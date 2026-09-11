@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Void Personal Expense{% endblock %}
+{% block page_heading %}Void Personal Expense{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-6">
+        <div class="card hdc-card">
+            <div class="card-header hdc-card-header">
+                <i class="fas fa-exclamation-triangle me-2"></i>Void Personal Expense
+            </div>
+            <div class="card-body">
+                <div class="alert alert-warning">
+                    <strong>Warning:</strong> You are about to void a personal expense record. This action cannot be undone.
+                </div>
+
+                <div class="card bg-light mb-3">
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <div class="col-12">
+                                <strong>Beneficiary:</strong> {{ row.beneficiary_name }}
+                            </div>
+                            <div class="col-12">
+                                <strong>Type:</strong> {{ row.beneficiary_type or 'Other' }}
+                            </div>
+                            <div class="col-12">
+                                <strong>Date:</strong> {{ row.date.strftime('%Y-%m-%d') }}
+                            </div>
+                            <div class="col-12">
+                                <strong>Category:</strong> {{ row.category }}
+                            </div>
+                            <div class="col-12">
+                                <strong>Amount:</strong> {{ "{:,.2f}".format(row.amount or 0) }} PKR
+                            </div>
+                            <div class="col-12">
+                                <strong>Remarks:</strong> {{ row.remarks or '-' }}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <form method="POST">
+                    <div class="mb-3">
+                        <label class="form-label">Reason for Voiding *</label>
+                        <textarea name="void_reason" class="form-control" rows="3" placeholder="Explain why this expense is being voided" required autofocus></textarea>
+                        <small class="text-muted">This reason will be permanently recorded.</small>
+                    </div>
+
+                    <div class="d-flex gap-2">
+                        <a href="{{ url_for('hdc_personal_expenses') }}" class="btn btn-outline-secondary">
+                            <i class="fas fa-arrow-left me-1"></i>Cancel
+                        </a>
+                        <button type="submit" class="btn btn-danger ms-auto">
+                            <i class="fas fa-trash me-1"></i>Confirm Void
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

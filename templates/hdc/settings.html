@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+{% block page_heading %}Settings{% endblock %}
+
+{% block content %}
+<div class="row g-3 mt-1">
+    <div class="col-lg-5">
+        <div class="card hdc-card">
+            <div class="card-header hdc-card-header"><i class="fas fa-database me-2"></i>Backup</div>
+            <div class="card-body">
+                <p class="text-muted small mb-3">Create a full backup ZIP of current system data (includes <strong>hdc_erp.db</strong> and <strong>hdc_data_export.xlsx</strong>).</p>
+                <form method="POST">
+                    <input type="hidden" name="action" value="create_backup">
+                    <button type="submit" class="btn btn-mint w-100">
+                        <i class="fas fa-download me-1"></i>Create Backup Now
+                    </button>
+                </form>
+                <hr>
+                <p class="text-muted small mb-2">Cleanup old backups and temporary restore/export files.</p>
+                <form method="POST" class="row g-2" onsubmit="return confirm('Cleanup old backups now?');">
+                    <input type="hidden" name="action" value="prune_backups">
+                    <div class="col-7">
+                        <input type="number" class="form-control" name="keep_latest" min="0" max="200" value="10">
+                    </div>
+                    <div class="col-5">
+                        <button type="submit" class="btn btn-outline-secondary w-100">
+                            <i class="fas fa-broom me-1"></i>Cleanup
+                        </button>
+                    </div>
+                    <div class="col-12">
+                        <div class="small text-muted">Keeps latest N backups and removes older files + temp artifacts.</div>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div class="card hdc-card mt-3">
+            <div class="card-header hdc-card-header"><i class="fas fa-upload me-2"></i>Restore From Upload</div>
+            <div class="card-body">
+                <p class="text-muted small mb-3">Supported files: <strong>.zip</strong> or <strong>.db</strong>.</p>
+                <form method="POST" enctype="multipart/form-data" onsubmit="return confirm('Restore will replace current data. Continue?');">
+                    <input type="hidden" name="action" value="restore_upload">
+                    <input type="file" name="backup_file" class="form-control mb-3" accept=".zip,.db" required>
+                    <button type="submit" class="btn btn-outline-danger w-100">
+                        <i class="fas fa-rotate-left me-1"></i>Restore Uploaded Backup
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <div class="card hdc-card mt-3">
+            <div class="card-header hdc-card-header"><i class="fas fa-screwdriver-wrench me-2"></i>Maintenance</div>
+            <div class="card-body">
+                <p class="text-muted small mb-3">Run reconciliation jobs manually (subcontract links and time-entry ledger links).</p>
+                <form method="POST" onsubmit="return confirm('Run maintenance now?');">
+                    <input type="hidden" name="action" value="run_maintenance">
+                    <button type="submit" class="btn btn-outline-primary w-100">
+                        <i class="fas fa-play me-1"></i>Run Maintenance Now
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <div class="card hdc-card mt-3">
+            <div class="card-header hdc-card-header"><i class="fas fa-money-bill-transfer me-2"></i>Accounts Backfill</div>
+            <div class="card-body">
+                <p class="text-muted small mb-3">Import existing financial records into Accounts ledger using idempotent source keys.</p>
+                <form method="POST" onsubmit="return confirm('Run Accounts backfill now?');">
+                    <input type="hidden" name="action" value="accounts_backfill">
+                    <button type="submit" class="btn btn-outline-success w-100">
+                        <i class="fas fa-database me-1"></i>Run Accounts Backfill
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <div class="card hdc-card mt-3 border border-danger-subtle">
+            <div class="card-header hdc-card-header text-danger"><i class="fas fa-trash-can me-2"></i>Granular Wipe (Danger Zone)</div>
+            <div class="card-body">
+                <p class="text-muted small mb-3">Permanently clear selected data groups from database. This cannot be undone.</p>
+                <form method="POST" id="wipeForm" onsubmit="return confirm('This will permanently delete selected data. Continue?');">
+                    <input type="hidden" name="action" value="wipe_data">
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" id="wipeAll" name="wipe_targets" value="all">
+                        <label class="form-check-label fw-bold" for="wipeAll">Select All Data Groups</label>
+                    </div>
+                    <div class="ps-2 border-start border-secondary-subtle mb-3">
+                        {% for k, item in wipe_targets.items() %}
+                        <div class="form-check">
+                            <input class="form-check-input wipe-target" type="checkbox" id="wipe_{{ k }}" name="wipe_targets" value="{{ k }}">
+                            <label class="form-check-label" for="wipe_{{ k }}">{{ item.label }}</label>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" id="wipeConfirmCheck" name="wipe_confirm_check" value="1">
+                        <label class="form-check-label text-danger" for="wipeConfirmCheck">I understand this delete is permanent.</label>
+                    </div>
+                    <label class="form-label small">Type <strong>WIPE</strong> to confirm</label>
+                    <input type="text" name="wipe_confirm_text" class="form-control mb-3" placeholder="WIPE">
+                    <button type="submit" class="btn btn-danger w-100">
+                        <i class="fas fa-triangle-exclamation me-1"></i>Wipe Selected Data
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-7">
+        <div class="card hdc-card">
+            <div class="card-header hdc-card-header"><i class="fas fa-clock-rotate-left me-2"></i>Saved Backups</div>
+            <div class="table-responsive">
+                <table class="table hdc-table table-sm mb-0">
+                    <thead>
+                        <tr>
+                            <th>File</th>
+                            <th>Modified</th>
+                            <th>Size</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for b in backups %}
+                        <tr>
+                            <td class="text-break">{{ b.name }}</td>
+                            <td>{{ b.modified.strftime('%Y-%m-%d %H:%M:%S PKT') }}</td>
+                            <td>{{ "{:,.1f}".format((b.size or 0) / 1024.0) }} KB</td>
+                            <td class="text-end text-nowrap">
+                                <a href="{{ url_for('hdc_settings_backup_download', filename=b.name) }}" class="btn btn-sm btn-outline-secondary">
+                                    Download
+                                </a>
+                                <form method="POST" class="d-inline" onsubmit="return confirm('Restore this backup and replace current data?');">
+                                    <input type="hidden" name="action" value="restore_saved">
+                                    <input type="hidden" name="backup_name" value="{{ b.name }}">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger ms-1">Restore</button>
+                                </form>
+                                <form method="POST" class="d-inline" onsubmit="return confirm('Delete this saved backup file permanently?');">
+                                    <input type="hidden" name="action" value="delete_backup">
+                                    <input type="hidden" name="backup_name" value="{{ b.name }}">
+                                    <button type="submit" class="btn btn-sm btn-outline-dark ms-1">Delete</button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="4" class="text-center text-muted py-3">No backups found yet.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    var all = document.getElementById('wipeAll');
+    var targets = Array.prototype.slice.call(document.querySelectorAll('.wipe-target'));
+    if (!all || !targets.length) return;
+
+    function syncAllFromTargets() {
+        all.checked = targets.every(function (cb) { return cb.checked; });
+    }
+
+    all.addEventListener('change', function () {
+        targets.forEach(function (cb) { cb.checked = all.checked; });
+    });
+
+    targets.forEach(function (cb) {
+        cb.addEventListener('change', syncAllFromTargets);
+    });
+});
+</script>
+{% endblock %}

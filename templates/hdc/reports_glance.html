@@ -1,0 +1,295 @@
+{% extends "base.html" %}
+{% block title %}Glance Report{% endblock %}
+{% block page_heading %}Glance Report{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-center mt-1 mb-2 gap-2">
+    <div>
+        <div class="fw-bold">Executive Snapshot</div>
+        <div class="small text-muted">As of {{ today.strftime('%Y-%m-%d') }} | 30-day window from {{ start_30.strftime('%Y-%m-%d') }}</div>
+    </div>
+    <a href="{{ url_for('hdc_reports') }}" class="btn btn-sm btn-outline-secondary">
+        <i class="fas fa-chart-bar me-1"></i>Open Detailed Reports
+    </a>
+</div>
+
+<div class="row g-3 mb-2">
+    <div class="col-6 col-md-3">
+        <div class="kpi-card kpi-blue">
+            <div class="kpi-label">Projects</div>
+            <div class="kpi-value small">{{ active_projects }} / {{ project_count }}</div>
+            <div class="kpi-sub">Active / Total</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="kpi-card {% if total_profit >= 0 %}kpi-profit{% else %}kpi-loss{% endif %}">
+            <div class="kpi-label">Net Profit</div>
+            <div class="kpi-value small">{{ "{:,.0f}".format(total_profit or 0) }}</div>
+            <div class="kpi-sub">PKR</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="kpi-card kpi-teal">
+            <div class="kpi-label">Collection</div>
+            <div class="kpi-value small">{{ "{:,.1f}".format(collection_pct or 0) }}%</div>
+            <div class="kpi-sub">Received / Contract</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="kpi-card kpi-orange">
+            <div class="kpi-label">Pending Receivable</div>
+            <div class="kpi-value small">{{ "{:,.0f}".format(total_receivable or 0) }}</div>
+            <div class="kpi-sub">PKR</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="kpi-card {% if cash_delta_30 >= 0 %}kpi-profit{% else %}kpi-loss{% endif %}">
+            <div class="kpi-label">30D Cash Delta</div>
+            <div class="kpi-value small">{{ "{:,.0f}".format(cash_delta_30 or 0) }}</div>
+            <div class="kpi-sub">Received - Outflow</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="kpi-card kpi-purple">
+            <div class="kpi-label">Stages</div>
+            <div class="kpi-value small">{{ completed_stages }} / {{ stage_count }}</div>
+            <div class="kpi-sub">Completed / Total</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="kpi-card kpi-red">
+            <div class="kpi-label">Delay + Over Budget</div>
+            <div class="kpi-value small">{{ delayed_stages_count + stage_over_budget_count }}</div>
+            <div class="kpi-sub">Stages needing action</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="kpi-card kpi-green">
+            <div class="kpi-label">Workers Today</div>
+            <div class="kpi-value small">{{ workers_present_today }} / {{ active_workers }}</div>
+            <div class="kpi-sub">{{ "{:,.1f}".format(work_hours_today or 0) }} hr | {{ "{:,.0f}".format(wages_today or 0) }} PKR</div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mb-2">
+    <div class="col-lg-6">
+        <div class="card hdc-card h-100">
+            <div class="card-header hdc-card-header"><i class="fas fa-wallet me-2"></i>30-Day Cash Pulse</div>
+            <div class="table-responsive">
+                <table class="table hdc-table table-sm mb-0">
+                    <tbody>
+                        <tr><td>Owner Received</td><td class="text-end text-success fw-bold">{{ "{:,.0f}".format(received_30 or 0) }}</td></tr>
+                        <tr><td>Project Expense Outflow</td><td class="text-end">{{ "{:,.0f}".format(expense_30 or 0) }}</td></tr>
+                        <tr><td>Office Expense Outflow</td><td class="text-end">{{ "{:,.0f}".format(office_expense_30 or 0) }}</td></tr>
+                        <tr><td>Subcontract Payments</td><td class="text-end">{{ "{:,.0f}".format(sub_pay_30 or 0) }}</td></tr>
+                        <tr><td>Labour Cash (Advance + Payment)</td><td class="text-end">{{ "{:,.0f}".format(labour_cash_30 or 0) }}</td></tr>
+                        <tr><td>Material Net Purchase</td><td class="text-end">{{ "{:,.0f}".format(material_net_30 or 0) }}</td></tr>
+                        <tr><td>Material Usage (Cost)</td><td class="text-end">{{ "{:,.0f}".format(material_usage_30 or 0) }}</td></tr>
+                        <tr class="table-secondary fw-bold">
+                            <td>Total Outflow</td>
+                            <td class="text-end">{{ "{:,.0f}".format(cash_out_30 or 0) }}</td>
+                        </tr>
+                        <tr class="table-secondary fw-bold">
+                            <td>Net Delta</td>
+                            <td class="text-end {% if (cash_delta_30 or 0) >= 0 %}text-success{% else %}text-danger{% endif %}">
+                                {{ "{:,.0f}".format(cash_delta_30 or 0) }}
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card hdc-card h-100">
+            <div class="card-header hdc-card-header"><i class="fas fa-hard-hat me-2"></i>Subcontractor Snapshot</div>
+            <div class="row g-2 p-3">
+                <div class="col-6">
+                    <div class="kpi-card kpi-blue h-100">
+                        <div class="kpi-label">Subcontractors</div>
+                        <div class="kpi-value small">{{ subcontract_count }}</div>
+                    </div>
+                </div>
+                <div class="col-6">
+                    <div class="kpi-card kpi-orange h-100">
+                        <div class="kpi-label">Payable Balance</div>
+                        <div class="kpi-value small">{{ "{:,.0f}".format(subcontract_total_balance or 0) }}</div>
+                    </div>
+                </div>
+                <div class="col-6">
+                    <div class="kpi-card kpi-green h-100">
+                        <div class="kpi-label">Total Cleared</div>
+                        <div class="kpi-value small">{{ "{:,.0f}".format(subcontract_total_cleared or 0) }}</div>
+                    </div>
+                </div>
+                <div class="col-6">
+                    <div class="kpi-card {% if subcontract_loss_count > 0 %}kpi-loss{% else %}kpi-profit{% endif %} h-100">
+                        <div class="kpi-label">Loss Cases</div>
+                        <div class="kpi-value small">{{ subcontract_loss_count }}</div>
+                        <div class="kpi-sub">Contract - Labour Cost &lt; 0</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mb-2">
+    <div class="col-xl-6">
+        <div class="card hdc-card h-100">
+            <div class="card-header hdc-card-header"><i class="fas fa-triangle-exclamation me-2"></i>Project Risk Queue</div>
+            <div class="table-responsive">
+                <table class="table hdc-table table-sm mb-0">
+                    <thead><tr><th>Project</th><th class="text-end">Net Profit</th><th class="text-end">Receivable</th><th class="text-end">Cost %</th></tr></thead>
+                    <tbody>
+                        {% for r in risk_project_rows %}
+                        <tr>
+                            <td><a href="{{ url_for('hdc_project_detail', pid=r.project.id) }}" class="text-decoration-none">{{ r.project.name }}</a></td>
+                            <td class="text-end {% if (r.profit or 0) >= 0 %}text-success{% else %}text-danger fw-bold{% endif %}">{{ "{:,.0f}".format(r.profit or 0) }}</td>
+                            <td class="text-end">{{ "{:,.0f}".format(r.remaining or 0) }}</td>
+                            <td class="text-end">{{ "{:,.1f}".format(r.cost_ratio or 0) }}%</td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="4" class="text-center text-muted py-3">No project risk rows.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <div class="col-xl-6">
+        <div class="card hdc-card h-100">
+            <div class="card-header hdc-card-header"><i class="fas fa-hourglass-half me-2"></i>Delayed Stages</div>
+            <div class="table-responsive">
+                <table class="table hdc-table table-sm mb-0">
+                    <thead><tr><th>Project</th><th>Stage</th><th>Due</th><th>Status</th></tr></thead>
+                    <tbody>
+                        {% for s in delayed_stage_rows %}
+                        <tr>
+                            <td>{{ s.project.name if s.project else '-' }}</td>
+                            <td><a href="{{ url_for('hdc_stage_ledger', sid=s.id) }}" class="text-decoration-none">{{ s.name }}</a></td>
+                            <td>{{ s.end_date.strftime('%Y-%m-%d') if s.end_date else '-' }}</td>
+                            <td><span class="badge bg-warning text-dark">{{ s.status or 'Pending' }}</span></td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="4" class="text-center text-muted py-3">No delayed stages.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mb-2">
+    <div class="col-xl-6">
+        <div class="card hdc-card h-100">
+            <div class="card-header hdc-card-header"><i class="fas fa-user-shield me-2"></i>Subcontractor Watchlist</div>
+            <div class="table-responsive">
+                <table class="table hdc-table table-sm mb-0">
+                    <thead><tr><th>Name</th><th class="text-end">Payable Bal</th><th class="text-end">Labour Cost</th><th class="text-end">P/L</th></tr></thead>
+                    <tbody>
+                        {% for r in subcontract_watch_rows %}
+                        <tr>
+                            <td><a href="{{ url_for('hdc_subcontractor_ledger', sid=r.sub.id) }}" class="text-decoration-none">{{ r.sub.name }}</a></td>
+                            <td class="text-end">{{ "{:,.0f}".format(r.sub.payable_balance or 0) }}</td>
+                            <td class="text-end">{{ "{:,.0f}".format(r.labour_cost or 0) }}</td>
+                            <td class="text-end {% if (r.pnl or 0) >= 0 %}text-success{% else %}text-danger fw-bold{% endif %}">{{ "{:,.0f}".format(r.pnl or 0) }}</td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="4" class="text-center text-muted py-3">No subcontractor watch rows.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <div class="col-xl-6">
+        <div class="card hdc-card h-100">
+            <div class="card-header hdc-card-header"><i class="fas fa-box-open me-2"></i>Material Stock Watch</div>
+            <div class="table-responsive">
+                <table class="table hdc-table table-sm mb-0">
+                    <thead><tr><th>Material</th><th class="text-end">Purchased</th><th class="text-end">Used</th><th class="text-end">Remaining</th></tr></thead>
+                    <tbody>
+                        {% for r in low_stock_rows %}
+                        <tr>
+                            <td><a href="{{ url_for('hdc_materials') }}" class="text-decoration-none">{{ r.material.name }}</a></td>
+                            <td class="text-end">{{ "{:,.2f}".format(r.purchased or 0) }}</td>
+                            <td class="text-end">{{ "{:,.2f}".format(r.used or 0) }}</td>
+                            <td class="text-end {% if (r.remaining or 0) <= 0 %}text-danger fw-bold{% else %}text-warning{% endif %}">
+                                {{ "{:,.2f}".format(r.remaining or 0) }} {{ r.material.unit }}
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="4" class="text-center text-muted py-3">No material records.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <div class="card-footer small text-muted">Out of stock items in watch list: {{ out_of_stock_count }}</div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3">
+    <div class="col-xl-6">
+        <div class="card hdc-card h-100">
+            <div class="card-header hdc-card-header"><i class="fas fa-piggy-bank me-2"></i>Project Budget Overruns</div>
+            <div class="table-responsive">
+                <table class="table hdc-table table-sm mb-0">
+                    <thead><tr><th>Project</th><th class="text-end">Budget</th><th class="text-end">Actual</th><th class="text-end">Overrun</th></tr></thead>
+                    <tbody>
+                        {% for r in project_budget_overrun_rows %}
+                        <tr>
+                            <td><a href="{{ url_for('hdc_project_detail', pid=r.project.id) }}" class="text-decoration-none">{{ r.project.name }}</a></td>
+                            <td class="text-end">{{ "{:,.0f}".format(r.budget or 0) }}</td>
+                            <td class="text-end">{{ "{:,.0f}".format(r.actual or 0) }}</td>
+                            <td class="text-end text-danger fw-bold">{{ "{:,.0f}".format(r.overrun or 0) }}</td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="4" class="text-center text-muted py-3">No project overruns.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <div class="col-xl-6">
+        <div class="card hdc-card h-100">
+            <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-bell me-2"></i>Open Alerts</span>
+                <a href="{{ url_for('hdc_alerts') }}" class="btn btn-sm btn-outline-secondary">Open</a>
+            </div>
+            <div class="table-responsive">
+                <table class="table hdc-table table-sm mb-0">
+                    <thead><tr><th>Time</th><th>Level</th><th>Message</th></tr></thead>
+                    <tbody>
+                        {% for a in open_alerts %}
+                        <tr>
+                            <td>{{ fmt_pkt(a.created_at) if a.created_at else '-' }}</td>
+                            <td>
+                                <span class="badge {% if (a.level or '') == 'danger' %}bg-danger{% elif (a.level or '') == 'warning' %}bg-warning text-dark{% else %}bg-info{% endif %}">
+                                    {{ a.level or 'info' }}
+                                </span>
+                            </td>
+                            <td class="small">{{ a.message }}</td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="3" class="text-center text-muted py-3">No open alerts.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <div class="card-footer small text-muted">
+                Latest payroll:
+                {% if latest_payroll %}
+                Run#{{ latest_payroll.id }} | {{ latest_payroll.run_date.strftime('%Y-%m-%d') if latest_payroll.run_date else '-' }} | {{ latest_payroll_workers }} worker(s) | {{ "{:,.0f}".format(latest_payroll.total_amount or 0) }} PKR
+                {% else %}
+                Not generated yet.
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

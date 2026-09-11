@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Office Salary Payment{% endblock %}
+{% block page_heading %}Office Salary Payment{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center mt-2">
+    <div class="col-md-7">
+        <div class="card hdc-card mb-3">
+            <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-money-bill-wave me-2"></i>Pay Salary - {{ staff.name }}</span>
+                <span class="badge bg-secondary">{{ staff.staff_code }}</span>
+            </div>
+            <div class="card-body">
+                <div class="row g-2 mb-3">
+                    <div class="col-md-4">
+                        <div class="small text-muted">Per Day (Basic + Allowance)</div>
+                        <div class="fw-bold">{{ "{:,.0f}".format(snap.per_day_salary or 0) }} PKR</div>
+                        <div class="small text-muted">B: {{ "{:,.0f}".format(snap.per_day_basic or 0) }} | A: {{ "{:,.0f}".format(snap.per_day_allowances or 0) }}</div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="small text-muted">Earned (MTD)</div>
+                        <div class="fw-bold text-primary">{{ "{:,.0f}".format(snap.earned or 0) }} PKR</div>
+                        <div class="small text-muted">B: {{ "{:,.0f}".format(snap.earned_basic or 0) }} | A: {{ "{:,.0f}".format(snap.earned_allowances or 0) }}</div>
+                    </div>
+                    <div class="col-md-4"><div class="small text-muted">Balance (MTD)</div><div class="fw-bold {% if (snap.balance or 0) > 0 %}text-warning{% elif (snap.balance or 0) < 0 %}text-success{% else %}text-muted{% endif %}">{{ "{:,.0f}".format(snap.balance or 0) }} PKR</div></div>
+                </div>
+                <form method="POST" class="row g-3">
+                    <div class="col-md-4">
+                        <label class="form-label">Payment Date</label>
+                        <input type="date" name="date" class="form-control" value="{{ today }}" required>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Amount (PKR)</label>
+                        <input type="number" step="0.01" min="0.01" name="amount" class="form-control" onwheel="this.blur();" required>
+                    </div>
+                    <div class="col-md-12">
+                        <label class="form-label">Notes</label>
+                        <input type="text" name="notes" class="form-control" placeholder="Optional note for salary payment">
+                    </div>
+                    <div class="col-12 d-flex gap-2">
+                        <button type="submit" class="btn btn-mint"><i class="fas fa-save me-1"></i>Record Payment</button>
+                        <a href="{{ url_for('hdc_office_staff_ledger', sid=staff.id) }}" class="btn btn-outline-secondary">Back to Ledger</a>
+                    </div>
+                </form>
+                <div class="small text-muted mt-3">Each salary payment here is automatically posted as an Office Expense with clear staff details.</div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

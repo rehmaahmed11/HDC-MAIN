@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Payroll History{% endblock %}
+{% block page_heading %}Payroll History{% endblock %}
+
+{% block content %}
+<div class="card hdc-card mt-2">
+    <div class="card-header hdc-card-header"><i class="fas fa-clock-rotate-left me-2"></i>All Payroll Runs</div>
+    <div class="table-responsive">
+        <table class="table hdc-table mb-0">
+            <thead>
+                <tr>
+                    <th>Run #</th>
+                    <th>From</th>
+                    <th>To</th>
+                    <th>Run Time</th>
+                    <th>Total Net</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in runs %}
+                <tr>
+                    <td><span class="badge bg-secondary">{{ r.id }}</span></td>
+                    <td>{{ r.date_from }}</td>
+                    <td>{{ r.date_to }}</td>
+                    <td>{{ fmt_pkt(r.created_at) }}</td>
+                    <td class="fw-bold">{{ "{:,.0f}".format(r.total_amount or 0) }}</td>
+                    <td class="text-end">
+                        <a href="{{ url_for('hdc_payroll_generate', run_id=r.id) }}" class="btn btn-sm btn-outline-secondary">Open Payroll</a>
+                        <a href="{{ url_for('hdc_payroll_salary_cards_page', run_id=r.id) }}" class="btn btn-sm btn-outline-danger ms-1">Salary Cards</a>
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="6" class="text-center text-muted py-4">No payroll runs yet.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

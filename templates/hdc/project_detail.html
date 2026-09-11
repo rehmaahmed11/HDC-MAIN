@@ -1,0 +1,668 @@
+{% extends "base.html" %}
+{% block title %}{{ p.name }}{% endblock %}
+{% block page_heading %}{{ p.name }} <span class="badge bg-secondary ms-2 fs-6">{{ p.project_code }}</span>{% endblock %}
+
+{% block content %}
+<!-- FINANCIAL SUMMARY CARDS -->
+<div class="row g-3 mt-1">
+    <div class="col-6 col-md-2">
+        <div class="kpi-card kpi-green">
+            <div class="kpi-label">Contract Value</div>
+            <div class="kpi-value small">{{ "{:,.0f}".format(p.owner_contract_value) }}</div>
+            <div class="kpi-sub">PKR{% if stages %} ({{ stages|length }} stages){% endif %}</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-2">
+        <div class="kpi-card kpi-teal">
+            <div class="kpi-label">Total Received</div>
+            <div class="kpi-value small">{{ "{:,.0f}".format(p.total_received) }}</div>
+            <div class="kpi-sub">PKR</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-2">
+        <div class="kpi-card kpi-orange">
+            <div class="kpi-label">Remaining</div>
+            <div class="kpi-value small">{{ "{:,.0f}".format(p.remaining_receivable) }}</div>
+            <div class="kpi-sub">PKR</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-2">
+        <a href="{{ url_for('hdc_project_detail', pid=p.id, show_cost_split=1) }}#cost-split" class="text-decoration-none text-reset d-block">
+            <div class="kpi-card kpi-red">
+                <div class="kpi-label">Total Cost</div>
+                <div class="kpi-value small">{{ "{:,.0f}".format(p.total_cost) }}</div>
+                <div class="kpi-sub">PKR (Click for split)</div>
+            </div>
+        </a>
+    </div>
+    <div class="col-6 col-md-2">
+        <div class="kpi-card {% if p.net_profit >= 0 %}kpi-profit{% else %}kpi-loss{% endif %}">
+            <div class="kpi-label">Net Profit</div>
+            <div class="kpi-value small">{{ "{:,.0f}".format(p.net_profit) }}</div>
+            <div class="kpi-sub">PKR</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-2">
+        <div class="kpi-card {% if (p.budget_total or 0) - (p.actual_cost or 0) >= 0 %}kpi-profit{% else %}kpi-loss{% endif %}">
+            <div class="kpi-label">Budget Variance</div>
+            <div class="kpi-value small">{{ "{:,.0f}".format((p.budget_total or 0) - (p.actual_cost or 0)) }}</div>
+            <div class="kpi-sub">PKR</div>
+        </div>
+    </div>
+</div>
+
+{% if show_cost_split %}
+<div class="row g-3 mt-1" id="cost-split">
+    <div class="col-6 col-md-4">
+        <a href="{{ url_for('hdc_cost_entries', scope='project', target_id=p.id, head='labour') }}" class="text-decoration-none text-reset d-block">
+            <div class="kpi-card kpi-green">
+                <div class="kpi-label">Labour Total Cost</div>
+                <div class="kpi-value small">{{ "{:,.0f}".format(p.total_labour_cost or 0) }}</div>
+                <div class="kpi-sub">Click to view all labour entries</div>
+            </div>
+        </a>
+    </div>
+    <div class="col-6 col-md-4">
+        <a href="{{ url_for('hdc_cost_entries', scope='project', target_id=p.id, head='material') }}" class="text-decoration-none text-reset d-block">
+            <div class="kpi-card kpi-blue">
+                <div class="kpi-label">Material Total Cost</div>
+                <div class="kpi-value small">{{ "{:,.0f}".format(p.total_material_cost or 0) }}</div>
+                <div class="kpi-sub">Click to view all material entries</div>
+            </div>
+        </a>
+    </div>
+    <div class="col-6 col-md-4">
+        <a href="{{ url_for('hdc_cost_entries', scope='project', target_id=p.id, head='expense') }}" class="text-decoration-none text-reset d-block">
+            <div class="kpi-card kpi-orange">
+                <div class="kpi-label">Expenses Total Cost</div>
+                <div class="kpi-value small">{{ "{:,.0f}".format(p.total_expense_cost or 0) }}</div>
+                <div class="kpi-sub">Click to view all expense entries</div>
+            </div>
+        </a>
+    </div>
+</div>
+{% endif %}
+
+<div class="d-flex justify-content-end mt-2">
+    <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#project-more-kpis" aria-expanded="false" aria-controls="project-more-kpis">
+        More Insights
+    </button>
+</div>
+<div class="collapse mt-2" id="project-more-kpis">
+    <div class="row g-3">
+        <div class="col-6 col-md-3">
+            <div class="kpi-card kpi-purple">
+                <div class="kpi-label">Materials</div>
+                <div class="kpi-value small">{{ "{:,.0f}".format(p.total_material_cost) }}</div>
+                <div class="kpi-sub">PKR</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="kpi-card kpi-blue">
+                <div class="kpi-label">Budget Total</div>
+                <div class="kpi-value small">{{ "{:,.0f}".format(p.budget_total or 0) }}</div>
+                <div class="kpi-sub">PKR</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="kpi-card kpi-blue">
+                <div class="kpi-label">Total Sqft</div>
+                <div class="kpi-value small">{{ "{:,.0f}".format(project_total_sqft or 0) if sqft_metrics_valid else 'N/A' }}</div>
+                <div class="kpi-sub">sqft</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="kpi-card kpi-teal">
+                <div class="kpi-label">Owner Rate / Sqft</div>
+                <div class="kpi-value small">{{ "{:,.2f}".format(owner_sqft_rate or 0) if sqft_metrics_valid else 'N/A' }}</div>
+                <div class="kpi-sub">PKR per sqft</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="kpi-card kpi-orange">
+                <div class="kpi-label">Owner Sqft Charges</div>
+                <div class="kpi-value small">{{ "{:,.0f}".format(owner_sqft_charges or 0) if sqft_metrics_valid else 'N/A' }}</div>
+                <div class="kpi-sub">PKR</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="kpi-card {% if sqft_metrics_valid and (profit_per_sqft or 0) >= 0 %}kpi-profit{% elif sqft_metrics_valid %}kpi-loss{% else %}kpi-blue{% endif %}">
+                <div class="kpi-label">Cost / Sqft</div>
+                <div class="kpi-value small">{{ "{:,.2f}".format(cost_per_sqft or 0) if sqft_metrics_valid else 'N/A' }}</div>
+                <div class="kpi-sub">PKR per sqft</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="kpi-card {% if sqft_metrics_valid and (profit_per_sqft or 0) >= 0 %}kpi-profit{% elif sqft_metrics_valid %}kpi-loss{% else %}kpi-blue{% endif %}">
+                <div class="kpi-label">Profit / Sqft</div>
+                <div class="kpi-value small">{{ "{:,.2f}".format(profit_per_sqft or 0) if sqft_metrics_valid else 'N/A' }}</div>
+                <div class="kpi-sub">{% if sqft_metrics_valid %}PKR per sqft{% else %}Only for Per Sq Ft basis{% endif %}</div>
+            </div>
+            {% if owner_payments_voided %}
+            <div class="border-top p-2">
+                <div class="small fw-semibold text-muted mb-1">Voided Payments (Restore)</div>
+                {% for op in owner_payments_voided[:10] %}
+                <div class="d-flex justify-content-between align-items-center small mb-1">
+                    <span>{{ fmt_pkt(op.activity_at or op.created_at) }} | {{ "{:,.0f}".format(op.amount) }} PKR</span>
+                    <form method="POST" action="{{ url_for('hdc_restore_owner_payment', pid=p.id, oid=op.id) }}" class="d-inline" onsubmit="return confirm('Restore this payment?');">
+                        <button type="submit" class="btn btn-xs btn-outline-success btn-sm">Restore</button>
+                    </form>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- STAGES SECTION -->
+<div class="card hdc-card mt-3">
+    <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+        <span><i class="fas fa-layer-group me-2"></i>Project Stages
+            <span class="badge bg-secondary ms-1">{{ stages|length }}</span>
+        </span>
+        <div class="d-flex gap-2">
+            <a href="{{ url_for('hdc_stage_library', project_id=p.id) }}" class="btn btn-sm btn-outline-secondary" title="Manage stage library">
+                <i class="fas fa-book me-1"></i>Stage Library
+            </a>
+            <a href="{{ url_for('hdc_add_stage', pid=p.id) }}" class="btn btn-mint btn-sm">
+                <i class="fas fa-plus me-1"></i>Add Stage
+            </a>
+        </div>
+    </div>
+
+    <div class="table-responsive">
+        <table class="table hdc-table table-sm mb-0">
+            <thead><tr>
+                <th>Stage</th><th>Status</th><th>Exec</th><th>Basis</th>
+                <th>Rate/sqft</th><th>Disc/sqft</th><th>Sqft</th>
+                <th>Lump Sum</th><th class="text-success">Contract Val</th>
+                <th>Est Cost</th><th>Actual Cost</th><th>Progress</th>
+                <th>Labour</th><th>Materials</th><th>Expenses</th>
+                <th class="text-success">Profit</th><th>Drawings</th><th></th>
+            </tr></thead>
+            <tbody>
+            {% for s in stages %}
+            <tr>
+                <td>
+                    <a href="{{ url_for('hdc_stage_ledger', sid=s.id) }}" class="text-decoration-none fw-bold">
+                        {{ s.name }}
+                    </a>
+                    <div><small><a href="{{ url_for('hdc_stage_ledger', sid=s.id) }}" class="text-muted">View Stage Ledger</a></small></div>
+                </td>
+                <td>
+                    <span class="badge {% if s.status in ['completed','Complete'] %}bg-success{% elif s.status in ['paused','On Hold'] %}bg-warning text-dark{% else %}bg-primary{% endif %}">
+                        {{ s.status }}
+                    </span>
+                </td>
+                <td>
+                    {% if (s.execution_mode or 'company') == 'subcontractor' %}
+                    <span class="badge bg-warning text-dark" title="{{ s.assigned_subcontractor.name if s.assigned_subcontractor else 'Subcontractor' }}">
+                        <i class="fas fa-hard-hat me-1"></i>Sub
+                    </span>
+                    {% if s.assigned_subcontractor %}
+                    <div>
+                        <small class="{% if s.status in ['completed','Complete'] and (s.assigned_subcontractor.effective_progress_percentage or 0) < 100 %}text-danger fw-bold{% else %}text-muted{% endif %}">
+                            Sub %: {{ "{:,.2f}".format(s.assigned_subcontractor.effective_progress_percentage or 0) }}
+                        </small>
+                    </div>
+                    {% endif %}
+                    {% else %}
+                    <span class="badge bg-secondary"><i class="fas fa-building me-1"></i>Own</span>
+                    {% endif %}
+                </td>
+                <td><small class="text-muted">{{ s.contract_basis or '—' }}</small></td>
+                <td>{{ "{:,.0f}".format(s.rate_per_sqft) if s.rate_per_sqft else '—' }}</td>
+                <td class="text-danger">{{ "{:,.0f}".format(s.discount_per_sqft) if s.discount_per_sqft else '—' }}</td>
+                <td>{{ "{:,.0f}".format(s.qty_sqft) if s.qty_sqft else '—' }}</td>
+                <td>{{ "{:,.0f}".format(s.lump_sum_value) if s.lump_sum_value else '—' }}</td>
+                <td class="fw-bold text-success">{{ "{:,.0f}".format(s.contract_value) }}</td>
+                <td>{{ "{:,.0f}".format(s.estimated_cost or 0) }}</td>
+                <td>{{ "{:,.0f}".format(s.actual_cost or 0) }}</td>
+                <td>{{ "{:,.0f}".format(s.progress or 0) }}%</td>
+                <td class="small">{{ "{:,.0f}".format(s.stage_labour_cost) }}</td>
+                <td class="small">{{ "{:,.0f}".format(s.stage_material_cost) }}</td>
+                <td class="small">
+                    {{ "{:,.0f}".format(s.stage_expense_cost) }}
+                    {% if (s.stage_tip_expense or 0) > 0 %}
+                    <div><small class="text-info">Tip: {{ "{:,.0f}".format(s.stage_tip_expense or 0) }}</small></div>
+                    {% endif %}
+                </td>
+                <td class="fw-bold {% if s.stage_profit >= 0 %}text-success{% else %}text-danger{% endif %}">
+                    {{ "{:,.0f}".format(s.stage_profit) }}
+                </td>
+                <td>
+                    <button class="btn btn-xs btn-outline-secondary btn-sm" data-bs-toggle="collapse" data-bs-target="#drawings-{{ s.id }}">
+                        <i class="fas fa-file-pdf me-1"></i>{{ s.drawings|length }}
+                    </button>
+                </td>
+                <td class="text-nowrap">
+                    <a href="{{ url_for('hdc_edit_stage', sid=s.id) }}" class="btn btn-xs btn-outline-primary btn-sm" title="Edit Stage">
+                        <i class="fas fa-edit"></i>
+                    </a>
+                    <form method="POST" action="{{ url_for('hdc_delete_stage', sid=s.id) }}" class="d-inline"
+                          onsubmit="return confirm('Delete stage {{ s.name }}?')">
+                        <button type="submit" class="btn btn-xs btn-outline-danger btn-sm ms-1" title="Delete">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </form>
+                    <form method="POST" action="{{ url_for('hdc_stage_status', sid=s.id) }}" class="d-inline ms-1">
+                        {% if s.status in ['completed','Complete'] %}
+                        <input type="hidden" name="status" value="active">
+                        <button type="submit" class="btn btn-xs btn-outline-secondary btn-sm" title="Mark Active">
+                            <i class="fas fa-undo"></i>
+                        </button>
+                        {% else %}
+                        <input type="hidden" name="status" value="completed">
+                        <button type="submit" class="btn btn-xs btn-outline-success btn-sm" title="Mark Complete">
+                            <i class="fas fa-check"></i>
+                        </button>
+                        {% endif %}
+                    </form>
+                    {% if s.status not in ['completed','Complete'] and s.assigned_subcontractor %}
+                    <form method="POST" action="{{ url_for('hdc_stage_status', sid=s.id) }}" class="d-inline ms-1"
+                          onsubmit="return confirm('Mark complete and force subcontractor completion to 100%?')">
+                        <input type="hidden" name="status" value="completed">
+                        <input type="hidden" name="auto_sub_complete" value="1">
+                        <button type="submit" class="btn btn-xs btn-outline-dark btn-sm" title="Complete + Sub 100%">
+                            <i class="fas fa-bolt"></i>
+                        </button>
+                    </form>
+                    {% endif %}
+                    <button type="button" class="btn btn-xs btn-outline-warning btn-sm ms-1"
+                        data-bs-toggle="collapse" data-bs-target="#shift-sub-{{ s.id }}" title="Shift to Subcontractor">
+                        <i class="fas fa-right-left"></i>
+                    </button>
+                    <button type="button" class="btn btn-xs btn-outline-primary btn-sm ms-1"
+                        data-bs-toggle="collapse" data-bs-target="#sub-comp-{{ s.id }}" title="Sub Completion %">
+                        <i class="fas fa-percent"></i>
+                    </button>
+                    <form method="POST" action="{{ url_for('hdc_stage_shift_to_company', sid=s.id) }}" class="d-inline ms-1"
+                          onsubmit="return confirm('Shift stage {{ s.name }} back to company?')">
+                        <button type="submit" class="btn btn-xs btn-outline-secondary btn-sm" title="Shift to Company">
+                            <i class="fas fa-building"></i>
+                        </button>
+                    </form>
+                </td>
+            </tr>
+            <tr class="collapse" id="sub-comp-{{ s.id }}">
+                <td colspan="18" class="bg-light-subtle">
+                    <form method="POST" action="{{ url_for('hdc_stage_sub_progress', sid=s.id) }}" class="d-flex flex-wrap gap-2 align-items-center py-2">
+                        <span class="small text-muted fw-bold">Subcontractor completion:</span>
+                        <input type="number" step="0.01" min="0" max="100" name="work_done_percentage" class="form-control form-control-sm" style="width:160px"
+                               value="{% if s.assigned_subcontractor %}{{ "{:.2f}".format(s.assigned_subcontractor.work_done_percentage or 0) }}{% else %}0{% endif %}">
+                        <button type="submit" class="btn btn-sm btn-primary" {% if not s.assigned_subcontractor %}disabled{% endif %}>Update</button>
+                        {% if not s.assigned_subcontractor %}
+                        <small class="text-muted">Assign stage to subcontractor first.</small>
+                        {% else %}
+                        <small class="text-muted">{{ s.assigned_subcontractor.name }} | {{ s.assigned_subcontractor.subcontractor_code or ('SUB-' ~ s.assigned_subcontractor.id) }}</small>
+                        {% endif %}
+                    </form>
+                </td>
+            </tr>
+            <tr class="collapse" id="shift-sub-{{ s.id }}">
+                <td colspan="18" class="bg-light-subtle">
+                    <form method="POST" action="{{ url_for('hdc_stage_shift_to_subcontractor', sid=s.id) }}" class="d-flex flex-wrap gap-2 align-items-center py-2">
+                        <span class="small text-muted fw-bold">Assign to subcontractor:</span>
+                        <input type="text" id="shiftSubInput{{ s.id }}" class="form-control form-control-sm" style="max-width:300px" placeholder="Search subcontractor">
+                        <select name="subcontractor_id" id="shiftSubSelect{{ s.id }}" class="form-select form-select-sm" style="max-width:300px" required>
+                            <option value="">Select Subcontractor</option>
+                            {% for sub in subcontractor_pool %}
+                            <option value="{{ sub.id }}" {% if s.assigned_subcontractor_id == sub.id %}selected{% endif %}>
+                                {{ sub.subcontractor_code or ('SUB-' ~ sub.id) }} | {{ sub.name }} | {{ sub.phone or '-' }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                        <select name="contract_type" class="form-select form-select-sm" style="width:120px">
+                            <option value="sqft">/sqft</option>
+                            <option value="lump_sum">Lump</option>
+                        </select>
+                        <input type="number" step="0.01" name="rate_per_sqft" class="form-control form-control-sm" style="width:110px" placeholder="Sub Rate">
+                        <input type="number" step="0.01" name="total_sqft" class="form-control form-control-sm" style="width:110px" placeholder="Sqft" value="{{ "{:.2f}".format(s.qty_sqft or 0) if s.qty_sqft else '' }}">
+                        <input type="number" step="0.01" name="lump_sum_amount" class="form-control form-control-sm" style="width:120px" placeholder="Sub Lump">
+                        <input type="number" step="0.01" name="retention_pct" class="form-control form-control-sm" style="width:95px" placeholder="Ret %">
+                        <button type="submit" class="btn btn-sm btn-warning" {% if not subcontractor_pool %}disabled{% endif %}>Shift</button>
+                        <small class="text-muted">Owner: {{ "{:,.0f}".format(s.contract_value or 0) }}{% if (s.contract_basis or '') == 'Per Sq Ft' %} ({{ "{:,.0f}".format(s.effective_rate or 0) }}/sqft){% endif %}</small>
+                        {% if not subcontractor_pool %}
+                        <small class="text-muted">Create subcontractor first in the section below.</small>
+                        {% endif %}
+                    </form>
+                </td>
+            </tr>
+            <tr class="collapse" id="drawings-{{ s.id }}">
+                <td colspan="18" class="bg-light-subtle">
+                    <div class="d-flex flex-column gap-2 py-2">
+                        <form method="POST" action="{{ url_for('hdc_stage_drawings_upload', sid=s.id) }}" enctype="multipart/form-data" class="d-flex flex-wrap gap-2 align-items-center">
+                            <span class="small text-muted fw-bold">Upload PDF Drawings:</span>
+                            <input type="file" name="drawings" accept="application/pdf,.pdf" multiple required class="form-control form-control-sm" style="max-width:320px">
+                            <button type="submit" class="btn btn-sm btn-mint"><i class="fas fa-upload me-1"></i>Upload</button>
+                        </form>
+                        {% if s.drawings %}
+                        <div class="table-responsive">
+                            <table class="table table-sm mb-0">
+                                <thead><tr><th>File</th><th>Uploaded</th><th></th></tr></thead>
+                                <tbody>
+                                    {% for d in s.drawings | sort(attribute='created_at', reverse=True) %}
+                                    <tr>
+                                        <td><a href="{{ url_for('hdc_stage_drawing_view', did=d.id) }}" target="_blank" class="text-decoration-none"><i class="fas fa-file-pdf text-danger me-1"></i>{{ d.original_name }}</a></td>
+                                        <td class="small text-muted">{{ fmt_pkt(d.updated_at or d.created_at) }}</td>
+                                        <td class="text-nowrap">
+                                            <form method="POST" action="{{ url_for('hdc_stage_drawing_replace', did=d.id) }}" enctype="multipart/form-data" class="d-inline-flex gap-1 align-items-center">
+                                                <input type="file" name="drawing_file" accept="application/pdf,.pdf" required class="form-control form-control-sm" style="max-width:180px">
+                                                <button type="submit" class="btn btn-xs btn-outline-primary btn-sm">Replace</button>
+                                            </form>
+                                            <form method="POST" action="{{ url_for('hdc_stage_drawing_delete', did=d.id) }}" class="d-inline" onsubmit="return confirm('Delete this drawing?')">
+                                                <button type="submit" class="btn btn-xs btn-outline-danger btn-sm ms-1">Delete</button>
+                                            </form>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <div class="small text-muted">No drawings uploaded for this stage yet.</div>
+                        {% endif %}
+                    </div>
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="18" class="text-center text-muted py-3">
+                No stages yet. <a href="{{ url_for('hdc_add_stage', pid=p.id) }}">Add first stage</a> or create definitions in this project's Stage Library.
+            </td></tr>
+            {% endfor %}
+            </tbody>
+            {% if stages %}
+            <tfoot class="table-secondary fw-bold">
+                <tr>
+                    <td colspan="8">Total</td>
+                    <td class="text-success">{{ "{:,.0f}".format(stages|sum(attribute='contract_value')) }}</td>
+                    <td>{{ "{:,.0f}".format(stages|sum(attribute='estimated_cost')) }}</td>
+                    <td>{{ "{:,.0f}".format(stages|sum(attribute='actual_cost')) }}</td>
+                    <td>{{ "{:,.0f}".format(stages|sum(attribute='progress')) }}%</td>
+                    <td>{{ "{:,.0f}".format(stages|sum(attribute='stage_labour_cost')) }}</td>
+                    <td>{{ "{:,.0f}".format(stages|sum(attribute='stage_material_cost')) }}</td>
+                    <td>{{ "{:,.0f}".format(stages|sum(attribute='stage_expense_cost')) }}</td>
+                    <td>{{ "{:,.0f}".format(stages|sum(attribute='stage_profit')) }}</td>
+                    <td></td>
+                    <td></td>
+                </tr>
+            </tfoot>
+            {% endif %}
+        </table>
+    </div>
+</div>
+
+<!-- FINANCIAL BREAKDOWN + PAYMENTS ROW -->
+<div class="row g-3 mt-1">
+    <div class="col-md-4">
+        <div class="card hdc-card h-100">
+            <div class="card-header hdc-card-header"><i class="fas fa-chart-bar me-2"></i>Financial Breakdown</div>
+            <div class="card-body p-0">
+                <table class="table table-sm mb-0">
+                    <tr><td class="text-muted ps-3">Contract Value</td><td class="text-end pe-3 fw-bold text-success">{{ "{:,.0f}".format(p.owner_contract_value) }}</td></tr>
+                    <tr><td class="text-muted ps-3">Owner Phone</td><td class="text-end pe-3">{{ p.client_phone or '—' }}</td></tr>
+                    <tr><td class="text-muted ps-3">Labour Cost</td><td class="text-end pe-3">{{ "{:,.0f}".format(p.total_labour_cost) }}</td></tr>
+                    <tr><td class="text-muted ps-3">Material Cost</td><td class="text-end pe-3">{{ "{:,.0f}".format(p.total_material_cost) }}</td></tr>
+                    <tr><td class="text-muted ps-3">Expenses</td><td class="text-end pe-3">{{ "{:,.0f}".format(p.total_expense_cost) }}</td></tr>
+                    <tr><td class="text-muted ps-3">Tip Expenses</td><td class="text-end pe-3 text-info">{{ "{:,.0f}".format(p.total_tip_expense or 0) }}</td></tr>
+                    <tr><td class="text-muted ps-3">Subcontract Cost</td><td class="text-end pe-3">{{ "{:,.0f}".format(p.total_subcontract_cost) }}</td></tr>
+                    <tr class="table-light"><td class="fw-bold ps-3">Total Cost</td><td class="text-end pe-3 fw-bold text-danger">{{ "{:,.0f}".format(p.total_cost) }}</td></tr>
+                    <tr><td class="fw-bold ps-3">Net Profit</td>
+                        <td class="text-end pe-3 fw-bold {% if p.net_profit >= 0 %}text-success{% else %}text-danger{% endif %}">
+                            {{ "{:,.0f}".format(p.net_profit) }}
+                        </td>
+                    </tr>
+                </table>
+                <div class="px-3 pb-3 pt-2">
+                    <a href="{{ url_for('hdc_edit_project', pid=p.id) }}" class="btn btn-sm btn-outline-primary me-1">
+                        <i class="fas fa-edit me-1"></i>Edit Project
+                    </a>
+                    <a href="{{ url_for('hdc_reports', project_id=p.id) }}" class="btn btn-sm btn-outline-secondary">
+                        <i class="fas fa-chart-bar me-1"></i>Report
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Owner Payments -->
+    <div class="col-md-8">
+        <div class="card hdc-card">
+            <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-money-bill-wave me-2"></i>Owner Payments
+                    <span class="badge bg-success ms-1">{{ "{:,.0f}".format(p.total_received) }} PKR</span>
+                </span>
+                <button class="btn btn-mint btn-sm" data-bs-toggle="collapse" data-bs-target="#addPaymentForm">
+                    <i class="fas fa-plus"></i>
+                </button>
+            </div>
+            <div class="collapse px-3 pb-2" id="addPaymentForm">
+                <form method="POST" action="{{ url_for('hdc_add_owner_payment', pid=p.id) }}" class="row g-2 mt-1">
+                    <div class="col-4">
+                        <input type="number" step="0.01" name="amount" class="form-control form-control-sm" placeholder="Amount" onwheel="this.blur();" required>
+                    </div>
+                    <div class="col-4">
+                        <input type="date" name="date" class="form-control form-control-sm" value="{{ today }}">
+                    </div>
+                    <div class="col-4">
+                        <input type="text" name="remarks" class="form-control form-control-sm" placeholder="Remarks">
+                    </div>
+                    <div class="col-12 col-md-6">
+                        <label class="form-label small mb-1">Receive In Account</label>
+                        <select name="received_to_account_id" class="form-select form-select-sm" required>
+                            <option value="">Select receiving account</option>
+                            {% for a in receiving_accounts %}
+                            <option value="{{ a.id }}" {% if loop.first %}selected{% endif %}>{{ a.name }} ({{ (a.type or '')|title }})</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-12">
+                        <button type="submit" class="btn btn-mint btn-sm">Save Payment</button>
+                    </div>
+                </form>
+            </div>
+            <div class="table-responsive">
+                <table class="table hdc-table table-sm mb-0">
+                    <thead><tr><th>Date</th><th>Amount (PKR)</th><th>Received In</th><th>Remarks</th><th></th></tr></thead>
+                    <tbody>
+                    {% for op in owner_payments | sort(attribute='activity_at', reverse=True) %}
+                    <tr>
+                        <td>{{ fmt_pkt(op.activity_at or op.created_at) }}</td>
+                        <td class="fw-bold text-success">{{ "{:,.0f}".format(op.amount) }}</td>
+                        <td class="small">{{ op.received_to_account.name if op.received_to_account else '-' }}</td>
+                        <td class="text-muted small">{{ op.remarks or '—' }}</td>
+                        <td>
+                            <a href="{{ url_for('hdc_owner_payment_receipt', pid=p.id, oid=op.id) }}" target="_blank" rel="noopener" class="btn btn-xs btn-outline-primary btn-sm me-1" title="Receipt">
+                                <i class="fas fa-receipt"></i>
+                            </a>
+                            <form method="POST" action="{{ url_for('hdc_delete_owner_payment', pid=p.id, oid=op.id) }}"
+                                  onsubmit="return confirm('Void this payment?')" class="d-inline">
+                                <button type="submit" class="btn btn-xs btn-outline-danger btn-sm">
+                                    <i class="fas fa-ban"></i>
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="5" class="text-center text-muted small py-3">No payments recorded</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- SUBCONTRACTORS -->
+<div class="card hdc-card mt-3">
+    <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+        <span><i class="fas fa-hard-hat me-2"></i>Subcontractors</span>
+        <button class="btn btn-mint btn-sm" data-bs-toggle="collapse" data-bs-target="#addSubForm">
+            <i class="fas fa-plus"></i>
+        </button>
+    </div>
+    <div class="collapse px-3 pb-2" id="addSubForm">
+        <form method="POST" action="{{ url_for('hdc_add_subcontractor', pid=p.id) }}" class="row g-2 mt-1">
+            <div class="col-md-4"><input type="text" name="name" class="form-control form-control-sm" placeholder="Name *" required></div>
+            <div class="col-md-3"><input type="text" name="phone" class="form-control form-control-sm" placeholder="Phone"></div>
+            <div class="col-12"><button type="submit" class="btn btn-mint btn-sm">Add Subcontractor</button></div>
+        </form>
+    </div>
+    <div class="table-responsive">
+        <table class="table hdc-table table-sm mb-0">
+            <thead><tr>
+                <th>Name</th><th>Phone</th><th>Work Type</th><th>Stage</th><th>Contract Value</th>
+                <th>Work Done %</th><th>Payable</th><th>Total Paid</th><th>Total Cleared</th><th>Payable Balance</th>
+                <th>Contract Balance</th><th>Attendance</th><th>Retention %</th><th></th>
+            </tr></thead>
+            <tbody>
+            {% for s in p.subcontractors %}
+            <tr>
+                <td>
+                    <a class="text-decoration-none fw-bold" href="{{ url_for('hdc_subcontractor_ledger', sid=s.id) }}">{{ s.name }}</a>
+                    <div><small class="text-muted">{{ s.subcontractor_code or ('SUB-' ~ s.id) }}</small></div>
+                </td>
+                <td class="small text-muted">{{ s.phone or '—' }}</td>
+                <td class="text-muted small">{{ s.work_type or '—' }}</td>
+                <td class="small text-muted">{{ s.stage_rel.name if s.stage_rel else '—' }}</td>
+                <td class="fw-bold">{{ "{:,.0f}".format(s.contract_value) }}</td>
+                <td class="text-primary fw-bold">{{ "{:,.2f}".format(s.effective_progress_percentage or 0) }}%</td>
+                <td class="text-info">{{ "{:,.0f}".format(s.payable_amount or 0) }}</td>
+                <td class="text-success">
+                    {{ "{:,.0f}".format(s.total_paid) }}
+                    {% if (s.total_settled or 0) > 0 %}
+                    <div><small class="text-primary">Settled: {{ "{:,.0f}".format(s.total_settled or 0) }}</small></div>
+                    {% endif %}
+                </td>
+                <td class="text-info fw-bold">{{ "{:,.0f}".format((s.total_cleared or ((s.total_paid or 0) + (s.total_settled or 0)))) }}</td>
+                <td class="{% if s.payable_balance > 0 %}text-warning fw-bold{% else %}text-muted{% endif %}">
+                    {{ "{:,.0f}".format(s.payable_balance or 0) }}
+                </td>
+                <td class="text-muted">{{ "{:,.0f}".format(s.contract_balance or 0) }}</td>
+                <td class="small">{{ s.attendance_days or 0 }} day(s) / {{ s.attendance_headcount or 0 }} men</td>
+                <td class="text-muted small">{{ s.retention_percentage }}%</td>
+                <td>
+                    <button class="btn btn-xs btn-outline-success btn-sm"
+                        data-bs-toggle="collapse" data-bs-target="#pay-sub-{{ s.id }}">
+                        <i class="fas fa-money-bill"></i>
+                    </button>
+                    <button class="btn btn-xs btn-outline-primary btn-sm ms-1"
+                        data-bs-toggle="collapse" data-bs-target="#prog-sub-{{ s.id }}">
+                        <i class="fas fa-percent"></i>
+                    </button>
+                    <button class="btn btn-xs btn-outline-warning btn-sm ms-1"
+                        data-bs-toggle="collapse" data-bs-target="#att-sub-{{ s.id }}">
+                        <i class="fas fa-user-check"></i>
+                    </button>
+                    <div class="collapse mt-2" id="pay-sub-{{ s.id }}">
+                        <form method="POST" action="{{ url_for('hdc_pay_subcontractor', sid=s.id) }}" class="d-flex gap-1 flex-wrap">
+                            <input type="number" step="0.01" name="amount" class="form-control form-control-sm" style="width:100px" placeholder="Amount" onwheel="this.blur();" required>
+                            <input type="date" name="date" class="form-control form-control-sm" style="width:120px" value="{{ today }}">
+                            <input type="text" name="notes" class="form-control form-control-sm" placeholder="Notes">
+                            <label class="form-check-label small d-flex align-items-center ms-1" style="gap:6px;">
+                                <input class="form-check-input mt-0" type="checkbox" name="settle_shortfall" value="1">
+                                Settle shortfall
+                            </label>
+                            <button type="submit" class="btn btn-success btn-sm">Pay</button>
+                        </form>
+                    </div>
+                    <div class="collapse mt-2" id="prog-sub-{{ s.id }}">
+                        <form method="POST" action="{{ url_for('hdc_subcontractor_progress', sid=s.id) }}" class="d-flex gap-1">
+                            <input type="number" step="0.01" min="0" max="100" name="work_done_percentage" class="form-control form-control-sm" style="width:140px" placeholder="Work done %" value="{{ "{:.2f}".format(s.work_done_percentage or 0) }}">
+                            <button type="submit" class="btn btn-primary btn-sm">Update</button>
+                        </form>
+                    </div>
+                    <div class="collapse mt-2" id="att-sub-{{ s.id }}">
+                        <form method="POST" action="{{ url_for('hdc_subcontractor_attendance', sid=s.id) }}" class="d-flex gap-1 flex-wrap">
+                            <input type="date" name="date" class="form-control form-control-sm" style="width:130px" value="{{ today }}">
+                            <input type="number" min="0" step="1" name="present_count" class="form-control form-control-sm" style="width:110px" placeholder="Present">
+                            <input type="number" step="0.01" min="0" max="100" name="work_done_pct" class="form-control form-control-sm" style="width:120px" placeholder="+Progress %">
+                            <input type="text" name="notes" class="form-control form-control-sm" placeholder="Notes">
+                            <button type="submit" class="btn btn-warning btn-sm">Save</button>
+                        </form>
+                    </div>
+                    {% if s.payments %}
+                    <small class="text-muted d-block mt-1">{{ s.payments|length }} payment(s)</small>
+                    {% endif %}
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="13" class="text-center text-muted small py-3">No subcontractors</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- ATTENDANCE RECENT + MATERIAL PURCHASES -->
+<div class="row g-3 mt-1">
+    <div class="col-md-6">
+        <div class="card hdc-card">
+            <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-calendar-check me-2"></i>Recent Time Entries</span>
+                <a href="{{ url_for('hdc_attendance') }}?project_id={{ p.id }}" class="btn btn-sm btn-outline-secondary">View All</a>
+            </div>
+            <div class="table-responsive">
+                <table class="table hdc-table table-sm mb-0">
+                    <thead><tr><th>Date</th><th>Worker</th><th>Stage</th><th>Hours</th><th>OT</th><th>Wage</th></tr></thead>
+                    <tbody>
+                    {% for a in recent_time_entries %}
+                    <tr>
+                        <td>{{ fmt_pkt(a.check_in) }}</td>
+                        <td>{{ a.worker.name }}</td>
+                        <td><small class="text-muted">{{ a.stage.name if a.stage_id else '—' }}</small></td>
+                        <td>{{ "{:,.2f}".format(a.hours or 0) }}h</td>
+                        <td class="{% if a.overtime > 0 %}text-warning{% endif %}">{{ "{:,.2f}".format(a.overtime or 0) }}h</td>
+                        <td class="text-success">{{ "{:,.0f}".format(a.wage_calculated or 0) }}</td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="6" class="text-center text-muted small py-3">No attendance records</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Expenses + Materials -->
+    <div class="col-md-6">
+        <div class="card hdc-card">
+            <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-boxes me-2"></i>Material Purchases</span>
+                <a href="{{ url_for('hdc_purchases', project_id=p.id) }}" class="btn btn-sm btn-outline-secondary">View All</a>
+            </div>
+            <div class="table-responsive">
+                <table class="table hdc-table table-sm mb-0">
+                    <thead><tr><th>Date</th><th>Material</th><th>Stage</th><th>Qty</th><th>Total</th></tr></thead>
+                    <tbody>
+                    {% for pur in (p.purchases | sort(attribute='activity_at', reverse=True))[:8] %}
+                    <tr>
+                        <td>{{ fmt_pkt(pur.activity_at or pur.created_at) }}</td>
+                        <td>{{ pur.material.name }} <small class="text-muted">({{ pur.material.unit }})</small></td>
+                        <td><small class="text-muted">{{ pur.stage.name if pur.stage_id else '—' }}</small></td>
+                        <td>{{ pur.qty }}</td>
+                        <td class="fw-bold">{{ "{:,.0f}".format(pur.total) }}</td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="5" class="text-center text-muted small py-3">No purchases recorded</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    {% for s in stages %}
+    if (window.HDCComboList) {
+        window.HDCComboList.attach('shiftSubInput{{ s.id }}', 'shiftSubSelect{{ s.id }}', { includeEmpty: true });
+    }
+    {% endfor %}
+});
+</script>
+{% endblock %}

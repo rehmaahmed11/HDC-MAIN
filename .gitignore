@@ -1,0 +1,34 @@
+# --- Local runtime data (never commit the live SQLite DB) ---
+hdc_instance/*.db
+hdc_instance/*.db-shm
+hdc_instance/*.db-wal
+hdc_instance/backups/
+hdc_instance/stage_drawings/
+hdc_instance/*.done
+hdc_instance/project_estimations.json
+attached_assets/
+
+# Archives / snapshots of the app
+all_files.zip
+backupprevios.zip
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Editor / shell dotfiles that came out of the zip (not app code)
+.bashrc
+.profile
+.vimrc
+.gitconfig
+.pythonstartup.py
+README.txt
+.cache/
+.local/
+.ipython/
+.virtualenvs/
+
+# Local env (contains DB path / admin bootstrap password)
+.env

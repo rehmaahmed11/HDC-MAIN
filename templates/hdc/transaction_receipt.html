@@ -1,0 +1,647 @@
+{% extends "base.html" %}
+{% block title %}Transaction Receipt{% endblock %}
+{% block page_heading %}Transaction Receipt{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-center mb-3 no-print gap-2">
+    <div>
+        <h5 class="mb-0 d-inline">Receipt {{ receipt_id }}</h5>
+        <span class="badge bg-light text-dark border ms-2" title="Internal Transaction ID">TXN #{{ txn_id }}</span>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+        <a href="{{ back_url }}" class="btn btn-outline-secondary btn-sm">Back</a>
+        {% if not is_void %}
+        <a href="{{ url_for('hdc_accounts_entries', edit_txn_id=txn_id) }}" class="btn btn-outline-warning btn-sm">
+            <i class="fas fa-pen me-1"></i>Edit
+        </a>
+        <form method="POST" action="{{ url_for('hdc_accounts') }}" class="d-inline"
+              onsubmit="return confirm('Void this transaction (and any linked source row)? This is reversible via Restore.');">
+            <input type="hidden" name="action" value="void_transaction">
+            <input type="hidden" name="transaction_id" value="{{ txn_id }}">
+            <button type="submit" class="btn btn-outline-danger btn-sm">
+                <i class="fas fa-ban me-1"></i>Void
+            </button>
+        </form>
+        {% else %}
+        <form method="POST" action="{{ url_for('hdc_accounts') }}" class="d-inline"
+              onsubmit="return confirm('Restore this voided transaction and re-activate the linked source row?');">
+            <input type="hidden" name="action" value="restore_transaction">
+            <input type="hidden" name="transaction_id" value="{{ txn_id }}">
+            <button type="submit" class="btn btn-outline-success btn-sm">
+                <i class="fas fa-rotate-left me-1"></i>Restore
+            </button>
+        </form>
+        {% endif %}
+        <button type="button" class="btn btn-primary btn-sm" onclick="window.print()">{{ print_label or 'Print / Save PDF' }}</button>
+    </div>
+</div>
+
+<div id="receipt-shell" class="rx-shell">
+    <div class="rx-topbar"></div>
+
+    {% if is_void %}
+    <div class="rx-void-banner">
+        <span class="rx-void-tag">VOID</span>
+        <span>This transaction has been voided. The receipt is shown for audit reference only.</span>
+    </div>
+    {% endif %}
+
+    <div class="rx-header">
+        <div class="rx-company">
+            <img src="{{ (company_profile.logo_url if company_profile else '/hdc_static/img/company_logo.svg') }}" alt="Company Logo" class="rx-logo">
+            <div>
+                <div class="rx-name">{{ (company_profile.name if company_profile else 'Hadi Design and Construction Company') }}</div>
+                <div class="rx-tag">{{ (company_profile.tagline if company_profile else 'Design | Build | Manage') }}</div>
+                <div class="rx-contact">
+                    {% for ph in (company_profile.phones if company_profile else []) %}
+                    <span>{{ ph }}</span>{% if not loop.last %}<span class="sep">|</span>{% endif %}
+                    {% endfor %}
+                </div>
+                <div class="rx-address">{{ (company_profile.address if company_profile else '-') }}</div>
+            </div>
+        </div>
+
+        <div class="rx-meta">
+            <div class="rx-meta-title">
+                {% if tx_direction == 'receive' %}OFFICIAL RECEIPT{% elif tx_direction == 'pay' %}PAYMENT VOUCHER{% else %}TRANSFER VOUCHER{% endif %}
+            </div>
+            <div class="rx-meta-row"><span>Receipt No</span><strong>{{ receipt_id }}</strong></div>
+            <div class="rx-meta-row"><span>Reference</span><strong class="rx-mono">{{ reference_id or '-' }}</strong></div>
+            <div class="rx-meta-row"><span>Txn Date</span><strong>{{ txn_date }}</strong></div>
+            <div class="rx-meta-row"><span>Issued At</span><strong>{{ fmt_pkt(created_at) }}</strong></div>
+            <div class="rx-meta-row"><span>Status</span>
+                <strong>
+                    {% if is_void %}<span class="rx-pill rx-pill-void">Void</span>{% else %}<span class="rx-pill rx-pill-ok">Active</span>{% endif %}
+                </strong>
+            </div>
+        </div>
+    </div>
+
+    <div class="rx-body">
+        <div class="rx-amount {% if tx_direction == 'pay' %}rx-amount-pay{% elif tx_direction == 'receive' %}rx-amount-receive{% else %}rx-amount-transfer{% endif %}">
+            <div class="rx-amount-row">
+                <div>
+                    <div class="rx-amount-label">
+                        {% if tx_direction == 'receive' %}Amount Received{% elif tx_direction == 'pay' %}Amount Paid{% else %}Amount Transferred{% endif %}
+                    </div>
+                    <div class="rx-amount-value">PKR {{ "{:,.2f}".format(amount or 0.0) }}</div>
+                    <div class="rx-amount-words">{{ amount_words }}</div>
+                </div>
+                <div class="rx-direction-badge">
+                    {% if tx_direction == 'receive' %}<span class="badge rx-badge-receive">RECEIVE</span>
+                    {% elif tx_direction == 'pay' %}<span class="badge rx-badge-pay">PAY</span>
+                    {% else %}<span class="badge rx-badge-transfer">TRANSFER</span>{% endif %}
+                </div>
+            </div>
+        </div>
+
+        <div class="rx-section-title">Transaction Details</div>
+        <table class="rx-detail-table">
+            <tbody>
+                <tr>
+                    <th>Transaction Type</th>
+                    <td>{{ tx_type or '-' }}</td>
+                    <th>Category</th>
+                    <td>{{ category or '-' }}</td>
+                </tr>
+                <tr>
+                    <th>{% if tx_direction == 'receive' %}Received From{% elif tx_direction == 'pay' %}Paid To{% else %}Party{% endif %}</th>
+                    <td><strong>{{ party_name or '-' }}</strong>
+                        {% if related_entity_type and related_entity_id %}
+                        <span class="text-muted small d-block">{{ related_entity_type|capitalize }} #{{ related_entity_id }}</span>
+                        {% endif %}
+                    </td>
+                    <th>Reference ID</th>
+                    <td class="rx-mono">{{ reference_id or '-' }}</td>
+                </tr>
+                <tr>
+                    <th>Project</th>
+                    <td>{{ project_name or '-' }}</td>
+                    <th>Stage</th>
+                    <td>{{ stage_name or '-' }}</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="rx-section-title">Cash Movement</div>
+        <table class="rx-detail-table">
+            <tbody>
+                <tr>
+                    <th>From Account</th>
+                    <td>{{ from_account_name or '-' }}</td>
+                    <th>To Account</th>
+                    <td>{{ to_account_name or '-' }}</td>
+                </tr>
+                <tr>
+                    <th>Executed By</th>
+                    <td>{{ executed_by_account_name or '-' }}</td>
+                    <th>Group ID</th>
+                    <td class="rx-mono">{{ group_id or '-' }}</td>
+                </tr>
+                {% if source_type or source_id %}
+                <tr>
+                    <th>Source</th>
+                    <td colspan="3" class="rx-mono">{{ source_type or '-' }}{% if source_id %} #{{ source_id }}{% endif %}</td>
+                </tr>
+                {% endif %}
+            </tbody>
+        </table>
+
+        {% if split_rows and split_rows|length > 1 %}
+        <div class="rx-section-title">
+            Posting Breakdown
+            <span class="rx-section-sub">{{ split_rows|length }} linked rows under group <span class="rx-mono">{{ group_id }}</span></span>
+        </div>
+        <div class="rx-split-wrap">
+            <table class="rx-split-table">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Date</th>
+                        <th>Type</th>
+                        <th>From → To</th>
+                        <th>Executed By</th>
+                        <th class="text-end">Amount (PKR)</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for s in split_rows %}
+                    <tr class="{% if s.is_current %}rx-row-current{% endif %} {% if s.is_void %}rx-row-void{% endif %}">
+                        <td>{{ loop.index }}</td>
+                        <td>{{ s.date or '-' }}</td>
+                        <td>
+                            {{ s.type_label }}
+                            {% if s.direction == 'receive' %}<span class="badge rx-badge-receive ms-1">R</span>
+                            {% elif s.direction == 'pay' %}<span class="badge rx-badge-pay ms-1">P</span>
+                            {% elif s.direction == 'transfer' %}<span class="badge rx-badge-transfer ms-1">T</span>{% endif %}
+                        </td>
+                        <td>{{ s.from_account }} <span class="text-muted">→</span> {{ s.to_account }}</td>
+                        <td>{{ s.executed_by }}</td>
+                        <td class="text-end fw-semibold">{{ "{:,.2f}".format(s.amount or 0.0) }}</td>
+                        <td>
+                            {% if s.is_void %}<span class="rx-pill rx-pill-void">Void</span>
+                            {% elif s.is_current %}<span class="rx-pill rx-pill-current">This Receipt</span>
+                            {% else %}<span class="rx-pill rx-pill-ok">Active</span>{% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+                <tfoot>
+                    <tr>
+                        <td colspan="5" class="text-end fw-bold">Group Total (active)</td>
+                        <td class="text-end fw-bold">{{ "{:,.2f}".format(split_total or 0.0) }}</td>
+                        <td></td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+        {% endif %}
+
+        <div class="rx-note">
+            <div class="rx-note-title">Notes / Narration</div>
+            <div class="rx-note-text">{{ note or '-' }}</div>
+        </div>
+
+        {% if recent_entries %}
+        <div class="d-flex justify-content-between align-items-center mt-3 mb-2 no-print">
+            <div class="fw-semibold">{{ recent_entries_title }}</div>
+            <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="toggleRecent" checked>
+                <label class="form-check-label small" for="toggleRecent">Show in print</label>
+            </div>
+        </div>
+        <div id="recentEntriesWrap" class="rx-recent">
+            <table class="table table-sm mb-0">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Type</th>
+                        <th>Direction</th>
+                        <th>Party</th>
+                        <th class="text-end">Amount</th>
+                        <th class="no-print">Receipt</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in recent_entries %}
+                    <tr>
+                        <td>{{ r.date or '-' }}</td>
+                        <td>{{ r.type or '-' }}</td>
+                        <td>
+                            {% if r.direction == 'receive' %}
+                            <span class="badge rx-badge-receive">Receive</span>
+                            {% elif r.direction == 'pay' %}
+                            <span class="badge rx-badge-pay">Pay</span>
+                            {% elif r.direction == 'transfer' %}
+                            <span class="badge rx-badge-transfer">Transfer</span>
+                            {% else %}
+                            -
+                            {% endif %}
+                        </td>
+                        <td>{{ r.party or '-' }}</td>
+                        <td class="text-end">{{ "{:,.2f}".format(r.amount or 0.0) }}</td>
+                        <td class="no-print">
+                            <a href="{{ r.receipt_url }}" target="_blank" rel="noopener" class="btn btn-outline-primary btn-sm px-2 py-0">Open</a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="rx-footer">
+        <div class="rx-foot-note">
+            Generated by HDC ERP &middot; {{ fmt_pkt(created_at) }}<br>
+            <span class="text-muted small">This is a system-generated document. Verify against company books before disbursing funds.</span>
+        </div>
+        <div class="rx-signatures">
+            <div class="rx-sign-box">
+                <div class="line"></div>
+                <div class="lbl">Prepared By</div>
+            </div>
+            <div class="rx-sign-box">
+                <div class="line"></div>
+                <div class="lbl">Received / Acknowledged</div>
+            </div>
+            <div class="rx-sign-box">
+                <div class="line"></div>
+                <div class="lbl">Authorized Signature</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.rx-shell {
+    max-width: 980px;
+    margin: 0 auto;
+    background: #fff;
+    border: 1px solid #d8e6f2;
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow: 0 10px 24px rgba(20, 45, 69, 0.08);
+}
+.rx-topbar {
+    height: 8px;
+    background: linear-gradient(90deg, #0f6f7b 0%, #1b7ab3 48%, #0e578e 100%);
+}
+.rx-void-banner {
+    background: repeating-linear-gradient(45deg, #fff5f5, #fff5f5 10px, #fde8e8 10px, #fde8e8 20px);
+    border-bottom: 1px solid #f5b9b9;
+    color: #8b1f1f;
+    padding: 8px 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+}
+.rx-void-tag {
+    background: #c0392b;
+    color: #fff;
+    font-weight: 800;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    letter-spacing: 1.2px;
+}
+.rx-header {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 16px 18px 12px;
+    border-bottom: 1px solid #e1edf7;
+}
+.rx-company {
+    display: flex;
+    gap: 12px;
+    min-width: 0;
+}
+.rx-logo {
+    width: 64px;
+    height: 64px;
+    object-fit: contain;
+    border: 1px solid #d8e6f2;
+    border-radius: 10px;
+    padding: 4px;
+    background: #fff;
+}
+.rx-name {
+    font-size: 19px;
+    font-weight: 800;
+    color: #123f66;
+    line-height: 1.2;
+}
+.rx-tag {
+    font-size: 12px;
+    color: #48657f;
+    margin-top: 2px;
+}
+.rx-contact {
+    margin-top: 6px;
+    font-size: 12px;
+    color: #334b61;
+}
+.rx-contact .sep {
+    margin: 0 6px;
+    color: #7690a8;
+}
+.rx-address {
+    font-size: 12px;
+    color: #334b61;
+    margin-top: 2px;
+}
+.rx-meta {
+    width: 320px;
+    border: 1px solid #d8e6f2;
+    border-radius: 10px;
+    padding: 10px 12px;
+    background: linear-gradient(180deg, #f6fbff 0%, #eef6ff 100%);
+}
+.rx-meta-title {
+    font-size: 13px;
+    font-weight: 800;
+    color: #0e588f;
+    margin-bottom: 6px;
+    letter-spacing: 0.5px;
+    text-align: center;
+    border-bottom: 1px dashed #cfe1f3;
+    padding-bottom: 4px;
+}
+.rx-meta-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 12px;
+    padding: 3px 0;
+}
+.rx-meta-row span { color: #4b647a; }
+.rx-meta-row strong { color: #102e4b; font-weight: 700; }
+
+.rx-body { padding: 14px 18px 10px; }
+
+.rx-amount {
+    border: 1px solid #d2e8dd;
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 14px;
+}
+.rx-amount-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+}
+.rx-amount-pay { background: linear-gradient(90deg, #fff3f0 0%, #ffe9e2 100%); border-color: #f3c8b8; }
+.rx-amount-receive { background: linear-gradient(90deg, #ebf8f1 0%, #e4f5ed 100%); border-color: #c8e3d2; }
+.rx-amount-transfer { background: linear-gradient(90deg, #f3f3fb 0%, #ebebf8 100%); border-color: #cfcfe5; }
+.rx-amount-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #2a4868;
+    font-weight: 700;
+}
+.rx-amount-value {
+    font-size: 30px;
+    font-weight: 900;
+    line-height: 1.15;
+    color: #1c3954;
+    margin-top: 2px;
+}
+.rx-amount-words {
+    font-size: 12.5px;
+    color: #2f4b6b;
+    margin-top: 3px;
+    font-style: italic;
+}
+
+.rx-badge-pay { background: #c0392b; color: #fff; font-weight: 700; letter-spacing: 0.6px; }
+.rx-badge-receive { background: #1f8a52; color: #fff; font-weight: 700; letter-spacing: 0.6px; }
+.rx-badge-transfer { background: #5466a7; color: #fff; font-weight: 700; letter-spacing: 0.6px; }
+
+.rx-section-title {
+    margin: 14px 0 6px;
+    font-size: 12px;
+    font-weight: 800;
+    color: #2c4862;
+    text-transform: uppercase;
+    letter-spacing: 0.7px;
+    border-bottom: 1px solid #e1edf7;
+    padding-bottom: 4px;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+}
+.rx-section-sub {
+    font-size: 11px;
+    font-weight: 500;
+    color: #6c8198;
+    text-transform: none;
+    letter-spacing: 0;
+}
+
+.rx-detail-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    border: 1px solid #dbe8f4;
+    border-radius: 10px;
+    overflow: hidden;
+}
+.rx-detail-table th,
+.rx-detail-table td {
+    font-size: 13px;
+    padding: 8px 10px;
+    border-bottom: 1px solid #e5eff8;
+    vertical-align: top;
+}
+.rx-detail-table tr:last-child th,
+.rx-detail-table tr:last-child td {
+    border-bottom: 0;
+}
+.rx-detail-table th {
+    width: 19%;
+    background: #f7fbff;
+    color: #31506b;
+    font-weight: 700;
+}
+.rx-detail-table td {
+    width: 31%;
+    color: #122f4b;
+}
+.rx-mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace; font-size: 12px; }
+
+.rx-split-wrap {
+    border: 1px solid #dbe8f4;
+    border-radius: 10px;
+    overflow: hidden;
+}
+.rx-split-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12.5px;
+}
+.rx-split-table th,
+.rx-split-table td {
+    padding: 7px 9px;
+    border-bottom: 1px solid #eef4fb;
+    text-align: left;
+}
+.rx-split-table thead th {
+    background: #f4f8fc;
+    font-weight: 700;
+    color: #36546f;
+    border-bottom: 1px solid #d8e6f2;
+}
+.rx-split-table tfoot td {
+    background: #f9fcff;
+    border-top: 1px solid #d8e6f2;
+}
+.rx-row-current { background: #fff8e6; }
+.rx-row-void { background: #fdecec; color: #8b1f1f; text-decoration: line-through; }
+
+.rx-pill {
+    display: inline-block;
+    font-size: 10.5px;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 999px;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+}
+.rx-pill-ok { background: #def7e7; color: #1f7e4a; }
+.rx-pill-void { background: #fde0e0; color: #a02323; }
+.rx-pill-current { background: #fff1c2; color: #8a6a00; }
+
+.rx-note {
+    margin-top: 14px;
+    border: 1px solid #dbe8f4;
+    border-radius: 10px;
+    background: #fffdf6;
+    padding: 10px 12px;
+    border-left: 4px solid #f1c75a;
+}
+.rx-note-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: #8a6a00;
+    text-transform: uppercase;
+    letter-spacing: 0.45px;
+    margin-bottom: 4px;
+}
+.rx-note-text {
+    color: #173754;
+    font-size: 13px;
+    white-space: pre-wrap;
+}
+
+.rx-recent {
+    border: 1px solid #dbe8f4;
+    border-radius: 10px;
+    overflow: hidden;
+    background: #fff;
+}
+.rx-recent th,
+.rx-recent td {
+    font-size: 12px;
+    padding: 7px 8px;
+}
+
+.rx-footer {
+    border-top: 1px solid #e1edf7;
+    padding: 14px 18px 18px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 12px;
+    background: #fbfdff;
+}
+.rx-foot-note {
+    font-size: 12px;
+    color: #5d7489;
+    line-height: 1.5;
+}
+.rx-signatures {
+    display: flex;
+    gap: 18px;
+    flex-wrap: wrap;
+}
+.rx-sign-box {
+    min-width: 150px;
+    text-align: center;
+}
+.rx-sign-box .line {
+    border-top: 1px solid #7890a7;
+    margin-top: 32px;
+}
+.rx-sign-box .lbl {
+    margin-top: 5px;
+    font-size: 11.5px;
+    color: #415c74;
+    font-weight: 600;
+}
+
+@media (max-width: 900px) {
+    .rx-header { flex-direction: column; }
+    .rx-meta { width: 100%; }
+    .rx-detail-table th,
+    .rx-detail-table td {
+        display: block;
+        width: 100%;
+    }
+    .rx-detail-table th {
+        border-bottom: 0;
+        padding-bottom: 2px;
+    }
+    .rx-detail-table td {
+        padding-top: 2px;
+    }
+    .rx-footer { flex-direction: column; align-items: stretch; }
+    .rx-signatures { justify-content: space-between; }
+    .rx-split-table { font-size: 11.5px; }
+    .rx-amount-row { flex-direction: column; align-items: flex-start; }
+}
+
+@media print {
+    .sidebar, .topbar, nav, footer, .no-print, .btn {
+        display: none !important;
+    }
+    #page-content { margin: 0 !important; padding: 0 !important; }
+    .main-content { padding: 0 !important; }
+    .rx-shell {
+        max-width: 100% !important;
+        border-radius: 0 !important;
+        border: 1px solid #8ea3b8 !important;
+        box-shadow: none !important;
+    }
+    .rx-row-void { color: #8b1f1f !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .rx-amount, .rx-meta, .rx-pill, .rx-badge-pay, .rx-badge-receive, .rx-badge-transfer, .rx-void-banner {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+    @page { size: A4; margin: 10mm; }
+}
+</style>
+
+<script>
+(function () {
+    var toggle = document.getElementById('toggleRecent');
+    var wrap = document.getElementById('recentEntriesWrap');
+    if (!toggle || !wrap) return;
+    function sync() {
+        wrap.classList.toggle('d-none', !toggle.checked);
+    }
+    toggle.addEventListener('change', sync);
+    sync();
+})();
+{% if auto_print %}
+window.addEventListener('load', function () {
+    setTimeout(function () { window.print(); }, 250);
+});
+{% endif %}
+</script>
+{% endblock %}

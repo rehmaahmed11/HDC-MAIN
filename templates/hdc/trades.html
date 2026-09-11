@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Trades{% endblock %}
+{% block page_heading %}Trades{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mt-2 mb-3">
+    <h5 class="mb-0"><i class="fas fa-people-carry-box me-2 text-mint"></i>Trades ({{ trades|length }})</h5>
+</div>
+
+<div class="card hdc-card mb-3">
+    <div class="card-body">
+        <form method="POST" class="row g-2 align-items-end">
+            <input type="hidden" name="action" value="add_trade">
+            <div class="col-md-9">
+                <label class="form-label">Trade Name</label>
+                <input type="text" name="trade_name" class="form-control form-control-sm" placeholder="e.g. Mason" required>
+            </div>
+            <div class="col-md-3">
+                <button type="submit" class="btn btn-mint btn-sm w-100"><i class="fas fa-plus me-1"></i>Add Trade</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card hdc-card">
+    <div class="table-responsive">
+        <table class="table hdc-table">
+            <thead>
+                <tr>
+                    <th style="width:70px;">#</th>
+                    <th>Trade Name</th>
+                    <th class="text-end" style="width:220px;">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for tr in trades %}
+                <tr>
+                    <td>{{ loop.index }}</td>
+                    <td>
+                        <form method="POST" class="d-flex gap-2 align-items-center">
+                            <input type="hidden" name="action" value="edit_trade">
+                            <input type="hidden" name="trade_id" value="{{ tr.id }}">
+                            <input type="text" name="trade_name" value="{{ tr.name }}" class="form-control form-control-sm" required>
+                            <button type="submit" class="btn btn-outline-info btn-sm" title="Save Name">
+                                <i class="fas fa-save"></i>
+                            </button>
+                        </form>
+                    </td>
+                    <td class="text-end">
+                        <form method="POST" class="d-inline" onsubmit="return confirm('Delete this trade from active list?');">
+                            <input type="hidden" name="action" value="delete_trade">
+                            <input type="hidden" name="trade_id" value="{{ tr.id }}">
+                            <button type="submit" class="btn btn-outline-danger btn-sm" title="Delete Trade">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </form>
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="3" class="text-center text-muted py-4">No trades found. Add one to get started.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,461 @@
+{% extends "base.html" %}
+{% block title %}Subcontractor Attendance{% endblock %}
+{% block page_heading %}Subcontractor Attendance{% endblock %}
+
+{% block content %}
+<div class="card hdc-card mt-2 mb-3">
+    <div class="card-body d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <div>
+            <div class="fw-bold">{{ sub.name }}</div>
+            <div class="small text-muted">Code: {{ sub.subcontractor_code or ('SUB-' ~ sub.id) }} | Phone: {{ sub.phone or '-' }}</div>
+            <div class="small text-muted">Project: {{ sub.project.name if sub.project else 'Unassigned' }} | Stage: {{ sub.stage_rel.name if sub.stage_rel else 'Unassigned' }}</div>
+        </div>
+        <a href="{{ url_for('hdc_subcontractor_ledger', sid=sub.id) }}" class="btn btn-sm btn-outline-dark">
+            <i class="fas fa-book me-1"></i>Back To Ledger
+        </a>
+    </div>
+</div>
+
+<div class="card hdc-card mt-2 mb-3">
+    <div class="card-body py-2">
+        <form method="GET" class="d-flex gap-2 align-items-center flex-wrap">
+            <label class="fw-bold text-muted mb-0">Filters:</label>
+            <select name="worker_id" class="form-select form-select-sm" style="max-width:260px">
+                <option value="">All Workers</option>
+                {% for w in all_workers %}
+                <option value="{{ w.id }}" {% if selected_worker_id == w.id %}selected{% endif %}>{{ w.name }}{% if not w.active_status %} (Suspended){% endif %}</option>
+                {% endfor %}
+            </select>
+            <input type="date" name="date_from" class="form-control form-control-sm" style="max-width:170px" value="{{ selected_from or '' }}">
+            <input type="date" name="date_to" class="form-control form-control-sm" style="max-width:170px" value="{{ selected_to or '' }}">
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="show_inactive" name="show_inactive" value="1" {% if show_inactive %}checked{% endif %}>
+                <label class="form-check-label small" for="show_inactive">Show Inactive</label>
+            </div>
+            <button type="submit" class="btn btn-sm btn-mint">Apply</button>
+            <a href="{{ url_for('hdc_subcontractor_attendance_page', sid=sub.id) }}" class="btn btn-sm btn-outline-secondary">Clear</a>
+        </form>
+    </div>
+</div>
+
+<div class="card hdc-card mt-2 mb-3">
+    <div class="card-header hdc-card-header"><i class="fas fa-user-plus me-2"></i>Add New Worker</div>
+    <div class="card-body py-2">
+        <form method="POST" action="{{ url_for('hdc_subcontractor_add_worker', sid=sub.id) }}" class="d-flex gap-2 align-items-center flex-wrap">
+            <input type="text" name="name" class="form-control form-control-sm" style="max-width:220px" placeholder="Worker Name" required>
+            <input type="text" name="phone" class="form-control form-control-sm" style="max-width:180px" placeholder="Phone">
+            <input type="text" name="trade" class="form-control form-control-sm" style="max-width:180px" placeholder="Trade">
+            <input type="number" step="0.01" min="0" name="daily_wage" class="form-control form-control-sm" style="max-width:150px" placeholder="Daily Wage">
+            <button type="submit" class="btn btn-sm btn-mint">Add Worker</button>
+        </form>
+    </div>
+</div>
+
+<div class="card hdc-card mt-2 mb-3">
+    <div class="card-header hdc-card-header"><i class="fas fa-users me-2"></i>Workers (Earned vs Paid vs Payable)</div>
+    <div class="table-responsive">
+        <table class="table hdc-table table-sm mb-0">
+            <thead><tr><th>Name</th><th>Phone</th><th>Trade</th><th>Status</th><th class="text-end">Daily Wage</th><th class="text-end">Earned</th><th class="text-end">Paid</th><th class="text-end">Payable</th><th></th></tr></thead>
+            <tbody>
+            {% for row in worker_stats %}
+            {% set w = row.worker %}
+            <tr>
+                <td class="fw-bold">{{ w.name }}</td>
+                <td>{{ w.phone or '-' }}</td>
+                <td>{{ w.trade or '-' }}</td>
+                <td>{% if w.active_status %}<span class="badge bg-success">Active</span>{% else %}<span class="badge bg-secondary">Suspended</span>{% endif %}</td>
+                <td class="text-end">{{ "{:,.0f}".format(w.daily_wage or 0) }}</td>
+                <td class="text-end">{{ "{:,.0f}".format(row.earned or 0) }}</td>
+                <td class="text-end text-success">{{ "{:,.0f}".format(row.paid or 0) }}</td>
+                <td class="text-end {% if (row.payable or 0) > 0 %}text-warning fw-bold{% else %}text-muted{% endif %}">{{ "{:,.0f}".format(row.payable or 0) }}</td>
+                <td class="text-nowrap">
+                    <a href="{{ url_for('hdc_subcontractor_worker_ledger', sid=sub.id, wid=w.id) }}" class="btn btn-xs btn-outline-dark btn-sm" title="Worker Ledger"><i class="fas fa-book"></i></a>
+                    <form method="POST" action="{{ url_for('hdc_subcontractor_worker_toggle', sid=sub.id, wid=w.id) }}" class="d-inline">
+                        <button type="submit" class="btn btn-xs btn-outline-secondary btn-sm" title="{% if w.active_status %}Suspend{% else %}Activate{% endif %}">
+                            <i class="fas {% if w.active_status %}fa-pause{% else %}fa-play{% endif %}"></i>
+                        </button>
+                    </form>
+                    <button type="button" class="btn btn-xs btn-outline-primary btn-sm" data-bs-toggle="collapse" data-bs-target="#editWorker{{ w.id }}" title="Edit Worker"><i class="fas fa-edit"></i></button>
+                </td>
+            </tr>
+            <tr class="collapse" id="editWorker{{ w.id }}">
+                <td colspan="9" class="bg-light">
+                    <form method="POST" action="{{ url_for('hdc_subcontractor_worker_edit', sid=sub.id, wid=w.id) }}" class="d-flex gap-2 align-items-center flex-wrap py-1">
+                        <input type="text" name="name" class="form-control form-control-sm" style="max-width:220px" value="{{ w.name }}" required>
+                        <input type="text" name="phone" class="form-control form-control-sm" style="max-width:180px" value="{{ w.phone or '' }}" placeholder="Phone">
+                        <input type="text" name="trade" class="form-control form-control-sm" style="max-width:180px" value="{{ w.trade or '' }}" placeholder="Trade">
+                        <input type="number" step="0.01" min="0" name="daily_wage" class="form-control form-control-sm" style="max-width:150px" value="{{ w.daily_wage or 0 }}">
+                        <button type="submit" class="btn btn-sm btn-primary">Save</button>
+                    </form>
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="9" class="text-center text-muted py-3">No labour worker added yet.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="card hdc-card mt-2 mb-3">
+    <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+        <span><i class="fas fa-table me-2"></i>Daily Register Sheet (All Workers)</span>
+        <form method="GET" class="d-flex align-items-center gap-2">
+            <input type="hidden" name="worker_id" value="{{ selected_worker_id or '' }}">
+            <input type="hidden" name="date_from" value="{{ selected_from or '' }}">
+            <input type="hidden" name="date_to" value="{{ selected_to or '' }}">
+            {% if show_inactive %}<input type="hidden" name="show_inactive" value="1">{% endif %}
+            <label class="small text-muted mb-0">Sheet Date</label>
+            <input type="date" name="sheet_date" class="form-control form-control-sm" value="{{ sheet_date }}">
+            <button type="submit" class="btn btn-sm btn-outline-secondary">Load</button>
+        </form>
+    </div>
+    <div class="card-body py-2">
+        <form method="POST" action="{{ url_for('hdc_subcontractor_labour_attendance', sid=sub.id) }}">
+            <input type="hidden" name="bulk_mode" value="1">
+            <input type="hidden" name="date" value="{{ sheet_date }}">
+            <input type="hidden" name="return_to" value="attendance_page">
+            <div class="small text-muted mb-2">Status options are only Present, Absent, and Not Assigned. Enter total hours; OT is auto-calculated above 8.</div>
+            <div class="table-responsive">
+                <table class="table hdc-table table-sm align-middle mb-2">
+                    <thead>
+                        <tr class="fw-bold">
+                            <th>S.N</th>
+                            <th>Worker</th>
+                            <th>Status</th>
+                            <th>Project</th>
+                            <th>Stage</th>
+                            <th class="text-end">Working Hrs</th>
+                            <th class="text-end">OT Hrs (Auto)</th>
+                            <th>Remarks</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in daily_sheet_rows %}
+                        {% set w = row.worker %}
+                        <tr>
+                            <td>{{ loop.index }}<input type="hidden" name="worker_ids" value="{{ w.id }}"></td>
+                            <td>
+                                <div class="fw-bold">{{ w.name }}</div>
+                                <div class="small text-muted">{{ w.trade or '-' }}</div>
+                            </td>
+                            <td>
+                                <select name="attendance_status_{{ w.id }}" class="form-select form-select-sm js-row-status" data-worker-id="{{ w.id }}">
+                                    <option value="present" {% if row.status == 'Present' %}selected{% endif %}>Present</option>
+                                    <option value="absent" {% if row.status == 'Absent' %}selected{% endif %}>Absent</option>
+                                    <option value="not_assigned" {% if row.status == 'Not Assigned' %}selected{% endif %}>Not Assigned</option>
+                                </select>
+                            </td>
+                            <td>
+                                <select name="project_id_{{ w.id }}" class="form-select form-select-sm js-row-project" data-worker-id="{{ w.id }}">
+                                    <option value="">Select Project</option>
+                                    {% for p in project_options %}
+                                    <option value="{{ p.id }}" {% if row.project_id == p.id %}selected{% endif %}>{{ p.project_code }} | {{ p.name }}</option>
+                                    {% endfor %}
+                                </select>
+                            </td>
+                            <td>
+                                <select name="stage_id_{{ w.id }}" class="form-select form-select-sm js-row-stage" data-worker-id="{{ w.id }}">
+                                    <option value="">Select Stage</option>
+                                    {% for st in stage_options %}
+                                    <option value="{{ st.id }}" data-project="{{ st.project_id }}" {% if row.stage_id == st.id %}selected{% endif %}>{{ st.name }}</option>
+                                    {% endfor %}
+                                </select>
+                            </td>
+                            <td>
+                                <input type="number" step="0.25" min="0" name="working_hours_{{ w.id }}" class="form-control form-control-sm text-end js-row-hours" data-worker-id="{{ w.id }}" value="{{ '%.2f'|format(row.working_hours or 0) }}">
+                            </td>
+                            <td>
+                                <input type="text" class="form-control form-control-sm text-end js-row-ot" data-worker-id="{{ w.id }}" readonly>
+                            </td>
+                            <td>
+                                <input type="text" name="notes_{{ w.id }}" class="form-control form-control-sm" value="{{ row.remarks or '' }}" placeholder="Notes">
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="8" class="text-center text-muted py-3">No workers available.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <div class="d-flex justify-content-end">
+                <button type="submit" class="btn btn-sm btn-primary">Save Register Sheet</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card hdc-card mt-2 mb-3">
+    <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <h6 class="mb-0"><i class="fas fa-users me-2 text-mint"></i>Worker Status ({{ sheet_date }})</h6>
+            <small class="text-muted">Click a card to view workers</small>
+        </div>
+        <form method="GET">
+            <input type="hidden" name="sheet_date" value="{{ sheet_date }}">
+            <input type="hidden" name="worker_id" value="{{ selected_worker_id or '' }}">
+            <input type="hidden" name="date_from" value="{{ selected_from or '' }}">
+            <input type="hidden" name="date_to" value="{{ selected_to or '' }}">
+            {% if show_inactive %}<input type="hidden" name="show_inactive" value="1">{% endif %}
+            <input type="hidden" name="status_project_id" value="{{ status_project_id or '' }}">
+            <input type="hidden" name="status_stage_id" value="{{ status_stage_id or '' }}">
+            <div class="row g-3 mt-1">
+                <div class="col-12 col-md-4">
+                    <button type="submit" name="status_view" value="assigned" class="w-100 border-0 bg-transparent p-0">
+                        <div class="kpi-card kpi-green {% if status_view == 'assigned' %}kpi-active{% endif %}">
+                            <div class="kpi-icon"><i class="fas fa-user-check"></i></div>
+                            <div class="kpi-value">{{ assigned_count }}</div>
+                            <div class="kpi-label">Assigned</div>
+                        </div>
+                    </button>
+                </div>
+                <div class="col-12 col-md-4">
+                    <button type="submit" name="status_view" value="absent" class="w-100 border-0 bg-transparent p-0">
+                        <div class="kpi-card kpi-red {% if status_view == 'absent' %}kpi-active{% endif %}">
+                            <div class="kpi-icon"><i class="fas fa-user-times"></i></div>
+                            <div class="kpi-value">{{ absent_count }}</div>
+                            <div class="kpi-label">Absent</div>
+                        </div>
+                    </button>
+                </div>
+                <div class="col-12 col-md-4">
+                    <button type="submit" name="status_view" value="not_assigned" class="w-100 border-0 bg-transparent p-0">
+                        <div class="kpi-card kpi-orange {% if status_view == 'not_assigned' %}kpi-active{% endif %}">
+                            <div class="kpi-icon"><i class="fas fa-user-plus"></i></div>
+                            <div class="kpi-value">{{ not_assigned_count }}</div>
+                            <div class="kpi-label">Not Assigned</div>
+                        </div>
+                    </button>
+                </div>
+            </div>
+        </form>
+
+        <div class="border-top mt-3 pt-3">
+            <form method="GET" class="row g-2 align-items-end">
+                <input type="hidden" name="sheet_date" value="{{ sheet_date }}">
+                <input type="hidden" name="status_view" value="{{ status_view }}">
+                <input type="hidden" name="worker_id" value="{{ selected_worker_id or '' }}">
+                <input type="hidden" name="date_from" value="{{ selected_from or '' }}">
+                <input type="hidden" name="date_to" value="{{ selected_to or '' }}">
+                {% if show_inactive %}<input type="hidden" name="show_inactive" value="1">{% endif %}
+                <div class="col-md-4">
+                    <label class="form-label text-muted small">Project</label>
+                    <select name="status_project_id" id="statusProjectSelect" class="form-select form-select-sm">
+                        <option value="">All Projects</option>
+                        {% for p in project_options %}
+                        <option value="{{ p.id }}" {% if status_project_id == p.id %}selected{% endif %}>{{ p.project_code }} | {{ p.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label text-muted small">Stage</label>
+                    <select name="status_stage_id" id="statusStageSelect" class="form-select form-select-sm">
+                        <option value="">All Stages</option>
+                        {% for s in stage_options %}
+                        <option value="{{ s.id }}" data-project="{{ s.project_id }}" {% if status_stage_id == s.id %}selected{% endif %}>{{ s.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-4 d-flex gap-2">
+                    <button type="submit" class="btn btn-mint btn-sm w-100">Apply Filters</button>
+                    <a href="{{ url_for('hdc_subcontractor_attendance_page', sid=sub.id, sheet_date=sheet_date, status_view=status_view) }}" class="btn btn-outline-secondary btn-sm w-100">Clear</a>
+                </div>
+            </form>
+        </div>
+
+        <div class="table-responsive mt-3">
+            <table class="table hdc-table table-sm mb-0">
+                <thead>
+                    <tr class="fw-bold border-bottom">
+                        <th>S.N</th>
+                        <th>Worker</th>
+                        <th>Trade</th>
+                        <th>Status</th>
+                        <th>Project</th>
+                        <th>Stage</th>
+                        <th class="text-end">Working Hrs</th>
+                        <th class="text-end">OT Hrs</th>
+                        <th>Remarks</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in status_rows %}
+                    <tr>
+                        <td>{{ loop.index }}</td>
+                        <td><strong>{{ r.worker_name }}</strong></td>
+                        <td>{{ r.worker_trade }}</td>
+                        <td>
+                            {% if r.status == 'Assigned' %}
+                                <span class="badge bg-success">Assigned</span>
+                            {% elif r.status == 'Absent' %}
+                                <span class="badge bg-secondary">Absent</span>
+                            {% else %}
+                                <span class="badge bg-info text-dark">Not Assigned</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ r.project_name }}</td>
+                        <td>{{ r.stage_name }}</td>
+                        <td class="text-end">{{ "{:.2f}".format(r.working_hours or 0) }}</td>
+                        <td class="text-end">{{ "{:.2f}".format(r.overtime_hours or 0) }}</td>
+                        <td class="small text-muted">{{ r.remarks or '-' }}</td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="9" class="text-center text-muted py-3">No workers found for selected status/filter.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div class="card hdc-card mt-2">
+    <div class="card-header hdc-card-header"><i class="fas fa-table me-2"></i>Subcontractor Attendance Sheet</div>
+    <div class="table-responsive">
+        <table class="table hdc-table table-sm mb-0">
+            <thead>
+                <tr class="fw-bold border-bottom">
+                    <th>S.N</th>
+                    <th>Date &amp; Time</th>
+                    <th>Worker Name</th>
+                    <th>Worker Trade</th>
+                    <th>Attendance</th>
+                    <th>Project Name</th>
+                    <th>Project Stage</th>
+                    <th class="text-end">Working Hours</th>
+                    <th class="text-end">Overtime Hours</th>
+                    <th>Remarks</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for r in labour_rows %}
+            <tr>
+                <td class="fw-bold">{{ loop.index }}</td>
+                <td>
+                    {% if r.activity_at %}
+                        {{ r.activity_at.strftime('%Y-%m-%d %H:%M') }}
+                    {% elif r.created_at %}
+                        {{ r.created_at.strftime('%Y-%m-%d %H:%M') }}
+                    {% elif r.date %}
+                        {{ r.date.strftime('%Y-%m-%d') }} 00:00
+                    {% else %}
+                        -
+                    {% endif %}
+                </td>
+                <td>{{ r.worker.name if r.worker else '-' }}</td>
+                <td>{{ r.worker.trade if r.worker and r.worker.trade else '-' }}</td>
+                <td>
+                    {% set status = (r.attendance_status or ('Present' if (r.labour_count or 0) > 0 else 'Absent')) %}
+                    {% if status == 'Present' %}
+                        <span class="badge bg-success">Present</span>
+                    {% elif status == 'Not Assigned' %}
+                        <span class="badge bg-info text-dark">Not Assigned</span>
+                    {% else %}
+                        <span class="badge bg-secondary">Absent</span>
+                    {% endif %}
+                </td>
+                <td>{{ r.project.name if r.project else (r.stage.project.name if r.stage and r.stage.project else '-') }}</td>
+                <td>{{ r.stage.name if r.stage else ('Stage#' ~ r.stage_id) }}</td>
+                <td class="text-end">{{ "{:.2f}".format(r.working_hours or 0) }}</td>
+                <td class="text-end">{{ "{:.2f}".format(r.overtime_hours or 0) }}</td>
+                <td class="small">
+                    <span class="text-muted">{{ r.notes or '-' }}</span>
+                    <form method="POST" action="{{ url_for('hdc_subcontractor_labour_attendance_delete', sid=sub.id, rid=r.id) }}" class="d-inline" onsubmit="return confirm('Delete this labour attendance row?');">
+                        <button type="submit" class="btn btn-xs btn-outline-danger btn-sm ms-2" title="Delete row"><i class="fas fa-trash"></i></button>
+                    </form>
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="10" class="text-center text-muted py-3">No attendance entries yet.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    function syncStageByProject(projectSel, stageSel) {
+        if (!projectSel || !stageSel) return;
+        var pid = (projectSel.value || '').trim();
+        var selectedStillValid = false;
+        Array.from(stageSel.options).forEach(function (opt, idx) {
+            if (idx === 0) {
+                opt.hidden = false;
+                return;
+            }
+            var show = !!pid && ((opt.getAttribute('data-project') || '').trim() === pid);
+            opt.hidden = !show;
+            if (show && opt.selected) selectedStillValid = true;
+        });
+        if (!selectedStillValid) stageSel.value = '';
+        stageSel.disabled = !pid;
+    }
+
+    function updateRowOT(workerId) {
+        var hrsInput = document.querySelector('.js-row-hours[data-worker-id="' + workerId + '"]');
+        var otInput = document.querySelector('.js-row-ot[data-worker-id="' + workerId + '"]');
+        if (!hrsInput || !otInput) return;
+        var hrs = parseFloat(hrsInput.value || '0') || 0;
+        var ot = Math.max(0, hrs - 8);
+        otInput.value = ot.toFixed(2);
+    }
+
+    document.querySelectorAll('.js-row-project').forEach(function (projSel) {
+        var wid = projSel.getAttribute('data-worker-id');
+        var stageSel = document.querySelector('.js-row-stage[data-worker-id="' + wid + '"]');
+        var statusSel = document.querySelector('.js-row-status[data-worker-id="' + wid + '"]');
+        var hrsInput = document.querySelector('.js-row-hours[data-worker-id="' + wid + '"]');
+
+        if (statusSel && statusSel.value === 'not_assigned') {
+            projSel.value = '';
+            if (stageSel) stageSel.value = '';
+            if (hrsInput) hrsInput.value = '0';
+        }
+        syncStageByProject(projSel, stageSel);
+        updateRowOT(wid);
+
+        projSel.addEventListener('change', function () {
+            syncStageByProject(projSel, stageSel);
+        });
+        if (hrsInput) {
+            hrsInput.addEventListener('input', function () {
+                updateRowOT(wid);
+            });
+        }
+        if (statusSel) {
+            statusSel.addEventListener('change', function () {
+                if (statusSel.value === 'not_assigned') {
+                    projSel.value = '';
+                    if (stageSel) stageSel.value = '';
+                    if (hrsInput) hrsInput.value = '0';
+                    syncStageByProject(projSel, stageSel);
+                    updateRowOT(wid);
+                }
+            });
+        }
+    });
+
+    var statusProjectSel = document.getElementById('statusProjectSelect');
+    var statusStageSel = document.getElementById('statusStageSelect');
+    function filterStatusStages() {
+        if (!statusProjectSel || !statusStageSel) return;
+        var pid = (statusProjectSel.value || '').trim();
+        Array.from(statusStageSel.options).forEach(function (opt, idx) {
+            if (idx === 0) {
+                opt.hidden = false;
+                return;
+            }
+            var show = !pid || (opt.getAttribute('data-project') || '').trim() === pid;
+            opt.hidden = !show;
+            if (!show && opt.selected) statusStageSel.value = '';
+        });
+    }
+    if (statusProjectSel) {
+        statusProjectSel.addEventListener('change', filterStatusStages);
+        filterStatusStages();
+    }
+})();
+</script>
+{% endblock %}

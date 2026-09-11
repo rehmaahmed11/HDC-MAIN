@@ -1,0 +1,304 @@
+{% extends "base.html" %}
+{% block title %}Generate Payroll{% endblock %}
+{% block page_heading %}Generate Payroll{% endblock %}
+
+{% block content %}
+<div class="row g-3 mt-1">
+    <div class="col-md-4">
+        <div class="card hdc-card">
+            <div class="card-header hdc-card-header"><i class="fas fa-gears me-2"></i>1) Generate Payroll</div>
+            <div class="card-body">
+                <form method="POST">
+                    <input type="hidden" name="action" value="generate">
+                    <div class="mb-3">
+                        <label class="form-label">From *</label>
+                        <input type="date" name="date_from" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">To *</label>
+                        <input type="date" name="date_to" class="form-control" required>
+                    </div>
+                    <button type="submit" class="btn btn-mint w-100"><i class="fas fa-play me-1"></i>Generate Payroll</button>
+                </form>
+                <div class="small text-muted mt-2">First select date range and generate payroll.</div>
+            </div>
+        </div>
+
+        <div class="card hdc-card mt-3">
+            <div class="card-header hdc-card-header"><i class="fas fa-info-circle me-2"></i>Selected Run</div>
+            <div class="card-body">
+                {% if selected_run %}
+                <div class="mb-2"><strong>Run #:</strong> {{ selected_run.id }}</div>
+                <div class="mb-2"><strong>Period:</strong> {{ selected_run.date_from }} to {{ selected_run.date_to }}</div>
+                <div class="mb-2"><strong>Run Time:</strong> {{ fmt_pkt(selected_run.created_at) }}</div>
+                <div class="mb-0"><strong>Total Net:</strong> {{ "{:,.0f}".format(selected_run.total_amount or 0) }}</div>
+                <form method="POST" class="mt-3" onsubmit="return confirm('Pay all pending balances for payroll run #{{ selected_run.id }}?');">
+                    <input type="hidden" name="action" value="pay_all">
+                    <input type="hidden" name="run_id" value="{{ selected_run.id }}">
+                    <button type="submit" class="btn btn-mint btn-sm w-100"><i class="fas fa-money-check-dollar me-1"></i>Pay All Pending</button>
+                </form>
+                <form method="POST" action="{{ url_for('hdc_payroll_delete', run_id=selected_run.id) }}" class="mt-3" onsubmit="return confirm('Delete payroll run #{{ selected_run.id }}? This will also remove linked payroll payment entries.');">
+                    <button type="submit" class="btn btn-outline-danger btn-sm w-100"><i class="fas fa-trash me-1"></i>Delete This Payroll Run</button>
+                </form>
+                {% else %}
+                <div class="text-muted">No run selected. Generate payroll to view details.</div>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="card hdc-card mt-3">
+            <div class="card-header hdc-card-header"><i class="fas fa-link me-2"></i>Quick Links</div>
+            <div class="card-body d-flex gap-2">
+                <a href="{{ url_for('hdc_payroll_salary_cards_page', run_id=selected_run.id if selected_run else None) }}" class="btn btn-outline-danger btn-sm w-100">Salary Cards</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-8">
+        {% if selected_run %}
+        <div class="card hdc-card mb-3">
+            <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-calendar-alt me-2"></i>Payroll Report Window</span>
+                <span class="badge bg-secondary">{{ cal_label }}</span>
+            </div>
+            <div class="card-body">
+                <form method="GET" class="row g-2 align-items-end">
+                    <input type="hidden" name="run_id" value="{{ selected_run.id }}">
+                    <div class="col-md-4">
+                        <label class="form-label">Calendar Mode</label>
+                        <select name="calendar_mode" class="form-select form-select-sm">
+                            <option value="range" {% if calendar_mode == 'range' %}selected{% endif %}>Payroll Date Range</option>
+                            <option value="month" {% if calendar_mode == 'month' %}selected{% endif %}>Full Month Calendar</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Month <small class="text-muted">(for full month)</small></label>
+                        <input type="month" name="calendar_month" class="form-control form-control-sm" value="{{ calendar_month }}">
+                    </div>
+                    <div class="col-md-4">
+                        <button type="submit" class="btn btn-mint btn-sm w-100"><i class="fas fa-sync-alt me-1"></i>Update View</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div class="row g-2 mb-3">
+            <div class="col-6 col-md-3">
+                <div class="kpi-card kpi-green">
+                    <div class="kpi-icon"><i class="fas fa-users"></i></div>
+                    <div class="kpi-value">{{ totals.workers }}</div>
+                    <div class="kpi-label">Workers</div>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="kpi-card kpi-teal">
+                    <div class="kpi-icon"><i class="fas fa-money-bill-wave"></i></div>
+                    <div class="kpi-value">{{ "{:,.0f}".format(totals.total_wage or 0) }}</div>
+                    <div class="kpi-label">Total Wage</div>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="kpi-card kpi-orange">
+                    <div class="kpi-icon"><i class="fas fa-hand-holding-usd"></i></div>
+                    <div class="kpi-value">{{ "{:,.0f}".format(totals.total_advance or 0) }}</div>
+                    <div class="kpi-label">Advance</div>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="kpi-card {% if (totals.total_balance or 0) > 0 %}kpi-red{% else %}kpi-profit{% endif %}">
+                    <div class="kpi-icon"><i class="fas fa-balance-scale"></i></div>
+                    <div class="kpi-value">{{ "{:,.0f}".format(totals.total_balance or 0) }}</div>
+                    <div class="kpi-label">Balance Pending</div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="card hdc-card">
+            <div class="card-header hdc-card-header"><i class="fas fa-receipt me-2"></i>Payroll Items</div>
+            <div class="table-responsive">
+                <table class="table hdc-table table-sm mb-0">
+                    <thead><tr>
+                        <th>Worker</th><th>Hours</th><th>OT</th>
+                        <th>Gross</th><th>Advance</th><th>Net Pay</th>
+                    </tr></thead>
+                    <tbody>
+                    {% for it in items %}
+                    <tr>
+                        <td>{{ it.worker.name if it.worker else '' }}</td>
+                        <td>{{ "{:,.2f}".format(it.total_hours or 0) }}</td>
+                        <td>{{ "{:,.2f}".format(it.total_overtime or 0) }}</td>
+                        <td>{{ "{:,.0f}".format(it.gross_amount or 0) }}</td>
+                        <td class="text-warning">{{ "{:,.0f}".format(it.advance_deducted or 0) }}</td>
+                        <td class="fw-bold text-success">{{ "{:,.0f}".format(it.net_pay or 0) }}</td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="6" class="text-center text-muted py-3">Select a run to view items.</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        {% if selected_run %}
+        <div class="card hdc-card mt-3">
+            <div class="card-header hdc-card-header"><i class="fas fa-table me-2"></i>Day-wise Status (Work / Absent / Not Assigned)</div>
+            <div class="table-responsive">
+                <table class="table hdc-table table-sm mb-0">
+                    <thead><tr><th>Date</th><th>Work Entries</th><th>Absent Entries</th><th>Not Assigned Entries</th></tr></thead>
+                    <tbody>
+                    {% for d in day_status_rows %}
+                    <tr>
+                        <td>{{ d.date }}</td>
+                        <td class="text-success fw-bold">{{ d.work_entries }}</td>
+                        <td class="text-warning fw-bold">{{ d.absent_entries }}</td>
+                        <td class="text-muted fw-bold">{{ d.not_assigned_entries }}</td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="4" class="text-center text-muted py-3">No day summary available.</td></tr>
+                    {% endfor %}
+                    </tbody>
+                    <tfoot>
+                        <tr>
+                            <th>Total</th>
+                            <th class="text-success">{{ totals.work_days }}</th>
+                            <th class="text-warning">{{ totals.absent_days }}</th>
+                            <th class="text-muted">{{ totals.not_assigned_days }}</th>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        </div>
+
+        <div class="card hdc-card mt-3">
+            <div class="card-header hdc-card-header"><i class="fas fa-file-invoice-dollar me-2"></i>Worker Payroll Report</div>
+            <div class="table-responsive">
+                <table class="table hdc-table table-sm mb-0">
+                    <thead><tr>
+                        <th>Worker</th>
+                        <th>Work Entries</th>
+                        <th>Absent Entries</th>
+                        <th>Not Assigned Entries</th>
+                        <th>Total Days</th>
+                        <th>Per Day Wage</th>
+                        <th>OT Total</th>
+                        <th>Total Wage</th>
+                        <th>Advance</th>
+                        <th>Payable</th>
+                        <th>Paid (This Run)</th>
+                        <th>Balance</th>
+                        <th>Status</th>
+                        <th></th>
+                    </tr></thead>
+                    <tbody>
+                    {% for r in payroll_summary_rows %}
+                    <tr>
+                        <td>
+                            <strong>{{ r.worker.name }}</strong><br>
+                            <small class="text-muted">{{ r.worker.worker_code }}</small>
+                        </td>
+                        <td>{{ r.work_entries }}</td>
+                        <td class="text-warning">{{ r.absent_entries }}</td>
+                        <td class="text-muted">{{ r.not_assigned_entries }}</td>
+                        <td>{{ r.worked_days }}</td>
+                        <td>{{ "{:,.0f}".format(r.per_day_wage or 0) }}</td>
+                        <td>{{ "{:,.2f}".format(r.overtime_total or 0) }}</td>
+                        <td class="text-success fw-bold">{{ "{:,.0f}".format(r.total_wage or 0) }}</td>
+                        <td class="text-warning">{{ "{:,.0f}".format(r.advance or 0) }}</td>
+                        <td>{{ "{:,.0f}".format(r.payable or 0) }}</td>
+                        <td>{{ "{:,.0f}".format(r.paid or 0) }}</td>
+                        <td class="{% if (r.balance or 0) > 0 %}text-danger fw-bold{% else %}text-success{% endif %}">
+                            {{ "{:,.0f}".format(r.balance or 0) }}
+                        </td>
+                        <td>
+                            <span class="badge {% if r.payment_status == 'Paid' %}bg-success{% else %}bg-danger{% endif %}">
+                                {{ r.payment_status }}
+                            </span>
+                        </td>
+                        <td class="text-nowrap">
+                            {% if (r.balance or 0) > 0 %}
+                            <form method="POST" class="d-inline" onsubmit="return confirm('Pay this worker balance for this payroll run?');">
+                                <input type="hidden" name="action" value="pay_worker">
+                                <input type="hidden" name="run_id" value="{{ selected_run.id }}">
+                                <input type="hidden" name="worker_id" value="{{ r.worker.id }}">
+                                <input type="hidden" name="amount" value="{{ "{:.2f}".format(r.balance or 0) }}">
+                                <button type="submit" class="btn btn-sm btn-mint">
+                                    <i class="fas fa-money-bill-wave me-1"></i>Pay Balance
+                                </button>
+                            </form>
+                            {% endif %}
+                            <a href="{{ url_for('hdc_payroll_salary_cards', run_id=selected_run.id, worker_id=r.worker.id, autoprint=1) }}" target="_blank" class="btn btn-sm btn-outline-primary">
+                                <i class="fas fa-id-card me-1"></i>Card PDF
+                            </a>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="14" class="text-center text-muted py-3">No worker report available.</td></tr>
+                    {% endfor %}
+                    </tbody>
+                    <tfoot>
+                        <tr>
+                            <th>Total</th>
+                            <th>{{ totals.work_entries }}</th>
+                            <th>{{ totals.absent_days }}</th>
+                            <th>{{ totals.not_assigned_days }}</th>
+                            <th>-</th>
+                            <th>-</th>
+                            <th>-</th>
+                            <th class="text-success">{{ "{:,.0f}".format(totals.total_wage or 0) }}</th>
+                            <th class="text-warning">{{ "{:,.0f}".format(totals.total_advance or 0) }}</th>
+                            <th>{{ "{:,.0f}".format(totals.total_payable or 0) }}</th>
+                            <th>{{ "{:,.0f}".format(totals.total_paid or 0) }}</th>
+                            <th class="{% if (totals.total_balance or 0) > 0 %}text-danger{% else %}text-success{% endif %}">
+                                {{ "{:,.0f}".format(totals.total_balance or 0) }}
+                            </th>
+                            <th>-</th>
+                            <th></th>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        </div>
+
+        <div class="card hdc-card mt-3">
+            <div class="card-header hdc-card-header"><i class="fas fa-calendar-week me-2"></i>Worker Calendar Matrix (W / A / N)</div>
+            <div class="table-responsive">
+                <table class="table hdc-table table-sm mb-0">
+                    <thead>
+                        <tr>
+                            <th style="min-width:180px;">Worker</th>
+                            {% for d in calendar_days %}
+                            <th class="text-center" title="{{ d }}">{{ d.day }}</th>
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                    {% for row in worker_calendar_rows %}
+                        <tr>
+                            <td>
+                                <strong>{{ row.worker.name }}</strong><br>
+                                <small class="text-muted">{{ row.worker.worker_code }}</small>
+                            </td>
+                            {% for st in row.statuses %}
+                            <td class="text-center">
+                                <span class="badge {% if st.code == 'W' %}bg-success{% elif st.code == 'A' %}bg-warning text-dark{% else %}bg-secondary{% endif %}">
+                                    {{ st.code }}
+                                </span>
+                            </td>
+                            {% endfor %}
+                        </tr>
+                    {% else %}
+                        <tr><td colspan="100" class="text-center text-muted py-3">No calendar rows available.</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <div class="card-footer small text-muted">
+                Legend: <span class="badge bg-success">W</span> Work, <span class="badge bg-warning text-dark">A</span> Absent, <span class="badge bg-secondary">N</span> Not Assigned
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+

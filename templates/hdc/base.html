@@ -1,0 +1,194 @@
+﻿<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token }}">
+    <title>{% block title %}HDC ERP{% endblock %} - Hadi Design & Construction</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/hdc_static/css/hdc.css">
+    <script>
+        (function(){
+            var t = localStorage.getItem('hdc_theme') || 'light';
+            document.documentElement.setAttribute('data-theme', t);
+        })();
+    </script>
+</head>
+<body>
+<div id="wrapper">
+    <!-- SIDEBAR -->
+    <nav id="sidebar">
+        <div class="sidebar-brand">
+            <i class="fas fa-hard-hat"></i>
+            <span class="brand-text">HDC ERP</span>
+        </div>
+        <div class="sidebar-divider"></div>
+        <ul class="sidebar-nav">
+            <li class="nav-item {% if request.endpoint == 'hdc_dashboard' %}active{% endif %}">
+                <a href="{{ url_for('hdc_dashboard') }}"><i class="fas fa-tachometer-alt"></i><span>Dashboard</span></a>
+            </li>
+            <li class="nav-item {% if 'project' in (request.endpoint or '') or 'stage' in (request.endpoint or '') %}active{% endif %}">
+                <a href="{{ url_for('hdc_projects') }}"><i class="fas fa-project-diagram"></i><span>Projects</span></a>
+            </li>
+            <li class="nav-item {% if request.endpoint == 'hdc_stage_overview' %}active{% endif %}">
+                <a href="{{ url_for('hdc_stage_overview') }}"><i class="fas fa-layer-group"></i><span>Stages</span></a>
+            </li>
+            <li class="nav-item {% if 'subcontractor' in (request.endpoint or '') %}active{% endif %}">
+                <a href="{{ url_for('hdc_subcontractors') }}"><i class="fas fa-hard-hat"></i><span>Subcontractors</span></a>
+            </li>
+            <li class="nav-item {% if 'worker' in (request.endpoint or '') %}active{% endif %}">
+                <a href="{{ url_for('hdc_workers') }}"><i class="fas fa-users-cog"></i><span>Workers</span></a>
+            </li>
+            <li class="nav-item {% if 'office_' in (request.endpoint or '') %}active{% endif %}">
+                <a href="{{ url_for('hdc_office_management') }}"><i class="fas fa-building-user"></i><span>Office Management</span></a>
+            </li>
+            <li class="nav-item {% if 'personal_' in (request.endpoint or '') %}active{% endif %}">
+                <a href="{{ url_for('hdc_personal_management') }}"><i class="fas fa-handshake"></i><span>Personal Management</span></a>
+            </li>
+            <li class="nav-item {% if 'trade' in (request.endpoint or '') %}active{% endif %}">
+                <a href="{{ url_for('hdc_trades') }}"><i class="fas fa-people-carry-box"></i><span>Trades</span></a>
+            </li>
+            <li class="nav-item {% if 'attendance' in (request.endpoint or '') or 'timekeeping' in (request.endpoint or '') %}active{% endif %}">
+                <a href="{{ url_for('hdc_attendance') }}"><i class="fas fa-calendar-check"></i><span>Timekeeping</span></a>
+            </li>
+            <li class="nav-item {% if request.endpoint == 'hdc_expenses' %}active{% endif %}">
+                <a href="{{ url_for('hdc_expenses') }}"><i class="fas fa-receipt"></i><span>Expenses</span></a>
+            </li>
+            <li class="nav-item {% if request.endpoint == 'hdc_expense_categories' %}active{% endif %}">
+                <a href="{{ url_for('hdc_expense_categories') }}"><i class="fas fa-tags"></i><span>Expense Categories</span></a>
+            </li>
+            <li class="nav-item {% if 'purchase_v2' in (request.endpoint or '') %}active{% endif %}">
+                <a href="{{ url_for('hdc_purchase_v2_page') }}"><i class="fas fa-cart-flatbed"></i><span>Purchase V2</span></a>
+            </li>
+            <li class="nav-item {% if 'estimation' in (request.endpoint or '') or 'formula' in (request.endpoint or '') %}active{% endif %}">
+                <a href="{{ url_for('hdc_estimation') }}"><i class="fas fa-calculator"></i><span>Estimation</span></a>
+            </li>
+            <li class="nav-item {% if request.endpoint == 'hdc_project_estimation' %}active{% endif %}">
+                <a href="{{ url_for('hdc_project_estimation') }}"><i class="fas fa-list-check"></i><span>Project Estimation</span></a>
+            </li>
+            <li class="nav-item {% if 'report' in (request.endpoint or '') %}active{% endif %}">
+                <a href="{{ url_for('hdc_reports') }}"><i class="fas fa-chart-bar"></i><span>Reports</span></a>
+            </li>
+            <li class="nav-item {% if request.endpoint == 'hdc_reports_glance' %}active{% endif %}">
+                <a href="{{ url_for('hdc_reports_glance') }}"><i class="fas fa-gauge-high"></i><span>Glance Report</span></a>
+            </li>
+            <li class="nav-item {% if 'payroll' in (request.endpoint or '') %}active{% endif %}">
+                <a href="{{ url_for('hdc_payroll') }}"><i class="fas fa-money-check-dollar"></i><span>Payroll</span></a>
+            </li>
+            <li class="nav-item {% if 'alerts' in (request.endpoint or '') %}active{% endif %}">
+                <a href="{{ url_for('hdc_alerts') }}"><i class="fas fa-bell"></i><span>Alerts</span></a>
+            </li>
+        </ul>
+        <div class="sidebar-divider"></div>
+        <ul class="sidebar-nav">
+            {% if current_user.role == 'admin' %}
+            <li class="nav-item {% if request.endpoint == 'hdc_users' %}active{% endif %}">
+                <a href="{{ url_for('hdc_users') }}"><i class="fas fa-user-shield"></i><span>Users</span></a>
+            </li>
+            <li class="nav-item {% if request.endpoint == 'hdc_event_recorder' %}active{% endif %}">
+                <a href="{{ url_for('hdc_event_recorder') }}"><i class="fas fa-clipboard-list"></i><span>Event Recorder</span></a>
+            </li>
+            <li class="nav-item {% if request.endpoint in ['hdc_accounts', 'hdc_accounts_kpi_detail', 'hdc_accounts_entries'] %}active{% endif %}">
+                <a href="{{ url_for('hdc_accounts') }}"><i class="fas fa-wallet"></i><span>Accounts</span></a>
+            </li>
+            <li class="nav-item {% if request.endpoint == 'hdc_settings' %}active{% endif %}">
+                <a href="{{ url_for('hdc_settings') }}"><i class="fas fa-gear"></i><span>Settings</span></a>
+            </li>
+            {% endif %}
+            <li class="nav-item">
+                <form method="POST" action="{{ url_for('hdc_logout') }}" class="m-0">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+                    <button type="submit" class="btn btn-link nav-link text-danger-light p-0 text-start w-100" style="text-decoration:none;">
+                        <i class="fas fa-sign-out-alt"></i><span>Logout</span>
+                    </button>
+                </form>
+            </li>
+        </ul>
+    </nav>
+
+    <!-- CONTENT -->
+    <div id="page-content">
+        <!-- TOPBAR -->
+        <nav class="topbar">
+            <button id="sidebarToggle" class="btn-hamburger" title="Toggle Sidebar">
+                <i class="fas fa-bars"></i>
+            </button>
+            <div class="topbar-title">{% block page_heading %}{% endblock %}</div>
+            <div class="topbar-right">
+                <a href="{{ url_for('hdc_alerts') }}" class="btn-theme position-relative" title="Alerts">
+                    <i class="fas fa-bell"></i>
+                    {% if alert_count and alert_count > 0 %}
+                    <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger">
+                        {{ alert_count }}
+                    </span>
+                    {% endif %}
+                </a>
+                <button id="themeToggle" class="btn-theme" title="Toggle Dark/Light Mode">
+                    <i class="fas fa-moon" id="themeIcon"></i>
+                </button>
+                <div class="topbar-user">
+                    <i class="fas fa-user-circle me-1"></i>
+                    <span>{{ current_user.username }}</span>
+                </div>
+            </div>
+        </nav>
+
+        <!-- FLASH MESSAGES -->
+        <div class="px-4 pt-3">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            {% for cat, msg in messages %}
+              <div class="alert alert-{{ cat }} alert-dismissible fade show py-2" role="alert">
+                {{ msg }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+              </div>
+            {% endfor %}
+          {% endif %}
+        {% endwith %}
+        </div>
+
+        <!-- MAIN CONTENT -->
+        <main class="main-content px-4 pb-4">
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="/hdc_static/js/hdc.js"></script>
+<script>
+(function () {
+    var tokenMeta = document.querySelector('meta[name=\"csrf-token\"]');
+    if (!tokenMeta) return;
+    var token = tokenMeta.getAttribute('content') || '';
+    if (!token) return;
+    var forms = document.querySelectorAll('form');
+    forms.forEach(function (f) {
+        var method = (f.getAttribute('method') || 'GET').toUpperCase();
+        if (method !== 'POST') return;
+        if (f.querySelector('input[name=\"_csrf_token\"]')) return;
+        var i = document.createElement('input');
+        i.type = 'hidden';
+        i.name = '_csrf_token';
+        i.value = token;
+        f.appendChild(i);
+    });
+})();
+
+// Prevent number input changes on mouse wheel scroll
+document.addEventListener('DOMContentLoaded', function() {
+    document.addEventListener('wheel', function(e) {
+        if (e.target && e.target.tagName === 'INPUT' && e.target.type === 'number') {
+            e.target.blur();
+            e.preventDefault();
+            e.stopPropagation();
+        }
+    }, { passive: false });
+});
+</script>
+{% block extra_js %}{% endblock %}
+</body>
+</html>
+

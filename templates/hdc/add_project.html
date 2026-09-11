@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Add Project{% endblock %}
+{% block page_heading %}Add New Project{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center mt-2">
+<div class="col-md-8 col-lg-7">
+<div class="card hdc-card">
+    <div class="card-header hdc-card-header"><i class="fas fa-plus-circle me-2"></i>New Project</div>
+    <div class="card-body">
+        <form method="POST" action="{{ url_for('hdc_add_project') }}">
+        <div class="row g-3">
+            <div class="col-md-8">
+                <label class="form-label">Project Code *</label>
+                <div class="input-group">
+                    <input type="text" name="project_code" class="form-control" placeholder="HDC-00001" required>
+                    <button class="btn btn-outline-secondary" type="button" id="autoProjectCodeBtn" title="Auto Generate">
+                        Auto
+                    </button>
+                </div>
+            </div>
+            <div class="col-md-8">
+                <label class="form-label">Project Name *</label>
+                <input type="text" name="name" class="form-control" placeholder="e.g. Ahmad Villa DHA" required>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Client / Owner Name</label>
+                <input type="text" name="client" class="form-control" placeholder="e.g. Mr. Ahmed Khan">
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Phone Number</label>
+                <input type="text" name="client_phone" class="form-control" placeholder="e.g. 03XXXXXXXXX">
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Location</label>
+                <input type="text" name="location" class="form-control" placeholder="City / Area">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Start Date</label>
+                <input type="date" name="start_date" class="form-control" value="{{ today }}">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Planned End</label>
+                <input type="date" name="planned_end" class="form-control">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Status</label>
+                <select name="status" class="form-select">
+                    <option value="planned">planned</option>
+                    <option value="active">active</option>
+                    <option value="paused">paused</option>
+                    <option value="completed">completed</option>
+                </select>
+            </div>
+        </div>
+        <div class="mt-4 d-flex gap-2">
+            <button type="submit" class="btn btn-mint"><i class="fas fa-save me-1"></i>Save Project</button>
+            <a href="{{ url_for('hdc_projects') }}" class="btn btn-outline-secondary">Cancel</a>
+        </div>
+        </form>
+    </div>
+</div>
+</div>
+</div>
+<script>
+(function(){
+    var btn = document.getElementById('autoProjectCodeBtn');
+    if (!btn) return;
+    btn.addEventListener('click', function(){
+                fetch('/hdc/api/next_project_code')
+            .then(r => r.json())
+            .then(d => {
+                if (!d || !d.ok) {
+                    alert((d && d.error) ? d.error : 'Unable to generate code.');
+                    return;
+                }
+                var input = document.querySelector('input[name="project_code"]');
+                input.value = d.code;
+                input.readOnly = true;
+            })
+            .catch(function(){ alert('Unable to generate code.'); });
+    });
+})();
+</script>
+{% endblock %}

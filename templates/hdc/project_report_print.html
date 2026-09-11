@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Project Report – {{ project.name }}</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 11px; color: #1a1a1a; background: #fff; }
+  .page { width: 210mm; min-height: 297mm; margin: 0 auto; padding: 16mm 18mm 16mm 18mm; }
+
+  /* Header */
+  .report-header { display: flex; justify-content: space-between; align-items: flex-start;
+                   border-bottom: 3px solid #87af32; padding-bottom: 10px; margin-bottom: 14px; }
+  .company-name  { font-size: 20px; font-weight: 700; color: #87af32; letter-spacing: 0.5px; }
+  .company-sub   { font-size: 11px; color: #555; margin-top: 2px; }
+  .report-meta   { text-align: right; font-size: 10px; color: #555; line-height: 1.6; }
+
+  /* Project Info Box */
+  .info-box { display: grid; grid-template-columns: repeat(4, 1fr);
+              background: #f7f9f0; border: 1px solid #d8e8ab; border-radius: 6px;
+              padding: 10px 14px; gap: 8px; margin-bottom: 14px; }
+  .info-item label { font-size: 9px; text-transform: uppercase; color: #87af32; font-weight: 700; display: block; }
+  .info-item span  { font-size: 12px; font-weight: 600; color: #1a1a1a; }
+
+  /* KPI row */
+  .kpi-row   { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 14px; }
+  .kpi-card  { background: #f5f5f5; border-radius: 6px; padding: 10px 12px;
+               border-top: 3px solid #87af32; text-align: center; }
+  .kpi-card.danger { border-top-color: #c0392b; background: #fff5f5; }
+  .kpi-card.success{ border-top-color: #27ae60; background: #f0fff5; }
+  .kpi-label { font-size: 9px; text-transform: uppercase; color: #888; font-weight: 600; margin-bottom: 4px; }
+  .kpi-value { font-size: 14px; font-weight: 700; color: #1a1a1a; }
+  .kpi-card.danger .kpi-value  { color: #c0392b; }
+  .kpi-card.success .kpi-value { color: #27ae60; }
+
+  /* Section heading */
+  h2 { font-size: 12px; font-weight: 700; color: #fff; background: #87af32;
+       padding: 5px 10px; border-radius: 4px; margin: 14px 0 6px; letter-spacing: 0.4px; }
+
+  /* Tables */
+  table { width: 100%; border-collapse: collapse; font-size: 10px; margin-bottom: 4px; }
+  th    { background: #87af32; color: #fff; font-weight: 700; padding: 5px 8px;
+          text-align: left; font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.3px; }
+  td    { padding: 4px 8px; border-bottom: 1px solid #e8e8e8; vertical-align: middle; }
+  tr:nth-child(even) td { background: #f7f9f0; }
+  .num  { text-align: right; font-variant-numeric: tabular-nums; }
+  .badge { display: inline-block; padding: 1px 6px; border-radius: 10px;
+           font-size: 9px; font-weight: 600; }
+  .badge-active   { background: #d6edaf; color: #4a7a10; }
+  .badge-hold     { background: #fff3cd; color: #856404; }
+  .badge-complete { background: #d1ecf1; color: #0c5460; }
+  .profit-pos { color: #27ae60; font-weight: 700; }
+  .profit-neg { color: #c0392b; font-weight: 700; }
+
+  /* Cost bar inside stage table */
+  .cost-bar-wrap { background: #e8e8e8; border-radius: 3px; height: 6px; width: 60px; display: inline-block; vertical-align: middle; }
+  .cost-bar-fill { height: 100%; border-radius: 3px; background: #87af32; }
+
+  /* Footer */
+  .report-footer { border-top: 1px solid #d8e8ab; margin-top: 18px; padding-top: 8px;
+                   font-size: 9px; color: #aaa; display: flex; justify-content: space-between; }
+
+  /* Print */
+  @media print {
+    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .no-print { display: none !important; }
+    .page { padding: 10mm 12mm; }
+    h2 { page-break-before: auto; }
+    table { page-break-inside: avoid; }
+  }
+  @page { size: A4; margin: 0; }
+
+  /* Screen only – print button bar */
+  .print-bar { position: fixed; top: 0; left: 0; right: 0; height: 46px;
+               background: #2b2b2b; display: flex; align-items: center; gap: 10px;
+               padding: 0 20px; z-index: 1000; }
+  .print-bar span { color: #87af32; font-weight: 700; font-size: 13px; }
+  .btn-print { background: #87af32; color: #fff; border: none; border-radius: 5px;
+               padding: 7px 18px; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .btn-print:hover { background: #6e9028; }
+  .btn-close { background: #555; color: #fff; border: none; border-radius: 5px;
+               padding: 7px 14px; font-size: 12px; cursor: pointer; margin-left: auto; }
+  .btn-close:hover { background: #333; }
+  @media print { .print-bar { display: none; } }
+  body.with-bar .page { margin-top: 50px; }
+</style>
+</head>
+<body class="with-bar">
+
+<!-- Screen print bar -->
+<div class="print-bar no-print">
+  <span>&#128196; Project Report — {{ project.name }}</span>
+  <button class="btn-print" onclick="window.print()">&#128424; Print / Save as PDF</button>
+  <button class="btn-close" onclick="window.close()">&#10005; Close</button>
+</div>
+
+<div class="page">
+
+  <!-- Header -->
+  <div class="report-header">
+    <div>
+      <div class="company-name">&#9881; HDC ERP</div>
+      <div class="company-sub">Hadi Design and Construction Company</div>
+    </div>
+    <div class="report-meta">
+      <strong>Project Report</strong><br>
+      Generated: {{ now }}<br>
+      {% if project.status %}<span>Status: {{ project.status }}</span>{% endif %}
+    </div>
+  </div>
+
+  <!-- Project Info -->
+  <div class="info-box">
+    <div class="info-item">
+      <label>Project</label>
+      <span>{{ project.name }}</span>
+    </div>
+    <div class="info-item">
+      <label>Client</label>
+      <span>{{ project.client or '—' }}</span>
+    </div>
+    <div class="info-item">
+      <label>Location</label>
+      <span>{{ project.location or '—' }}</span>
+    </div>
+    <div class="info-item">
+      <label>Contract Type</label>
+      <span>{{ project.contract_type.replace('_',' ').title() }}</span>
+    </div>
+  </div>
+
+  <!-- KPI Cards -->
+  <div class="kpi-row">
+    <div class="kpi-card">
+      <div class="kpi-label">Contract Value</div>
+      <div class="kpi-value">Rs {{ "{:,.0f}".format(contract_value) }}</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Total Cost</div>
+      <div class="kpi-value">Rs {{ "{:,.0f}".format(total_cost) }}</div>
+    </div>
+    <div class="kpi-card {% if profit >= 0 %}success{% else %}danger{% endif %}">
+      <div class="kpi-label">Profit / Loss</div>
+      <div class="kpi-value {% if profit >= 0 %}profit-pos{% else %}profit-neg{% endif %}">
+        Rs {{ "{:,.0f}".format(profit) }}
+      </div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Margin</div>
+      <div class="kpi-value {% if profit >= 0 %}profit-pos{% else %}profit-neg{% endif %}">
+        {% if contract_value %}{{ "{:.1f}".format(profit/contract_value*100) }}%{% else %}—{% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Cost Breakdown row -->
+  <table>
+    <thead>
+      <tr>
+        <th>Cost Category</th>
+        <th class="num">Amount (Rs)</th>
+        <th class="num">% of Contract</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for lbl, val in [('Labour', total_labour),('Materials', total_materials),('Expenses', total_expenses),('Subcontracts', total_subcontracts)] %}
+      <tr>
+        <td>{{ lbl }}</td>
+        <td class="num">{{ "{:,.2f}".format(val) }}</td>
+        <td class="num">{% if contract_value %}{{ "{:.1f}".format(val/contract_value*100) }}%{% else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+      <tr style="font-weight:700; background:#f0f0f0;">
+        <td>Total Cost</td>
+        <td class="num">{{ "{:,.2f}".format(total_cost) }}</td>
+        <td class="num">{% if contract_value %}{{ "{:.1f}".format(total_cost/contract_value*100) }}%{% else %}—{% endif %}</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- Stages -->
+  {% if stages %}
+  <h2>Stage Breakdown</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Stage Name</th>
+        <th>Basis</th>
+        <th>Status</th>
+        <th class="num">Stage Value</th>
+        <th class="num">Labour</th>
+        <th class="num">Materials</th>
+        <th class="num">Expenses</th>
+        <th class="num">Subcontracts</th>
+        <th class="num">Total Cost</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% set max_val = namespace(v=1) %}
+      {% for s in stages %}{% set sc = stage_costs.get(s.id,{}) %}
+        {% set tc = sc.get('labour',0)+sc.get('materials',0)+sc.get('expenses',0)+sc.get('subcontracts',0) %}
+        {% if tc > max_val.v %}{% set max_val.v = tc %}{% endif %}
+      {% endfor %}
+      {% for s in stages %}
+      {% set sc = stage_costs.get(s.id, {}) %}
+      {% set tc = sc.get('labour',0)+sc.get('materials',0)+sc.get('expenses',0)+sc.get('subcontracts',0) %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td><strong>{{ s.name }}</strong></td>
+        <td>{{ s.contract_basis or '' }}</td>
+        <td>
+          <span class="badge badge-{% if s.status in ['active','Active'] %}active{% elif s.status in ['completed','Complete'] %}complete{% else %}hold{% endif %}">
+            {{ s.status }}
+          </span>
+        </td>
+        <td class="num">{{ "{:,.0f}".format(s.contract_value) }}</td>
+        <td class="num">{{ "{:,.0f}".format(sc.get('labour',0)) }}</td>
+        <td class="num">{{ "{:,.0f}".format(sc.get('materials',0)) }}</td>
+        <td class="num">{{ "{:,.0f}".format(sc.get('expenses',0)) }}</td>
+        <td class="num">{{ "{:,.0f}".format(sc.get('subcontracts',0)) }}</td>
+        <td class="num"><strong>{{ "{:,.0f}".format(tc) }}</strong></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  <!-- Attendance -->
+  {% if attendance %}
+  <h2>Attendance / Labour Records</h2>
+  <table>
+    <thead>
+      <tr><th>Date</th><th>Worker</th><th class="num">Hours</th><th class="num">Wage (Rs)</th><th>Stage</th><th>Notes</th></tr>
+    </thead>
+    <tbody>
+      {% for att, wkr in attendance %}
+      {% set wage = (att.wage_calculated or 0) %}
+      <tr>
+        <td>{{ fmt_pkt(att.check_in) }}</td>
+        <td>{{ wkr.name }}</td>
+        <td class="num">{{ "{:,.2f}".format(att.hours or 0) }}</td>
+        <td class="num">{{ "{:,.2f}".format(wage) }}</td>
+        <td>{{ att.stage.name if att.stage_id else '' }}</td>
+        <td></td>
+      </tr>
+      {% endfor %}
+      <tr style="font-weight:700;">
+        <td colspan="2">Total Labour</td>
+        <td class="num">{{ "{:.1f}".format(total_hours|float) }}</td>
+        <td class="num">{{ "{:,.2f}".format(total_labour) }}</td>
+        <td colspan="2"></td>
+      </tr>
+    </tbody>
+  </table>
+  {% endif %}
+
+  <!-- Expenses -->
+  {% if expenses %}
+  <h2>Expenses</h2>
+  <table>
+    <thead>
+      <tr><th>Date</th><th>Category</th><th class="num">Amount (Rs)</th><th>Stage</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+      {% for exp in expenses %}
+      <tr>
+        <td>{{ fmt_pkt(exp.activity_at or exp.created_at) }}</td>
+        <td>{{ exp.category }}</td>
+        <td class="num">{{ "{:,.2f}".format(exp.amount|float) }}</td>
+        <td>{{ exp.stage.name if exp.stage_id else '' }}</td>
+        <td>{{ exp.remarks or '' }}</td>
+      </tr>
+      {% endfor %}
+      <tr style="font-weight:700;">
+        <td colspan="2">Total Expenses</td>
+        <td class="num">{{ "{:,.2f}".format(total_expenses) }}</td>
+        <td colspan="2"></td>
+      </tr>
+    </tbody>
+  </table>
+  {% endif %}
+
+  <!-- Materials -->
+  {% if purchases %}
+  <h2>Material Purchases</h2>
+  <table>
+    <thead>
+      <tr><th>Date</th><th>Material</th><th>Unit</th><th class="num">Qty</th><th class="num">Rate</th><th class="num">Total (Rs)</th><th>Stage</th></tr>
+    </thead>
+    <tbody>
+      {% for pur, mat in purchases %}
+      <tr>
+        <td>{{ fmt_pkt(pur.activity_at or pur.created_at) }}</td>
+        <td>{{ mat.name }}</td>
+        <td>{{ mat.unit }}</td>
+        <td class="num">{{ pur.qty }}</td>
+        <td class="num">{{ "{:,.2f}".format(pur.rate|float) }}</td>
+        <td class="num">{{ "{:,.2f}".format(pur.total|float) }}</td>
+        <td>{{ pur.stage.name if pur.stage_id else '' }}</td>
+      </tr>
+      {% endfor %}
+      <tr style="font-weight:700;">
+        <td colspan="5">Total Materials</td>
+        <td class="num">{{ "{:,.2f}".format(total_materials) }}</td>
+        <td></td>
+      </tr>
+    </tbody>
+  </table>
+  {% endif %}
+
+  <!-- Subcontract Payments -->
+  {% if sub_payments %}
+  <h2>Subcontract Payments</h2>
+  <table>
+    <thead>
+      <tr><th>Date</th><th>Subcontractor</th><th class="num">Amount (Rs)</th><th>Stage</th><th>Notes</th></tr>
+    </thead>
+    <tbody>
+      {% for sp, sub in sub_payments %}
+      <tr>
+        <td>{{ fmt_pkt(sp.activity_at or sp.created_at) }}</td>
+        <td>{{ sub.name }}</td>
+        <td class="num">{{ "{:,.2f}".format(sp.amount|float) }}</td>
+        <td>{{ sub.stage_rel.name if sub.stage_id else '' }}</td>
+        <td>{{ sp.notes or '' }}</td>
+      </tr>
+      {% endfor %}
+      <tr style="font-weight:700;">
+        <td colspan="2">Total Subcontracts</td>
+        <td class="num">{{ "{:,.2f}".format(total_subcontracts) }}</td>
+        <td colspan="2"></td>
+      </tr>
+    </tbody>
+  </table>
+  {% endif %}
+
+  <!-- Owner Payments -->
+  {% if owner_payments %}
+  <h2>Owner Payments Received</h2>
+  <table>
+    <thead>
+      <tr><th>Date</th><th class="num">Amount (Rs)</th><th>Remarks</th></tr>
+    </thead>
+    <tbody>
+      {% for op in owner_payments %}
+      <tr>
+        <td>{{ fmt_pkt(op.activity_at or op.created_at) }}</td>
+        <td class="num">{{ "{:,.2f}".format(op.amount|float) }}</td>
+        <td>{{ op.remarks or '' }}</td>
+      </tr>
+      {% endfor %}
+      <tr style="font-weight:700;">
+        <td>Total Received</td>
+        <td class="num">{{ "{:,.2f}".format(owner_payments|sum(attribute='amount')|float) }}</td>
+        <td></td>
+      </tr>
+    </tbody>
+  </table>
+  {% endif %}
+
+  <!-- Footer -->
+  <div class="report-footer">
+    <span>HDC ERP — Hadi Design and Construction Company</span>
+    <span>Generated: {{ now }}</span>
+  </div>
+
+</div>
+
+<script>
+  // Auto-print when opened in new tab
+  window.addEventListener('load', function() {
+    if (window.opener) {
+      setTimeout(function() { window.print(); }, 600);
+    }
+  });
+</script>
+</body>
+</html>
