@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Personal Management{% endblock %}
+{% block page_heading %}Personal Management{% endblock %}
+
+{% block content %}
+<div class="row g-3 mt-1">
+    <div class="col-md-6">
+        <a href="{{ url_for('hdc_personal_expenses') }}" class="text-decoration-none text-reset d-flex h-100">
+            <div class="kpi-card kpi-orange h-100 w-100 d-flex flex-column">
+                <div class="kpi-icon"><i class="fas fa-handshake"></i></div>
+                <div class="kpi-value">{{ "{:,.0f}".format(personal_expense_total or 0) }}</div>
+                <div class="kpi-label">Total Personal Expenses</div>
+                <div class="small mt-auto text-white-50">This month: {{ "{:,.0f}".format(personal_expense_month or 0) }} PKR</div>
+            </div>
+        </a>
+    </div>
+    <div class="col-md-6">
+        <a href="{{ url_for('hdc_personal_expenses') }}" class="text-decoration-none text-reset d-flex h-100">
+            <div class="kpi-card kpi-teal h-100 w-100 d-flex flex-column">
+                <div class="kpi-icon"><i class="fas fa-users"></i></div>
+                <div class="kpi-value">{{ unique_beneficiaries }}</div>
+                <div class="kpi-label">Unique Parties / Purposes</div>
+                <div class="small mt-auto text-white-50">People or self-purpose labels used in entries</div>
+            </div>
+        </a>
+    </div>
+</div>
+
+<div class="row g-3 mt-3">
+    <div class="col-md-6">
+        <a href="{{ url_for('hdc_personal_expenses') }}" class="text-decoration-none text-reset d-flex h-100">
+            <div class="kpi-card kpi-green h-100 w-100 d-flex flex-column">
+                <div class="kpi-icon"><i class="fas fa-list"></i></div>
+                <div class="kpi-value"><i class="fas fa-arrow-right"></i></div>
+                <div class="kpi-label">View Personal Expenses</div>
+                <div class="small mt-auto text-white-50">View account-posted entries with date/category filters</div>
+            </div>
+        </a>
+    </div>
+    <div class="col-md-6">
+        <a href="{{ url_for('hdc_personal_expense_categories') }}" class="text-decoration-none text-reset d-flex h-100">
+            <div class="kpi-card kpi-indigo h-100 w-100 d-flex flex-column">
+                <div class="kpi-icon"><i class="fas fa-tags"></i></div>
+                <div class="kpi-value">{{ personal_expense_categories_count or 0 }}</div>
+                <div class="kpi-label">Expense Categories</div>
+                <div class="small mt-auto text-white-50">Manage expense types</div>
+            </div>
+        </a>
+    </div>
+</div>
+
+<div class="card hdc-card mt-3">
+    <div class="card-body small text-muted">
+        Personal expenses are posted from the <strong>Accounts</strong> module and shown here for tracking/reporting.
+        Use this section to manage categories and review entries.
+        <br><br>
+        <strong>Management:</strong> Create/manage categories from <strong>Expense Categories</strong>. Review entries from <strong>Personal Expenses</strong> with date range and category filters.
+    </div>
+</div>
+{% endblock %}

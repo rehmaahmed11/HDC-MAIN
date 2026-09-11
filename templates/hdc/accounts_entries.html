@@ -1,0 +1,920 @@
+{% extends "base.html" %}
+{% block title %}All Entries Ledger{% endblock %}
+{% block page_heading %}All Entries Ledger{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div class="small text-muted">Dedicated ledger view with complete filters, pagination and receipts.</div>
+    <a href="{{ url_for('hdc_accounts', show_auto_person=(1 if show_auto_person else 0), date_from=filter_date_from, date_to=filter_date_to) }}" class="btn btn-outline-secondary">Back To Accounts</a>
+</div>
+
+<div class="card hdc-card">
+    <div class="card-header hdc-card-header"><i class="fas fa-filter me-2"></i>All Entries</div>
+    {% if latest_print_txn %}
+    <div class="card-body border-bottom" style="background: var(--card-header-bg);">
+        <div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
+            <div>
+                <div class="fw-semibold">Latest saved entry is ready for printing</div>
+                <div class="small text-muted">
+                    #{{ latest_print_txn.id }} | {{ latest_print_txn.date.strftime('%Y-%m-%d') if latest_print_txn.date else '' }} |
+                    {{ (latest_print_txn.type or '')|replace('_', ' ')|title }} |
+                    {{ "{:,.2f}".format(latest_print_txn.amount or 0) }} PKR
+                </div>
+            </div>
+            <a href="{{ url_for('hdc_account_transaction_receipt', txn_id=latest_print_txn.id) }}" target="_blank" rel="noopener" class="btn btn-outline-primary">
+                <i class="fas fa-print me-1"></i>Print Latest Receipt
+            </a>
+        </div>
+    </div>
+    {% endif %}
+    <div class="card-body border-bottom">
+        <form method="GET" class="row g-2">
+            {% if show_auto_person %}<input type="hidden" name="show_auto_person" value="1">{% endif %}
+            <input type="hidden" name="per_page" value="{{ pg_per_page }}">
+
+            {# ── ROW 1: WHO / WHERE — Account, Class, Project, Stage ── #}
+            <div class="col-12"><div class="small fw-semibold text-muted text-uppercase mt-1" style="letter-spacing:.04em;">Scope</div></div>
+            <div class="col-md-3">
+                <label class="form-label">Account</label>
+                <select name="account_id" class="form-select">
+                    <option value="">All</option>
+                    {% for a in form_accounts %}
+                    <option value="{{ a.id }}" {% if filter_account_id == a.id %}selected{% endif %}>{{ a.name }}{% if a.status != 'active' %} (Inactive){% endif %}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Account Class</label>
+                <select name="account_group" class="form-select">
+                    <option value="">All</option>
+                    <option value="company" {% if filter_account_group == 'company' %}selected{% endif %}>Company Accounts</option>
+                    <option value="project_in_flow" {% if filter_account_group == 'project_in_flow' %}selected{% endif %}>Project-in-Flow Accounts</option>
+                    <option value="credit_debit" {% if filter_account_group == 'credit_debit' %}selected{% endif %}>Credit/Debit Accounts</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Project</label>
+                <select name="project_id" class="form-select">
+                    <option value="">All</option>
+                    {% for p in projects %}
+                    <option value="{{ p.id }}" {% if filter_project_id == p.id %}selected{% endif %}>{{ p.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Stage</label>
+                <select name="stage_id" class="form-select">
+                    <option value="">All</option>
+                    {% for s in stages %}
+                    <option value="{{ s.id }}" {% if filter_stage_id == s.id %}selected{% endif %}>{{ s.project.name if s.project else 'Project' }} / {{ s.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            {# ── ROW 2: WHO PAID/RECEIVED — Worker, Party Name (free text) ── #}
+            <div class="col-12"><div class="small fw-semibold text-muted text-uppercase mt-2" style="letter-spacing:.04em;">Party / Worker</div></div>
+            <div class="col-md-4">
+                <label class="form-label">Worker</label>
+                <input type="text" id="entriesWorkerInput" class="form-control" placeholder="Type to search worker..." autocomplete="off">
+                <select name="worker_id" id="entriesWorkerSelect" class="form-select d-none">
+                    <option value="">All Workers</option>
+                    {% for w in workers_for_filter %}
+                    <option value="{{ w.id }}" {% if filter_worker_id == w.id %}selected{% endif %}>{{ w.name }} ({{ w.worker_code }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Party Name <small class="text-muted">(free text)</small></label>
+                <input type="text" name="party_name" class="form-control" value="{{ filter_party_name or '' }}" placeholder="e.g. supplier name, person...">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Date Range</label>
+                <div class="input-group">
+                    <input type="date" name="date_from" class="form-control" value="{{ filter_date_from }}" title="From">
+                    <span class="input-group-text">to</span>
+                    <input type="date" name="date_to" class="form-control" value="{{ filter_date_to }}" title="To">
+                </div>
+            </div>
+
+            {# ── ROW 3: WHAT — Direction, Type, Category ── #}
+            <div class="col-12"><div class="small fw-semibold text-muted text-uppercase mt-2" style="letter-spacing:.04em;">Transaction</div></div>
+            <div class="col-md-3">
+                <label class="form-label">Direction</label>
+                <select name="direction" class="form-select">
+                    <option value="">All</option>
+                    <option value="receive" {% if filter_direction == 'receive' %}selected{% endif %}>Receive (In)</option>
+                    <option value="pay" {% if filter_direction == 'pay' %}selected{% endif %}>Pay (Out)</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Type</label>
+                <select name="transaction_type" class="form-select">
+                    <option value="">All</option>
+                    {% for t in txn_types %}
+                    <option value="{{ t }}" {% if filter_tx_type == t %}selected{% endif %}>{{ t|replace('_', ' ')|title }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Category</label>
+                <select name="category" class="form-select">
+                    <option value="">All</option>
+                    {% for c in txn_categories %}
+                    <option value="{{ c }}" {% if filter_category == c %}selected{% endif %}>{{ c|title }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Per Page</label>
+                <select name="per_page" class="form-select">
+                    {% for n in [25, 50, 100, 200] %}
+                    <option value="{{ n }}" {% if pg_per_page == n %}selected{% endif %}>{{ n }} / page</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            {# ── ROW 4: REFERENCE LOOKUP — direct entry navigation ── #}
+            <div class="col-12"><div class="small fw-semibold text-muted text-uppercase mt-2" style="letter-spacing:.04em;">Reference</div></div>
+            <div class="col-md-4">
+                <label class="form-label">Reference ID <small class="text-muted">(jump to a specific entry)</small></label>
+                <input type="text" name="reference_id" class="form-control" value="{{ filter_reference_id }}" placeholder="e.g. RCPT-… / wp_paym#42">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Group ID <small class="text-muted">(linked entries)</small></label>
+                <input type="text" name="group_id" class="form-control" value="{{ filter_group_id }}" placeholder="e.g. wgrp_…">
+            </div>
+            <div class="col-md-4 d-flex align-items-end gap-2">
+                <button type="submit" class="btn btn-primary"><i class="fas fa-magnifying-glass me-1"></i>Apply Filters</button>
+                <a href="{{ url_for('hdc_accounts_entries', show_auto_person=(1 if show_auto_person else 0)) }}" class="btn btn-outline-secondary">Reset</a>
+            </div>
+        </form>
+    </div>
+
+    <div class="px-3 py-2 small text-muted border-bottom">
+        <strong>{{ pg_total_items }}</strong> entr{{ 'y' if pg_total_items == 1 else 'ies' }} match the current filters.
+        {% if filter_worker_id or filter_party_name or filter_reference_id or filter_group_id %}
+        <span class="badge bg-info text-dark ms-2">Filtered</span>
+        {% endif %}
+    </div>
+
+    <div class="table-responsive">
+        <table class="table hdc-table table-sm mb-0 entries-compact">
+            <thead>
+                <tr>
+                    <th>Entry</th>
+                    <th>Direction</th>
+                    <th>From</th>
+                    <th>To / Party</th>
+                    <th>Scope</th>
+                    <th class="text-end">Amount</th>
+                    <th>Meta</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in history_rows %}
+                {% set dir = account_tx_direction_for_type(r.type) %}
+                <tr {% if latest_print_txn and (latest_print_txn.id == r.id) %}class="table-warning"{% endif %}>
+                    <td>
+                        <div class="fw-semibold">{{ (r.type or '')|replace('_', ' ')|title }}</div>
+                        <div class="small text-muted">
+                            <span title="Transaction ID">#{{ r.id }}</span> ·
+                            {{ r.date.strftime('%Y-%m-%d') if r.date else '' }}
+                        </div>
+                    </td>
+                    <td>
+                        {% if dir == 'receive' %}
+                        <span class="badge bg-success">In</span>
+                        {% elif dir == 'pay' %}
+                        <span class="badge bg-danger">Out</span>
+                        {% elif dir == 'transfer' %}
+                        <span class="badge bg-secondary">Xfer</span>
+                        {% else %}
+                        -
+                        {% endif %}
+                    </td>
+                    <td class="text-truncate-cell" title="{{ r.from_account.name if r.from_account else '-' }}">{{ r.from_account.name if r.from_account else '-' }}</td>
+                    <td>
+                        {% if r.to_account %}
+                            <span class="text-truncate-cell d-inline-block" title="{{ r.to_account.name }}">{{ r.to_account.name }}</span>
+                            {% if r.party_name %}<span class="text-muted"> ({{ r.party_name }})</span>{% endif %}
+                        {% else %}
+                            <span class="text-truncate-cell d-inline-block" title="{{ r.party_name or '-' }}">{{ r.party_name or '-' }}</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <div class="text-truncate-cell" title="{{ r.project.name if r.project else '-' }}">{{ r.project.name if r.project else '-' }}</div>
+                        <div class="small text-muted text-truncate-cell" title="{{ r.stage.name if r.stage else '-' }}">{{ r.stage.name if r.stage else '-' }}</div>
+                    </td>
+                    <td class="text-end">{{ "{:,.2f}".format(r.amount or 0) }}</td>
+                    <td>
+                        <div class="small">{{ (r.category or '')|title }}</div>
+                        <div class="small text-muted text-truncate-cell" title="Ref: {{ r.reference_id or '-' }}">Ref: {{ r.reference_id or '-' }}</div>
+                        <div class="small text-muted text-truncate-cell" title="Grp: {{ r.group_id or '-' }}">Grp: {{ r.group_id or '-' }}</div>
+                    </td>
+                    <td class="action-cell">
+                        {% set src = (r.source_type or '') %}
+                        {% if src %}
+                        <span class="badge bg-secondary me-1 badge-mini" title="{{ src }}">Synced</span>
+                        {% else %}
+                        <span class="badge bg-light text-dark border me-1 badge-mini">Manual</span>
+                        {% endif %}
+                        <a href="{{ url_for('hdc_account_transaction_receipt', txn_id=r.id) }}" target="_blank" rel="noopener" class="btn btn-outline-primary btn-mini">Receipt</a>
+                        <a href="{{ url_for('hdc_accounts_entries', edit_txn_id=r.id) }}" class="btn btn-outline-secondary btn-mini">Edit</a>
+                        <form method="POST" action="{{ url_for('hdc_accounts') }}" class="d-inline">
+                            <input type="hidden" name="action" value="void_transaction">
+                            <input type="hidden" name="transaction_id" value="{{ r.id }}">
+                            <button type="submit" class="btn btn-outline-danger btn-mini" onclick="return confirm('Void this transaction/group and sync source record state?')">Void</button>
+                        </form>
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="8" class="text-center text-muted py-3">No transactions found.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% include '_pagination.html' with context %}
+</div>
+{% if edit_txn %}
+<div class="card hdc-card mt-3 d-none" id="txn_form_host">
+    <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+        <span>
+            <i class="fas fa-pen-to-square me-2"></i>
+            Update Transaction <span class="badge bg-warning text-dark ms-1">Edit #{{ edit_txn.id }}</span>
+        </span>
+        <a href="{{ url_for('hdc_accounts_entries') }}" class="btn btn-sm btn-outline-secondary"><i class="fas fa-xmark me-1"></i>Cancel Edit</a>
+    </div>
+    <div class="card-body">
+        <form method="POST" id="txn_form">
+            <input type="hidden" name="action" value="update_transaction">
+            <input type="hidden" name="transaction_id" value="{{ edit_txn.id }}">
+            <div class="row g-2">
+                <div class="col-12">
+                    <label class="form-label">Date</label>
+                    <input type="date" name="date" class="form-control" value="{{ edit_txn.date.isoformat() if edit_txn else today }}" required>
+                </div>
+            </div>
+            <div class="mt-2" id="txn_direction_wrap">
+                <label class="form-label">Transaction Direction</label>
+                <select id="txn_direction" class="form-select" required>
+                    <option value="">Select</option>
+                    <option value="receive">Receive Money</option>
+                    <option value="pay">Pay Money</option>
+                </select>
+            </div>
+            <div class="mt-2">
+                <label class="form-label">Transaction Type</label>
+                <select name="type" id="txn_type" class="form-select" required>
+                    <option value="">Select</option>
+                    {% for t in txn_form_options %}
+                    <option value="{{ t.value }}" data-direction="{{ t.direction }}" {% if edit_txn and edit_txn.type == t.value %}selected{% endif %}>{{ t.label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="mt-2 d-none" id="office_target_wrap">
+                <label class="form-label">Office Target</label>
+                <select name="office_target" id="office_target" class="form-select">
+                    <option value="staff">Office Staff</option>
+                    <option value="expense">Office Expense</option>
+                </select>
+            </div>
+            <div class="mt-2 d-none" id="receive_source_wrap">
+                <label class="form-label">Counterparty Group</label>
+                <select id="receive_source_kind" class="form-select">
+                    <option value="">Select</option>
+                    <option value="company">Company</option>
+                    <option value="project_in_flow">Project-in-Flow</option>
+                    <option value="credit_debit">Credit/Debit</option>
+                </select>
+            </div>
+            <div class="mt-2" id="from_wrap">
+                <label class="form-label" id="from_account_label">From Account</label>
+                <select name="from_account_id" id="from_account" class="form-select" required>
+                    <option value="">Select</option>
+                    {% for a in accounts %}
+                    <option value="{{ a.id }}" data-group="{{ a.account_group }}" data-type="{{ a.type }}" data-bank="{{ a.bank_name }}" data-acno="{{ a.account_number }}" data-iban="{{ a.iban }}" data-label="{{ a.name }} ({{ a.type|title }})" data-balance="{{ a.current_balance }}" {% if edit_txn and edit_txn.from_account_id == a.id %}selected{% endif %}>{{ a.name }} ({{ a.type|title }}) | Bal: {{ "{:,.2f}".format(a.current_balance or 0) }}</option>
+                    {% endfor %}
+                </select>
+                <div id="from_account_balance_hint" class="small mt-1 d-none"></div>
+            </div>
+            <div class="mt-2" id="to_wrap">
+                <label class="form-label" id="to_account_label">To Account (optional for off-ledger party)</label>
+                <select name="to_account_id" id="to_account" class="form-select">
+                    <option value="">Off-ledger Party</option>
+                    {% for a in accounts %}
+                    <option value="{{ a.id }}" data-group="{{ a.account_group }}" data-type="{{ a.type }}" data-bank="{{ a.bank_name }}" data-acno="{{ a.account_number }}" data-iban="{{ a.iban }}" data-label="{{ a.name }} ({{ a.type|title }})" data-balance="{{ a.current_balance }}" {% if edit_txn and edit_txn.to_account_id == a.id %}selected{% endif %}>{{ a.name }} ({{ a.type|title }}) | Bal: {{ "{:,.2f}".format(a.current_balance or 0) }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="mt-2" id="project_wrap">
+                <label class="form-label">Project</label>
+                <select name="project_id" id="project_id" class="form-select">
+                    <option value="">None</option>
+                    {% for p in projects %}
+                    <option value="{{ p.id }}" {% if edit_txn and edit_txn.project_id == p.id %}selected{% endif %}>{{ p.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="mt-2 d-none" id="stage_wrap">
+                <label class="form-label">Stage</label>
+                <select name="stage_id" id="stage_id" class="form-select">
+                    <option value="">Select stage</option>
+                    {% for s in stages %}
+                    <option value="{{ s.id }}" {% if edit_txn and edit_txn.stage_id == s.id %}selected{% endif %}>{{ s.project.name if s.project else 'Project' }} / {{ s.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="mt-2" id="related_wrap">
+                <label class="form-label">Related Entity</label>
+                <input type="hidden" name="related_entity_type" id="related_entity_type">
+                <select name="related_entity_id" id="related_entity_id" class="form-select">
+                    <option value="">Select entity</option>
+                </select>
+                <div id="related_help" class="small text-muted mt-1 d-none"></div>
+                <div id="pending_info" class="small mt-2 p-2 rounded d-none" style="background: var(--card-header-bg); border: 1px solid var(--card-border);"></div>
+            </div>
+            <div class="mt-2">
+                <label class="form-label">Amount</label>
+                <input type="number" step="0.01" min="0.01" name="amount" class="form-control" value="{{ edit_txn.amount if edit_txn else '' }}" onwheel="event.preventDefault(); this.blur();" required>
+            </div>
+            <div class="mt-2 d-none" id="excess_split_wrap">
+                <label class="form-label mb-1">Excess Split (Tip / Advance)</label>
+                <div class="row g-2">
+                    <div class="col-6">
+                        <input type="number" step="0.01" min="0" name="excess_tip_amount" id="excess_tip_amount" class="form-control" value="0" placeholder="Tip">
+                    </div>
+                    <div class="col-6">
+                        <input type="number" step="0.01" min="0" name="excess_advance_amount" id="excess_advance_amount" class="form-control" value="0" placeholder="Advance">
+                    </div>
+                </div>
+                <div class="small text-muted mt-1">If Tip is 0, all excess is posted as Advance automatically.</div>
+                <div class="small mt-1 text-info" id="excess_split_info"></div>
+            </div>
+            <div class="mt-2 d-none" id="settle_shortfall_wrap">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="settle_shortfall" id="settle_shortfall">
+                    <label class="form-check-label" for="settle_shortfall">
+                        Settle shortfall to zero (posts remaining payable as settlement adjustment)
+                    </label>
+                </div>
+            </div>
+            <div class="mt-2 d-none" id="expense_category_wrap">
+                <label class="form-label">Expense Category</label>
+                <select name="expense_category_id" id="expense_category_id" class="form-select">
+                    <option value="">Select expense category</option>
+                    {% for c in expense_categories %}
+                    <option value="{{ c.id }}">{{ c.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="mt-2 d-none" id="office_expense_category_wrap">
+                <label class="form-label d-flex align-items-center justify-content-between">
+                    <span>Office Expense Category</span>
+                    <button type="button" class="btn btn-sm btn-outline-success py-0 px-2" id="officeExpCatAddBtn" title="Add new category permanently" style="font-size:12px;">
+                        <i class="fas fa-plus"></i> New
+                    </button>
+                </label>
+                <div class="d-flex gap-1">
+                    <input type="text" name="office_expense_category" id="office_expense_category" class="form-control" placeholder="Search or type category..." autocomplete="off" list="officeExpCatList">
+                    <datalist id="officeExpCatList"></datalist>
+                </div>
+                <div id="officeExpCatMatches" class="position-relative" style="z-index:999;"></div>
+            </div>
+            <div class="mt-2" id="party_name_wrap">
+                <label class="form-label">Off-ledger Party / Purpose</label>
+                <input type="text" name="party_name" class="form-control" value="{{ edit_txn.party_name or '' }}" placeholder="Use when no To Account is selected (e.g., Self, Food, Petrol, Donation)">
+            </div>
+            <div class="mt-2" id="reference_wrap">
+                <label class="form-label">Reference ID</label>
+                <input type="text" name="reference_id" class="form-control" value="{{ edit_txn.reference_id or '' }}" placeholder="Source reference">
+            </div>
+            <div id="bank_info" class="small text-muted mt-2 d-none"></div>
+            <div class="mt-2">
+                <label class="form-label">Note</label>
+                <textarea name="note" class="form-control" rows="2">{{ edit_txn.note or '' }}</textarea>
+            </div>
+            <div id="txn_reset_notice" class="small text-muted mt-2 d-none"></div>
+            <button type="submit" class="btn btn-primary w-100 mt-3"><i class="fas fa-floppy-disk me-1"></i>Update Transaction</button>
+        </form>
+    </div>
+</div>
+{% endif %}
+<style>
+.entries-compact th,
+.entries-compact td {
+    padding: .26rem .34rem;
+    font-size: .76rem;
+    vertical-align: middle;
+}
+.entries-compact .badge {
+    font-size: .62rem;
+}
+.text-truncate-cell {
+    max-width: 120px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.entries-compact .small {
+    font-size: .68rem !important;
+    line-height: 1.2;
+}
+.action-cell {
+    white-space: nowrap;
+    min-width: 126px;
+}
+.btn-mini {
+    padding: .08rem .3rem;
+    font-size: .67rem;
+    line-height: 1.2;
+}
+.badge-mini {
+    padding: .18em .35em;
+    font-size: .58rem;
+}
+@media (max-width: 1400px) {
+    .text-truncate-cell { max-width: 95px; }
+    .action-cell { min-width: 112px; }
+}
+</style>
+{% endblock %}
+{% block extra_js %}
+<script>
+var intentMatrix = {{ intent_matrix|tojson }};
+var workerOptionRows = {{ worker_option_rows|tojson }};
+var supplierOptionRows = {{ supplier_option_rows|tojson }};
+var subcontractorOptionRows = {{ subcontractor_option_rows|tojson }};
+var officeStaffOptionRows = {{ office_staff_option_rows|tojson }};
+var projectsData = {{ projects|map(attribute='id')|list|tojson }};
+var projectsNames = {{ projects|map(attribute='name')|list|tojson }};
+var projectReceivableRows = {{ project_receivable_rows|tojson }};
+var projectClientMeta = {{ project_client_meta|tojson }};
+var personalExpenseCategoryNames = {{ personal_expense_category_names|tojson }};
+var personalExpensePartyNames = {{ personal_expense_party_names|tojson }};
+var txnForm = document.getElementById('txn_form');
+var txnDirectionWrap = document.getElementById('txn_direction_wrap');
+var txnDirection = document.getElementById('txn_direction');
+var txnType = document.getElementById('txn_type');
+var amountInput = (txnForm ? txnForm.querySelector('input[name="amount"]') : null);
+var refInput = (txnForm ? txnForm.querySelector('input[name="reference_id"]') : null);
+var refWrap = document.getElementById('reference_wrap');
+var noteInput = (txnForm ? txnForm.querySelector('textarea[name="note"]') : null);
+var resetNotice = document.getElementById('txn_reset_notice');
+var toWrap = document.getElementById('to_wrap');
+var fromSel = document.getElementById('from_account');
+var fromBalanceHint = document.getElementById('from_account_balance_hint');
+var fromLabel = document.getElementById('from_account_label');
+var toAccountSelect = document.getElementById('to_account');
+var toLabel = document.getElementById('to_account_label');
+var projectWrap = document.getElementById('project_wrap');
+var stageWrap = document.getElementById('stage_wrap');
+var projectSelect = document.getElementById('project_id');
+var stageSelect = document.getElementById('stage_id');
+var receiveSourceWrap = document.getElementById('receive_source_wrap');
+var receiveSourceKind = document.getElementById('receive_source_kind');
+var relatedWrap = document.getElementById('related_wrap');
+var relatedTypeSelect = document.getElementById('related_entity_type');
+var relatedIdSelect = document.getElementById('related_entity_id');
+var relatedHelp = document.getElementById('related_help');
+var officeTargetWrap = document.getElementById('office_target_wrap');
+var officeTargetSelect = document.getElementById('office_target');
+var officeExpenseCategoryWrap = document.getElementById('office_expense_category_wrap');
+var officeExpenseCategoryInput = document.getElementById('office_expense_category');
+var partyNameInput = document.querySelector('input[name="party_name"]');
+var partyNameWrap = document.getElementById('party_name_wrap');
+var pendingInfo = document.getElementById('pending_info');
+var stageLoadSeq = 0;
+var excessSplitWrap = document.getElementById('excess_split_wrap');
+var settleShortfallWrap = document.getElementById('settle_shortfall_wrap');
+var excessTipInput = document.getElementById('excess_tip_amount');
+var excessAdvanceInput = document.getElementById('excess_advance_amount');
+var excessSplitInfo = document.getElementById('excess_split_info');
+var settleShortfallInput = document.getElementById('settle_shortfall');
+var expenseCategoryWrap = document.getElementById('expense_category_wrap');
+var expenseCategoryInput = document.getElementById('expense_category_id');
+var latestPendingItem = null;
+
+// Prevent mouse-wheel from changing numeric inputs while focused (common source of accidental amount edits).
+document.addEventListener('wheel', function (e) {
+    var active = document.activeElement;
+    if (!active) return;
+    if (
+        active.tagName === 'INPUT' &&
+        active.type === 'number' &&
+        active.closest &&
+        active.closest('#txn_form')
+    ) {
+        if (e.target === active) e.preventDefault();
+        active.blur();
+    }
+}, { capture: true, passive: false });
+
+var relatedTypeByTxn = {
+    expense_material: 'supplier',
+    purchase: 'supplier',
+    expense_subcontractor: 'subcontractor',
+    expense_wage: 'worker',
+    payroll: 'worker',
+    advance_to_person: 'worker',
+    office_management_payment: 'office_staff'
+};
+var toAccountRequiredByTxn = {
+    transfer: true,
+    advance_to_person: true,
+    project_income: true,
+    party_receipt: true,
+    client_payment: true,
+    receive_from_project: true,
+    receive_intra_company: true,
+    receive_from_credit_debit: true
+};
+var toOrPartyRequiredByTxn = {
+    expense_material: true,
+    expense_wage: true,
+    expense_subcontractor: true,
+    office_management_payment: true,
+    personal_management_payment: true,
+    expense_general: true,
+    purchase: true,
+    payroll: true,
+    party_payment: true
+};
+var hideReferenceByTxn = {
+    payroll: true,
+    expense_wage: true
+};
+function normalizeTxnType(tx) {
+    var t = String(tx || '').toLowerCase();
+    if (t === 'receive_from_project') return 'project_income';
+    if (t === 'receive_intra_company') return 'transfer';
+    if (t === 'receive_from_credit_debit') return 'party_receipt';
+    if (t === 'pay_to_project') return 'party_payment';
+    if (t === 'pay_intra_company') return 'transfer';
+    if (t === 'pay_to_credit_debit') return 'party_payment';
+    return t;
+}
+var counterpartyGroupByTxn = {
+    receive_from_project: 'project_in_flow',
+    receive_intra_company: 'company',
+    receive_from_credit_debit: 'credit_debit',
+    pay_to_project: 'project_in_flow',
+    pay_intra_company: 'company',
+    pay_to_credit_debit: 'credit_debit',
+    transfer: 'company',
+    project_income: 'project_in_flow',
+    party_receipt: 'credit_debit',
+    client_payment: 'credit_debit',
+    party_payment: 'credit_debit',
+    personal_management_payment: 'credit_debit',
+    purchase: 'credit_debit',
+    expense_subcontractor: 'credit_debit',
+    expense_general: 'credit_debit',
+    expense_material: 'credit_debit',
+    payroll: 'credit_debit',
+    expense_wage: 'credit_debit',
+    advance_to_person: 'credit_debit'
+};
+var stageRequiredByTxn = {
+    expense_material: false,
+    expense_wage: true,
+    expense_subcontractor: true,
+    expense_general: true,
+    purchase: false,
+    payroll: true,
+    advance_to_person: true
+};
+var projectRequiredByTxn = {
+    project_income: true,
+    expense_general: true
+};
+var expenseCategoryRequiredByTxn = {
+    expense_general: true
+};
+var treasuryAccountTypes = { company: true, cash: true, bank: true };
+var fromBaseOptions = Array.prototype.slice.call((fromSel && fromSel.options) ? fromSel.options : []).map(function (o) { return o.cloneNode(true); });
+var toBaseOptions = Array.prototype.slice.call((toAccountSelect && toAccountSelect.options) ? toAccountSelect.options : []).map(function (o) { return o.cloneNode(true); });
+function money2(v) {
+    var n = Number(v || 0) || 0;
+    return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function labelWithBalance(baseLabel, balance) {
+    return String(baseLabel || 'Account') + ' | Bal: ' + money2(balance);
+}
+function applyOptionBalanceMeta(opt, meta) {
+    if (!opt || !meta) return;
+    var bal = Number(meta.current_balance || 0) || 0;
+    var baseLabel = String(opt.getAttribute('data-label') || '').trim();
+    if (!baseLabel) {
+        baseLabel = String(opt.textContent || '').split('| Bal:')[0].trim() || ('Account #' + (opt.value || ''));
+        opt.setAttribute('data-label', baseLabel);
+    }
+    opt.setAttribute('data-balance', String(bal));
+    opt.textContent = labelWithBalance(baseLabel, bal);
+}
+function applyBalanceMapToOptionCollection(optionCollection, balanceMap) {
+    Array.prototype.slice.call(optionCollection || []).forEach(function (opt) {
+        if (!opt || !opt.value) return;
+        var meta = balanceMap[String(opt.value)];
+        if (!meta) return;
+        applyOptionBalanceMeta(opt, meta);
+    });
+}
+function setSelectedBalanceHint(hintEl, selectEl, prefix) {
+    if (!hintEl || !selectEl) return;
+    var opt = selectEl.options[selectEl.selectedIndex];
+    if (!opt || !opt.value) {
+        hintEl.classList.add('d-none');
+        hintEl.textContent = '';
+        hintEl.classList.remove('text-success', 'text-danger', 'text-muted');
+        return;
+    }
+    var label = String(opt.getAttribute('data-label') || opt.textContent || 'Selected account').split('| Bal:')[0].trim();
+    var bal = Number(opt.getAttribute('data-balance') || 0) || 0;
+    hintEl.classList.remove('d-none', 'text-success', 'text-danger', 'text-muted');
+    hintEl.classList.add((bal < 0) ? 'text-danger' : ((bal > 0) ? 'text-success' : 'text-muted'));
+    hintEl.textContent = (prefix || 'Selected Account') + ': ' + label + ' | Available: ' + money2(bal) + ' PKR';
+}
+function fromAccountHintPrefix() {
+    var dir = txnDirection ? (txnDirection.value || '') : '';
+    if (dir === 'receive') return 'Source Account';
+    if (dir === 'pay') return 'Paying Account';
+    return 'From Account';
+}
+var realtimeBalanceMap = {};
+var realtimeBalanceFetchPromise = null;
+var realtimeBalanceFetchedAt = 0;
+function refreshAccountBalancesRealtime(force) {
+    var now = Date.now();
+    if (!force && (now - realtimeBalanceFetchedAt) < 8000 && Object.keys(realtimeBalanceMap).length) {
+        applyBalanceMapToOptionCollection(fromBaseOptions, realtimeBalanceMap);
+        applyBalanceMapToOptionCollection(toBaseOptions, realtimeBalanceMap);
+        applyBalanceMapToOptionCollection((fromSel && fromSel.options), realtimeBalanceMap);
+        applyBalanceMapToOptionCollection((toAccountSelect && toAccountSelect.options), realtimeBalanceMap);
+        setSelectedBalanceHint(fromBalanceHint, fromSel, fromAccountHintPrefix());
+        return Promise.resolve(realtimeBalanceMap);
+    }
+    if (realtimeBalanceFetchPromise) return realtimeBalanceFetchPromise;
+    realtimeBalanceFetchPromise = fetch('/api/accounts/list_accounts_with_balances?include_inactive=1')
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+            var map = {};
+            var items = (j && j.items) ? j.items : [];
+            (items || []).forEach(function (it) {
+                map[String(it.id)] = it;
+            });
+            realtimeBalanceMap = map;
+            realtimeBalanceFetchedAt = Date.now();
+            applyBalanceMapToOptionCollection(fromBaseOptions, realtimeBalanceMap);
+            applyBalanceMapToOptionCollection(toBaseOptions, realtimeBalanceMap);
+            applyBalanceMapToOptionCollection((fromSel && fromSel.options), realtimeBalanceMap);
+            applyBalanceMapToOptionCollection((toAccountSelect && toAccountSelect.options), realtimeBalanceMap);
+            setSelectedBalanceHint(fromBalanceHint, fromSel, fromAccountHintPrefix());
+            return realtimeBalanceMap;
+        })
+        .catch(function () { return realtimeBalanceMap; })
+        .finally(function () {
+            realtimeBalanceFetchPromise = null;
+        });
+    return realtimeBalanceFetchPromise;
+}
+function optionAccountType(opt) {
+    if (!opt) return '';
+    return String(opt.getAttribute('data-type') || '').trim().toLowerCase();
+}
+function optionAccountGroup(opt) {
+    if (!opt) return '';
+    return String(opt.getAttribute('data-group') || '').trim().toLowerCase();
+}
+function _isPersonalSuggestionValue(v) {
+    var val = String(v || '');
+    return (val.indexOf('pmcat::') === 0 || val.indexOf('pmparty::') === 0);
+}
+function _appendPersonalSuggestionOption(selectEl, value, text, keepValue) {
+    if (!selectEl) return;
+    var label = String(text || '').trim();
+    var opt = document.createElement('option');
+    opt.value = String(value || '');
+    opt.textContent = label;
+    if (keepValue && String(keepValue) === String(value)) opt.selected = true;
+    selectEl.appendChild(opt);
+}
+function _syncPersonalSuggestionToParty() {
+    if (!partyNameInput || !toAccountSelect) return;
+    var selOpt = toAccountSelect.options[toAccountSelect.selectedIndex];
+    if (!selOpt || !selOpt.value) {
+        var val = partyNameInput.value || '';
+        if (_isPersonalSuggestionValue(val)) {
+            var parts = val.split('::', 2);
+            if (parts.length === 2) {
+                var kind = parts[0];
+                var name = parts[1];
+                if (kind === 'pmcat') {
+                    partyNameInput.value = 'Personal Expense: ' + name;
+                } else if (kind === 'pmparty') {
+                    partyNameInput.value = name;
+                }
+            }
+        }
+    }
+}
+function _syncPartyToPersonalSuggestion() {
+    if (!partyNameInput || !toAccountSelect) return;
+    var selOpt = toAccountSelect.options[toAccountSelect.selectedIndex];
+    if (selOpt && selOpt.value) {
+        partyNameInput.value = '';
+    }
+}
+function updateTxnUI() {
+    if (!txnType) return;
+    var tx = normalizeTxnType(txnType.value || '');
+    var dir = (tx in toAccountRequiredByTxn) ? 'receive' : 'pay';
+    if (txnDirection) txnDirection.value = dir;
+    applyReceiveSourceKindUI();
+    if (txnDirectionWrap) txnDirectionWrap.classList.toggle('d-none', false);
+    var isReceive = (dir === 'receive');
+    var isPay = (dir === 'pay');
+    var isTransfer = (tx === 'transfer');
+    var isProjectIncome = (tx === 'project_income');
+    var isPartyReceipt = (tx === 'party_receipt');
+    var isClientPayment = (tx === 'client_payment');
+    var isExpenseGeneral = (tx === 'expense_general');
+    var isPurchase = (tx === 'purchase');
+    var isPayroll = (tx === 'payroll');
+    var isExpenseWage = (tx === 'expense_wage');
+    var isExpenseSubcontractor = (tx === 'expense_subcontractor');
+    var isExpenseMaterial = (tx === 'expense_material');
+    var isOfficeManagementPayment = (tx === 'office_management_payment');
+    var isPersonalManagementPayment = (tx === 'personal_management_payment');
+    var isPartyPayment = (tx === 'party_payment');
+    var isAdvanceToPerson = (tx === 'advance_to_person');
+    var m = intentMatrix[tx] || {};
+    if (fromLabel) fromLabel.textContent = isReceive ? 'From Account' : 'Paying Account';
+    if (toLabel) toLabel.textContent = isReceive ? 'To Account' : 'Receiving Account';
+    if (toWrap) toWrap.classList.toggle('d-none', false);
+    var isWorkerProjectStageScope = (isPayroll || isExpenseWage || isExpenseSubcontractor);
+    var workerProjectStageActive = true;
+    if (isWorkerProjectStageScope) {
+        var tipAmount = Number((excessTipInput ? excessTipInput.value : 0) || 0) || 0;
+        var settleActive = !!(settleShortfallInput && settleShortfallInput.checked);
+        workerProjectStageActive = (tipAmount > 0.000001 || settleActive);
+    }
+    var showProjectScope = (!!m.project && (!isWorkerProjectStageScope || workerProjectStageActive));
+    var showStageScope = (!!m.stage && (!isWorkerProjectStageScope || workerProjectStageActive));
+    var hasProject = !!(projectSelect && projectSelect.value);
+    if (projectWrap) projectWrap.classList.toggle('d-none', (!hasType || !showProjectScope));
+    if (stageWrap) stageWrap.classList.toggle('d-none', (!hasType || !showStageScope || !hasProject));
+    if (relatedWrap) relatedWrap.classList.toggle('d-none', false);
+    if (receiveSourceWrap) receiveSourceWrap.classList.toggle('d-none', !isReceive);
+    if (officeTargetWrap) officeTargetWrap.classList.toggle('d-none', !isOfficeManagementPayment);
+    if (officeExpenseCategoryWrap) officeExpenseCategoryWrap.classList.toggle('d-none', !isOfficeManagementPayment);
+    if (partyNameWrap) partyNameWrap.classList.toggle('d-none', false);
+    if (refWrap) refWrap.classList.toggle('d-none', tx in hideReferenceByTxn);
+    if (excessSplitWrap) excessSplitWrap.classList.toggle('d-none', !isPayroll);
+    if (settleShortfallWrap) settleShortfallWrap.classList.toggle('d-none', !isPayroll);
+    if (expenseCategoryWrap) expenseCategoryWrap.classList.toggle('d-none', !(isExpenseGeneral));
+    if (amountInput) amountInput.min = isReceive ? '0.01' : '0.01';
+    if (toAccountSelect) {
+        toAccountSelect.required = tx in toAccountRequiredByTxn;
+        toAccountSelect.classList.toggle('d-none', false);
+    }
+    if (partyNameInput) {
+        partyNameInput.required = (tx in toOrPartyRequiredByTxn) && !(toAccountSelect && toAccountSelect.value);
+    }
+    if (projectSelect) {
+        projectSelect.required = showProjectScope && (tx in projectRequiredByTxn);
+    }
+    if (stageSelect) {
+        stageSelect.required = showStageScope && (tx in stageRequiredByTxn);
+    }
+    if (expenseCategoryInput) {
+        expenseCategoryInput.required = tx in expenseCategoryRequiredByTxn;
+    }
+    if (relatedTypeSelect && relatedIdSelect) {
+        var relType = relatedTypeByTxn[tx] || '';
+        relatedTypeSelect.value = relType;
+        relatedIdSelect.innerHTML = '<option value="">Select entity</option>';
+        if (relType) {
+            var options = [];
+            if (relType === 'worker') options = workerOptionRows || [];
+            else if (relType === 'supplier') options = supplierOptionRows || [];
+            else if (relType === 'subcontractor') options = subcontractorOptionRows || [];
+            else if (relType === 'office_staff') options = officeStaffOptionRows || [];
+            options.forEach(function (r) {
+                var o = document.createElement('option');
+                o.value = String(r.id || '');
+                o.textContent = r.label || ('#' + r.id);
+                relatedIdSelect.appendChild(o);
+            });
+        }
+    }
+    if (relatedHelp) {
+        relatedHelp.classList.toggle('d-none', !relatedTypeByTxn[tx]);
+        if (relatedTypeByTxn[tx]) {
+            relatedHelp.textContent = 'Select the ' + String(relatedTypeByTxn[tx] || 'entity').replace('_', ' ') + ' for this transaction.';
+        }
+    }
+    if (pendingInfo) pendingInfo.classList.add('d-none');
+    if (resetNotice) resetNotice.classList.add('d-none');
+    refreshAccountBalancesRealtime(true);
+}
+function applyReceiveSourceKindUI() {
+    var dir = txnDirection ? (txnDirection.value || '') : '';
+    if (receiveSourceWrap) receiveSourceWrap.classList.toggle('d-none', !dir);
+    if (receiveSourceKind) {
+        receiveSourceKind.required = !!dir;
+        if (!dir) {
+            receiveSourceKind.value = '';
+        } else if (!receiveSourceKind.value) {
+            receiveSourceKind.value = (dir === 'receive' ? 'project_in_flow' : 'credit_debit');
+        }
+    }
+}
+function updateBankInfo(sel) {
+    var bankInfo = document.getElementById('bank_info');
+    if (!bankInfo) return;
+    var opt = sel.options[sel.selectedIndex];
+    if (!opt || !opt.value) {
+        bankInfo.classList.add('d-none');
+        return;
+    }
+    var bank = String(opt.getAttribute('data-bank') || '').trim();
+    var ac = String(opt.getAttribute('data-acno') || '').trim();
+    var iban = String(opt.getAttribute('data-iban') || '').trim();
+    if (bank || ac || iban) {
+        bankInfo.classList.remove('d-none');
+        bankInfo.textContent = 'Bank: ' + (bank || '-') + ' | A/C: ' + (ac || '-') + (iban ? (' | IBAN: ' + iban) : '');
+    } else {
+        bankInfo.classList.add('d-none');
+        bankInfo.textContent = '';
+    }
+}
+if (txnType) txnType.addEventListener('change', updateTxnUI);
+if (fromSel) fromSel.addEventListener('change', function () { updateBankInfo(fromSel); });
+if (toAccountSelect) {
+    toAccountSelect.addEventListener('change', function () {
+        _syncPersonalSuggestionToParty();
+        updateBankInfo(toAccountSelect);
+        updateTxnUI();
+    });
+    toAccountSelect.addEventListener('focus', function () { refreshAccountBalancesRealtime(true); });
+    toAccountSelect.addEventListener('mousedown', function () { refreshAccountBalancesRealtime(true); });
+}
+updateTxnUI();
+updateBankInfo(fromSel);
+setSelectedBalanceHint(fromBalanceHint, fromSel, fromAccountHintPrefix());
+var initialRelatedId = '{{ edit_txn.related_entity_id if edit_txn else '' }}';
+if (relatedIdSelect && initialRelatedId) relatedIdSelect.value = initialRelatedId;
+</script>
+<script>
+(function () {
+    if (window.HDCComboList) {
+        window.HDCComboList.attach('entriesWorkerInput', 'entriesWorkerSelect', { includeEmpty: true });
+    }
+})();
+</script>
+{% if edit_txn %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Make sure the form host is visible
+    var host = document.getElementById('txn_form_host');
+    if (host) host.classList.remove('d-none');
+
+    // Set txn_type
+    var txnTypeEl = document.getElementById('txn_type');
+    if (txnTypeEl) {
+        txnTypeEl.value = '{{ edit_txn.type }}';
+        txnTypeEl.dispatchEvent(new Event('change'));
+    }
+    // Set from_account
+    var fromEl = document.getElementById('from_account');
+    if (fromEl) { fromEl.value = '{{ edit_txn.from_account_id }}'; fromEl.dispatchEvent(new Event('change')); }
+    // Set to_account
+    var toEl = document.getElementById('to_account');
+    if (toEl) { toEl.value = '{{ edit_txn.to_account_id or "" }}'; toEl.dispatchEvent(new Event('change')); }
+    // Set project
+    var projEl = document.getElementById('project_id');
+    if (projEl) {
+        projEl.value = '{{ edit_txn.project_id or "" }}';
+        projEl.dispatchEvent(new Event('change'));
+    }
+    // Stage and related-entity
+    setTimeout(function() {
+        var stageEl = document.getElementById('stage_id');
+        if (stageEl) stageEl.value = '{{ edit_txn.stage_id or "" }}';
+        var relTypeEl = document.getElementById('related_entity_type');
+        if (relTypeEl) relTypeEl.value = '{{ edit_txn.related_entity_type or "" }}';
+        var relIdEl = document.getElementById('related_entity_id');
+        if (relIdEl) relIdEl.value = '{{ edit_txn.related_entity_id or "" }}';
+    }, 80);
+
+    // Scroll
+    setTimeout(function() {
+        if (host && typeof host.scrollIntoView === 'function') {
+            host.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+    }, 120);
+});
+</script>
+{% endif %}
+{% endblock %}

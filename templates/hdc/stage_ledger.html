@@ -1,0 +1,197 @@
+{% extends "base.html" %}
+{% block title %}Stage Ledger - {{ s.name }}{% endblock %}
+{% block page_heading %}{{ s.name }} <span class="badge bg-secondary ms-2 fs-6">{{ p.project_code }}</span>{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mt-2 mb-3">
+    <div>
+        <div class="small text-muted">Project: {{ p.name }} | Stage Status: {{ s.status }}</div>
+        <div class="small text-muted">Chronological ledger: oldest on top, PKT timestamps</div>
+    </div>
+    <a href="{{ url_for('hdc_project_detail', pid=p.id) }}" class="btn btn-outline-secondary btn-sm">
+        <i class="fas fa-arrow-left me-1"></i>Back to Project
+    </a>
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col-6 col-md-2">
+        <div class="kpi-card kpi-green">
+            <div class="kpi-label">Labour</div>
+            <div class="kpi-value small">{{ "{:,.0f}".format(totals.labour or 0) }}</div>
+            <div class="kpi-sub">PKR</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-2">
+        <div class="kpi-card kpi-blue">
+            <div class="kpi-label">Material</div>
+            <div class="kpi-value small">{{ "{:,.0f}".format(totals.material or 0) }}</div>
+            <div class="kpi-sub">PKR</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-2">
+        <div class="kpi-card kpi-orange">
+            <div class="kpi-label">Expenses</div>
+            <div class="kpi-value small">{{ "{:,.0f}".format(totals.expense or 0) }}</div>
+            <div class="kpi-sub">PKR</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-2">
+        <div class="kpi-card kpi-purple">
+            <div class="kpi-label">Subcontract</div>
+            <div class="kpi-value small">{{ "{:,.0f}".format(totals.subcontract or 0) }}</div>
+            <div class="kpi-sub">PKR</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-2">
+        <a href="{{ url_for('hdc_stage_ledger', sid=s.id, show_cost_split=1) }}#cost-split" class="text-decoration-none text-reset d-block">
+            <div class="kpi-card {% if grand_total >= 0 %}kpi-loss{% else %}kpi-profit{% endif %}">
+                <div class="kpi-label">Grand Total</div>
+                <div class="kpi-value small">{{ "{:,.0f}".format(grand_total or 0) }}</div>
+                <div class="kpi-sub">Stage net cost (PKR) | Click for split</div>
+            </div>
+        </a>
+    </div>
+</div>
+
+{% if show_cost_split %}
+<div class="row g-3 mb-3" id="cost-split">
+    <div class="col-6 col-md-4">
+        <a href="{{ url_for('hdc_cost_entries', scope='stage', target_id=s.id, head='labour') }}" class="text-decoration-none text-reset d-block">
+            <div class="kpi-card kpi-green">
+                <div class="kpi-label">Labour Total Cost</div>
+                <div class="kpi-value small">{{ "{:,.0f}".format(totals.labour or 0) }}</div>
+                <div class="kpi-sub">Click to view labour entries</div>
+            </div>
+        </a>
+    </div>
+    <div class="col-6 col-md-4">
+        <a href="{{ url_for('hdc_cost_entries', scope='stage', target_id=s.id, head='material') }}" class="text-decoration-none text-reset d-block">
+            <div class="kpi-card kpi-blue">
+                <div class="kpi-label">Material Total Cost</div>
+                <div class="kpi-value small">{{ "{:,.0f}".format(totals.material or 0) }}</div>
+                <div class="kpi-sub">Click to view material entries</div>
+            </div>
+        </a>
+    </div>
+    <div class="col-6 col-md-4">
+        <a href="{{ url_for('hdc_cost_entries', scope='stage', target_id=s.id, head='expense') }}" class="text-decoration-none text-reset d-block">
+            <div class="kpi-card kpi-orange">
+                <div class="kpi-label">Expenses Total Cost</div>
+                <div class="kpi-value small">{{ "{:,.0f}".format(totals.expense or 0) }}</div>
+                <div class="kpi-sub">Click to view expense entries</div>
+            </div>
+        </a>
+    </div>
+</div>
+{% endif %}
+
+<div class="d-flex justify-content-end mb-3">
+    <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#stage-more-kpis" aria-expanded="false" aria-controls="stage-more-kpis">
+        More Insights
+    </button>
+</div>
+<div class="collapse mb-3" id="stage-more-kpis">
+    <div class="row g-3">
+        <div class="col-6 col-md-3">
+            <div class="kpi-card kpi-teal">
+                <div class="kpi-label">Finance Events</div>
+                <div class="kpi-value small">{{ "{:,.0f}".format(totals.finance or 0) }}</div>
+                <div class="kpi-sub">No cost impact</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="kpi-card kpi-blue">
+                <div class="kpi-label">Stage Sqft</div>
+                <div class="kpi-value small">{{ "{:,.0f}".format(stage_sqft or 0) if stage_is_sqft else 'N/A' }}</div>
+                <div class="kpi-sub">sqft</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="kpi-card kpi-teal">
+                <div class="kpi-label">Owner Rate / Sqft</div>
+                <div class="kpi-value small">{{ "{:,.2f}".format(stage_owner_sqft_rate or 0) if stage_is_sqft else 'N/A' }}</div>
+                <div class="kpi-sub">PKR per sqft</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="kpi-card kpi-orange">
+                <div class="kpi-label">Owner Sqft Charges</div>
+                <div class="kpi-value small">{{ "{:,.0f}".format(stage_owner_sqft_charges or 0) if stage_is_sqft else 'N/A' }}</div>
+                <div class="kpi-sub">PKR</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="kpi-card kpi-blue">
+                <div class="kpi-label">Cost / Sqft</div>
+                <div class="kpi-value small">{{ "{:,.2f}".format(stage_cost_per_sqft or 0) if stage_is_sqft else 'N/A' }}</div>
+                <div class="kpi-sub">PKR per sqft</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="kpi-card {% if stage_is_sqft and (stage_profit_per_sqft or 0) >= 0 %}kpi-profit{% elif stage_is_sqft %}kpi-loss{% else %}kpi-blue{% endif %}">
+                <div class="kpi-label">Profit / Sqft</div>
+                <div class="kpi-value small">{{ "{:,.2f}".format(stage_profit_per_sqft or 0) if stage_is_sqft else 'N/A' }}</div>
+                <div class="kpi-sub">{% if stage_is_sqft %}PKR per sqft{% else %}Only for Per Sq Ft basis{% endif %}</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card hdc-card">
+    <div class="card-header hdc-card-header d-flex justify-content-between">
+        <span><i class="fas fa-list me-2"></i>Stage Event Trace</span>
+        <span class="small text-muted">{{ rows|length }} row(s)</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table hdc-table table-sm mb-0">
+            <thead>
+            <tr>
+                <th>Date/Time</th>
+                <th>Type</th>
+                <th>Source</th>
+                <th>Ref</th>
+                <th>Amount</th>
+                <th>Impact</th>
+                <th>After Impact Total</th>
+                <th>Status</th>
+                <th>Details</th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for r in rows %}
+            <tr class="{% if r.status == 'Voided' %}table-secondary{% endif %}">
+                <td>{{ fmt_pkt(r.dt) }}</td>
+                <td>{{ r.event_type }}</td>
+                <td class="text-muted small">{{ r.source }}</td>
+                <td><small>{{ r.ref }}</small></td>
+                <td class="{% if r.amount < 0 %}text-success{% elif r.amount > 0 %}text-danger{% endif %}">
+                    {{ "{:,.0f}".format(r.amount or 0) }}
+                </td>
+                <td class="{% if r.impact < 0 %}text-success{% elif r.impact > 0 %}text-danger{% else %}text-muted{% endif %}">
+                    {{ "{:,.0f}".format(r.impact or 0) }}
+                </td>
+                <td class="fw-bold">{{ "{:,.0f}".format(r.running_total or 0) }}</td>
+                <td>
+                    <span class="badge {% if r.status == 'Voided' %}bg-secondary{% else %}bg-success{% endif %}">{{ r.status }}</span>
+                </td>
+                <td class="small text-muted">{{ r.notes }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="9" class="text-center text-muted py-4">No stage events recorded yet.</td></tr>
+            {% endfor %}
+            </tbody>
+            {% if rows %}
+            <tfoot class="table-secondary fw-bold">
+                <tr>
+                    <td colspan="4">Grand Total (Cost Impact)</td>
+                    <td></td>
+                    <td>{{ "{:,.0f}".format(grand_total or 0) }}</td>
+                    <td>{{ "{:,.0f}".format(grand_total or 0) }}</td>
+                    <td colspan="2">Final Stage Cost Impact</td>
+                </tr>
+            </tfoot>
+            {% endif %}
+        </table>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" role="img" aria-label="HDC Company Logo">
+  <defs>
+    <linearGradient id="g1" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0f6c7a"/>
+      <stop offset="55%" stop-color="#1773b0"/>
+      <stop offset="100%" stop-color="#0d4f86"/>
+    </linearGradient>
+  </defs>
+  <rect x="10" y="10" width="220" height="220" rx="36" fill="url(#g1)"/>
+  <path d="M58 152 L90 88 L106 120 L122 94 L154 152" fill="none" stroke="#ffffff" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M52 168 H188" fill="none" stroke="#8fe5ff" stroke-width="10" stroke-linecap="round"/>
+  <text x="120" y="206" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="28" font-weight="700" fill="#ffffff">HDC</text>
+</svg>

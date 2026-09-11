@@ -1,0 +1,233 @@
+{% extends "base.html" %}
+{% block title %}Office Expenses{% endblock %}
+{% block page_heading %}Office Expenses{% endblock %}
+
+{% block content %}
+<div class="row g-3 mt-1">
+    <div class="col-md-4">
+        <div class="card hdc-card">
+            <div class="card-header hdc-card-header"><i class="fas fa-plus-circle me-2"></i>Record Office Expense</div>
+            <div class="card-body">
+                <form method="POST">
+                    <div class="mb-3">
+                        <label class="form-label">Date</label>
+                        <input type="date" name="date" class="form-control" value="{{ today }}" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label d-flex align-items-center justify-content-between">
+                            <span>Category *</span>
+                            <button type="button" class="btn btn-sm btn-outline-success py-0 px-2" id="oeAddCatBtn" title="Save new category permanently" style="font-size:12px;">
+                                <i class="fas fa-plus"></i> New
+                            </button>
+                        </label>
+                        <input type="text" name="category" id="oeCategoryInput" class="form-control" placeholder="Search or type category..." list="oeCatList" required autocomplete="off">
+                        <datalist id="oeCatList">
+                            {% for c in categories %}
+                            <option value="{{ c }}">{{ c }}</option>
+                            {% endfor %}
+                        </datalist>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Amount (PKR) *</label>
+                        <input type="number" step="0.01" min="0.01" name="amount" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Remarks</label>
+                        <textarea name="remarks" class="form-control" rows="2"></textarea>
+                    </div>
+                    <button type="submit" class="btn btn-mint w-100"><i class="fas fa-save me-1"></i>Save</button>
+                </form>
+            </div>
+        </div>
+
+        <div class="card hdc-card mt-3">
+            <div class="card-header hdc-card-header"><i class="fas fa-tags me-2"></i>Saved Categories</div>
+            <div class="card-body">
+                <div class="small text-muted mb-3">Edit saved office expense categories or suspend categories you no longer want to keep active.</div>
+                {% if office_expense_categories %}
+                <div class="list-group list-group-flush office-expense-category-list">
+                    {% for cat in office_expense_categories %}
+                    <div class="list-group-item px-0 py-2 d-flex align-items-center justify-content-between gap-2">
+                        <div>
+                            <strong>{{ cat.name }}</strong>
+                            {% if not cat.active_status %}
+                            <span class="badge bg-secondary ms-2">Suspended</span>
+                            {% endif %}
+                        </div>
+                        <div class="btn-group btn-group-sm" role="group">
+                            <button type="button" class="btn btn-outline-primary oe-cat-edit-btn" data-id="{{ cat.id }}" data-name="{{ cat.name }}">Edit</button>
+                            <button type="button" class="btn {% if cat.active_status %}btn-outline-warning{% else %}btn-outline-success{% endif %} oe-cat-toggle-btn" data-id="{{ cat.id }}" data-action="{% if cat.active_status %}suspend{% else %}activate{% endif %}" data-name="{{ cat.name }}">
+                                {% if cat.active_status %}Suspend{% else %}Activate{% endif %}
+                            </button>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="text-muted">No saved categories yet. Use the New button above to save a category.</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-8">
+        <div class="card hdc-card">
+            <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-list me-2"></i>Office Expense Records</span>
+                <span class="badge bg-danger fs-6">Total: {{ "{:,.0f}".format(total or 0) }} PKR</span>
+            </div>
+            <div class="px-3 pt-3">
+                <form method="GET" class="d-flex gap-2 mb-2">
+                    <select name="category" class="form-select form-select-sm" onchange="this.form.submit()">
+                        <option value="">All Categories</option>
+                        {% for c in categories %}
+                        <option value="{{ c }}" {% if category_filter == c %}selected{% endif %}>{{ c }}</option>
+                        {% endfor %}
+                    </select>
+                    <a href="{{ url_for('hdc_office_expenses') }}" class="btn btn-sm btn-outline-secondary">Clear</a>
+                </form>
+            </div>
+            <div class="table-responsive">
+                <table class="table hdc-table table-sm">
+                    <thead><tr><th>Date</th><th>Category</th><th>Source</th><th>Amount</th><th>Remarks</th><th class="text-end">Actions</th></tr></thead>
+                    <tbody>
+                        {% for rec in records %}
+                        {% set r = rec[0] %}
+                        {% set staff = rec[1] %}
+                        <tr>
+                            <td>{{ fmt_pkt(r.activity_at or r.created_at) }}</td>
+                            <td><span class="badge bg-info text-dark">{{ r.category or 'General' }}</span></td>
+                            <td class="text-muted small">
+                                {% if staff %}
+                                {{ staff.name }} ({{ staff.staff_code }})
+                                {% else %}
+                                Manual
+                                {% endif %}
+                            </td>
+                            <td class="fw-bold text-danger">{{ "{:,.0f}".format(r.amount or 0) }}</td>
+                            <td class="text-muted small">{{ r.remarks or '-' }}</td>
+                            <td class="text-end">
+                                {% if r.office_staff_ledger_id %}
+                                <span class="badge bg-secondary">From Staff Ledger</span>
+                                {% else %}
+                                <a href="{{ url_for('hdc_office_expense_edit', eid=r.id) }}" class="btn btn-outline-primary btn-sm"><i class="fas fa-edit"></i></a>
+                                <form method="POST" action="{{ url_for('hdc_office_expense_delete', eid=r.id) }}" class="d-inline" onsubmit="return confirm('Delete this office expense?');">
+                                    <button type="submit" class="btn btn-outline-danger btn-sm"><i class="fas fa-trash-alt"></i></button>
+                                </form>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="6" class="text-center text-muted py-4">No office expenses found.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    var addBtn = document.getElementById('oeAddCatBtn');
+    var input = document.getElementById('oeCategoryInput');
+    var datalist = document.getElementById('oeCatList');
+
+    function buildDatalist(cats) {
+        if (!datalist) return;
+        datalist.innerHTML = '';
+        (cats || []).forEach(function (c) {
+            var opt = document.createElement('option');
+            opt.value = c;
+            datalist.appendChild(opt);
+        });
+    }
+
+    if (addBtn) {
+        addBtn.addEventListener('click', function () {
+            var current = (input ? (input.value || '').trim() : '');
+            var newName = window.prompt('Enter new office expense category name:', current || '');
+            if (!newName || !newName.trim()) return;
+            fetch('/hdc/api/office_expense_categories', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: newName.trim() })
+            })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (data.ok) {
+                    buildDatalist(data.categories || []);
+                    if (input) input.value = data.name || newName.trim();
+                    alert('Category "' + (data.name || newName.trim()) + '" saved permanently.');
+                } else {
+                    alert('Error: ' + (data.error || 'Could not save category.'));
+                }
+            })
+            .catch(function () { alert('Network error saving category.'); });
+        });
+    }
+
+    function apiUpdateOfficeExpenseCategory(categoryId, payload) {
+        return fetch('/hdc/api/office_expense_categories/' + encodeURIComponent(categoryId), {
+            method: 'PATCH',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        }).then(function (r) {
+            return r.json().then(function (data) {
+                if (!r.ok) throw data;
+                return data;
+            });
+        });
+    }
+
+    function attachCategoryActions() {
+        var editButtons = document.querySelectorAll('.oe-cat-edit-btn');
+        var toggleButtons = document.querySelectorAll('.oe-cat-toggle-btn');
+
+        editButtons.forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var categoryId = btn.dataset.id;
+                var currentName = btn.dataset.name || '';
+                var newName = window.prompt('Rename office expense category:', currentName);
+                if (!newName || !newName.trim() || newName.trim() === currentName) {
+                    return;
+                }
+                apiUpdateOfficeExpenseCategory(categoryId, {
+                    action: 'rename',
+                    name: newName.trim()
+                }).then(function () {
+                    window.location.reload();
+                }).catch(function (err) {
+                    alert('Error updating category: ' + (err.error || err.message || 'Unknown error'));
+                });
+            });
+        });
+
+        toggleButtons.forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var categoryId = btn.dataset.id;
+                var action = btn.dataset.action;
+                var name = btn.dataset.name || '';
+                var promptMessage = action === 'suspend'
+                    ? 'Suspend category "' + name + '"? It will remain in existing expenses but not be active for new entries.'
+                    : 'Activate category "' + name + '"?';
+                if (!window.confirm(promptMessage)) {
+                    return;
+                }
+                apiUpdateOfficeExpenseCategory(categoryId, { action: action }).then(function () {
+                    window.location.reload();
+                }).catch(function (err) {
+                    alert('Error updating category: ' + (err.error || err.message || 'Unknown error'));
+                });
+            });
+        });
+    }
+
+    attachCategoryActions();
+})();
+</script>
+{% endblock %}

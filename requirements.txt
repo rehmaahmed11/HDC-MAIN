@@ -1,0 +1,13 @@
+Flask
+Flask-Login
+Flask-SQLAlchemy
+SQLAlchemy
+openpyxl
+gunicorn
+flask
+flask-login
+flask-sqlalchemy
+gunicorn
+openpyxl
+sqlalchemy
+werkzeug

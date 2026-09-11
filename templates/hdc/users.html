@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}User Management{% endblock %}
+{% block page_heading %}User Management{% endblock %}
+
+{% block content %}
+<div class="row g-3 mt-1">
+    <!-- Add User -->
+    <div class="col-md-4">
+        <div class="card hdc-card">
+            <div class="card-header hdc-card-header"><i class="fas fa-user-plus me-2"></i>Add New User</div>
+            <div class="card-body">
+                <form method="POST">
+                    <input type="hidden" name="action" value="add">
+                    <div class="mb-3">
+                        <label class="form-label">Username *</label>
+                        <input type="text" name="username" class="form-control" placeholder="e.g. manager_ali" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Password *</label>
+                        <input type="password" name="password" class="form-control" placeholder="Minimum 6 characters" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Role</label>
+                        <select name="role" class="form-select">
+                            <option value="manager">Manager — can view + add records</option>
+                            <option value="accountant">Accountant — finance access</option>
+                            <option value="admin">Admin — full access</option>
+                        </select>
+                    </div>
+                    <button type="submit" class="btn btn-mint w-100"><i class="fas fa-save me-1"></i>Create User</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- User List -->
+    <div class="col-md-8">
+        <div class="card hdc-card">
+            <div class="card-header hdc-card-header"><i class="fas fa-users me-2"></i>All Users ({{ users|length }})</div>
+            <div class="table-responsive">
+                <table class="table hdc-table table-sm mb-0">
+                    <thead><tr>
+                        <th>#</th><th>Username</th><th>Role</th><th>Created</th><th>Actions</th>
+                    </tr></thead>
+                    <tbody>
+                    {% for u in users %}
+                    <tr class="{% if u.id == current_user.id %}table-active{% endif %}">
+                        <td class="text-muted">{{ loop.index }}</td>
+                        <td>
+                            <strong>{{ u.username }}</strong>
+                            {% if u.id == current_user.id %}<span class="badge bg-primary ms-1">You</span>{% endif %}
+                        </td>
+                        <td>
+                            <span class="badge {% if u.role == 'admin' %}bg-danger{% elif u.role == 'manager' %}bg-success{% else %}bg-info text-dark{% endif %}">
+                                {{ u.role | title }}
+                            </span>
+                        </td>
+                        <td class="text-muted small">{{ u.created_at.strftime('%Y-%m-%d') if u.created_at else '—' }}</td>
+                        <td>
+                            <!-- Reset Password -->
+                            <button class="btn btn-xs btn-outline-warning btn-sm"
+                                data-bs-toggle="collapse" data-bs-target="#reset-{{ u.id }}">
+                                <i class="fas fa-key me-1"></i>Reset
+                            </button>
+                            <div class="collapse mt-1" id="reset-{{ u.id }}">
+                                <form method="POST" class="d-flex gap-1">
+                                    <input type="hidden" name="action" value="reset_password">
+                                    <input type="hidden" name="user_id" value="{{ u.id }}">
+                                    <input type="password" name="new_password" class="form-control form-control-sm"
+                                        style="width:130px" placeholder="New password" required>
+                                    <button type="submit" class="btn btn-warning btn-sm">Set</button>
+                                </form>
+                            </div>
+                            {% if u.id != current_user.id %}
+                            <form method="POST" class="d-inline ms-1"
+                                onsubmit="return confirm('Delete user {{ u.username }}?')">
+                                <input type="hidden" name="action" value="delete">
+                                <input type="hidden" name="user_id" value="{{ u.id }}">
+                                <button type="submit" class="btn btn-xs btn-outline-danger btn-sm">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </form>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <div class="px-3 py-2 border-top">
+                <small class="text-muted">
+                    <strong>Admin</strong> — full access, user management &nbsp;|&nbsp;
+                    <strong>Manager</strong> — can add/view records &nbsp;|&nbsp;
+                    <strong>Accountant</strong> — finance views only
+                </small>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

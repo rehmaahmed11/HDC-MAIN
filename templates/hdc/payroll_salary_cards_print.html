@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>{{ title }} - {{ label_period }}</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Segoe UI", Arial, sans-serif; color: #1f1f1f; background: #fff; }
+  .print-bar { position: fixed; top: 0; left: 0; right: 0; height: 48px; background: #1f2328; color: #fff; z-index: 999; display: flex; align-items: center; gap: 10px; padding: 0 16px; }
+  .print-title { color: #87af32; font-size: 13px; font-weight: 700; }
+  .btn { border: none; border-radius: 6px; padding: 7px 14px; font-size: 12px; cursor: pointer; }
+  .btn-print { background: #87af32; color: #fff; }
+  .btn-close { margin-left: auto; background: #4a4f57; color: #fff; }
+  .wrapper { margin-top: 56px; }
+
+  .page {
+    width: 210mm;
+    min-height: 297mm;
+    margin: 0 auto;
+    padding: 12mm 14mm;
+    page-break-after: always;
+    border-bottom: 1px dashed #d6d6d6;
+  }
+  .page:last-child { page-break-after: auto; border-bottom: none; }
+
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    border-bottom: 3px solid #87af32;
+    padding-bottom: 8px;
+    margin-bottom: 10px;
+  }
+  .company { font-size: 20px; font-weight: 800; color: #87af32; }
+  .subtitle { color: #6c757d; font-size: 11px; margin-top: 2px; }
+  .meta { text-align: right; font-size: 11px; color: #444; line-height: 1.5; }
+
+  .worker-strip {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 10px;
+    background: #f8f9f0;
+    border: 1px solid #dce8b5;
+    border-radius: 8px;
+    padding: 10px;
+  }
+  .kv label { display: block; font-size: 10px; font-weight: 700; color: #7aa129; text-transform: uppercase; margin-bottom: 2px; }
+  .kv span { font-size: 13px; font-weight: 700; }
+
+  .kpis {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .kpi { border-radius: 8px; padding: 10px; color: #fff; min-height: 70px; }
+  .kpi label { font-size: 10px; opacity: 0.95; text-transform: uppercase; display: block; margin-bottom: 4px; }
+  .kpi .v { font-size: 16px; font-weight: 800; line-height: 1.1; }
+  .k1 { background: linear-gradient(135deg, #3a7bd5, #2e5fc2); }
+  .k2 { background: linear-gradient(135deg, #87af32, #5e8022); }
+  .k3 { background: linear-gradient(135deg, #f4873a, #d46d24); }
+  .k4 { background: linear-gradient(135deg, #e05353, #b83434); }
+
+  .section-title {
+    background: #87af32;
+    color: #fff;
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    margin: 8px 0 6px;
+    letter-spacing: 0.2px;
+  }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 6px; }
+  th, td { border: 1px solid #e7e7e7; padding: 7px 8px; font-size: 11px; }
+  th { background: #f3f6e8; color: #56761c; text-align: left; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+  .status {
+    display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 700;
+  }
+  .paid { background: #d4edda; color: #1f7a34; }
+  .not-paid { background: #f8d7da; color: #a51d2d; }
+
+  .signatures {
+    margin-top: 18px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 26px;
+  }
+  .sig-box { border-top: 1px solid #bbb; padding-top: 5px; font-size: 11px; color: #666; text-align: center; }
+
+  .footer {
+    margin-top: 14px;
+    font-size: 10px;
+    color: #8b8b8b;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  @media print {
+    @page { size: A4; margin: 0; }
+    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .print-bar { display: none; }
+    .wrapper { margin-top: 0; }
+  }
+</style>
+</head>
+<body>
+<div class="print-bar">
+  <span class="print-title">{{ title }} - {{ label_period }}</span>
+  <button class="btn btn-print" onclick="window.print()">Print / Save PDF</button>
+  <button class="btn btn-close" onclick="window.close()">Close</button>
+</div>
+
+<div class="wrapper">
+{% for c in cards %}
+  <section class="page">
+    <div class="header">
+      <div>
+        <div class="company">HDC ERP</div>
+        <div class="subtitle">Hadi Design & Construction - Salary Card</div>
+      </div>
+      <div class="meta">
+        <strong>Payroll Period</strong><br>
+        {{ label_period }}<br>
+        Generated: {{ now }}
+      </div>
+    </div>
+
+    <div class="worker-strip">
+      <div class="kv">
+        <label>Worker</label>
+        <span>{{ c.worker.name }}</span>
+      </div>
+      <div class="kv">
+        <label>Code</label>
+        <span>{{ c.worker.worker_code }}</span>
+      </div>
+      <div class="kv">
+        <label>Trade</label>
+        <span>{{ c.worker.role_type or '-' }}</span>
+      </div>
+    </div>
+
+    <div class="kpis">
+      <div class="kpi k1"><label>Total Wage</label><div class="v">Rs {{ "{:,.0f}".format(c.total_wage or 0) }}</div></div>
+      <div class="kpi k2"><label>Payable</label><div class="v">Rs {{ "{:,.0f}".format(c.payable or 0) }}</div></div>
+      <div class="kpi k3"><label>Paid</label><div class="v">Rs {{ "{:,.0f}".format(c.paid or 0) }}</div></div>
+      <div class="kpi k4"><label>Balance</label><div class="v">Rs {{ "{:,.0f}".format(c.balance or 0) }}</div></div>
+    </div>
+
+    <div class="section-title">Salary Breakdown</div>
+    <table>
+      <tbody>
+        <tr><th>Work Entries</th><td class="num">{{ c.work_entries }}</td><th>Total Days Worked</th><td class="num">{{ c.worked_days }}</td></tr>
+        <tr><th>Per Day Wage</th><td class="num">Rs {{ "{:,.0f}".format(c.per_day_wage or 0) }}</td><th>Overtime Total (Hours)</th><td class="num">{{ "{:,.2f}".format(c.overtime_total or 0) }}</td></tr>
+        <tr><th>Total Wage</th><td class="num">Rs {{ "{:,.0f}".format(c.total_wage or 0) }}</td><th>Advance Deducted</th><td class="num">Rs {{ "{:,.0f}".format(c.advance or 0) }}</td></tr>
+        <tr><th>Net Payable</th><td class="num">Rs {{ "{:,.0f}".format(c.payable or 0) }}</td><th>Paid</th><td class="num">Rs {{ "{:,.0f}".format(c.paid or 0) }}</td></tr>
+        <tr><th>Balance Pending</th><td class="num">Rs {{ "{:,.0f}".format(c.balance or 0) }}</td><th>Payment Status</th><td>{% if c.status == 'Paid' %}<span class="status paid">Paid</span>{% else %}<span class="status not-paid">Not Paid</span>{% endif %}</td></tr>
+      </tbody>
+    </table>
+
+    <div class="signatures">
+      <div class="sig-box">Worker Signature</div>
+      <div class="sig-box">Authorized Signature</div>
+    </div>
+
+    <div class="footer">
+      <span>Run ID: {{ run.id }}</span>
+      <span>Worker {{ loop.index }} of {{ cards|length }}</span>
+    </div>
+  </section>
+{% else %}
+  <section class="page">
+    <div class="header">
+      <div>
+        <div class="company">HDC ERP</div>
+        <div class="subtitle">Salary Cards Report</div>
+      </div>
+      <div class="meta">
+        {{ label_period }}<br>
+        Generated: {{ now }}
+      </div>
+    </div>
+    <p style="font-size:13px;color:#666;">No worker salary cards found for this run.</p>
+  </section>
+{% endfor %}
+</div>
+
+{% if auto_print %}
+<script>
+window.addEventListener('load', function () {
+  setTimeout(function () { window.print(); }, 500);
+});
+</script>
+{% endif %}
+</body>
+</html>
