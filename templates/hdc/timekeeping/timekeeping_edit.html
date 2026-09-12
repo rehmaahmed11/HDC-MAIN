@@ -1,0 +1,73 @@
+{% extends "shared/base.html" %}
+{% block title %}Edit Attendance Entry{% endblock %}
+{% block page_heading %}Edit Attendance Entry{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center mt-2">
+    <div class="col-md-7">
+        <div class="card hdc-card">
+            <div class="card-header hdc-card-header">
+                <i class="fas fa-edit me-2"></i>Edit Site/Stage Hours
+            </div>
+            <div class="card-body">
+                <form method="POST">
+                    <div class="mb-3">
+                        <label class="form-label">Date</label>
+                        <input type="text" class="form-control" value="{{ t.check_in.date().isoformat() }}" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Worker</label>
+                        <input type="text" class="form-control" value="{{ t.worker.name }} ({{ t.worker.role_type or 'Worker' }})" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Site / Project *</label>
+                        <select name="project_id" class="form-select" id="editProjectSelect" required>
+                            {% for p in projects %}
+                            <option value="{{ p.id }}" {% if p.id == t.project_id %}selected{% endif %}>{{ p.name }} | {{ p.project_code }} | {{ p.client or 'No Owner' }} | {{ p.location or 'No Location' }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Stage *</label>
+                        <select name="stage_id" class="form-select" id="editStageSelect" required>
+                            {% for s in stages %}
+                            <option value="{{ s.id }}" data-project="{{ s.project_id }}" {% if s.id == t.stage_id %}selected{% endif %}>{{ s.project.name }} - {{ s.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Hours *</label>
+                        <input type="number" name="hours" step="0.25" min="0.25" max="24" class="form-control" value="{{ t.hours or 0 }}" required>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-mint"><i class="fas fa-save me-1"></i>Save Changes</button>
+                        <a href="{{ url_for('hdc_attendance') }}" class="btn btn-outline-secondary">Cancel</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function(){
+    var projSel = document.getElementById('editProjectSelect');
+    var stageSel = document.getElementById('editStageSelect');
+    function syncStages(){
+        if(!projSel || !stageSel) return;
+        var pid = projSel.value;
+        Array.from(stageSel.options).forEach(function(opt){
+            var ok = !pid || (opt.getAttribute('data-project') === pid);
+            opt.style.display = ok ? '' : 'none';
+            if (!ok && opt.selected) stageSel.value = '';
+        });
+    }
+    if(projSel){
+        projSel.addEventListener('change', syncStages);
+        syncStages();
+    }
+})();
+</script>
+{% endblock %}

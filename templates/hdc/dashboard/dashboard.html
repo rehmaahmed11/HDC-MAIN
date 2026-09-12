@@ -1,0 +1,291 @@
+{% extends "shared/base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block page_heading %}Dashboard{% endblock %}
+
+{% block content %}
+<!-- KPI CARDS -->
+<div class="row g-3 mt-1">
+    <div class="col-6 col-md-3">
+        <a href="{{ url_for('hdc_kpi_detail', metric='active_projects') }}" class="text-decoration-none text-reset d-block">
+            <div class="kpi-card kpi-blue">
+                <div class="kpi-icon"><i class="fas fa-project-diagram"></i></div>
+                <div class="kpi-value">{{ active_count }}<span class="kpi-sub"> / {{ total_project_count }}</span></div>
+                <div class="kpi-label">Active Projects</div>
+            </div>
+        </a>
+    </div>
+    <div class="col-6 col-md-3">
+        <a href="{{ url_for('hdc_kpi_detail', metric='contract_value') }}" class="text-decoration-none text-reset d-block">
+            <div class="kpi-card kpi-green">
+                <div class="kpi-icon"><i class="fas fa-file-contract"></i></div>
+                <div class="kpi-value">{{ "{:,.0f}".format(total_contract) }}</div>
+                <div class="kpi-label">Contract Value (PKR)</div>
+            </div>
+        </a>
+    </div>
+    <div class="col-6 col-md-3">
+        <a href="{{ url_for('hdc_kpi_detail', metric='total_received') }}" class="text-decoration-none text-reset d-block">
+            <div class="kpi-card kpi-teal">
+                <div class="kpi-icon"><i class="fas fa-hand-holding-usd"></i></div>
+                <div class="kpi-value">{{ "{:,.0f}".format(total_received) }}</div>
+                <div class="kpi-label">Total Received (PKR)</div>
+            </div>
+        </a>
+    </div>
+    <div class="col-6 col-md-3">
+        <a href="{{ url_for('hdc_kpi_detail', metric='pending_receivable') }}" class="text-decoration-none text-reset d-block">
+            <div class="kpi-card kpi-orange">
+                <div class="kpi-icon"><i class="fas fa-clock"></i></div>
+                <div class="kpi-value">{{ "{:,.0f}".format(pending_receivable) }}</div>
+                <div class="kpi-label">Pending Receivable</div>
+            </div>
+        </a>
+    </div>
+    <div class="col-6 col-md-3">
+        <a href="{{ url_for('hdc_kpi_detail', metric='total_expenses') }}" class="text-decoration-none text-reset d-block">
+            <div class="kpi-card kpi-red">
+                <div class="kpi-icon"><i class="fas fa-minus-circle"></i></div>
+                <div class="kpi-value">{{ "{:,.0f}".format(total_expenses) }}</div>
+                <div class="kpi-label">Total Expenses (PKR)</div>
+            </div>
+        </a>
+    </div>
+    <div class="col-6 col-md-3">
+        <a href="{{ url_for('hdc_kpi_detail', metric='net_profit') }}" class="text-decoration-none text-reset d-block">
+            <div class="kpi-card {% if net_profit >= 0 %}kpi-profit{% else %}kpi-loss{% endif %}">
+                <div class="kpi-icon"><i class="fas fa-coins"></i></div>
+                <div class="kpi-value">{{ "{:,.0f}".format(net_profit) }}</div>
+                <div class="kpi-label">Net Profit (PKR)</div>
+            </div>
+        </a>
+    </div>
+</div>
+
+<div class="d-flex justify-content-end mt-2">
+    <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#dashboard-more-kpis" aria-expanded="false" aria-controls="dashboard-more-kpis">
+        More Insights
+    </button>
+</div>
+<div class="collapse mt-2" id="dashboard-more-kpis">
+    <div class="row g-3">
+        <div class="col-6 col-md-3">
+            <a href="{{ url_for('hdc_kpi_detail', metric='gross_margin') }}" class="text-decoration-none text-reset d-block">
+                <div class="kpi-card kpi-purple">
+                    <div class="kpi-icon"><i class="fas fa-chart-line"></i></div>
+                    <div class="kpi-value">{{ "{:,.0f}".format(gross_margin) }}</div>
+                    <div class="kpi-label">Gross Margin (PKR)</div>
+                </div>
+            </a>
+        </div>
+        <div class="col-6 col-md-3">
+            <a href="{{ url_for('hdc_kpi_detail', metric='today_expenses') }}" class="text-decoration-none text-reset d-block">
+                <div class="kpi-card kpi-red">
+                    <div class="kpi-icon"><i class="fas fa-receipt"></i></div>
+                    <div class="kpi-value">{{ "{:,.0f}".format(today_expenses) }}</div>
+                    <div class="kpi-label">Today's Expenses</div>
+                </div>
+            </a>
+        </div>
+        <div class="col-6 col-md-3">
+            <a href="{{ url_for('hdc_office_expenses') }}" class="text-decoration-none text-reset d-block">
+                <div class="kpi-card kpi-red">
+                    <div class="kpi-icon"><i class="fas fa-building-circle-exclamation"></i></div>
+                    <div class="kpi-value">{{ "{:,.0f}".format(office_expense_total or 0) }}</div>
+                    <div class="kpi-label">Office Expense Burden</div>
+                </div>
+            </a>
+        </div>
+        <div class="col-6 col-md-3">
+            <a href="{{ url_for('hdc_personal_expenses') }}" class="text-decoration-none text-reset d-block">
+                <div class="kpi-card kpi-orange">
+                    <div class="kpi-icon"><i class="fas fa-handshake"></i></div>
+                    <div class="kpi-value">{{ "{:,.0f}".format(personal_expense_total or 0) }}</div>
+                    <div class="kpi-label">Personal Expenses</div>
+                </div>
+            </a>
+        </div>
+        <div class="col-6 col-md-3">
+            <a href="{{ url_for('hdc_kpi_detail', metric='workers_present') }}" class="text-decoration-none text-reset d-block">
+                <div class="kpi-card kpi-teal">
+                    <div class="kpi-icon"><i class="fas fa-user-check"></i></div>
+                    <div class="kpi-value">{{ workers_present }}</div>
+                    <div class="kpi-label">Workers Present</div>
+                </div>
+            </a>
+        </div>
+        <div class="col-6 col-md-3">
+            <a href="{{ url_for('hdc_kpi_detail', metric='delayed_stages') }}" class="text-decoration-none text-reset d-block">
+                <div class="kpi-card kpi-orange">
+                    <div class="kpi-icon"><i class="fas fa-hourglass-half"></i></div>
+                    <div class="kpi-value">{{ delayed_stages }}</div>
+                    <div class="kpi-label">Delayed Stages</div>
+                </div>
+            </a>
+        </div>
+        <div class="col-6 col-md-3">
+            <a href="{{ url_for('hdc_kpi_detail', metric='budget_overruns') }}" class="text-decoration-none text-reset d-block">
+                <div class="kpi-card kpi-purple">
+                    <div class="kpi-icon"><i class="fas fa-exclamation-triangle"></i></div>
+                    <div class="kpi-value">{{ budget_overruns }}</div>
+                    <div class="kpi-label">Budget Overruns</div>
+                </div>
+            </a>
+        </div>
+    </div>
+</div>
+
+<!-- CHARTS -->
+<div class="row g-3 mt-2">
+    <div class="col-md-7">
+        <div class="card hdc-card">
+            <div class="card-header hdc-card-header">
+                <i class="fas fa-chart-bar me-2"></i>Contract vs Expense by Project
+            </div>
+            <div class="card-body">
+                <canvas id="barChart" height="110"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-5">
+        <div class="card hdc-card">
+            <div class="card-header hdc-card-header">
+                <i class="fas fa-chart-pie me-2"></i>Expense Distribution
+            </div>
+            <div class="card-body d-flex justify-content-center">
+                <canvas id="pieChart" height="140" style="max-width:220px"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- QUICK ACCESS -->
+<div class="row g-2 mt-2">
+    <div class="col-12">
+        <div class="card hdc-card">
+            <div class="card-header hdc-card-header"><i class="fas fa-bolt me-2"></i>Quick Access</div>
+            <div class="card-body d-flex flex-wrap gap-2">
+                <a href="{{ url_for('hdc_add_project') }}" class="btn btn-mint"><i class="fas fa-plus me-1"></i>Add Project</a>
+                <a href="{{ url_for('hdc_workers') }}" class="btn btn-outline-secondary"><i class="fas fa-user-plus me-1"></i>Workers</a>
+                <a href="{{ url_for('hdc_attendance') }}" class="btn btn-outline-secondary"><i class="fas fa-calendar-plus me-1"></i>Timekeeping</a>
+                <a href="{{ url_for('hdc_expenses') }}" class="btn btn-outline-secondary"><i class="fas fa-receipt me-1"></i>Expenses</a>
+                <a href="{{ url_for('hdc_project_estimation') }}" class="btn btn-outline-secondary"><i class="fas fa-calculator me-1"></i>Project Estimation</a>
+                <a href="{{ url_for('hdc_reports') }}" class="btn btn-outline-secondary"><i class="fas fa-file-export me-1"></i>Reports</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- RECENT PROJECTS -->
+{% if recent_projects %}
+<div class="row g-2 mt-1">
+    <div class="col-12">
+        <div class="card hdc-card">
+            <div class="card-header hdc-card-header"><i class="fas fa-list me-2"></i>Recent Projects</div>
+            <div class="table-responsive">
+                <table class="table hdc-table mb-0">
+                    <thead><tr>
+                        <th>Code</th><th>Name</th><th>Contract</th><th>Received</th><th>Net Profit</th><th>Status</th>
+                    </tr></thead>
+                    <tbody>
+                    {% for p in recent_projects %}
+                    <tr onclick="location.href='{{ url_for('hdc_project_detail', pid=p.id) }}'" style="cursor:pointer">
+                        <td><span class="badge bg-secondary">{{ p.project_code }}</span></td>
+                        <td>{{ p.name }}</td>
+                        <td>{{ "{:,.0f}".format(p.owner_contract_value) }}</td>
+                        <td>{{ "{:,.0f}".format(p.total_received) }}</td>
+                        <td class="{% if p.net_profit >= 0 %}text-success fw-bold{% else %}text-danger fw-bold{% endif %}">
+                            {{ "{:,.0f}".format(p.net_profit) }}
+                        </td>
+                        <td><span class="badge {% if p.status in ['Active','active'] %}bg-success{% else %}bg-secondary{% endif %}">{{ p.status }}</span></td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const barCtx = document.getElementById('barChart').getContext('2d');
+const pieCtx = document.getElementById('pieChart').getContext('2d');
+const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+const gridColor = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)';
+const textColor = isDark ? '#ccc' : '#555';
+const chartProjectIds = {{ chart_project_ids | tojson }};
+
+const barGradContract = barCtx.createLinearGradient(0, 0, 0, 220);
+barGradContract.addColorStop(0, 'rgba(20, 184, 166, 0.95)');
+barGradContract.addColorStop(1, 'rgba(6, 95, 70, 0.75)');
+
+const barGradCost = barCtx.createLinearGradient(0, 0, 0, 220);
+barGradCost.addColorStop(0, 'rgba(239, 68, 68, 0.95)');
+barGradCost.addColorStop(1, 'rgba(127, 29, 29, 0.75)');
+
+new Chart(barCtx, {
+    type: 'bar',
+    data: {
+        labels: {{ chart_labels | tojson }},
+        datasets: [
+            {
+                label: 'Contract Value',
+                data: {{ chart_contracts | tojson }},
+                backgroundColor: barGradContract,
+                borderColor: 'rgba(20, 184, 166, 1)',
+                borderWidth: 1.5,
+                borderRadius: 8
+            },
+            {
+                label: 'Total Cost',
+                data: {{ chart_expenses | tojson }},
+                backgroundColor: barGradCost,
+                borderColor: 'rgba(239, 68, 68, 1)',
+                borderWidth: 1.5,
+                borderRadius: 8
+            }
+        ]
+    },
+    options: {
+        responsive: true,
+        plugins: { legend: { labels: { color: textColor } } },
+        onClick: function (evt, elements) {
+            if (!elements || !elements.length) return;
+            var idx = elements[0].index;
+            var pid = chartProjectIds[idx];
+            if (pid) window.location.href = '/hdc/projects/' + encodeURIComponent(pid);
+        },
+        scales: { x: { ticks: { color: textColor }, grid: { color: gridColor } },
+                  y: { ticks: { color: textColor }, grid: { color: gridColor } } } }
+});
+
+new Chart(pieCtx, {
+    type: 'doughnut',
+    data: {
+        labels: {{ pie_labels | tojson }},
+        datasets: [{
+            data: {{ pie_values | tojson }},
+            backgroundColor: [
+                '#00C2FF', '#FF6B6B', '#7C4DFF', '#00E5A8', '#FF9F43', '#2DCEFF',
+                '#FF3D81', '#5D9CFF', '#00B894', '#FFC857'
+            ],
+            borderColor: isDark ? 'rgba(17,24,39,0.9)' : '#ffffff',
+            borderWidth: 2
+        }]
+    },
+    options: {
+        responsive: true,
+        plugins: { legend: { position: 'bottom', labels: { color: textColor, padding: 10 } } },
+        onClick: function (evt, elements) {
+            if (!elements || !elements.length) return;
+            var idx = elements[0].index;
+            var labels = {{ pie_labels | tojson }};
+            var category = labels[idx] || '';
+            window.location.href = '/hdc/reports?section=expense&expense_category=' + encodeURIComponent(category);
+        }
+    }
+});
+</script>
+{% endblock %}

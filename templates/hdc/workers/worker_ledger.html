@@ -1,0 +1,247 @@
+{% extends "shared/base.html" %}
+{% block title %}{{ w.name }} - Ledger{% endblock %}
+{% block page_heading %}{{ w.name }} <span class="badge bg-secondary ms-2 fs-6">{{ w.worker_code }}</span>{% endblock %}
+
+{% block content %}
+<div class="row g-3 mt-1">
+    <div class="col-6 col-md-3">
+        <div class="kpi-card kpi-green">
+            <div class="kpi-label">Total Earned</div>
+            <div class="kpi-value small">{{ "{:,.0f}".format(snap.earned or 0) }}</div>
+            <div class="kpi-sub">PKR from attendance</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="kpi-card kpi-orange">
+            <div class="kpi-label">Total Advanced</div>
+            <div class="kpi-value small">{{ "{:,.0f}".format(snap.advanced or 0) }}</div>
+            <div class="kpi-sub">PKR advances given</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="kpi-card kpi-red">
+            <div class="kpi-label">Total Paid</div>
+            <div class="kpi-value small">{{ "{:,.0f}".format(snap.paid or 0) }}</div>
+            <div class="kpi-sub">PKR salary paid (tip excluded)</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="kpi-card {% if (snap.balance or 0) > 0 %}kpi-teal{% else %}kpi-profit{% endif %}">
+            <div class="kpi-label">Balance Due</div>
+            <div class="kpi-value small">{{ "{:,.0f}".format(snap.balance or 0) }}</div>
+            <div class="kpi-sub">PKR owed to worker</div>
+        </div>
+    </div>
+</div>
+
+<div class="d-flex gap-2 mt-3 mb-3 flex-wrap ledger-actions">
+    <a href="{{ url_for('hdc_worker_advance', wid=w.id) }}" class="btn btn-warning btn-sm">
+        <i class="fas fa-hand-holding-usd me-1"></i>Give Advance
+    </a>
+    <a href="{{ url_for('hdc_worker_payment', wid=w.id) }}" class="btn btn-success btn-sm">
+        <i class="fas fa-money-bill-wave me-1"></i>Record Payment
+    </a>
+    <a href="{{ url_for('hdc_worker_rate', wid=w.id) }}" class="btn btn-info btn-sm">
+        <i class="fas fa-edit me-1"></i>Update Rate
+    </a>
+    {% if filter_show_voided %}
+    <a href="{{ url_for('hdc_worker_ledger', wid=w.id, show_voided=0) }}" class="btn btn-outline-dark btn-sm">
+        <i class="fas fa-eye-slash me-1"></i>Hide Voided
+    </a>
+    {% else %}
+    <a href="{{ url_for('hdc_worker_ledger', wid=w.id, show_voided=1) }}" class="btn btn-outline-dark btn-sm">
+        <i class="fas fa-eye me-1"></i>Show Voided
+    </a>
+    {% endif %}
+    <a href="{{ url_for('hdc_workers') }}" class="btn btn-outline-secondary btn-sm ms-auto">
+        <i class="fas fa-arrow-left me-1"></i>Back to Workers
+    </a>
+</div>
+
+<div class="row g-3">
+    <div class="col-md-3">
+        <div class="card hdc-card">
+            <div class="card-header hdc-card-header"><i class="fas fa-user me-2"></i>Worker Info</div>
+            <div class="card-body">
+                <div class="hdc-info-list small">
+                    <div class="hdc-info-item">
+                        <span class="hdc-info-label">Code</span>
+                        <span class="hdc-info-value">{{ w.worker_code }}</span>
+                    </div>
+                    <div class="hdc-info-item">
+                        <span class="hdc-info-label">Role</span>
+                        <span class="hdc-info-value">{{ w.role_type or '-' }}</span>
+                    </div>
+                    <div class="hdc-info-item">
+                        <span class="hdc-info-label">Daily Wage</span>
+                        <span class="hdc-info-value fw-bold">{{ "{:,.0f}".format(w.base_daily_wage) }} PKR</span>
+                    </div>
+                    <div class="hdc-info-item">
+                        <span class="hdc-info-label">Hourly</span>
+                        <span class="hdc-info-value">{{ "{:,.1f}".format(w.hourly_wage) }} PKR</span>
+                    </div>
+                    <div class="hdc-info-item">
+                        <span class="hdc-info-label">Status</span>
+                        <span class="hdc-info-value">
+                            <span class="badge {% if w.active_status %}bg-success{% else %}bg-secondary{% endif %}">
+                                {{ "Active" if w.active_status else "Inactive" }}
+                            </span>
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-9">
+        <div class="card hdc-card">
+            <div class="card-header hdc-card-header d-flex justify-content-between flex-wrap gap-2">
+                <span><i class="fas fa-book me-2"></i>Complete Ledger</span>
+                <span class="text-muted small">
+                    Chronological: oldest on top — running balance is global across pages.
+                    {% if pg_total_items %}
+                        <span class="ms-2">{{ pg_total_items }} total entr{{ 'y' if pg_total_items == 1 else 'ies' }}</span>
+                    {% endif %}
+                </span>
+            </div>
+            <div class="table-responsive">
+                <table class="table hdc-table table-sm mb-0 ledger-grid-center">
+                    <thead><tr>
+                        <th>Date</th><th>Type</th><th>Project</th>
+                        <th class="text-success">Earned (+)</th>
+                        <th class="text-warning">Advanced (-)</th>
+                        <th class="text-danger">Paid (-)</th>
+                        <th class="text-info">Running Balance</th>
+                        <th>Notes / Actions</th>
+                    </tr></thead>
+                    <tbody>
+                    {% for entry in ledger_entries %}
+                    <tr class="{% if entry.is_void %}table-secondary{% elif entry.entry_type == 'work' %}table-success-light{% elif entry.entry_type == 'advance' %}table-warning-light{% elif entry.entry_type == 'payment' %}table-danger-light{% elif entry.entry_type == 'tip' %}table-info{% elif entry.entry_type == 'settlement' %}table-primary{% endif %}">
+                        <td>{{ fmt_pkt(entry.activity_at or entry.created_at) }}</td>
+                        <td>
+                            <span class="badge {% if entry.is_void %}bg-secondary{% elif entry.entry_type == 'work' %}bg-success{% elif entry.entry_type == 'advance' %}bg-warning text-dark{% elif entry.entry_type == 'payment' %}bg-danger{% elif entry.entry_type == 'tip' %}bg-info text-dark{% elif entry.entry_type == 'settlement' %}bg-primary{% else %}bg-secondary{% endif %}">
+                                {% if entry.is_void %}Voided{% else %}{{ entry.entry_type | title }}{% endif %}
+                            </span>
+                        </td>
+                        <td class="text-muted small">{{ entry.project.name if entry.project else '-' }}</td>
+                        <td class="text-success">{% if entry.entry_type == 'work' and not entry.is_void %}{{ "{:,.0f}".format(entry.amount) }}{% endif %}</td>
+                        <td class="text-warning">{% if entry.entry_type == 'advance' and not entry.is_void %}{{ "{:,.0f}".format(entry.amount) }}{% endif %}</td>
+                        <td class="text-danger">{% if entry.entry_type == 'payment' and not entry.is_void %}{{ "{:,.0f}".format(entry.amount) }}{% elif entry.entry_type == 'tip' and not entry.is_void %}<span class="text-info">{{ "{:,.0f}".format(entry.amount) }}</span>{% elif entry.entry_type == 'settlement' and not entry.is_void %}<span class="text-primary">{{ "{:,.0f}".format(entry.amount) }}</span>{% endif %}</td>
+                        {% set rb = running_balance_map.get(entry.id, 0) %}
+                        <td class="fw-bold {% if rb > 0 %}text-info{% elif rb < 0 %}text-danger{% else %}text-muted{% endif %}">{{ "{:,.0f}".format(rb) }}</td>
+                        <td class="text-muted small">
+                            {{ entry.notes or '-' }}
+                            {% if entry.is_void %}
+                            <div><small class="text-danger">Void: {{ entry.void_reason or 'No reason' }}</small></div>
+                            {% if entry.entry_type in ['advance', 'payment'] %}
+                            <div class="mt-1">
+                                <form method="POST" action="{{ url_for('hdc_worker_ledger_restore', wid=w.id, lid=entry.id) }}" class="d-inline" onsubmit="return confirm('Restore this ledger entry?');">
+                                    <button type="submit" class="btn btn-xs btn-outline-success btn-sm">Restore</button>
+                                </form>
+                            </div>
+                            {% endif %}
+                            {% endif %}
+                            {% if not entry.is_void and entry.entry_type != 'work' %}
+                            <div class="mt-1 d-flex gap-1">
+                                <a href="{{ url_for('hdc_worker_ledger_edit', wid=w.id, lid=entry.id) }}" class="btn btn-xs btn-outline-primary btn-sm">Edit</a>
+                                <form method="POST" action="{{ url_for('hdc_worker_ledger_void', wid=w.id, lid=entry.id) }}" class="d-inline" onsubmit="return confirm('Void this ledger entry?');">
+                                    <input type="hidden" name="void_reason" value="Voided from worker ledger">
+                                    <button type="submit" class="btn btn-xs btn-outline-danger btn-sm">Void</button>
+                                </form>
+                            </div>
+                            {% endif %}
+                            {% if not entry.is_void and entry.entry_type in ['payment', 'tip', 'settlement', 'advance'] %}
+                            <div class="mt-1">
+                                <a href="{{ url_for('hdc_worker_payment_receipt', wid=w.id, lid=entry.id) }}" class="btn btn-xs btn-outline-secondary btn-sm" target="_blank"><i class="fas fa-receipt me-1"></i>Receipt</a>
+                            </div>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="8" class="text-center text-muted py-4 hdc-empty-row">No ledger entries yet.</td></tr>
+                    {% endfor %}
+                    </tbody>
+                    <tfoot class="table-secondary fw-bold">
+                        <tr>
+                            <td colspan="3">Balance Summary (all pages)</td>
+                            <td class="text-success">{{ "{:,.0f}".format(snap.earned or 0) }}</td>
+                            <td class="text-warning">{{ "{:,.0f}".format(snap.advanced or 0) }}</td>
+                            <td class="text-danger">{{ "{:,.0f}".format(snap.salary_paid or 0) }} <small class="text-info">(+{{ "{:,.0f}".format(snap.tip_paid or 0) }} tip)</small> <small class="text-primary">(+{{ "{:,.0f}".format(snap.settled or 0) }} settled)</small></td>
+                            <td class="text-info">{{ "{:,.0f}".format(snap.balance or 0) }}</td>
+                            <td class="text-info fw-bold">Balance: {{ "{:,.0f}".format(snap.balance or 0) }} PKR</td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+            {% include 'shared/_pagination.html' with context %}
+        </div>
+
+        <div class="card hdc-card mt-3">
+            <div class="card-header hdc-card-header"><i class="fas fa-calendar-check me-2"></i>Attendance Records</div>
+            <div class="table-responsive">
+                <table class="table hdc-table table-sm mb-0">
+                    <thead><tr><th>Date</th><th>Project</th><th>Stage</th><th>Hours</th><th>OT</th><th>Wage</th></tr></thead>
+                    <tbody>
+                    {% for a in time_entries %}
+                    <tr>
+                        <td>{{ fmt_pkt(a.check_in) }}</td>
+                        <td class="text-muted small">{{ a.project.name }}</td>
+                        <td class="text-muted small">{{ a.stage.name if a.stage_id else '-' }}</td>
+                        <td>{{ "{:,.2f}".format(a.hours or 0) }}h</td>
+                        <td class="{% if a.overtime > 0 %}text-warning{% endif %}">{{ "{:,.2f}".format(a.overtime or 0) }}h</td>
+                        <td class="fw-bold text-success">{{ "{:,.0f}".format(a.wage_calculated or 0) }}</td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="6" class="text-center text-muted py-3 hdc-empty-row">No attendance records</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="card hdc-card mt-3">
+            <div class="card-header hdc-card-header"><i class="fas fa-gift me-2"></i>Tip Trace (Worker Tip Records)</div>
+            <div class="table-responsive">
+                <table class="table hdc-table table-sm mb-0">
+                    <thead><tr><th>Date</th><th>Project</th><th>Stage</th><th>Amount</th><th>Remarks</th></tr></thead>
+                    <tbody>
+                    {% for e in tip_rows %}
+                    <tr>
+                        <td>{{ fmt_pkt(e.activity_at or e.created_at) }}</td>
+                        <td class="text-muted small">{{ e.project.name if e.project else '-' }}</td>
+                        <td class="text-muted small">{{ e.stage.name if e.stage else '-' }}</td>
+                        <td class="fw-bold text-danger">{{ "{:,.0f}".format(e.amount or 0) }}</td>
+                        <td class="text-muted small">{{ e.remarks or '-' }}</td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="5" class="text-center text-muted py-3 hdc-empty-row">No tip expense trace for this worker.</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="card hdc-card mt-3">
+            <div class="card-header hdc-card-header"><i class="fas fa-balance-scale me-2"></i>Settlement Trace</div>
+            <div class="table-responsive">
+                <table class="table hdc-table table-sm mb-0">
+                    <thead><tr><th>Date</th><th>Project</th><th>Stage</th><th>Amount</th><th>Remarks</th></tr></thead>
+                    <tbody>
+                    {% for e in settlement_rows %}
+                    <tr>
+                        <td>{{ fmt_pkt(e.activity_at or e.created_at) }}</td>
+                        <td class="text-muted small">{{ e.project.name if e.project else '-' }}</td>
+                        <td class="text-muted small">{{ e.stage.name if e.stage else '-' }}</td>
+                        <td class="fw-bold text-primary">{{ "{:,.0f}".format(e.amount or 0) }}</td>
+                        <td class="text-muted small">{{ e.notes or '-' }}</td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="5" class="text-center text-muted py-3 hdc-empty-row">No settlement trace for this worker.</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

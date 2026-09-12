@@ -1,0 +1,105 @@
+{% extends "shared/base.html" %}
+{% block title %}Salary Cards{% endblock %}
+{% block page_heading %}Salary Cards{% endblock %}
+
+{% block content %}
+<div class="row g-3 mt-1">
+    <div class="col-md-4">
+        <div class="card hdc-card">
+            <div class="card-header hdc-card-header"><i class="fas fa-list me-2"></i>Select Payroll Run</div>
+            <div class="table-responsive">
+                <table class="table hdc-table table-sm mb-0">
+                    <thead><tr><th>Period</th><th>Total</th><th></th></tr></thead>
+                    <tbody>
+                    {% for r in runs %}
+                    <tr>
+                        <td>{{ r.date_from }} to {{ r.date_to }}</td>
+                        <td>{{ "{:,.0f}".format(r.total_amount or 0) }}</td>
+                        <td class="text-end text-nowrap">
+                            <a href="{{ url_for('hdc_payroll_salary_cards_page', run_id=r.id) }}" class="btn btn-sm btn-outline-secondary">Open</a>
+                            <form method="POST" action="{{ url_for('hdc_payroll_delete', run_id=r.id) }}" class="d-inline" onsubmit="return confirm('Delete payroll run #{{ r.id }}? This will also remove linked payroll payment entries.');">
+                                <button type="submit" class="btn btn-sm btn-outline-danger ms-1">Delete</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="3" class="text-center text-muted py-3">No runs yet.</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-8">
+        <div class="card hdc-card">
+            <div class="card-header hdc-card-header"><i class="fas fa-id-card me-2"></i>Salary Card Generation</div>
+            <div class="card-body">
+                {% if selected_run %}
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <div>
+                        <strong>Run #{{ selected_run.id }}</strong><br>
+                        <small class="text-muted">{{ selected_run.date_from }} to {{ selected_run.date_to }}</small>
+                    </div>
+                    <a href="{{ url_for('hdc_payroll_salary_cards', run_id=selected_run.id, autoprint=1) }}" target="_blank" class="btn btn-danger btn-sm">
+                        <i class="fas fa-file-pdf me-1"></i>All Workers PDF
+                    </a>
+                </div>
+                <form method="GET" class="row g-2 align-items-end mb-3">
+                    <input type="hidden" name="run_id" value="{{ selected_run.id }}">
+                    <div class="col-md-8">
+                        <label class="form-label text-muted small">Worker (Searchable)</label>
+                        <input type="text" id="salaryWorkerFilter" class="form-control form-control-sm mb-1" placeholder="Type worker name..." autocomplete="off">
+                        <select name="worker_id" id="salaryWorkerSelect" class="form-select form-select-sm">
+                            <option value="">All Workers</option>
+                            {% for w in workers %}
+                            <option value="{{ w.id }}" {% if filter_worker_id == w.id %}selected{% endif %}>{{ w.name }} ({{ w.worker_code }})</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-4 d-flex gap-2">
+                        <button type="submit" class="btn btn-mint btn-sm w-100">Apply</button>
+                        {% if filter_worker_id %}
+                        <a href="{{ url_for('hdc_payroll_salary_cards_page', run_id=selected_run.id) }}" class="btn btn-outline-secondary btn-sm w-100">Clear</a>
+                        {% endif %}
+                    </div>
+                </form>
+
+                <div class="table-responsive">
+                    <table class="table hdc-table table-sm mb-0">
+                        <thead><tr><th>Worker</th><th>Net Pay</th><th></th></tr></thead>
+                        <tbody>
+                        {% for row in salary_rows %}
+                        <tr>
+                            <td>{{ row.worker.name if row.worker else '' }}</td>
+                            <td class="fw-bold">{{ "{:,.0f}".format(row.net_pay or 0) }}</td>
+                            <td class="text-end">
+                                {% if row.worker %}
+                                <a href="{{ url_for('hdc_payroll_salary_cards', run_id=selected_run.id, worker_id=row.worker.id, autoprint=1) }}" target="_blank" class="btn btn-sm btn-outline-primary">
+                                    <i class="fas fa-id-card me-1"></i>Worker Card
+                                </a>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="3" class="text-center text-muted py-3">No workers found.</td></tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="text-muted">Select a payroll run to generate salary cards.</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+if (window.HDCComboList) {
+    window.HDCComboList.attach('salaryWorkerFilter', 'salaryWorkerSelect', { includeEmpty: true });
+}
+</script>
+{% endblock %}

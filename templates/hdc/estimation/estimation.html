@@ -1,0 +1,226 @@
+{% extends "shared/base.html" %}
+{% block title %}Estimation Engine{% endblock %}
+{% block page_heading %}Estimation Engine{% endblock %}
+
+{% block content %}
+<ul class="nav nav-tabs mt-2 mb-3" id="estTab">
+    <li class="nav-item"><a class="nav-link {% if tab=='concrete' %}active{% endif %}" href="?tab=concrete">
+        <i class="fas fa-cube me-1"></i>Concrete</a></li>
+    <li class="nav-item"><a class="nav-link {% if tab=='steel' %}active{% endif %}" href="?tab=steel">
+        <i class="fas fa-cog me-1"></i>Steel</a></li>
+    <li class="nav-item"><a class="nav-link {% if tab=='custom' %}active{% endif %}" href="?tab=custom">
+        <i class="fas fa-flask me-1"></i>Custom Formula</a></li>
+    <li class="nav-item ms-auto"><a class="nav-link" href="{{ url_for('hdc_formulas') }}">
+        <i class="fas fa-edit me-1"></i>Manage Formulas</a></li>
+</ul>
+
+<div class="row g-3">
+    <!-- CONCRETE CALCULATOR -->
+    {% if tab == 'concrete' %}
+    <div class="col-md-5">
+        <div class="card hdc-card">
+            <div class="card-header hdc-card-header"><i class="fas fa-cube me-2"></i>Concrete Volume Calculator</div>
+            <div class="card-body">
+                <form method="POST">
+                    <input type="hidden" name="calc_type" value="concrete">
+                    <div class="mb-3">
+                        <label class="form-label">Member Type</label>
+                        <select name="member_type" class="form-select">
+                            {% for m in member_types %}<option>{{ m }}</option>{% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label">Dimension Unit</label>
+                        <select name="dim_unit" class="form-select">
+                            <option value="mm" {% if dim_unit=='mm' %}selected{% endif %}>mm</option>
+                            <option value="cm" {% if dim_unit=='cm' %}selected{% endif %}>cm</option>
+                            <option value="m" {% if dim_unit=='m' %}selected{% endif %}>meter</option>
+                            <option value="ft" {% if dim_unit=='ft' %}selected{% endif %}>foot</option>
+                            <option value="in" {% if dim_unit=='in' %}selected{% endif %}>inch</option>
+                        </select>
+                    </div>
+                    <div class="row g-2">
+                        <div class="col-4"><label class="form-label">Length</label>
+                            <input type="number" step="0.001" name="length" class="form-control" required></div>
+                        <div class="col-4"><label class="form-label">Width</label>
+                            <input type="number" step="0.001" name="width" class="form-control" required></div>
+                        <div class="col-4"><label class="form-label">Height</label>
+                            <input type="number" step="0.001" name="height" class="form-control" required></div>
+                    </div>
+                    <div class="row g-2 mt-2">
+                        <div class="col-4">
+                            <label class="form-label">Dry Factor</label>
+                            <input type="number" step="0.01" name="dry_factor" class="form-control" value="{{ dry_factor }}">
+                        </div>
+                        <div class="col-4">
+                            <label class="form-label">Bag Volume (CFT)</label>
+                            <input type="number" step="0.01" name="bag_cft" class="form-control" value="{{ bag_cft }}">
+                        </div>
+                        <div class="col-4">
+                            <label class="form-label">W/C Ratio</label>
+                            <input type="number" step="0.01" name="wc_ratio" class="form-control" value="{{ wc_ratio }}">
+                        </div>
+                    </div>
+                    <div class="mb-3 mt-2">
+                        <label class="form-label">Concrete Grade</label>
+                        <select name="grade" class="form-select">
+                            {% for g in grades %}<option>{{ g }}</option>{% endfor %}
+                        </select>
+                    </div>
+                    <button type="submit" class="btn btn-mint w-100"><i class="fas fa-calculator me-1"></i>Calculate</button>
+                </form>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- STEEL CALCULATOR -->
+    {% if tab == 'steel' %}
+    <div class="col-md-5">
+        <div class="card hdc-card">
+            <div class="card-header hdc-card-header"><i class="fas fa-cog me-2"></i>Steel Weight Calculator</div>
+            <div class="card-body">
+                <form method="POST">
+                    <input type="hidden" name="calc_type" value="steel">
+                    <div class="mb-3">
+                        <label class="form-label">Bar Diameter</label>
+                        <input type="number" step="1" name="diameter" class="form-control" placeholder="e.g. 12" required>
+                        <select name="diameter_unit" class="form-select mt-2">
+                            <option value="mm" {% if diameter_unit=='mm' %}selected{% endif %}>mm</option>
+                            <option value="cm" {% if diameter_unit=='cm' %}selected{% endif %}>cm</option>
+                            <option value="m" {% if diameter_unit=='m' %}selected{% endif %}>meter</option>
+                            <option value="ft" {% if diameter_unit=='ft' %}selected{% endif %}>foot</option>
+                            <option value="in" {% if diameter_unit=='in' %}selected{% endif %}>inch</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Total Length</label>
+                        <input type="number" step="0.01" name="steel_length" class="form-control" required>
+                        <select name="steel_length_unit" class="form-select mt-2">
+                            <option value="mm" {% if steel_length_unit=='mm' %}selected{% endif %}>mm</option>
+                            <option value="cm" {% if steel_length_unit=='cm' %}selected{% endif %}>cm</option>
+                            <option value="m" {% if steel_length_unit=='m' %}selected{% endif %}>meter</option>
+                            <option value="ft" {% if steel_length_unit=='ft' %}selected{% endif %}>foot</option>
+                            <option value="in" {% if steel_length_unit=='in' %}selected{% endif %}>inch</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Rate per KG (PKR) <span class="text-muted small">— optional</span></label>
+                        <input type="number" step="0.01" name="rate_per_kg" class="form-control" placeholder="0.00">
+                    </div>
+                    <div class="alert alert-info small py-2">
+                        Formula: Weight (kg) = (D² / 162) × Length (m)
+                    </div>
+                    <button type="submit" class="btn btn-mint w-100"><i class="fas fa-calculator me-1"></i>Calculate</button>
+                </form>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- CUSTOM FORMULA -->
+    {% if tab == 'custom' %}
+    <div class="col-md-5">
+        <div class="card hdc-card">
+            <div class="card-header hdc-card-header"><i class="fas fa-flask me-2"></i>Custom Formula Calculator</div>
+            <div class="card-body">
+                {% if formulas %}
+                <form method="POST" id="customForm">
+                    <input type="hidden" name="calc_type" value="custom">
+                    <div class="mb-3">
+                        <label class="form-label">Select Formula</label>
+                        <select name="formula_id" class="form-select" id="formulaSelect" onchange="loadVars()">
+                            <option value="">-- Select Formula --</option>
+                            {% for f in formulas %}
+                            <option value="{{ f.id }}">{{ f.name }} ({{ f.category }})</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div id="formulaExpression" class="alert alert-info small py-2 d-none"></div>
+                    <div id="varInputs"></div>
+                    <button type="submit" class="btn btn-mint w-100 d-none" id="calcBtn">
+                        <i class="fas fa-calculator me-1"></i>Calculate
+                    </button>
+                </form>
+                {% else %}
+                <div class="text-center text-muted py-4">
+                    <i class="fas fa-flask fa-2x mb-2"></i><br>
+                    No custom formulas yet.<br>
+                    <a href="{{ url_for('hdc_formulas') }}">Create one</a>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- RESULT -->
+    {% if result %}
+    <div class="col-md-5">
+        <div class="card hdc-card border-success border-2">
+            <div class="card-header hdc-card-header text-success">
+                <i class="fas fa-check-circle me-2"></i>Result — {{ result.type }}
+            </div>
+            <div class="card-body">
+                {% if result.type == 'Concrete' %}
+                <table class="table table-sm mb-0">
+                    <tr><td class="text-muted">Member Type</td><td class="fw-bold">{{ result.member }}</td></tr>
+                    <tr><td class="text-muted">Concrete Grade</td><td class="fw-bold">{{ result.grade }}</td></tr>
+                    <tr class="table-light"><td class="fw-bold">Wet Volume</td><td class="fw-bold text-primary">{{ result.volume_m3 }} m? <span class="text-muted small">({{ result.volume_cft }} cft)</span></td></tr>
+                    <tr><td class="text-muted">Dry Volume</td><td class="fw-bold">{{ result.dry_cft }} cft <span class="text-muted small">(x{{ result.dry_factor }})</span></td></tr>
+                    <tr><td class="text-muted">Cement Required</td><td class="fw-bold">{{ result.cement_bags }} Bags</td></tr>
+                    <tr><td class="text-muted">Sand Required</td><td class="fw-bold">{{ result.sand_cft }} cft</td></tr>
+                    <tr><td class="text-muted">Aggregate Required</td><td class="fw-bold">{{ result.aggregate_cft }} cft</td></tr>
+                    {% if result.water_liters is not none %}
+                    <tr><td class="text-muted">Water</td><td class="fw-bold">{{ result.water_liters }} Liters</td></tr>
+                    {% endif %}
+                </table>
+                {% elif result.type == 'Steel' %}
+                <table class="table table-sm mb-0">
+                    <tr><td class="text-muted">Diameter</td><td class="fw-bold">{{ result.diameter }} mm</td></tr>
+                    <tr><td class="text-muted">Length</td><td class="fw-bold">{{ result.length }} m</td></tr>
+                    <tr class="table-light"><td class="fw-bold">Total Weight</td><td class="fw-bold text-primary">{{ result.weight_kg }} kg</td></tr>
+                    {% if result.cost %}<tr><td class="text-muted">Total Cost</td><td class="fw-bold text-success">{{ "{:,.0f}".format(result.cost) }} PKR</td></tr>{% endif %}
+                </table>
+                {% elif result.type == 'Custom' %}
+                <table class="table table-sm mb-0">
+                    <tr><td class="text-muted">Formula</td><td class="fw-bold">{{ result.formula_name }}</td></tr>
+                    <tr><td class="text-muted">Expression</td><td><code>{{ result.expression }}</code></td></tr>
+                    {% for k, v in result.variables.items() %}<tr><td class="text-muted">{{ k }}</td><td>{{ v }}</td></tr>{% endfor %}
+                    <tr class="table-light"><td class="fw-bold">Result</td><td class="fw-bold text-primary fs-5">{{ result.result }}</td></tr>
+                </table>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function loadVars() {
+    var fid = document.getElementById('formulaSelect').value;
+    if (!fid) {
+        document.getElementById('varInputs').innerHTML = '';
+        document.getElementById('calcBtn').classList.add('d-none');
+        document.getElementById('formulaExpression').classList.add('d-none');
+        return;
+    }
+    fetch('/hdc/api/formula_vars/' + fid)
+        .then(r => r.json())
+        .then(data => {
+            var exprDiv = document.getElementById('formulaExpression');
+            exprDiv.textContent = 'Expression: ' + data.expression;
+            exprDiv.classList.remove('d-none');
+            var html = '';
+            data.variables.forEach(function(v) {
+                html += '<div class="mb-3"><label class="form-label">' + v + '</label>'
+                     + '<input type="number" step="any" name="var_' + v + '" class="form-control" required></div>';
+            });
+            document.getElementById('varInputs').innerHTML = html;
+            document.getElementById('calcBtn').classList.remove('d-none');
+        });
+}
+</script>
+{% endblock %}

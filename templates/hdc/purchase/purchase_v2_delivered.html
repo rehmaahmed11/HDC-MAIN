@@ -1,0 +1,646 @@
+{% extends "shared/base.html" %}
+{% block title %}Deliveries{% endblock %}
+{% block page_heading %}Material Deliveries{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap gap-2 align-items-center mt-1 mb-3">
+    <a href="{{ url_for('hdc_purchase_v2_page') }}" class="btn btn-sm btn-outline-secondary">
+        <i class="fas fa-arrow-left me-1"></i>Back
+    </a>
+    <span class="badge bg-success">{{ rows|length }} records</span>
+    <span class="badge bg-info text-dark">Total Qty: {{ "{:,.2f}".format(total_qty or 0) }}</span>
+</div>
+
+<!-- Record Delivery Card -->
+<div class="card hdc-card mb-4">
+    <div class="card-header hdc-card-header">
+        <i class="fas fa-truck-fast me-2"></i>Record Delivery
+    </div>
+    <div class="card-body">
+        <form method="POST" id="deliveryForm">
+
+            <!-- Step 1: Material + PO -->
+            <div class="row g-3 mb-3">
+                <div class="col-md-4">
+                    <label class="form-label fw-semibold">
+                        <span class="badge bg-secondary me-1">1</span>
+                        Material <span class="text-danger">*</span>
+                    </label>
+                    <select id="deliveryMaterialFilter" class="form-select" onchange="filterPOsByMaterial()">
+                        <option value="">— Select a material —</option>
+                        {% for m in all_materials %}
+                        <option value="{{ m.id }}"
+                            {% if m.id not in material_ids_with_stock %}disabled class="text-muted"{% endif %}>
+                            {{ m.name }} ({{ m.unit or '' }})
+                            {% if m.id not in material_ids_with_stock %} – no stock{% endif %}
+                        </option>
+                        {% endfor %}
+                    </select>
+                    <div class="form-text text-muted" id="deliveryMaterialHint">Select a material to see available purchase orders</div>
+                </div>
+
+                <div class="col-md-5">
+                    <label class="form-label fw-semibold">
+                        <span class="badge bg-secondary me-1">2</span>
+                        Purchase Order <span class="text-danger">*</span>
+                        <span class="text-muted small fw-normal" id="deliveryPOCountBadge"></span>
+                    </label>
+                    <select name="purchase_id" id="deliveryPurchaseSelect" class="form-select" required
+                            onchange="refreshRemaining()">
+                        <option value="">— Choose material first —</option>
+                        {% for p in purchase_rows %}
+                        <option value="{{ p.id }}"
+                                data-material-id="{{ p.material_id }}"
+                                data-remaining="{{ p.remaining_qty }}"
+                                data-unit="{{ p.unit }}"
+                                data-supplier="{{ p.supplier_name }}">
+                            PO #{{ p.id }} | {{ p.supplier_name }} | Rem: {{ "{:,.2f}".format(p.remaining_qty) }} {{ p.unit }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                    <div class="form-text" id="deliveryRemainingText">—</div>
+                </div>
+
+                <div class="col-md-3">
+                    <label class="form-label fw-semibold">
+                        <span class="badge bg-secondary me-1">3</span>
+                        Quantity <span class="text-danger">*</span>
+                    </label>
+                    <div class="input-group">
+                        <input type="number" min="0.01" step="0.01" name="quantity"
+                               id="deliveryQtyInput" class="form-control" required
+                               placeholder="0.00" oninput="validateQty()">
+                        <span class="input-group-text" id="deliveryUnitLabel">—</span>
+                    </div>
+                    <div class="form-text text-danger d-none" id="deliveryQtyError">Exceeds remaining stock.</div>
+                </div>
+            </div>
+
+            <!-- Step 2: Project + Stage -->
+            <div class="row g-3 mb-3">
+                <div class="col-md-4">
+                    <label class="form-label fw-semibold">
+                        <span class="badge bg-secondary me-1">4</span>
+                        Project <span class="text-danger">*</span>
+                    </label>
+                    <select name="project_id" class="form-select" id="deliveryProjectSelect" required
+                            onchange="filterStages()">
+                        <option value="">Select project</option>
+                        {% for p in projects %}
+                        <option value="{{ p.id }}">{{ p.name }}{% if p.client %} &mdash; {{ p.client }}{% endif %}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="col-md-4">
+                    <label class="form-label fw-semibold">
+                        <span class="badge bg-secondary me-1">5</span>
+                        Stage <span class="text-muted fw-normal small">(optional)</span>
+                    </label>
+                    <select name="stage_id" class="form-select" id="deliveryStageSelect">
+                        <option value="">No specific stage</option>
+                        {% for s in stages %}
+                        <option value="{{ s.id }}" data-project="{{ s.project_id }}">
+                            {{ s.project.name if s.project else '' }} &rarr; {{ s.name }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="col-md-4">
+                    <label class="form-label fw-semibold">
+                        <span class="badge bg-secondary me-1">6</span>
+                        Date
+                    </label>
+                    <input type="date" name="date" class="form-control" value="{{ today }}">
+                </div>
+            </div>
+
+            <!-- Step 3: Extra details -->
+            <div class="row g-3 align-items-end">
+                <div class="col-md-4">
+                    <label class="form-label fw-semibold">Delivery Person</label>
+                    <input name="delivery_person" class="form-control" placeholder="Driver / transporter">
+                </div>
+                <div class="col-md-5">
+                    <label class="form-label fw-semibold">Notes</label>
+                    <input name="notes" class="form-control" placeholder="Optional notes">
+                </div>
+                <div class="col-md-3">
+                    <button class="btn btn-mint w-100" type="submit" id="deliverySubmitBtn">
+                        <i class="fas fa-truck me-1"></i>Record Delivery
+                    </button>
+                </div>
+            </div>
+
+        </form>
+    </div>
+</div>
+
+<!-- Stock Shift Card -->
+<div class="card hdc-card mb-4">
+    <div class="card-header hdc-card-header">
+        <i class="fas fa-right-left me-2"></i>Shift Stock Between Projects / Stages
+    </div>
+    <div class="card-body">
+        <form method="POST" action="{{ url_for('hdc_purchase_v2_delivery_transfer') }}" id="stockShiftForm" class="row g-3">
+            <div class="col-md-3">
+                <label class="form-label fw-semibold">Material <span class="text-danger">*</span></label>
+                <select name="material_id" id="shiftMaterial" class="form-select" required disabled>
+                    <option value="">Select source project first</option>
+                </select>
+                <div class="form-text" id="shiftMaterialHint">Materials with available stock in source scope will appear here.</div>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label fw-semibold">From Project <span class="text-danger">*</span></label>
+                <select name="from_project_id" id="shiftFromProject" class="form-select" required>
+                    <option value="">Select source project</option>
+                    {% for p in projects %}
+                    <option value="{{ p.id }}">{{ p.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label fw-semibold">From Stage</label>
+                <select name="from_stage_id" id="shiftFromStage" class="form-select">
+                    <option value="">No stage</option>
+                    {% for s in stages %}
+                    <option value="{{ s.id }}" data-project="{{ s.project_id }}">{{ s.project.name if s.project else '' }} -> {{ s.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label fw-semibold">Available at Source</label>
+                <input type="text" id="shiftAvailable" class="form-control bg-light" value="-" readonly tabindex="-1">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label fw-semibold">To Project <span class="text-danger">*</span></label>
+                <select name="to_project_id" id="shiftToProject" class="form-select" required>
+                    <option value="">Select destination project</option>
+                    {% for p in projects %}
+                    <option value="{{ p.id }}">{{ p.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label fw-semibold">To Stage</label>
+                <select name="to_stage_id" id="shiftToStage" class="form-select">
+                    <option value="">No stage</option>
+                    {% for s in stages %}
+                    <option value="{{ s.id }}" data-project="{{ s.project_id }}">{{ s.project.name if s.project else '' }} -> {{ s.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label fw-semibold">Qty <span class="text-danger">*</span></label>
+                <input type="number" min="0.01" step="0.01" name="quantity" id="shiftQty" class="form-control" required>
+                <div class="form-text" id="shiftAfterText">Remaining after shift: -</div>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label fw-semibold">Date</label>
+                <input type="date" name="date" class="form-control" value="{{ today }}">
+            </div>
+            <div class="col-md-2 d-flex align-items-end">
+                <button type="submit" class="btn btn-outline-primary w-100">
+                    <i class="fas fa-right-left me-1"></i>Shift
+                </button>
+            </div>
+            <div class="col-md-12">
+                <label class="form-label fw-semibold">Notes</label>
+                <input type="text" name="notes" class="form-control" placeholder="Reason / reference">
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Delivery Records Table -->
+<div class="card hdc-card">
+    <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+        <span><i class="fas fa-dolly me-2"></i>Delivery Records</span>
+        <small class="text-muted">Showing {{ rows|length }} active records</small>
+    </div>
+    <div class="table-responsive">
+        <table class="table hdc-table table-sm align-middle mb-0">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Date</th>
+                    <th>Material</th>
+                    <th>Supplier</th>
+                    <th>Purchase Order</th>
+                    <th>Project</th>
+                    <th>Stage</th>
+                    <th class="text-end">Qty</th>
+                    <th>Delivery Person</th>
+                    <th>Notes</th>
+                    <th style="width:90px">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in rows %}
+                <tr>
+                    <td class="text-muted small">#{{ r.id }}</td>
+                    <td class="small">{{ r.date.strftime('%Y-%m-%d') if r.date else (r.created_at.strftime('%Y-%m-%d') if r.created_at else '-') }}</td>
+                    <td class="fw-semibold">
+                        {{ r.material.name if r.material else '-' }}
+                        {% if r.material %}<small class="text-muted">({{ r.material.unit or '' }})</small>{% endif %}
+                    </td>
+                    <td class="small text-muted">
+                        {{ r.purchase.supplier.name if (r.purchase and r.purchase.supplier) else '-' }}
+                    </td>
+                    <td class="small">
+                        <span class="fw-semibold">
+                            {% if r.purchase_id %}PO #{{ r.purchase_id }}{% else %}-{% endif %}
+                        </span>
+                        {% if r.purchase and r.purchase.challan_no %}
+                        <div class="text-muted">Bill/Challan: {{ r.purchase.challan_no }}</div>
+                        {% endif %}
+                    </td>
+                    <td>{{ r.project.name if r.project else '-' }}</td>
+                    <td class="small text-muted">{{ r.stage.name if r.stage else '-' }}</td>
+                    <td class="text-end fw-semibold {% if (r.quantity or 0) < 0 %}text-danger{% elif (r.notes or '')[:12] == 'Transfer in ' %}text-primary{% endif %}">
+                        {{ "{:,.2f}".format(r.quantity or 0) }}
+                    </td>
+                    <td class="small text-muted">{{ r.delivery_person or '-' }}</td>
+                    <td class="small text-muted">{{ r.notes or '' }}</td>
+                    <td>
+                        {% if (r.quantity or 0) > 0 %}
+                        <button class="btn btn-sm btn-outline-primary me-1" title="Edit"
+                            onclick="openDelEditModal({{ r.id }},
+                                '{{ r.date.strftime('%Y-%m-%d') if r.date else (r.created_at.strftime('%Y-%m-%d') if r.created_at else '') }}',
+                                '{{ r.quantity }}',
+                                '{{ (r.delivery_person or '')|replace("'","") }}',
+                                '{{ (r.notes or '')|replace("'","") }}')">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                        {% endif %}
+                        <button class="btn btn-sm btn-outline-danger" title="Void"
+                            onclick="openDelVoidModal({{ r.id }})">
+                            <i class="fas fa-ban"></i>
+                        </button>
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="11" class="text-center text-muted py-4">
+                    <i class="fas fa-inbox fa-2x mb-2 d-block opacity-30"></i>No deliveries recorded yet.
+                </td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Edit Delivery Modal -->
+<div class="modal fade" id="delEditModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header hdc-card-header">
+                <h5 class="modal-title"><i class="fas fa-edit me-2"></i>Edit Delivery</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" id="delEditForm">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Date</label>
+                        <input type="date" name="date" id="delEditDate" class="form-control">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Quantity <span class="text-danger">*</span></label>
+                        <input type="number" step="0.01" min="0.01" name="quantity" id="delEditQty" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Delivery Person</label>
+                        <input type="text" name="delivery_person" id="delEditPerson" class="form-control">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Notes</label>
+                        <input type="text" name="notes" id="delEditNotes" class="form-control">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-mint"><i class="fas fa-save me-1"></i>Update</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Void Delivery Modal -->
+<div class="modal fade" id="delVoidModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title"><i class="fas fa-ban me-2"></i>Void Delivery</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" id="delVoidForm">
+                <div class="modal-body">
+                    <p class="text-muted mb-3">This will void the delivery and return the quantity to the purchase order's remaining stock.</p>
+                    <label class="form-label fw-semibold">Reason <span class="text-muted fw-normal small">(optional)</span></label>
+                    <input type="text" name="void_reason" class="form-control" placeholder="e.g. Wrong quantity entered">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-danger"><i class="fas fa-ban me-1"></i>Void Delivery</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Serialised purchase_rows for JS -->
+<script id="purchaseRowsData" type="application/json">
+[{% for p in purchase_rows %}
+  {"id":{{ p.id }},"material_id":{{ p.material_id }},"supplier":"{{ p.supplier_name|replace('"',"'") }}","remaining_qty":{{ p.remaining_qty }},"unit":"{{ p.unit }}","total_qty":{{ p.total_qty }}}{% if not loop.last %},{% endif %}
+{% endfor %}]
+</script>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    // ── data ───────────────────────────────────────────────────────────────
+    var purchaseRows = JSON.parse(document.getElementById('purchaseRowsData').textContent || '[]');
+
+    var matFilter    = document.getElementById('deliveryMaterialFilter');
+    var poSelect     = document.getElementById('deliveryPurchaseSelect');
+    var qtyInput     = document.getElementById('deliveryQtyInput');
+    var unitLabel    = document.getElementById('deliveryUnitLabel');
+    var remText      = document.getElementById('deliveryRemainingText');
+    var qtyErr       = document.getElementById('deliveryQtyError');
+    var matHint      = document.getElementById('deliveryMaterialHint');
+    var poBadge      = document.getElementById('deliveryPOCountBadge');
+    var projectSel   = document.getElementById('deliveryProjectSelect');
+    var stageSel     = document.getElementById('deliveryStageSelect');
+    var shiftMaterial = document.getElementById('shiftMaterial');
+    var shiftFromProject = document.getElementById('shiftFromProject');
+    var shiftFromStage = document.getElementById('shiftFromStage');
+    var shiftToProject = document.getElementById('shiftToProject');
+    var shiftToStage = document.getElementById('shiftToStage');
+    var shiftAvail = document.getElementById('shiftAvailable');
+    var shiftQty = document.getElementById('shiftQty');
+    var shiftMaterialHint = document.getElementById('shiftMaterialHint');
+    var shiftAfterText = document.getElementById('shiftAfterText');
+    var prefillShiftMaterialId = '{{ prefill_shift_material_id or "" }}';
+    var prefillFromProjectId = '{{ prefill_from_project_id or "" }}';
+    var prefillFromStageId = '{{ prefill_from_stage_id or "" }}';
+    var prefillToProjectId = '{{ prefill_to_project_id or "" }}';
+    var prefillToStageId = '{{ prefill_to_stage_id or "" }}';
+
+    // ── filter POs by selected material ────────────────────────────────────
+    window.filterPOsByMaterial = function () {
+        var mid = matFilter ? parseInt(matFilter.value || '0') : 0;
+        if (!poSelect) return;
+
+        // Reset PO dropdown
+        poSelect.innerHTML = '';
+        var defaultOpt = document.createElement('option');
+        defaultOpt.value = '';
+        defaultOpt.textContent = mid ? '— Select purchase order —' : '— Choose material first —';
+        poSelect.appendChild(defaultOpt);
+
+        if (!mid) {
+            if (matHint) matHint.textContent = 'Select a material to see available purchase orders';
+            if (poBadge) poBadge.textContent = '';
+            refreshRemaining();
+            return;
+        }
+
+        // Filter purchase rows for this material
+        var matching = purchaseRows.filter(function (p) { return p.material_id === mid; });
+        matching.forEach(function (p) {
+            var opt = document.createElement('option');
+            opt.value = p.id;
+            opt.setAttribute('data-remaining', p.remaining_qty);
+            opt.setAttribute('data-unit', p.unit);
+            opt.setAttribute('data-supplier', p.supplier);
+            opt.textContent = 'PO #' + p.id + ' | ' + p.supplier + ' | Rem: ' + p.remaining_qty.toLocaleString('en-PK', {maximumFractionDigits:2}) + ' ' + p.unit;
+            poSelect.appendChild(opt);
+        });
+
+        if (poBadge) poBadge.textContent = matching.length ? '(' + matching.length + ' PO' + (matching.length > 1 ? 's' : '') + ')' : '';
+
+        // Auto-select if only one PO available
+        if (matching.length === 1) {
+            poSelect.selectedIndex = 1;
+            if (matHint) matHint.textContent = '1 purchase order found — auto-selected.';
+        } else if (matching.length === 0) {
+            if (matHint) matHint.textContent = 'No purchase orders with remaining stock for this material.';
+        } else {
+            if (matHint) matHint.textContent = matching.length + ' purchase orders available — pick one below.';
+        }
+        refreshRemaining();
+    };
+
+    // ── refresh remaining qty display ──────────────────────────────────────
+    window.refreshRemaining = function () {
+        if (!poSelect) return;
+        var opt = poSelect.options[poSelect.selectedIndex];
+        var rem = parseFloat((opt && opt.getAttribute && opt.getAttribute('data-remaining')) || '0') || 0;
+        var unit = (opt && opt.getAttribute && opt.getAttribute('data-unit')) || '';
+
+        if (qtyInput) qtyInput.max = rem > 0 ? String(rem) : '';
+        if (unitLabel) unitLabel.textContent = unit || '—';
+        if (remText) {
+            if (rem > 0) {
+                remText.textContent = 'Remaining stock: ' + rem.toLocaleString('en-PK', {maximumFractionDigits: 2}) + (unit ? ' ' + unit : '');
+                remText.className = 'form-text text-success fw-semibold';
+            } else if (opt && opt.value) {
+                remText.textContent = 'No remaining stock';
+                remText.className = 'form-text text-danger';
+            } else {
+                remText.textContent = '—';
+                remText.className = 'form-text text-muted';
+            }
+        }
+        validateQty();
+    };
+
+    // ── qty validation ─────────────────────────────────────────────────────
+    window.validateQty = function () {
+        if (!qtyInput || !qtyErr) return;
+        var opt = poSelect && poSelect.options[poSelect.selectedIndex];
+        var rem = parseFloat((opt && opt.getAttribute && opt.getAttribute('data-remaining')) || '0') || 0;
+        var q   = parseFloat(qtyInput.value || '0') || 0;
+        var over = rem > 0 && q > rem + 0.001;
+        qtyErr.classList.toggle('d-none', !over);
+        qtyInput.classList.toggle('is-invalid', over);
+    };
+
+    // ── stage filtering by project ─────────────────────────────────────────
+    window.filterStages = function () {
+        if (!projectSel || !stageSel) return;
+        var pid = projectSel.value;
+        Array.from(stageSel.options).forEach(function (opt) {
+            if (!opt.value) return;
+            var ok = !pid || opt.getAttribute('data-project') === pid;
+            opt.style.display = ok ? '' : 'none';
+            if (!ok && opt.selected) stageSel.value = '';
+        });
+    };
+
+    function filterShiftStages(projectSelect, stageSelect) {
+        if (!projectSelect || !stageSelect) return;
+        var pid = projectSelect.value;
+        Array.from(stageSelect.options).forEach(function (opt) {
+            if (!opt.value) return;
+            var ok = !pid || opt.getAttribute('data-project') === pid;
+            opt.style.display = ok ? '' : 'none';
+            if (!ok && opt.selected) stageSelect.value = '';
+        });
+    }
+
+    function updateShiftAfterText() {
+        if (!shiftAfterText || !shiftQty) return;
+        var av = parseFloat((shiftAvail && shiftAvail.value ? shiftAvail.value.replace(/,/g, '') : '0') || '0') || 0;
+        var q = parseFloat(shiftQty.value || '0') || 0;
+        var rem = av - q;
+        if (!q) {
+            shiftAfterText.textContent = 'Remaining after shift: ' + av.toLocaleString('en-PK', {maximumFractionDigits:2});
+            shiftAfterText.className = 'form-text text-muted';
+            shiftQty.classList.remove('is-invalid');
+            return;
+        }
+        if (rem < -0.001) {
+            shiftAfterText.textContent = 'Shift exceeds available stock.';
+            shiftAfterText.className = 'form-text text-danger';
+            shiftQty.classList.add('is-invalid');
+            return;
+        }
+        shiftAfterText.textContent = 'Remaining after shift: ' + rem.toLocaleString('en-PK', {maximumFractionDigits:2});
+        shiftAfterText.className = 'form-text text-success';
+        shiftQty.classList.remove('is-invalid');
+    }
+
+    function refreshShiftAvailable() {
+        if (!shiftAvail) return;
+        var mid = shiftMaterial ? shiftMaterial.value : '';
+        var pid = shiftFromProject ? shiftFromProject.value : '';
+        var sid = shiftFromStage ? shiftFromStage.value : '';
+        if (!mid || !pid) {
+            shiftAvail.value = '-';
+            if (shiftQty) shiftQty.max = '';
+            updateShiftAfterText();
+            return;
+        }
+        fetch('/api/v2/purchase/material-available?material_id=' + encodeURIComponent(mid)
+            + '&project_id=' + encodeURIComponent(pid)
+            + '&stage_id=' + encodeURIComponent(sid || ''), {credentials:'same-origin'})
+            .then(function(r){ return r.ok ? r.json() : null; })
+            .then(function(d){
+                var av = (d && d.ok) ? (parseFloat(d.available_qty || '0') || 0) : 0;
+                shiftAvail.value = av.toLocaleString('en-PK', {maximumFractionDigits:2});
+                if (shiftQty) shiftQty.max = String(av);
+                updateShiftAfterText();
+            })
+            .catch(function(){ shiftAvail.value = '-'; updateShiftAfterText(); });
+    }
+
+    function loadShiftMaterialsForScope() {
+        if (!shiftMaterial) return;
+        var pid = shiftFromProject ? shiftFromProject.value : '';
+        var sid = shiftFromStage ? shiftFromStage.value : '';
+        shiftMaterial.innerHTML = '';
+        if (!pid) {
+            shiftMaterial.disabled = true;
+            var opt0 = document.createElement('option');
+            opt0.value = '';
+            opt0.textContent = 'Select source project first';
+            shiftMaterial.appendChild(opt0);
+            if (shiftMaterialHint) shiftMaterialHint.textContent = 'Materials with available stock in source scope will appear here.';
+            shiftAvail.value = '-';
+            updateShiftAfterText();
+            return;
+        }
+        fetch('/api/v2/purchase/material-stock-scope?project_id=' + encodeURIComponent(pid) + '&stage_id=' + encodeURIComponent(sid || ''), {credentials:'same-origin'})
+            .then(function(r){ return r.ok ? r.json() : null; })
+            .then(function(d){
+                var items = (d && d.ok && Array.isArray(d.items)) ? d.items : [];
+                shiftMaterial.disabled = false;
+                var first = document.createElement('option');
+                first.value = '';
+                first.textContent = items.length ? 'Select material' : 'No stock in selected source scope';
+                shiftMaterial.appendChild(first);
+                items.forEach(function(it){
+                    var o = document.createElement('option');
+                    o.value = String(it.id);
+                    o.textContent = (it.name || '-') + ' (' + (it.unit || '') + ') | Avl: ' + (parseFloat(it.available_qty || '0') || 0).toLocaleString('en-PK', {maximumFractionDigits:2});
+                    shiftMaterial.appendChild(o);
+                });
+                if (prefillShiftMaterialId) {
+                    var wanted = String(prefillShiftMaterialId);
+                    var exists = items.some(function(it){ return String(it.id) === wanted; });
+                    if (exists) shiftMaterial.value = wanted;
+                }
+                if (shiftMaterialHint) {
+                    shiftMaterialHint.textContent = items.length
+                        ? 'Showing materials available in selected source scope.'
+                        : 'No available stock found in selected source scope.';
+                }
+                if (items.length === 1) shiftMaterial.value = String(items[0].id);
+                refreshShiftAvailable();
+            })
+            .catch(function(){
+                shiftMaterial.disabled = true;
+                var o = document.createElement('option');
+                o.value = '';
+                o.textContent = 'Unable to load scope materials';
+                shiftMaterial.appendChild(o);
+                if (shiftMaterialHint) shiftMaterialHint.textContent = 'Could not load source stock right now.';
+                shiftAvail.value = '-';
+                updateShiftAfterText();
+            });
+    }
+
+    // ── bindings ───────────────────────────────────────────────────────────
+    if (qtyInput) qtyInput.addEventListener('input', validateQty);
+    if (poSelect) poSelect.addEventListener('change', refreshRemaining);
+    if (projectSel) projectSel.addEventListener('change', filterStages);
+    if (shiftFromProject) shiftFromProject.addEventListener('change', function(){ filterShiftStages(shiftFromProject, shiftFromStage); loadShiftMaterialsForScope(); });
+    if (shiftFromStage) shiftFromStage.addEventListener('change', loadShiftMaterialsForScope);
+    if (shiftToProject) shiftToProject.addEventListener('change', function(){ filterShiftStages(shiftToProject, shiftToStage); });
+    if (shiftMaterial) shiftMaterial.addEventListener('change', refreshShiftAvailable);
+    if (shiftQty) shiftQty.addEventListener('input', updateShiftAfterText);
+
+    if (prefillFromProjectId && shiftFromProject) shiftFromProject.value = String(prefillFromProjectId);
+    filterShiftStages(shiftFromProject, shiftFromStage);
+    if (prefillFromStageId && shiftFromStage) shiftFromStage.value = String(prefillFromStageId);
+    if (prefillToProjectId && shiftToProject) shiftToProject.value = String(prefillToProjectId);
+    filterShiftStages(shiftToProject, shiftToStage);
+    if (prefillToStageId && shiftToStage) shiftToStage.value = String(prefillToStageId);
+
+    filterStages();
+    refreshRemaining();
+    loadShiftMaterialsForScope();
+})();
+
+// ── edit / void modal helpers ──────────────────────────────────────────────
+function openDelEditModal(id, date, qty, person, notes) {
+    var form = document.getElementById('delEditForm');
+    form.action = '/hdc/purchase-v2/delivered/' + id + '/edit';
+    document.getElementById('delEditDate').value   = date;
+    document.getElementById('delEditQty').value    = qty;
+    document.getElementById('delEditPerson').value = person;
+    document.getElementById('delEditNotes').value  = notes;
+    new bootstrap.Modal(document.getElementById('delEditModal')).show();
+}
+function openDelVoidModal(id) {
+    var form = document.getElementById('delVoidForm');
+    form.action = '/hdc/purchase-v2/delivered/' + id + '/void';
+    new bootstrap.Modal(document.getElementById('delVoidModal')).show();
+}
+
+{% if prefill_edit_row %}
+window.addEventListener('load', function () {
+    openDelEditModal(
+        {{ prefill_edit_row.id }},
+        '{{ prefill_edit_row.date.strftime('%Y-%m-%d') if prefill_edit_row.date else (prefill_edit_row.created_at.strftime('%Y-%m-%d') if prefill_edit_row.created_at else '') }}',
+        '{{ prefill_edit_row.quantity or 0 }}',
+        '{{ (prefill_edit_row.delivery_person or '')|replace("'","") }}',
+        '{{ (prefill_edit_row.notes or '')|replace("'","") }}'
+    );
+});
+{% endif %}
+</script>
+{% endblock %}

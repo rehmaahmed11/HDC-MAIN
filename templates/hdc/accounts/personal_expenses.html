@@ -1,0 +1,142 @@
+{% extends "shared/base.html" %}
+{% block title %}Personal Expenses{% endblock %}
+{% block page_heading %}Personal Expenses{% endblock %}
+
+{% block content %}
+<div class="card hdc-card mb-3">
+    <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+        <span><i class="fas fa-list me-2"></i>Personal Expenses</span>
+        <a href="{{ url_for('hdc_personal_management') }}" class="btn btn-sm btn-outline-secondary">Back</a>
+    </div>
+    <div class="card-body">
+        <form method="GET" class="row g-2 mb-3">
+            <div class="col-md-3">
+                <label class="form-label small mb-1">Date From</label>
+                <input type="date" name="date_from" class="form-control form-control-sm" value="{{ filter_date_from or '' }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small mb-1">Date To</label>
+                <input type="date" name="date_to" class="form-control form-control-sm" value="{{ filter_date_to or '' }}">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label small mb-1">Category</label>
+                <select name="category" class="form-select form-select-sm">
+                    <option value="">All Categories</option>
+                    {% for cat in categories %}
+                        <option value="{{ cat.name }}" {% if (filter_category or '') == cat.name %}selected{% endif %}>{{ cat.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2 d-flex align-items-end gap-2">
+                <button type="submit" class="btn btn-primary btn-sm w-100">Filter</button>
+                <a href="{{ url_for('hdc_personal_expenses') }}" class="btn btn-outline-secondary btn-sm w-100">Clear</a>
+            </div>
+            <div class="col-12">
+                {% if show_void %}
+                    <a href="{{ url_for('hdc_personal_expenses', date_from=filter_date_from, date_to=filter_date_to, category=filter_category) }}" class="btn btn-outline-secondary btn-sm">
+                        <i class="fas fa-eye me-1"></i>Hide Voided
+                    </a>
+                {% else %}
+                    <a href="{{ url_for('hdc_personal_expenses', show_void='yes', date_from=filter_date_from, date_to=filter_date_to, category=filter_category) }}" class="btn btn-outline-secondary btn-sm">
+                        <i class="fas fa-eye-slash me-1"></i>Show Voided
+                    </a>
+                {% endif %}
+            </div>
+        </form>
+
+        {% if rows.items %}
+        <div class="table-responsive">
+            <table class="table table-sm table-hover">
+                <thead class="table-light">
+                    <tr>
+                        <th>Date</th>
+                        <th>Party / Purpose</th>
+                        <th>Type</th>
+                        <th>Category</th>
+                        <th class="text-end">Amount (PKR)</th>
+                        <th>Remarks</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rows.items %}
+                    <tr {% if row.is_void %}style="opacity: 0.6;"{% endif %}>
+                        <td><small>{{ row.date.strftime('%Y-%m-%d') }}</small></td>
+                        <td>
+                            <strong>{{ row.beneficiary_name }}</strong>
+                            <br>
+                            <small class="text-muted">{{ row.beneficiary_type or 'Other' }}</small>
+                        </td>
+                        <td>
+                            {% if row.beneficiary_type == 'worker' %}
+                                <span class="badge bg-primary">Worker</span>
+                            {% elif row.beneficiary_type == 'staff' %}
+                                <span class="badge bg-secondary">Staff</span>
+                            {% else %}
+                                <span class="badge bg-light text-dark">Other</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ row.category or '-' }}</td>
+                        <td class="text-end">
+                            <strong>{{ "{:,.2f}".format(row.amount or 0) }}</strong>
+                            {% if row.is_void %}
+                                <br><small class="text-danger">VOIDED</small>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <small>{{ row.remarks or '' }}</small>
+                            {% if row.void_reason %}
+                                <br><small class="text-danger">Reason: {{ row.void_reason }}</small>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if not row.is_void %}
+                                <a href="{{ url_for('hdc_personal_expense_void', eid=row.id) }}" class="btn btn-sm btn-outline-danger" title="Void">
+                                    <i class="fas fa-trash"></i>
+                                </a>
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Pagination -->
+        {% if rows.pages > 1 %}
+        <nav aria-label="Page navigation">
+            <ul class="pagination pagination-sm justify-content-center">
+                {% if rows.has_prev %}
+                    <li class="page-item">
+                        <a class="page-link" href="{{ url_for('hdc_personal_expenses', page=rows.prev_num, show_void=('yes' if show_void else ''), date_from=filter_date_from, date_to=filter_date_to, category=filter_category) }}">Previous</a>
+                    </li>
+                {% endif %}
+                {% for page_num in rows.iter_pages(left_edge=1, left_margin=1, right_margin=1, right_edge=1) %}
+                    {% if page_num %}
+                        {% if page_num == rows.page %}
+                            <li class="page-item active"><span class="page-link">{{ page_num }}</span></li>
+                        {% else %}
+                            <li class="page-item"><a class="page-link" href="{{ url_for('hdc_personal_expenses', page=page_num, show_void=('yes' if show_void else ''), date_from=filter_date_from, date_to=filter_date_to, category=filter_category) }}">{{ page_num }}</a></li>
+                        {% endif %}
+                    {% else %}
+                        <li class="page-item disabled"><span class="page-link">...</span></li>
+                    {% endif %}
+                {% endfor %}
+                {% if rows.has_next %}
+                    <li class="page-item">
+                        <a class="page-link" href="{{ url_for('hdc_personal_expenses', page=rows.next_num, show_void=('yes' if show_void else ''), date_from=filter_date_from, date_to=filter_date_to, category=filter_category) }}">Next</a>
+                    </li>
+                {% endif %}
+            </ul>
+        </nav>
+        {% endif %}
+        {% else %}
+        <div class="alert alert-info">
+            <i class="fas fa-info-circle me-2"></i>No personal expenses found for current filters.
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

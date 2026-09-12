@@ -1,0 +1,42 @@
+{% extends "shared/base.html" %}
+{% block title %}Alerts{% endblock %}
+{% block page_heading %}Alerts{% endblock %}
+
+{% block content %}
+<div class="card hdc-card mt-2">
+    <div class="card-header hdc-card-header"><i class="fas fa-bell me-2"></i>System Alerts</div>
+    <div class="table-responsive">
+        <table class="table hdc-table table-sm mb-0">
+            <thead><tr>
+                <th>Date</th><th>Level</th><th>Message</th><th>Project</th><th>Stage</th><th></th>
+            </tr></thead>
+            <tbody>
+            {% for a in alerts %}
+            <tr class="{% if a.resolved %}table-secondary{% endif %}">
+                <td>{{ fmt_pkt(a.created_at) }}</td>
+                <td>
+                    <span class="badge {% if a.level == 'danger' %}bg-danger{% elif a.level == 'warning' %}bg-warning text-dark{% else %}bg-info{% endif %}">
+                        {{ a.level }}
+                    </span>
+                </td>
+                <td>{{ a.message }}</td>
+                <td class="text-muted">{{ a.project.name if a.project_id else '—' }}</td>
+                <td class="text-muted">{{ a.stage.name if a.stage_id else '—' }}</td>
+                <td class="text-end">
+                    {% if not a.resolved %}
+                    <form method="POST" action="{{ url_for('hdc_alerts_resolve', aid=a.id) }}">
+                        <button type="submit" class="btn btn-sm btn-outline-secondary">Resolve</button>
+                    </form>
+                    {% else %}
+                    <span class="badge bg-secondary">Resolved</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="6" class="text-center text-muted py-4">No alerts.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

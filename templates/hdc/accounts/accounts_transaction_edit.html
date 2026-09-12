@@ -1,0 +1,98 @@
+{% extends "shared/base.html" %}
+{% block title %}Edit Accounts Entry{% endblock %}
+{% block page_heading %}Edit Accounts Entry{% endblock %}
+
+{% block content %}
+<div class="card hdc-card mt-2">
+    <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+        <span><i class="fas fa-pen-to-square me-2"></i>Edit Transaction #{{ txn.id }}</span>
+        <a href="{{ url_for('hdc_accounts_entries') }}" class="btn btn-sm btn-outline-secondary">Back</a>
+    </div>
+    <div class="card-body">
+        <form method="POST" class="row g-2">
+            <div class="col-md-3">
+                <label class="form-label">Date</label>
+                <input type="date" name="date" class="form-control" value="{{ txn.date.isoformat() if txn.date else '' }}" required>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Amount</label>
+                <input type="number" step="0.01" min="0.01" name="amount" class="form-control" value="{{ txn.amount or 0 }}" required>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Type</label>
+                <select name="type" class="form-select" required>
+                    {% for t in txn_types %}
+                    <option value="{{ t }}" {% if (txn.type or '') == t %}selected{% endif %}>{{ t|replace('_', ' ')|title }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">From Account</label>
+                <select name="from_account_id" class="form-select" required>
+                    {% for a in accounts %}
+                    <option value="{{ a.id }}" {% if txn.from_account_id == a.id %}selected{% endif %}>{{ a.name }} ({{ a.account_group|replace('_', ' ')|title }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">To Account</label>
+                <select name="to_account_id" class="form-select">
+                    <option value="">Off-ledger Party</option>
+                    {% for a in accounts %}
+                    <option value="{{ a.id }}" {% if txn.to_account_id == a.id %}selected{% endif %}>{{ a.name }} ({{ a.account_group|replace('_', ' ')|title }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Project</label>
+                <select name="project_id" class="form-select">
+                    <option value="">None</option>
+                    {% for p in projects %}
+                    <option value="{{ p.id }}" {% if txn.project_id == p.id %}selected{% endif %}>{{ p.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Stage</label>
+                <select name="stage_id" class="form-select">
+                    <option value="">None</option>
+                    {% for s in stages %}
+                    <option value="{{ s.id }}" {% if txn.stage_id == s.id %}selected{% endif %}>{{ s.project.name if s.project else 'Project' }} / {{ s.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Party Name</label>
+                <input type="text" name="party_name" class="form-control" value="{{ txn.party_name or '' }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Related Type</label>
+                <input type="text" name="related_entity_type" class="form-control" value="{{ txn.related_entity_type or '' }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Related ID</label>
+                <input type="number" min="0" name="related_entity_id" class="form-control" value="{{ txn.related_entity_id or '' }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Reference ID</label>
+                <input type="text" name="reference_id" class="form-control" value="{{ txn.reference_id or '' }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Executed By Account</label>
+                <select name="executed_by_account_id" class="form-select">
+                    {% for a in accounts %}
+                    <option value="{{ a.id }}" {% if txn.executed_by_account_id == a.id %}selected{% endif %}>{{ a.name }} ({{ a.account_group|replace('_', ' ')|title }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-12">
+                <label class="form-label">Note</label>
+                <textarea name="note" class="form-control" rows="3">{{ txn.note or '' }}</textarea>
+            </div>
+            <div class="col-12">
+                <button type="submit" class="btn btn-primary"><i class="fas fa-floppy-disk me-1"></i>Save Changes</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

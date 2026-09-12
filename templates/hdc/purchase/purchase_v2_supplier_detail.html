@@ -1,0 +1,394 @@
+{% extends "shared/base.html" %}
+{% block title %}Supplier: {{ supplier.name }}{% endblock %}
+{% block page_heading %}Supplier: {{ supplier.name }}{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap gap-2 align-items-center mt-1 mb-3">
+    <a href="{{ url_for('hdc_purchase_v2_suppliers') }}" class="btn btn-sm btn-outline-secondary">
+        <i class="fas fa-arrow-left me-1"></i>All Suppliers
+    </a>
+    <span class="badge bg-secondary">#{{ supplier.id }}</span>
+    <span class="badge {% if (supplier.status or 'active') == 'active' %}bg-success{% else %}bg-warning text-dark{% endif %}">
+        {{ (supplier.status or 'active')|title }}
+    </span>
+</div>
+
+<!-- KPI Row -->
+<div class="row g-3 mb-4">
+    <div class="col-6 col-md-3">
+        <div class="kpi-card kpi-blue text-center">
+            <div class="kpi-value">Rs {{ "{:,.0f}".format(purchase_total or 0) }}</div>
+            <div class="kpi-label">Total Purchases</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="kpi-card kpi-green text-center">
+            <div class="kpi-value">Rs {{ "{:,.0f}".format(paid_total or 0) }}</div>
+            <div class="kpi-label">Paid (incl. Tip &amp; Settlement)</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="kpi-card {% if (balance or 0) > 0 %}kpi-red{% else %}kpi-green{% endif %} text-center">
+            <div class="kpi-value">Rs {{ "{:,.0f}".format((balance or 0) if (balance or 0) > 0 else (advance_total or 0)) }}</div>
+            <div class="kpi-label">{% if (balance or 0) > 0 %}Outstanding Balance{% else %}Advance / Settled{% endif %}</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="kpi-card kpi-blue text-center">
+            <div class="kpi-value">{{ purchases|length }}</div>
+            <div class="kpi-label">Purchase Rows</div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-4 mb-4">
+    <!-- Record Purchase -->
+    <div class="col-lg-7">
+        <div class="card hdc-card h-100">
+            <div class="card-header hdc-card-header"><i class="fas fa-cart-plus me-2"></i>Record Purchase</div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('hdc_purchase_v2_supplier_purchase', supplier_id=supplier.id) }}"
+                      class="row g-2" id="supplierPurchaseForm">
+                    <div class="col-md-6">
+                        <label class="form-label fw-semibold">Select Material <span class="text-danger">*</span></label>
+                        <div class="d-flex gap-2">
+                            <select name="material_id" class="form-select" id="supplierMaterialSelect" required>
+                                <option value="">Select material</option>
+                                {% for m in materials %}
+                                <option value="{{ m.id }}">{{ m.name }} ({{ m.unit or '' }})</option>
+                                {% endfor %}
+                            </select>
+                            <button type="button"
+                                    class="btn btn-outline-primary"
+                                    title="Add new material"
+                                    aria-label="Add new material"
+                                    onclick="openQuickMaterialModal()">
+                                <i class="fas fa-plus"></i>
+                            </button>
+                        </div>
+                        <div class="form-text">Use + to add material here without leaving this page.</div>
+                    </div>
+                    <div class="col-6 col-md-2">
+                        <label class="form-label fw-semibold">Qty <span class="text-danger">*</span></label>
+                        <input type="number" step="0.01" min="0.01" name="quantity" id="supplierQty" class="form-control" required>
+                    </div>
+                    <div class="col-6 col-md-2">
+                        <label class="form-label fw-semibold">Rate <span class="text-danger">*</span></label>
+                        <input type="number" step="0.01" min="0.01" name="unit_price" id="supplierRate" class="form-control" required>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label fw-semibold">Total</label>
+                        <input type="text" id="supplierTotal" class="form-control bg-light" readonly tabindex="-1">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label fw-semibold">Status</label>
+                        <select name="payment_status" class="form-select">
+                            <option value="unpaid">Unpaid</option>
+                            <option value="paid">Paid</option>
+                        </select>
+                    </div>
+                    <div class="col-12">
+                        <button class="btn btn-mint" type="submit">
+                            <i class="fas fa-save me-1"></i>Record Purchase
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Right Panel -->
+    <div class="col-lg-5">
+        <!-- Payment -->
+        <div class="card hdc-card mb-3">
+            <div class="card-header hdc-card-header"><i class="fas fa-money-bill me-2"></i>Record Payment</div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('hdc_purchase_v2_supplier_payment', supplier_id=supplier.id) }}"
+                      class="row g-2">
+                    <div class="col-md-5">
+                        <label class="form-label fw-semibold">Type</label>
+                        <select name="entry_kind" class="form-select">
+                            <option value="payment">Payment</option>
+                            <option value="tip">Tip</option>
+                            <option value="settlement">Settlement</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label fw-semibold">Amount <span class="text-danger">*</span></label>
+                        <input type="number" step="0.01" min="0.01" name="amount" class="form-control" onwheel="this.blur();" required>
+                    </div>
+                    <div class="col-md-3 d-flex align-items-end">
+                        <button class="btn btn-mint w-100" type="submit">Post</button>
+                    </div>
+                    <div class="col-12">
+                        <input name="note" class="form-control form-control-sm" placeholder="Note (optional)">
+                    </div>
+                </form>
+                <div class="alert alert-light border mt-3 mb-0 py-2 small">
+                    <div class="fw-semibold mb-1">Payment Breakdown</div>
+                    <div>
+                        Payment: <strong>{{ "{:,.0f}".format(payment_total or 0) }}</strong> &bull;
+                        Tip: <strong>{{ "{:,.0f}".format(tip_total or 0) }}</strong> &bull;
+                        Settlement: <strong>{{ "{:,.0f}".format(settlement_total or 0) }}</strong>
+                    </div>
+                    <div class="mt-1">
+                        Purchases (Debit): <strong>{{ "{:,.0f}".format(debit_total or 0) }}</strong> &bull;
+                        Credits Total: <strong>{{ "{:,.0f}".format(paid_total or 0) }}</strong> &bull;
+                        {% if (balance or 0) > 0 %}
+                        <span class="text-danger fw-semibold">Payable: {{ "{:,.0f}".format(balance or 0) }}</span>
+                        {% elif (advance_total or 0) > 0 %}
+                        <span class="text-success fw-semibold">Advance: {{ "{:,.0f}".format(advance_total or 0) }}</span>
+                        {% else %}
+                        <span class="text-success fw-semibold">Balance: 0 (Settled)</span>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Quick Add Material Modal -->
+<div class="modal fade" id="quickMaterialModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header hdc-card-header">
+                <h5 class="modal-title"><i class="fas fa-plus me-2"></i>Add New Material</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="quickMaterialForm">
+                <div class="modal-body">
+                    <div id="quickMaterialMsg" class="alert d-none py-2 mb-3"></div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Material Name <span class="text-danger">*</span></label>
+                        <input type="text" id="quickMaterialName" class="form-control" placeholder="e.g. Steel Bar 12mm" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Unit <span class="text-danger">*</span></label>
+                        <select id="quickMaterialUnit" class="form-select">
+                            {% for u in material_units %}
+                            <option value="{{ u }}">{{ u }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-mint" id="quickMaterialSaveBtn">
+                        <i class="fas fa-save me-1"></i>Save Material
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Purchases -->
+<div class="card hdc-card mb-4">
+    <div class="card-header hdc-card-header"><i class="fas fa-cart-shopping me-2"></i>Purchase History</div>
+    <div class="table-responsive">
+        <table class="table hdc-table table-sm align-middle mb-0">
+            <thead>
+                <tr>
+                    <th>#</th><th>Date</th><th>Material</th>
+                    <th class="text-end">Qty</th><th class="text-end">Delivered</th>
+                    <th class="text-end">Remaining</th><th class="text-end">Rate</th>
+                    <th class="text-end">Total</th><th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for p in purchases %}
+                {% set dq = (delivered_map.get(p.id) if delivered_map else 0) or 0 %}
+                <tr>
+                    <td class="text-muted small">#{{ p.id }}</td>
+                    <td class="small">{{ p.date or (p.created_at.strftime('%Y-%m-%d') if p.created_at else '-') }}</td>
+                    <td>{{ p.material.name if p.material else '-' }} <small class="text-muted">({{ p.material.unit if p.material else '' }})</small></td>
+                    <td class="text-end">{{ "{:,.2f}".format(p.quantity or 0) }}</td>
+                    <td class="text-end">{{ "{:,.2f}".format(dq) }}</td>
+                    <td class="text-end {% if (p.quantity or 0) - dq <= 0 %}text-muted{% else %}text-warning{% endif %}">
+                        {{ "{:,.2f}".format((p.quantity or 0) - dq) }}
+                    </td>
+                    <td class="text-end">{{ "{:,.0f}".format(p.unit_price or 0) }}</td>
+                    <td class="text-end fw-semibold">Rs {{ "{:,.0f}".format(p.total_amount or 0) }}</td>
+                    <td>
+                        <span class="badge {% if (p.payment_status or 'unpaid') == 'paid' %}bg-success{% else %}bg-warning text-dark{% endif %}">
+                            {{ (p.payment_status or 'unpaid')|title }}
+                        </span>
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="9" class="text-center text-muted py-3">No purchases yet.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Ledger -->
+<div class="card hdc-card">
+    <div class="card-header hdc-card-header"><i class="fas fa-book me-2"></i>Supplier Ledger</div>
+    <div class="table-responsive">
+        <table class="table hdc-table table-sm align-middle mb-0">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Date</th>
+                    <th>Entry</th>
+                    <th>Material Name</th>
+                    <th class="text-end">Material Qty</th>
+                    <th class="text-end">Price / Unit</th>
+                    <th class="text-end">Purchase</th>
+                    <th class="text-end">Paid</th>
+                    <th class="text-end">Balance Amount</th>
+                    <th>Note</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in ledger_items %}
+                <tr>
+                    <td class="text-muted small">{{ loop.index }}</td>
+                    <td class="small">{{ r.date.strftime('%Y-%m-%d') if r.date else '-' }}</td>
+                    <td>
+                        <span class="badge {% if (r.entry_type or '') == 'debit' %}bg-danger{% else %}bg-success{% endif %}">
+                            {{ r.entry_label }}
+                        </span>
+                        {% if r.reference_id %}<span class="text-muted small"> #{{ r.reference_id }}</span>{% endif %}
+                    </td>
+                    <td>{% if (r.entry_type or '') == 'debit' %}{{ r.material_name }}{% else %}-{% endif %}</td>
+                    <td class="text-end">{% if (r.entry_type or '') == 'debit' %}{{ "{:,.2f}".format(r.qty or 0) }}{% else %}-{% endif %}</td>
+                    <td class="text-end">{% if (r.entry_type or '') == 'debit' %}Rs {{ "{:,.0f}".format(r.unit_price or 0) }}{% else %}-{% endif %}</td>
+                    <td class="text-end text-danger">{% if (r.purchase_amount or 0) > 0 %}Rs {{ "{:,.0f}".format(r.purchase_amount or 0) }}{% else %}-{% endif %}</td>
+                    <td class="text-end text-success">{% if (r.paid or 0) > 0 %}Rs {{ "{:,.0f}".format(r.paid or 0) }}{% else %}-{% endif %}</td>
+                    <td class="text-end fw-semibold {% if (r.balance_kind or '') == 'payable' %}text-danger{% else %}text-success{% endif %}">
+                        {% if (r.balance_kind or '') == 'payable' %}
+                        Payable Rs {{ "{:,.0f}".format(r.balance_amount or 0) }}
+                        {% elif (r.balance_kind or '') == 'advance' %}
+                        Advance Rs {{ "{:,.0f}".format((-(r.balance_amount or 0))) }}
+                        {% else %}
+                        Balance 0
+                        {% endif %}
+                    </td>
+                    <td class="text-muted small">
+                        {{ r.note or '' }}
+                        {% if r.reference_type %}<span class="text-muted"> ({{ r.reference_type|title }}{% if r.reference_id %} #{{ r.reference_id }}{% endif %})</span>{% endif %}
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="10" class="text-center text-muted py-3">No ledger entries yet.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    var matSel  = document.getElementById('supplierMaterialSelect');
+    var qty     = document.getElementById('supplierQty');
+    var rate    = document.getElementById('supplierRate');
+    var total   = document.getElementById('supplierTotal');
+
+    function refreshTotal() {
+        if (!total) return;
+        var q = parseFloat((qty && qty.value) || '0') || 0;
+        var r = parseFloat((rate && rate.value) || '0') || 0;
+        total.value = (q * r).toLocaleString('en-PK', {maximumFractionDigits: 0});
+    }
+    if (qty)    qty.addEventListener('input', refreshTotal);
+    if (rate)   rate.addEventListener('input', refreshTotal);
+    refreshTotal();
+})();
+
+var quickMaterialModal;
+function openQuickMaterialModal() {
+    if (!quickMaterialModal) {
+        quickMaterialModal = new bootstrap.Modal(document.getElementById('quickMaterialModal'));
+    }
+    clearQuickMaterialMessage();
+    document.getElementById('quickMaterialName').value = '';
+    document.getElementById('quickMaterialUnit').value = 'KG';
+    quickMaterialModal.show();
+    setTimeout(function () {
+        var nameInput = document.getElementById('quickMaterialName');
+        if (nameInput) nameInput.focus();
+    }, 150);
+}
+
+function showQuickMaterialMessage(type, text) {
+    var box = document.getElementById('quickMaterialMsg');
+    if (!box) return;
+    box.className = 'alert py-2 mb-3 ' + (type === 'success' ? 'alert-success' : 'alert-danger');
+    box.textContent = text;
+    box.classList.remove('d-none');
+}
+
+function clearQuickMaterialMessage() {
+    var box = document.getElementById('quickMaterialMsg');
+    if (!box) return;
+    box.className = 'alert d-none py-2 mb-3';
+    box.textContent = '';
+}
+
+document.getElementById('quickMaterialForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    clearQuickMaterialMessage();
+    var nameEl = document.getElementById('quickMaterialName');
+    var unitEl = document.getElementById('quickMaterialUnit');
+    var saveBtn = document.getElementById('quickMaterialSaveBtn');
+    var materialSelect = document.getElementById('supplierMaterialSelect');
+    var name = (nameEl.value || '').trim();
+    var unit = (unitEl.value || 'KG').trim().toUpperCase();
+    if (!name) {
+        showQuickMaterialMessage('error', 'Material name is required.');
+        return;
+    }
+    saveBtn.disabled = true;
+    fetch('/api/v2/purchase/materials', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name, unit: unit })
+    })
+    .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+    .then(function (res) {
+        if (!res.ok || !res.data || !res.data.ok) {
+            var msg = (res.data && res.data.message) ? res.data.message : 'Unable to save material.';
+            showQuickMaterialMessage('error', msg);
+            return;
+        }
+        var id = String(res.data.id || '');
+        var label = (res.data.name || name) + ' (' + (res.data.unit || unit) + ')';
+        var found = false;
+        if (materialSelect) {
+            for (var i = 0; i < materialSelect.options.length; i++) {
+                if (materialSelect.options[i].value === id) {
+                    materialSelect.options[i].text = label;
+                    materialSelect.selectedIndex = i;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                var opt = document.createElement('option');
+                opt.value = id;
+                opt.text = label;
+                materialSelect.appendChild(opt);
+                materialSelect.value = id;
+            }
+        }
+        showQuickMaterialMessage('success', 'Material saved and selected.');
+        setTimeout(function () {
+            if (quickMaterialModal) quickMaterialModal.hide();
+        }, 450);
+    })
+    .catch(function () {
+        showQuickMaterialMessage('error', 'Network error while saving material.');
+    })
+    .finally(function () {
+        saveBtn.disabled = false;
+    });
+});
+</script>
+{% endblock %}

@@ -1,0 +1,132 @@
+{% extends "shared/base.html" %}
+{% block title %}{{ page_title }}{% endblock %}
+{% block page_heading %}{{ page_title }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mt-2 mb-3">
+    <div>
+        <div class="small text-muted">{{ subtitle or 'Detailed KPI breakdown' }}</div>
+        <div class="small text-muted">{{ rows|length }} row(s)</div>
+    </div>
+    <a href="{{ back_url or url_for('hdc_dashboard') }}" class="btn btn-outline-secondary btn-sm">
+        <i class="fas fa-arrow-left me-1"></i>Back
+    </a>
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col-12 col-md-6">
+        <div class="kpi-card kpi-blue">
+            <div class="kpi-label">Rows</div>
+            <div class="kpi-value">{{ rows|length }}</div>
+            <div class="kpi-sub">Entries in this detail view</div>
+        </div>
+    </div>
+    <div class="col-12 col-md-6">
+        <div class="kpi-card {% if value_format == 'currency' and grand_total < 0 %}kpi-profit{% else %}kpi-orange{% endif %}">
+            <div class="kpi-label">{{ grand_total_label }}</div>
+            <div class="kpi-value">
+                {% if value_format == 'currency' %}
+                    {{ "{:,.0f}".format(grand_total or 0) }}
+                {% else %}
+                    {{ "{:,.0f}".format(grand_total or 0) }}
+                {% endif %}
+            </div>
+            <div class="kpi-sub">{% if value_format == 'currency' %}PKR{% else %}Total{% endif %}</div>
+        </div>
+    </div>
+</div>
+
+{% if breakdown_totals %}
+<div class="row g-3 mb-3">
+    <div class="col-6 col-md-2">
+        <div class="kpi-card kpi-green">
+            <div class="kpi-label">Labour</div>
+            <div class="kpi-value small">{{ "{:,.0f}".format(breakdown_totals.labour or 0) }}</div>
+            <div class="kpi-sub">PKR</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-2">
+        <div class="kpi-card kpi-blue">
+            <div class="kpi-label">Material</div>
+            <div class="kpi-value small">{{ "{:,.0f}".format(breakdown_totals.material or 0) }}</div>
+            <div class="kpi-sub">PKR</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-2">
+        <div class="kpi-card kpi-orange">
+            <div class="kpi-label">Expense</div>
+            <div class="kpi-value small">{{ "{:,.0f}".format(breakdown_totals.expense or 0) }}</div>
+            <div class="kpi-sub">PKR</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-2">
+        <div class="kpi-card kpi-purple">
+            <div class="kpi-label">Subcontract</div>
+            <div class="kpi-value small">{{ "{:,.0f}".format(breakdown_totals.subcontract or 0) }}</div>
+            <div class="kpi-sub">PKR</div>
+        </div>
+    </div>
+    <div class="col-12 col-md-4">
+        <div class="kpi-card kpi-red">
+            <div class="kpi-label">Grand Total</div>
+            <div class="kpi-value small">{{ "{:,.0f}".format(breakdown_totals.total or 0) }}</div>
+            <div class="kpi-sub">Labour + Material + Expense + Subcontract</div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<div class="card hdc-card">
+    <div class="card-header hdc-card-header d-flex justify-content-between">
+        <span><i class="fas fa-list me-2"></i>Details</span>
+        <span class="small text-muted">{{ page_title }}</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table hdc-table table-sm mb-0">
+            <thead>
+                <tr>
+                    {% for c in columns %}
+                    <th class="{{ c.align or '' }}">{{ c.label }}</th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in rows %}
+                <tr class="{% if r.get('_is_subtotal') %}table-secondary fw-bold{% endif %}">
+                    {% for c in columns %}
+                    {% set val = r.get(c.key) %}
+                    <td class="{{ c.align or '' }}">
+                        {% if val is number and c.format == 'currency' %}
+                            {{ "{:,.0f}".format(val or 0) }}
+                        {% elif val is number and c.format == 'float2' %}
+                            {{ "{:,.2f}".format(val or 0) }}
+                        {% elif c.key in ['dt', 'check_in'] and val %}
+                            {{ fmt_pkt(val) }}
+                        {% else %}
+                            {{ val if val is not none else '-' }}
+                        {% endif %}
+                    </td>
+                    {% endfor %}
+                </tr>
+                {% else %}
+                <tr><td colspan="{{ columns|length }}" class="text-center text-muted py-4">No detail rows found.</td></tr>
+                {% endfor %}
+            </tbody>
+            {% if rows and show_table_footer %}
+            <tfoot class="table-secondary fw-bold">
+                <tr>
+                    <td colspan="{{ (columns|length - 1) if columns|length > 1 else 1 }}">{{ grand_total_label }}</td>
+                    <td class="text-end">
+                        {% if value_format == 'currency' %}
+                            {{ "{:,.0f}".format(grand_total or 0) }}
+                        {% else %}
+                            {{ "{:,.0f}".format(grand_total or 0) }}
+                        {% endif %}
+                    </td>
+                </tr>
+            </tfoot>
+            {% endif %}
+        </table>
+    </div>
+</div>
+{% endblock %}

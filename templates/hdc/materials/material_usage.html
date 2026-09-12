@@ -1,0 +1,164 @@
+{% extends "shared/base.html" %}
+{% block title %}Material Usage{% endblock %}
+{% block page_heading %}Material Usage{% endblock %}
+
+{% block content %}
+<div class="row g-3 mt-1">
+    <div class="col-md-4">
+        <div class="card hdc-card">
+            <div class="card-header hdc-card-header"><i class="fas fa-tools me-2"></i>Log Usage</div>
+            <div class="card-body">
+                <form method="POST">
+                    <div class="mb-3">
+                        <label class="form-label">Date</label>
+                        <input type="date" name="used_at" class="form-control" value="{{ today }}">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Project *</label>
+                        <select name="project_id" class="form-select" id="usageProjectSelect" required>
+                            <option value="">Select Project</option>
+                            {% for p in projects %}
+                            <option value="{{ p.id }}">{{ p.name }} | {{ p.project_code }} | {{ p.client or 'No Owner' }} | {{ p.location or 'No Location' }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Stage *</label>
+                        <select name="stage_id" class="form-select" id="usageStageSelect" required>
+                            <option value="">Select Stage</option>
+                            {% for s in stages %}
+                            <option value="{{ s.id }}" data-project="{{ s.project_id }}">{{ s.project.name }} - {{ s.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Material *</label>
+                        <select name="material_id" class="form-select" id="usageMaterialSelect" required>
+                            <option value="">Select Material</option>
+                            {% for m in materials %}
+                            {% set st = (stock_map.get(m.id) if stock_map else None) %}
+                            <option value="{{ m.id }}" data-stock="{{ ((st.remaining if st else 0) or 0) }}">
+                                {{ m.name }} (Available: {{ "{:,.2f}".format((st.remaining if st else 0) or 0) }} {{ m.unit }})
+                            </option>
+                            {% endfor %}
+                        </select>
+                        <div class="form-text" id="usageStockText">Available stock: 0.00</div>
+                    </div>
+                    <div class="row g-2">
+                        <div class="col-12">
+                            <label class="form-label">Qty</label>
+                            <input type="number" step="0.01" min="0" name="qty" id="usageQtyInput" class="form-control" required>
+                            <div class="form-text text-danger d-none" id="usageQtyError">Entered qty is greater than available stock.</div>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-mint w-100 mt-3"><i class="fas fa-save me-1"></i>Save</button>
+                </form>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-8">
+        <div class="card hdc-card">
+            <div class="card-header hdc-card-header"><i class="fas fa-list me-2"></i>Usage Records</div>
+            <div class="table-responsive">
+                <table class="table hdc-table table-sm mb-0">
+                    <thead><tr>
+                        <th>Date</th><th>Material</th><th>Project</th><th>Stage</th>
+                        <th class="text-end">Qty</th>
+                    </tr></thead>
+                    <tbody>
+                    {% for r in records %}
+                    <tr>
+                        <td>{{ fmt_pkt(r.activity_at or r.created_at) }}</td>
+                        <td>{{ r.material.name if r.material else '' }}</td>
+                        <td>{{ r.project.name if r.project else '' }}</td>
+                        <td>{{ r.stage.name if r.stage_id else '' }}</td>
+                        <td class="text-end">{{ "{:,.2f}".format(r.qty or 0) }}</td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="5" class="text-center text-muted py-4">No usage records.</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    var projectSel = document.getElementById('usageProjectSelect');
+    var stageSel = document.getElementById('usageStageSelect');
+    var materialSel = document.getElementById('usageMaterialSelect');
+    var qtyInput = document.getElementById('usageQtyInput');
+    var stockText = document.getElementById('usageStockText');
+    var qtyErr = document.getElementById('usageQtyError');
+
+    function filterStagesByProject() {
+        if (!projectSel || !stageSel) return;
+        var pid = projectSel.value;
+        Array.from(stageSel.options).forEach(function (opt) {
+            if (!opt.value) return;
+            var ok = !pid || (opt.getAttribute('data-project') === pid);
+            opt.style.display = ok ? '' : 'none';
+            if (!ok && opt.selected) stageSel.value = '';
+        });
+    }
+
+    function selectedStockFallback() {
+        if (!materialSel) return 0;
+        var opt = materialSel.options[materialSel.selectedIndex];
+        if (!opt) return 0;
+        return parseFloat(opt.getAttribute('data-stock') || '0') || 0;
+    }
+
+    function renderStock(avail) {
+        if (stockText) {
+            stockText.textContent = 'Available stock: ' + avail.toLocaleString('en-PK', { maximumFractionDigits: 2 });
+        }
+        if (!qtyInput || !qtyErr) return;
+        var qty = parseFloat(qtyInput.value || '0') || 0;
+        var over = qty > avail;
+        qtyErr.classList.toggle('d-none', !over);
+        qtyInput.classList.toggle('is-invalid', over);
+    }
+
+    function refreshStockUI() {
+        var mid = materialSel ? materialSel.value : '';
+        if (!mid) {
+            renderStock(0);
+            return;
+        }
+        var pid = projectSel ? projectSel.value : '';
+        var sid = stageSel ? stageSel.value : '';
+        var url = '/hdc/api/material_stock/' + encodeURIComponent(mid) +
+                  '?project_id=' + encodeURIComponent(pid || '') +
+                  '&stage_id=' + encodeURIComponent(sid || '');
+        fetch(url, { credentials: 'same-origin' })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (data) {
+                if (!data || typeof data.remaining === 'undefined') {
+                    renderStock(selectedStockFallback());
+                    return;
+                }
+                renderStock(parseFloat(data.remaining || 0) || 0);
+            })
+            .catch(function () {
+                renderStock(selectedStockFallback());
+            });
+    }
+
+    if (projectSel) projectSel.addEventListener('change', function () {
+        filterStagesByProject();
+        refreshStockUI();
+    });
+    if (stageSel) stageSel.addEventListener('change', refreshStockUI);
+    if (materialSel) materialSel.addEventListener('change', refreshStockUI);
+    if (qtyInput) qtyInput.addEventListener('input', refreshStockUI);
+
+    filterStagesByProject();
+    refreshStockUI();
+})();
+</script>
+{% endblock %}

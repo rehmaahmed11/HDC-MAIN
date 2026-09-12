@@ -1,0 +1,140 @@
+{% extends "shared/base.html" %}
+{% block title %}Record Payment - {{ w.name }}{% endblock %}
+{% block page_heading %}Record Payment - {{ w.name }}{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center mt-2">
+<div class="col-md-6">
+<div class="card hdc-card">
+    <div class="card-header hdc-card-header">
+        <i class="fas fa-money-bill-wave me-2"></i>Record Salary Payment for {{ w.name }}
+    </div>
+    <div class="card-body">
+        <div class="d-flex align-items-center gap-2 mb-3">
+            <span class="badge bg-danger fs-6">Payable: {{ "{:,.0f}".format(payable_amount or 0) }} PKR</span>
+            <small class="text-muted">Live amount, auto-updated from attendance + advances + payments.</small>
+        </div>
+        <div class="alert alert-danger py-2 small mb-3">
+            <strong>Payable:</strong> {{ "{:,.0f}".format(payable_amount or 0) }} PKR
+            &nbsp;|&nbsp; <strong>Earned:</strong> {{ "{:,.0f}".format(earned_amount or 0) }} PKR
+            &nbsp;|&nbsp; <strong>Advanced:</strong> {{ "{:,.0f}".format(advanced_amount or 0) }} PKR
+            &nbsp;|&nbsp; <strong>Paid:</strong> {{ "{:,.0f}".format(paid_amount or 0) }} PKR
+            &nbsp;|&nbsp; <strong>Settled:</strong> {{ "{:,.0f}".format(settled_amount or 0) }} PKR
+        </div>
+        <form method="POST">
+            <div class="mb-3">
+                <label class="form-label">Date *</label>
+                <input type="date" name="date" class="form-control" value="{{ today }}" required>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Amount (PKR) *</label>
+                <input type="number" step="0.01" name="amount" class="form-control" id="paymentAmountInput"
+                    value="{{ (payable_amount or 0) | int }}" placeholder="0.00" onwheel="this.blur();" required>
+                <div class="form-text text-danger">If amount is greater than payable, choose either Tip or Excess as Advance below.</div>
+            </div>
+            <div class="form-check mb-2">
+                <input class="form-check-input" type="checkbox" name="overpay_as_tip" id="overpayAsTip">
+                <label class="form-check-label" for="overpayAsTip">
+                    Tip (extra amount above payable is posted as Tip)
+                </label>
+            </div>
+            <div class="form-check mb-3">
+                <input class="form-check-input" type="checkbox" name="overpay_as_advance" id="overpayAsAdvance">
+                <label class="form-check-label" for="overpayAsAdvance">
+                    Excess as Advance (if Tip not checked, all amount above payable is saved as worker advance)
+                </label>
+            </div>
+            <div class="form-check mb-3">
+                <input class="form-check-input" type="checkbox" name="settle_shortfall" id="settleShortfall">
+                <label class="form-check-label" for="settleShortfall">
+                    Settle shortfall to zero (book remaining payable as settlement adjustment)
+                </label>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Project (optional)</label>
+                <select name="project_id" class="form-select" id="paymentProjectSelect">
+                    <option value="">General Payment</option>
+                    {% for proj in projects %}
+                    <option value="{{ proj.id }}">{{ proj.name }} | {{ proj.project_code }} | {{ proj.client or 'No Owner' }} | {{ proj.location or 'No Location' }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Stage (optional)</label>
+                <select name="stage_id" class="form-select" id="paymentStageSelect">
+                    <option value="">No Stage</option>
+                    {% for s in stages %}
+                    <option value="{{ s.id }}" data-project="{{ s.project_id }}">{{ s.project.name }} - {{ s.name }}</option>
+                    {% endfor %}
+                </select>
+                <div class="form-text">Project and stage are required for Tip (overpayment) or shortfall settlement.</div>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Notes</label>
+                <input type="text" name="notes" class="form-control" placeholder="e.g. Monthly salary, final settlement">
+            </div>
+            <div class="d-flex gap-2">
+                <button type="submit" class="btn btn-success"><i class="fas fa-save me-1"></i>Record Payment</button>
+                <a href="{{ url_for('hdc_worker_ledger', wid=w.id) }}" class="btn btn-outline-secondary">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+</div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function(){
+    var proj = document.getElementById('paymentProjectSelect');
+    var stage = document.getElementById('paymentStageSelect');
+    var amountInput = document.getElementById('paymentAmountInput');
+    var tipChk = document.getElementById('overpayAsTip');
+    var advChk = document.getElementById('overpayAsAdvance');
+    var settleChk = document.getElementById('settleShortfall');
+    var form = amountInput ? amountInput.closest('form') : null;
+    var payable = Number({{ (payable_amount or 0)|float }}) || 0;
+
+    function sync(){
+        if(!proj || !stage) return;
+        var pid = proj.value;
+        Array.from(stage.options).forEach(function(opt){
+            if(!opt.value) return;
+            var ok = !pid || (opt.getAttribute('data-project') === pid);
+            opt.style.display = ok ? '' : 'none';
+            if(!ok && opt.selected) stage.value = '';
+        });
+    }
+    function overpayModeChanged(changed){
+        if(!tipChk || !advChk) return;
+        if(changed === 'tip' && tipChk.checked) advChk.checked = false;
+        if(changed === 'adv' && advChk.checked) tipChk.checked = false;
+    }
+    function validatePaymentForm(e){
+        if(!amountInput) return;
+        var amount = Number(amountInput.value || 0);
+        if(!(amount > 0)) return;
+        var isOverpay = amount > (payable + 0.01);
+        if(isOverpay && !tipChk.checked && !advChk.checked){
+            e.preventDefault();
+            alert('Amount is above payable. Please check Tip or Excess as Advance.');
+            return;
+        }
+        if(tipChk.checked && advChk.checked){
+            e.preventDefault();
+            alert('Please select only one: Tip or Excess as Advance.');
+            return;
+        }
+        if(amount <= (payable + 0.01) && (tipChk.checked || advChk.checked)){
+            e.preventDefault();
+            alert('Tip/Advance overpayment options are only for amount above payable.');
+        }
+    }
+    if(proj){ proj.addEventListener('change', sync); sync(); }
+    if(tipChk){ tipChk.addEventListener('change', function(){ overpayModeChanged('tip'); }); }
+    if(advChk){ advChk.addEventListener('change', function(){ overpayModeChanged('adv'); }); }
+    if(form){ form.addEventListener('submit', validatePaymentForm); }
+})();
+</script>
+{% endblock %}
