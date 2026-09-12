@@ -39,6 +39,8 @@ hdc/                    the application package (import here, not hdc_erp)
                         settings, api_purchase, api_accounts)
 hdc_erp.py              backward-compat shim: app, db, models, helpers
 wsgi.py                 gunicorn/PythonAnywhere entrypoint (env-configured)
+deploy_receiver.py      standalone stdlib-only WSGI app: GitHub webhook ->
+                        deploy.sh (mounted at /deploy/* on PythonAnywhere)
 templates/hdc/<domain>/ 82 Jinja pages, one folder per feature
 static/hdc/             css/hdc.css, img/, js/core/*.js, js/pages/*.js
 scripts/                split_monolith, reorganize_frontend, parity_check,
@@ -89,6 +91,9 @@ backup archive (see `.gitignore`).
 .venv/bin/python tests/smoke_test.py --baseline /path/to/legacy-copy
 ```
 
+Deploy automation has its own suite (webhook receiver, `deploy.sh`, and the
+database guard): `.venv/bin/python -m unittest discover -s tests -p 'test_*.py'`.
+
 The differential harness boots the legacy baseline and new package side by
 side (fresh scratch DBs), logs in, GETs ~90 pages/APIs, writes a project →
 stage → worker → expense → time-entry → supplier → material → account flow,
@@ -109,6 +114,13 @@ not shipped in this repository because it included a live database archive.
 
 ## Deploy / rollback
 
-Deploy: pull → `pip install -r requirements.txt` → set env → restart.
-The DB file is untouched by this conversion, so rollback is just redeploying
-the previous commit.
+Pushing to `main` deploys itself: a GitHub webhook hits `/deploy/github` on
+PythonAnywhere, verifies the `X-Hub-Signature-256` HMAC, and runs
+`ops/pythonanywhere/deploy.sh` detached — back up the DB, update every tracked
+file, install requirements only when they changed, run checks and migrations,
+then touch the WSGI file to reload. Databases and instance data live outside
+Git and are never pulled, reset or cleaned, and `scripts/check_db_safety.py`
+aborts any deploy whose incoming commit tries to track a `.db`. Rollback is a
+signed `POST /deploy/trigger {"revision": "<commit>"}` (or the same script with
+`HDC_DEPLOY_REVISION=...`); code moves, data does not. Full setup, limits and
+troubleshooting: [`ops/pythonanywhere/README.md`](ops/pythonanywhere/README.md).
