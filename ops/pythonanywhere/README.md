@@ -169,6 +169,43 @@ it is safe to run by hand at any time:
 Any failing step stops the script **before** the reload, so the site keeps
 serving the previous code; the outcome lands in `deploy_state.json`.
 
+For code-only iteration there is a deliberately lighter path below (`sync.sh`):
+no database backup, no migrations, no schema boot.
+
+## Fast iteration: `sync.sh`
+
+`deploy.sh` is the careful path (database backup, `pip install`, every check,
+migrations, reload). While iterating on code you usually want the fast path:
+
+```bash
+cp ops/pythonanywhere/sync.sh /home/yourname/sync_hdc.sh
+chmod +x /home/yourname/sync_hdc.sh
+
+bash /home/yourname/sync_hdc.sh
+```
+
+`sync.sh` pulls the branch, reinstalls requirements **only if
+`requirements.txt` changed**, runs the cheap `compileall` check (including
+`deploy_receiver.py`, so a syntax error there is caught before the reload that
+would otherwise take `/deploy` down), and requests a reload by touching
+`HDC_WSGI_FILE`. It deliberately skips the database backup
+and the migration pass, so use `deploy.sh` for anything that changes the schema
+or before you trust a release.
+
+It refuses to run on a checkout with uncommitted tracked changes rather than
+silently clobbering them.
+
+| Option | Effect |
+| --- | --- |
+| `--branch NAME` | Sync a branch other than `$HDC_DEPLOY_BRANCH` |
+| `--pip` | Force `pip install -r requirements.txt` |
+| `--no-reload` | Pull and check, but do not touch the WSGI file |
+| `--dry-run` | Print `current -> incoming` and change nothing |
+
+The code itself always travels through Git. There is no path where code is
+pushed to PythonAnywhere from outside the repository, so the deployed commit is
+always identifiable with `git rev-parse HEAD`.
+
 ## Manual trigger, rollback, kill switch
 
 Set `HDC_DEPLOY_ALLOW_MANUAL=1` and `HDC_DEPLOY_TOKEN=...` to enable:
