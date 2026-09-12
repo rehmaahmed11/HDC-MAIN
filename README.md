@@ -44,7 +44,10 @@ deploy_receiver.py      standalone stdlib-only WSGI app: GitHub webhook ->
 templates/hdc/<domain>/ 82 Jinja pages, one folder per feature
 static/hdc/             css/hdc.css, img/, js/core/*.js, js/pages/*.js
 scripts/                split_monolith, reorganize_frontend, parity_check,
-                        check_layers (reproducible conversion + verification)
+                        check_layers, check_db_safety, reset_admin_password
+                        (reproducible conversion + verification + ops CLIs)
+ops/                    pythonanywhere/ (setup.py, deploy.sh, sync.sh, webhook
+                        receiver wiring), arena/ (local<->sandbox git pairer)
 tests/                  differential smoke test vs the pre-split baseline
 ```
 

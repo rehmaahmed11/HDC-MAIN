@@ -78,6 +78,18 @@ the site. Watch it live:
 Do NOT use plain "git pull" or "git reset" in ~/HDC-MAIN. Those
 skip every safety check and can mix your database with Git.
 
+If you are only iterating on CODE and nothing touched the schema, there is a
+faster path (it skips the DB backup, the migrations and the full check suite):
+
+    cd ~/HDC-MAIN
+    bash ops/pythonanywhere/sync.sh
+
+sync.sh pulls the branch, reinstalls dependencies ONLY when requirements.txt
+changed, runs the quick syntax check, then touches the WSGI file to reload.
+It refuses to run when the checkout has uncommitted changes, so it can never
+eat your work. Options: --branch NAME, --pip, --no-reload, --dry-run.
+Anything that changes the database: use deploy.sh instead.
+
 
 3. ROLLING BACK TO AN OLDER VERSION
 ------------------------------------------------
@@ -115,6 +127,9 @@ Which secret does what:
                                     and /deploy/trigger.
     HDC_BOOTSTRAP_ADMIN_PASSWORD    only used while the database has
                                     no users yet (fresh install).
+                                    To change a login that already
+                                    exists, see section 7 - use
+                                    scripts/reset_admin_password.py.
 
 The important one - changing the webhook secret. Do it in this order,
 as fast as you can (in between, GitHub pushes are rejected with 401):
@@ -216,6 +231,22 @@ Pushes are not deploying:
 Pushes get 401 (unauthorized):
     the webhook secret on GitHub does not match production.env.
     Follow section 4 exactly.
+
+Locked out of an existing admin login:
+    HDC_BOOTSTRAP_ADMIN_PASSWORD is only read while the user table is
+    EMPTY, so changing it in production.env does nothing to a login that
+    already exists. Reset the password from a Bash console instead - and
+    load the same settings file the site uses, or you will edit a
+    different database:
+
+      cd ~/HDC-MAIN
+      set -a; . ~/.config/hdc/production.env; set +a
+      python3 scripts/reset_admin_password.py --show
+      python3 scripts/reset_admin_password.py --username admin --prompt
+
+    --show prints which database file it is about to touch. It refuses
+    weak passwords, never echoes what you type, and --role admin also
+    promotes the account. Reload the site afterwards, then log in.
 
 The setup script stopped with an error:
     read the message - it never deleted anything. Fix the problem,
