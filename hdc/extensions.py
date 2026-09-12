@@ -9,10 +9,9 @@ import sqlite3
 
 from flask import abort, current_app, flash, request, session
 from flask_login import current_user
-from sqlalchemy import event
+from sqlalchemy import event, inspect as sa_inspect
 from sqlalchemy.engine import Engine
 
-from hdc.config import _DB_STORE
 from hdc.utils.dates import _fmt_pkt
 from flask_login import LoginManager
 from flask_sqlalchemy import SQLAlchemy
@@ -58,29 +57,16 @@ def _inject_alert_count():
 
 def _ensure_db_runtime_ready():
     from hdc.core.bootstrap import _ensure_bootstrap_once
-    # Self-heal for long-running WSGI workers: if DB file is deleted after startup,
-    # recreate a fresh schema on the next request.
-    if os.path.exists(_DB_STORE):
-        try:
-            con = sqlite3.connect(_DB_STORE)
-            cur = con.cursor()
-            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='hdc_user'")
-            ok = cur.fetchone() is not None
-            cur.close()
-            con.close()
-            if ok:
-                return None
-            _ensure_bootstrap_once(force=True)
-            return None
-        except Exception as ex:
-            current_app.logger.error('Runtime DB table self-heal failed: %s', ex)
-            abort(500, description='Database schema check failed and auto-recovery failed.')
+    # Inspect the active SQLAlchemy engine rather than a module-global path.
+    # This keeps runtime self-healing correct for every factory-created app.
     try:
+        if sa_inspect(db.engine).has_table('hdc_user'):
+            return None
         _ensure_bootstrap_once(force=True)
+        return None
     except Exception as ex:
         current_app.logger.error('Runtime DB self-heal failed: %s', ex)
-        abort(500, description='Database is missing and auto-recovery failed.')
-    return None
+        abort(500, description='Database schema check failed and auto-recovery failed.')
 
 
 def _csrf_protect():
@@ -89,10 +75,13 @@ def _csrf_protect():
     ep = (request.endpoint or '').strip()
     if ep in ('static',):
         return None
-    # JSON endpoints may use token header from JS callers; do not hard-block legacy JSON posts here.
-    if request.is_json:
-        return None
-    sent = (request.form.get('_csrf_token') or request.headers.get('X-CSRFToken') or '').strip()
+    sent = (request.form.get('_csrf_token') or
+            request.headers.get('X-CSRFToken') or
+            request.headers.get('X-CSRF-Token') or '').strip()
+    if not sent and request.is_json:
+        payload = request.get_json(silent=True) or {}
+        if isinstance(payload, dict):
+            sent = str(payload.get('_csrf_token') or '').strip()
     tok = (session.get('_csrf_token') or '').strip()
     if (not sent) or (not tok) or (sent != tok):
         abort(400, description='CSRF token missing or invalid.')

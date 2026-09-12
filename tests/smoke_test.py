@@ -13,6 +13,7 @@ import sys
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 BASELINE_DEFAULT = "/tmp/hdc-baseline"
+BASELINE_COMMIT = os.environ.get("HDC_BASELINE_COMMIT", "HEAD^")
 
 
 def run_worker(app_dir, tag):
@@ -41,8 +42,14 @@ def main():
         new = args[args.index("--new") + 1]
     if not os.path.isdir(baseline):
         print(f"baseline dir {baseline} missing; creating worktree...")
-        subprocess.run(["git", "worktree", "add", baseline, "fab3e8c"],
-                       check=True, cwd=ROOT)
+        try:
+            subprocess.run(["git", "worktree", "add", baseline, BASELINE_COMMIT],
+                           check=True, cwd=ROOT)
+        except subprocess.CalledProcessError as ex:
+            raise SystemExit(
+                f"Baseline unavailable ({BASELINE_COMMIT}). Pass "
+                "--baseline /path/to/legacy-copy or set HDC_BASELINE_COMMIT."
+            ) from ex
     print(f"baseline: {baseline}")
     print(f"new:      {new}")
     base = run_worker(baseline, "base")

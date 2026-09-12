@@ -105,6 +105,7 @@ for page in READ_PAGES:
 # and the overdraft block rejects unfunded cash accounts).
 step("writes", "POST account(json)", lambda: client.post(
     "/api/accounts/create_account",
+    headers={"X-CSRFToken": token},
     json={"name": "Smoke Cash", "account_group": "company",
           "account_mode": "cash"}).status_code)
 with app.app_context():
@@ -116,6 +117,7 @@ res["writes"]["account_id"] = accid
 # Fund the auto-created Company Cash (expenses post from it).
 step("writes", "PUT fund Company Cash", lambda: client.put(
     f"/api/accounts/account/{ccid}",
+    headers={"X-CSRFToken": token},
     json={"opening_balance": 100000}).status_code)
 
 step("writes", "POST project", lambda: post_form("/hdc/projects/add", {

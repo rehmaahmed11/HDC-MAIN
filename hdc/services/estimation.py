@@ -8,7 +8,7 @@ import os
 
 from flask import current_app
 
-from hdc.config import _ESTIMATION_STORE
+from hdc.config import get_runtime_settings
 from hdc.extensions import db
 from hdc.models.projects import Project, Stage
 from hdc.services.lookups import _next_project_code
@@ -16,10 +16,11 @@ from hdc.utils.dates import _pkt_now_naive, _pkt_today
 from hdc.utils.format import _flt
 
 def _load_estimations():
-    if not os.path.exists(_ESTIMATION_STORE):
+    estimation_store = get_runtime_settings().estimation_store
+    if not os.path.exists(estimation_store):
         return []
     try:
-        with open(_ESTIMATION_STORE, 'r', encoding='utf-8') as f:
+        with open(estimation_store, 'r', encoding='utf-8') as f:
             data = json.load(f)
         if isinstance(data, list):
             return data
@@ -29,8 +30,9 @@ def _load_estimations():
 
 
 def _save_estimations(items):
+    estimation_store = get_runtime_settings().estimation_store
     try:
-        with open(_ESTIMATION_STORE, 'w', encoding='utf-8') as f:
+        with open(estimation_store, 'w', encoding='utf-8') as f:
             json.dump(items, f, indent=2)
         return True
     except Exception as ex:

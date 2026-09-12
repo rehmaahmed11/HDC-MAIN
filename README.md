@@ -13,8 +13,9 @@ served by gunicorn (`wsgi:app`).
 > This repo was converted from a 20,101-line single-file app into a modular
 > monolith with zero behaviour change. Read
 > [`MODULARIZATION_PLAN.md`](MODULARIZATION_PLAN.md) for the why/how,
-> [`REFACTOR_NOTES.md`](REFACTOR_NOTES.md) for every non-move edit, and
-> [`APP_REVIEW.md`](APP_REVIEW.md) for the deep functional review.
+> [`REFACTOR_NOTES.md`](REFACTOR_NOTES.md) for every non-move edit,
+> [`PRODUCTION_HARDENING.md`](PRODUCTION_HARDENING.md) for deployment/security
+> hardening, and [`APP_REVIEW.md`](APP_REVIEW.md) for the deep functional review.
 
 ## Layout
 
@@ -57,30 +58,42 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 HDC_DB_PATH=/tmp/hdc_dev.db HDC_INSTANCE_DIR=/tmp/hdc_dev_inst \
   .venv/bin/python hdc_erp.py        # 0.0.0.0:$PORT (5000) -> /hdc/login
 
-# production (gunicorn)
-HDC_SECRET_KEY='<strong-random>' HDC_DB_PATH=/srv/hdc/hdc_instance/hdc_erp.db \
+# production (gunicorn; terminate HTTPS at the reverse proxy)
+HDC_ENV=prod \
+HDC_SECRET_KEY='<strong-random>' \
+HDC_BOOTSTRAP_ADMIN_USERNAME='admin' \
+HDC_BOOTSTRAP_ADMIN_PASSWORD='<strong-random-password>' \
+HDC_DB_PATH=/srv/hdc/hdc_instance/hdc_erp.db \
   gunicorn 'wsgi:app' --bind 0.0.0.0:5000 --workers 2
-
-# default bootstrap admin (change immediately): admin / Admin@1234
 ```
 
-Config is environment-only: `HDC_DB_PATH`, `HDC_INSTANCE_DIR`,
+Production refuses to start without `HDC_SECRET_KEY`, and refuses to create
+its first admin without `HDC_BOOTSTRAP_ADMIN_PASSWORD`. The development-only
+fallback admin password is not used when `HDC_ENV=prod`.
+
+Config is environment-driven: `HDC_ENV`, `HDC_DB_PATH`, `HDC_INSTANCE_DIR`,
 `HDC_SECRET_KEY`, `HDC_BOOTSTRAP_ADMIN_USERNAME`,
-`HDC_BOOTSTRAP_ADMIN_PASSWORD`, `PORT`, plus optional `.env` file.
-Never commit the real database (see `.gitignore`).
+`HDC_BOOTSTRAP_ADMIN_PASSWORD`, `HDC_DEFAULT_ADMIN_PASSWORD` (development
+only), `PORT`, plus an optional `.env` file for local development. Session cookies are HttpOnly,
+SameSite=Lax, and Secure in production. Never commit a real database or
+backup archive (see `.gitignore`).
 
 ## Test
 
 ```bash
-.venv/bin/python scripts/parity_check.py   # URL map + template parity vs baseline
-.venv/bin/python tests/smoke_test.py       # 120-value differential read/write test
 .venv/bin/python scripts/check_layers.py   # layering rules + acyclic imports
+.venv/bin/python -m compileall -q hdc hdc_erp.py wsgi.py
+
+# Differential checks require an external copy of the pre-split app:
+.venv/bin/python scripts/parity_check.py --baseline /path/to/legacy-copy
+.venv/bin/python tests/smoke_test.py --baseline /path/to/legacy-copy
 ```
 
-`smoke_test.py` boots the pre-split baseline from a git worktree and the new
-package side by side (fresh scratch DBs), logs in, GETs ~90 pages/APIs,
-writes a project → stage → worker → expense → time-entry → supplier →
-material → account flow, and diffs every status code and table count.
+The differential harness boots the legacy baseline and new package side by
+side (fresh scratch DBs), logs in, GETs ~90 pages/APIs, writes a project →
+stage → worker → expense → time-entry → supplier → material → account flow,
+and diffs every status code and table count. The baseline is intentionally
+not shipped in this repository because it included a live database archive.
 
 ## Working with modules
 

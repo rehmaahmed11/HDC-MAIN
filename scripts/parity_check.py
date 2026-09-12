@@ -15,6 +15,7 @@ import sys
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 BASELINE_DEFAULT = "/tmp/hdc-baseline"
+BASELINE_COMMIT = os.environ.get("HDC_BASELINE_COMMIT", "HEAD^")
 URL_DUMP = (
     "import json, os, sys; "
     "sys.path.insert(0, os.getcwd()); "
@@ -54,8 +55,14 @@ def main():
     baseline = (sys.argv[sys.argv.index("--baseline") + 1]
                 if "--baseline" in sys.argv else BASELINE_DEFAULT)
     if not os.path.isdir(baseline):
-        subprocess.run(["git", "worktree", "add", baseline, "fab3e8c"],
-                       check=True, cwd=ROOT)
+        try:
+            subprocess.run(["git", "worktree", "add", baseline, BASELINE_COMMIT],
+                           check=True, cwd=ROOT)
+        except subprocess.CalledProcessError as ex:
+            raise SystemExit(
+                f"Baseline unavailable ({BASELINE_COMMIT}). Pass "
+                "--baseline /path/to/legacy-copy or set HDC_BASELINE_COMMIT."
+            ) from ex
     print(f"baseline: {baseline}\nnew:      {ROOT}")
 
     base_map = dump_urlmap(baseline, "base")

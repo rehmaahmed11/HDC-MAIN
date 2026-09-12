@@ -12,7 +12,7 @@ from flask_login import login_required
 from sqlalchemy import func
 from werkzeug.utils import secure_filename
 
-from hdc.config import STAGE_DRAWINGS_DIR
+from hdc.config import get_runtime_settings
 from hdc.extensions import db
 from hdc.models.accounts import Account, OwnerPayment
 from hdc.models.materials import Material
@@ -482,7 +482,7 @@ def register(app):
                 continue
             original = secure_filename(f.filename or 'drawing.pdf') or 'drawing.pdf'
             stored = f"{uuid4().hex}.pdf"
-            path = os.path.join(STAGE_DRAWINGS_DIR, stored)
+            path = os.path.join(get_runtime_settings().stage_drawings_dir, stored)
             f.save(path)
             db.session.add(StageDrawing(
                 stage_id=s.id,
@@ -502,7 +502,7 @@ def register(app):
     @login_required
     def hdc_stage_drawing_view(did):
         d = StageDrawing.query.get_or_404(did)
-        path = os.path.join(STAGE_DRAWINGS_DIR, d.stored_name or '')
+        path = os.path.join(get_runtime_settings().stage_drawings_dir, d.stored_name or '')
         if not os.path.exists(path):
             flash('Drawing file not found on disk.', 'danger')
             return redirect(url_for('hdc_project_detail', pid=d.stage.project_id))
@@ -514,7 +514,7 @@ def register(app):
     def hdc_stage_drawing_delete(did):
         d = StageDrawing.query.get_or_404(did)
         pid = d.stage.project_id
-        path = os.path.join(STAGE_DRAWINGS_DIR, d.stored_name or '')
+        path = os.path.join(get_runtime_settings().stage_drawings_dir, d.stored_name or '')
         db.session.delete(d)
         db.session.commit()
         try:
@@ -535,10 +535,10 @@ def register(app):
         if not _is_pdf_upload(f):
             flash('Please upload a valid PDF file.', 'warning')
             return redirect(url_for('hdc_project_detail', pid=pid))
-        old_path = os.path.join(STAGE_DRAWINGS_DIR, d.stored_name or '')
+        old_path = os.path.join(get_runtime_settings().stage_drawings_dir, d.stored_name or '')
         new_original = secure_filename(f.filename or 'drawing.pdf') or 'drawing.pdf'
         new_stored = f"{uuid4().hex}.pdf"
-        new_path = os.path.join(STAGE_DRAWINGS_DIR, new_stored)
+        new_path = os.path.join(get_runtime_settings().stage_drawings_dir, new_stored)
         f.save(new_path)
         d.original_name = new_original
         d.stored_name = new_stored
