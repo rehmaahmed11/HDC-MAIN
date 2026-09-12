@@ -18,6 +18,41 @@ git push origin main  ->  GitHub "push" webhook
         ->  state in $HDC_INSTANCE_DIR/deploy/{deploy_state.json,deploy.log}
 ```
 
+## Interactive setup (recommended)
+
+Run the standard-library setup app in a **PythonAnywhere Bash console**, using
+Python 3.10 or newer:
+
+```bash
+python3 ops/pythonanywhere/setup.py
+```
+
+You can also upload `setup.py` to your home directory and run
+`python3 ~/setup.py`; it asks for the checkout path and can clone GitHub into an
+empty folder. It refuses to overwrite a nonempty ZIP-extracted application.
+Create/select a web app in PythonAnywhere's Web tab first so its WSGI file exists.
+
+The wizard generates missing application/webhook secrets, preserves existing
+valid secrets on reruns, and writes `~/.config/hdc/production.env` with mode 600.
+It asks for existing data paths (no database is moved or deleted), requires the
+literal confirmation `CREATE NEW DATABASE` for an empty installation, sets up a
+virtualenv if needed, installs dependencies, and can run the guarded deployment
+script. After deployment succeeds, it backs up and installs the WSGI dispatcher
+and requests reload. Configuration backups are private, timestamped files.
+Existing data must be backed up before deployment: application startup may run
+schema migrations. If replacing another application or a custom WSGI dispatcher,
+review the replacement first; the wizard installs the HDC-only dispatcher.
+
+The wizard cannot change the Web-tab Python version or virtualenv setting: it
+prints the paths and asks you to confirm those settings before deployment.
+It prints every GitHub webhook field after setup and shows the secret only on
+explicit confirmation in your private terminal. Verify `/deploy/health` and
+`/hdc/` before enabling the hook. A successful GitHub ping or push acceptance is
+not proof of deployment completion; check the deployment log.
+
+**Deployment always follows `origin/main`.** Merge reviewed code into main first.
+This wizard does not register a GitHub webhook or ask for GitHub/API credentials.
+
 ## Webhook setup (works on a free account)
 
 Free accounts have **one web app** and no inbound SSH, so the receiver is
