@@ -26,4 +26,4 @@ project_dir = os.environ["HDC_APP_DIR"]
 if project_dir not in sys.path:
     sys.path.insert(0, project_dir)
 
-from wsgi import app as application  # noqa: E402
+from wsgi import app as application  # noqa: E402,F401
