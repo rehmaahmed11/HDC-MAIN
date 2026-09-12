@@ -32,7 +32,15 @@ LOCK_DIR="${HDC_DEPLOY_LOCK_DIR:-/tmp/hdc-erp-deploy.lock}"
 PYTHON="$HDC_VENV_PATH/bin/python"
 PIP="$HDC_VENV_PATH/bin/pip"
 
-for path in "$HDC_APP_DIR" "$HDC_INSTANCE_DIR" "$HDC_VENV_PATH"; do
+if [[ ! -d "$HDC_INSTANCE_DIR" ]]; then
+    if [[ "${HDC_ALLOW_NEW_DB:-0}" == "1" ]]; then
+        mkdir -p "$HDC_INSTANCE_DIR"
+    else
+        echo "Required instance directory does not exist: $HDC_INSTANCE_DIR" >&2
+        exit 1
+    fi
+fi
+for path in "$HDC_APP_DIR" "$HDC_VENV_PATH"; do
     if [[ ! -d "$path" ]]; then
         echo "Required directory does not exist: $path" >&2
         exit 1
