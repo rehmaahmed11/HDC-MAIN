@@ -48,16 +48,62 @@ class SetupTests(unittest.TestCase):
             project.mkdir()
             db = project / 'live.db'
             db.write_bytes(b'existing data')
-            with patch.object(setup, 'ask', return_value=str(project)), patch.object(setup, 'run') as run:
+            with patch.object(setup, 'run') as run:
                 with self.assertRaisesRegex(ValueError, 'not a Git checkout'):
-                    setup.main()
-                run.assert_not_called()
+                    setup.main(project=project)
+            run.assert_not_called()
             self.assertEqual(db.read_bytes(), b'existing data')
 
     def test_placeholder_detection(self):
         self.assertFalse(setup.usable('replace-with-a-long-random-secret'))
         self.assertFalse(setup.usable('/home/yourname/HDC-MAIN'))
         self.assertTrue(setup.usable('existing-valid-secret'))
+
+    def test_credentials_content_and_permissions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / setup.CREDENTIALS_FILE
+            text = setup.build_credentials(
+                domain='me.pythonanywhere.com',
+                webhook_secret='a' * 64,
+                deploy_token='tok-123',
+                admin=('admin', 'Sup3r$ecret'),
+                log_dir='/home/me/hdc_instance/deploy',
+            )
+            setup.write_private(path, text)
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            content = path.read_text()
+            for needle in (
+                    'https://me.pythonanywhere.com/deploy/github',
+                    'https://me.pythonanywhere.com/deploy/health',
+                    'https://github.com/rehmaahmed11/HDC-MAIN/settings/hooks',
+                    'application/json',
+                    'Just the push event',
+                    'a' * 64,
+                    'tok-123',
+                    'Sup3r$ecret',
+                    '/home/me/hdc_instance/deploy/deploy.log',
+            ):
+                self.assertIn(needle, content)
+
+    def test_credentials_omit_admin_for_existing_database(self):
+        text = setup.build_credentials('me.pythonanywhere.com', 'a' * 64, 'tok-123')
+        self.assertNotIn('Password:', text)
+        self.assertNotIn('Fresh-INSTALL LOGIN', text)
+
+    def test_strong_password_policy(self):
+        seen = set()
+        for _ in range(100):
+            password = setup.strong_password()
+            self.assertNotIn(password, seen)
+            seen.add(password)
+            self.assertGreaterEqual(len(password), 12)
+            self.assertRegex(password, r'[A-Z]')
+            self.assertRegex(password, r'[a-z]')
+            self.assertRegex(password, r'[0-9]')
+            self.assertRegex(password, r'[^A-Za-z0-9]')
+            # Must survive the single-quoted production.env serialization.
+            self.assertNotIn("'", password)
+            self.assertIn(password, setup.serialize({'HDC_BOOTSTRAP_ADMIN_PASSWORD': password}))
 
 
 if __name__ == '__main__':

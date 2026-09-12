@@ -1,5 +1,43 @@
 #!/usr/bin/env python3
-"""Interactive PythonAnywhere setup. Standard library only; run with Python 3.10+."""
+"""Unattended PythonAnywhere setup for HDC ERP. Standard library only; Python 3.10+.
+
+Runs with ZERO questions.  Every value is resolved in this order:
+
+  1. values already saved in ``~/.config/hdc/production.env`` (secrets reused),
+  2. ``HDC_*`` environment variables,
+  3. defaults derived from this checkout and your account name.
+
+In one run it:
+
+  * finds the checkout (clones it when the folder is missing or empty),
+  * verifies the deployment files exist and the working tree is clean,
+  * generates any missing secrets (site key, webhook secret, deploy token),
+  * saves ``~/.config/hdc/production.env`` (mode 600, timestamped backup),
+  * writes ``<checkout>/github_hook_credentials.txt`` (mode 600, gitignored)
+    with every field needed to add the GitHub hook,
+  * creates the virtualenv if needed and installs the requirements,
+  * writes the WSGI dispatcher (backed up first) and runs the guarded
+    ``deploy.sh`` whenever the PythonAnywhere WSGI file can be located or
+    created.
+
+Rerunning is always safe: saved secrets are reused, existing files are
+backed up, and nothing is ever asked interactively.  PythonAnywhere allows
+exactly two browser-only steps that no script can click: creating the web
+app once in the Web tab, and watching the reload.  When the WSGI file cannot
+be located or created, the setup still finishes everything else and prints
+that single remaining step instead of asking.
+
+Optional environment overrides:
+
+  HDC_APP_DIR            checkout folder (default: the one containing this script)
+  HDC_DOMAIN             public web domain (default: <username>.pythonanywhere.com)
+  HDC_PYTHON             interpreter used to build the virtualenv (default: python3)
+  HDC_SETUP_NO_DEPLOY=1  save config + credentials + dependencies and stop
+                         before the deploy.sh / WSGI-replace step
+"""
+
+from __future__ import annotations
+
 import getpass
 import os
 from pathlib import Path
@@ -12,16 +50,8 @@ import tempfile
 from datetime import datetime, timezone
 
 REPO = 'rehmaahmed11/HDC-MAIN'
+CREDENTIALS_FILE = 'github_hook_credentials.txt'
 PLACEHOLDER = ('replace-with-', 'yourname')
-
-
-def ask(label, default=''):
-    value = input(f'{label}' + (f' [{default}]' if default else '') + ': ').strip()
-    return value or default
-
-
-def confirm(label):
-    return ask(label + ' (yes/no)', 'no').lower() == 'yes'
 
 
 def run(*args):
@@ -84,16 +114,92 @@ def absolute(value):
     return Path(value).expanduser().resolve()
 
 
-def main():
-    print('\nHDC PythonAnywhere setup\nNo databases are deleted or moved. Secrets stay outside Git.\n')
+def strong_password():
+    """16 random characters with at least one upper, lower, digit and symbol.
+
+    Avoids quote/backtick characters so the value survives the single-quoted
+    ``production.env`` serialization and every shell context untouched.
+    """
+    upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ'
+    lower = 'abcdefghijkmnopqrstuvwxyz'
+    digits = '23456789'
+    symbols = '@!%*?=-_+'
+    alphabet = upper + lower + digits + symbols
+    rng = secrets.SystemRandom()
+    chars = [rng.choice(upper), rng.choice(lower), rng.choice(digits), rng.choice(symbols)]
+    chars += [rng.choice(alphabet) for _ in range(16 - len(chars))]
+    rng.shuffle(chars)
+    return ''.join(chars)
+
+
+def build_credentials(domain, webhook_secret, deploy_token, admin=None, log_dir=''):
+    """Return the plain-text content of ``github_hook_credentials.txt``.
+
+    ``admin`` is an optional ``(username, password)`` pair, included only for
+    a brand-new database so the first login never has to be hunted for.
+    """
+    base = f'https://{domain}'
+    lines = [
+        '=' * 70,
+        'HDC GITHUB HOOK CREDENTIALS  -  PRIVATE: never commit, never share',
+        '=' * 70,
+        f'Generated:   {datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")}',
+        f'Repository:  {REPO}',
+        'Deploys:     pushes to branch main only (other refs are ignored)',
+        '',
+        '1) GITHUB HOOK  (Settings -> Webhooks -> Add webhook)',
+        f'   Settings page:  https://github.com/{REPO}/settings/hooks',
+        f'   Payload URL:    {base}/deploy/github',
+        '   Content type:   application/json',
+        '   SSL verification: Enable SSL verification',
+        '   Events:         Just the push event',
+        '   Secret:         ' + webhook_secret,
+        '   Branch field:   not needed (the receiver filters to main itself)',
+        '',
+        '2) MANUAL TRIGGER / ROLLBACK  (optional, off by default)',
+        f'   Endpoint:       POST {base}/deploy/trigger',
+        '   Bearer token:   ' + deploy_token,
+        '   Answered only when production.env has HDC_DEPLOY_ALLOW_MANUAL=1',
+        '',
+        '3) CHECK IT',
+        f'   Health (public):  GET {base}/deploy/health',
+        f'   Log tail (auth):  GET {base}/deploy/status   (Authorization: Bearer {deploy_token})',
+        '   Deploy log file:  ' + (f'{log_dir}/deploy.log' if log_dir else '<instance dir>/deploy/deploy.log'),
+        '',
+    ]
+    if admin:
+        lines += [
+            '4) FRESH-INSTALL LOGIN  (brand-new database only)',
+            f'   Login page:   {base}/hdc/login',
+            '   Username:     ' + admin[0],
+            '   Password:     ' + admin[1],
+            '',
+        ]
+    lines += [
+        'RULES: This file holds live secrets. It is listed in .gitignore and',
+        'kept at mode 600. The same values live in ~/.config/hdc/production.env.',
+        '=' * 70,
+    ]
+    return '\n'.join(lines) + '\n'
+
+
+def main(project=None):
+    print('\nHDC PythonAnywhere setup (unattended) - no questions will be asked.\n')
     home = Path.home()
     username = getpass.getuser()
-    project = absolute(ask('Git checkout folder', str(home / 'HDC-MAIN')))
+
+    # 1. Locate (or clone) the checkout.
+    if project is not None:
+        project = absolute(project)
+    else:
+        default = Path(__file__).resolve().parents[2]
+        project = absolute(os.environ.get('HDC_APP_DIR', '').strip() or str(default))
     if not (project / '.git').is_dir():
         if project.exists() and any(project.iterdir()):
-            raise ValueError('That folder is not a Git checkout and is not empty. Keep your ZIP/data folder; choose a different empty folder and rerun.')
-        if not confirm(f'Clone https://github.com/{REPO}.git into {project}?'):
-            return
+            raise ValueError('That folder is not a Git checkout and is not empty. '
+                             'Keep your ZIP/data folder; point HDC_APP_DIR at an empty '
+                             'folder and rerun.')
+        print(f'Cloning https://github.com/{REPO}.git into {project} ...')
         run('git', 'clone', f'https://github.com/{REPO}.git', project)
     for relative in ('deploy_receiver.py', 'ops/pythonanywhere/deploy.sh',
                      'ops/pythonanywhere/wsgi_deploy_with_receiver.example.py'):
@@ -102,8 +208,11 @@ def main():
     dirty = subprocess.check_output(['git', '-C', str(project), 'diff', '--name-only'], text=True)
     staged = subprocess.check_output(['git', '-C', str(project), 'diff', '--cached', '--name-only'], text=True)
     if dirty or staged:
-        raise ValueError('Tracked local changes exist. Save/reconcile them before deploying; this setup will not discard them.')
+        raise ValueError('Tracked local changes exist. Save/reconcile them before deploying; '
+                         'this setup will not discard them.')
+    print(f'Code: {project}')
 
+    # 2. Load existing configuration and keep every secret that is still valid.
     env_path = home / '.config/hdc/production.env'
     if env_path.is_relative_to(project):
         raise ValueError('Production settings must be outside the Git checkout.')
@@ -117,116 +226,179 @@ def main():
         if not usable(values[key]):
             del values[key]
 
-    domain = ask('Public web domain (no https or path)', f'{username}.pythonanywhere.com')
-    if not re.fullmatch(r'[A-Za-z0-9.-]+', domain) or '.' not in domain:
-        raise ValueError('Enter only a domain, such as rehmanahmed92yd.pythonanywhere.com.')
-    wsgi_default = values.get('HDC_WSGI_FILE', f'/var/www/{domain.replace(".", "_")}_wsgi.py')
-    wsgi = absolute(ask('WSGI file path shown in the PythonAnywhere Web tab', wsgi_default))
-    if not wsgi.is_file():
-        raise ValueError('WSGI file does not exist. Create/select a Manual configuration web app in the Web tab first, then rerun with its actual WSGI path.')
-
     # The ERP resolves relative paths against its checkout, not the console cwd.
     for key in ('HDC_INSTANCE_DIR', 'HDC_DB_PATH', 'HDC_BACKUP_DIR'):
         if values.get(key):
             path = Path(values[key]).expanduser()
             values[key] = str(path if path.is_absolute() else project / path)
-    instance_default = values.get('HDC_INSTANCE_DIR', str(project / 'hdc_instance'))
-    instance = absolute(ask('Existing instance/data folder (or folder for a fresh installation)', instance_default))
+
+    # 3. Web domain and WSGI file.
+    domain = (os.environ.get('HDC_DOMAIN', '').strip()
+              or values.get('HDC_DOMAIN', '').strip()
+              or f'{username}.pythonanywhere.com')
+    if not re.fullmatch(r'[A-Za-z0-9.-]+', domain) or '.' not in domain:
+        raise ValueError(f'HDC_DOMAIN is not a valid domain: {domain!r}')
+    print(f'Web domain: {domain}')
+    wsgi = absolute(values.get('HDC_WSGI_FILE', '').strip()
+                    or f'/var/www/{domain.replace(".", "_")}_wsgi.py')
+    wsgi_ready = wsgi.is_file()
+    if not wsgi_ready:
+        # PythonAnywhere creates /var/www/<domain>_wsgi.py for the web app.  If
+        # the app has not been created yet we write the dispatcher there
+        # anyway, so the only remaining human step is the one Web-tab click.
+        try:
+            template = (project / 'ops/pythonanywhere/wsgi_deploy_with_receiver.example.py').read_text()
+            template = template.replace('/home/yourname', str(home))
+            template = template.replace(
+                f'PROJECT_DIR_DEFAULT = "{home}/HDC-MAIN"', f'PROJECT_DIR_DEFAULT = {str(project)!r}')
+            compile(template, str(wsgi), 'exec')
+            write_private(wsgi, template)
+            wsgi_ready = True
+            print(f'WSGI file not found; dispatcher written to {wsgi} '
+                  f'(still create the web app in the Web tab).')
+        except OSError:
+            print(f'WSGI file not found at {wsgi} and it cannot be created here; '
+                  f'the deploy step will be skipped.')
+
+    # 4. Instance folder and database.
+    instance = absolute(values.get('HDC_INSTANCE_DIR', '').strip() or str(project / 'hdc_instance'))
     candidates = [instance / 'hdc_erp_integrated.db', instance / 'hdc_erp.db']
-    db_default = values.get('HDC_DB_PATH', str(next((p for p in candidates if p.is_file()), candidates[-1])))
-    db = absolute(ask('Live SQLite database path (keep your existing DB path to retain data)', db_default))
+    db = absolute(values.get('HDC_DB_PATH', '').strip()
+                  or str(next((p for p in candidates if p.is_file()), candidates[-1])))
     fresh = not db.exists()
     if fresh:
-        print(f'WARNING: No database exists at {db}. An incorrect path would create an empty ERP.')
-        if ask('Type CREATE NEW DATABASE only if you intentionally want an empty ERP') != 'CREATE NEW DATABASE':
-            raise ValueError('Stopped without changing configuration. Rerun with your existing database path.')
+        print(f'WARNING: No database exists at {db}; an empty ERP database '
+              f'will be created on first start.')
     elif not db.is_file() or db.stat().st_size == 0:
-        raise ValueError('Database is not a nonempty file. Check the path before continuing.')
+        raise ValueError('Database is not a nonempty file. Check HDC_DB_PATH before continuing.')
     if not fresh and not instance.is_dir():
         raise ValueError('Existing instance folder not found. Check the data path.')
+    print(f'Database: {db}' + ('  (fresh install)' if fresh else '  (existing data kept in place)'))
 
-    venv = absolute(ask('Virtualenv path (use the existing Web-tab path if available)', values.get('HDC_VENV_PATH', str(home / '.virtualenvs/hdc'))))
+    # 5. Virtualenv and dependencies.
+    venv = absolute(values.get('HDC_VENV_PATH', '').strip() or str(home / '.virtualenvs/hdc'))
     if not (venv / 'bin/python').is_file():
-        interpreter = ask('Python executable matching your Web-tab Python version', f'python{sys.version_info.major}.{sys.version_info.minor}')
+        interpreter = (os.environ.get('HDC_PYTHON', '').strip()
+                       or f'python{sys.version_info.major}.{sys.version_info.minor}'
+                       or 'python3')
         if not shutil.which(interpreter):
-            raise ValueError(f'{interpreter} not found. Choose an installed Python matching your web app.')
+            interpreter = 'python3'
+        if not shutil.which(interpreter):
+            raise ValueError(f'{interpreter} not found; set HDC_PYTHON to the Python '
+                             f'matching your web app.')
+        print(f'Creating virtualenv at {venv} with {interpreter}')
         run(interpreter, '-m', 'venv', venv)
+    print(f'Virtualenv: {venv}')
 
+    # 6. Resolve every setting; generate secrets only where missing.
     values.update({
         'HDC_ENV': 'prod', 'HDC_APP_DIR': str(project),
         'HDC_INSTANCE_DIR': str(instance), 'HDC_DB_PATH': str(db),
-        'HDC_VENV_PATH': str(venv), 'HDC_WSGI_FILE': str(wsgi),
+        'HDC_VENV_PATH': str(venv), 'HDC_WSGI_FILE': str(wsgi), 'HDC_DOMAIN': domain,
         'HDC_DEPLOY_REPO': REPO, 'HDC_DEPLOY_BRANCH': 'main',
         'HDC_DEPLOY_ALLOW_MANUAL': '0', 'HDC_DEPLOY_DISABLED': '0',
         'HDC_ALLOW_NEW_DB': '1' if fresh else '0',
         'HDC_BACKUP_DIR': values.get('HDC_BACKUP_DIR', str(instance / 'backups/deployments')),
         'HDC_DEPLOY_ENV_FILE': str(env_path),
     })
-    for key in ('HDC_SECRET_KEY', 'HDC_DEPLOY_WEBHOOK_SECRET'):
-        values.setdefault(key, secrets.token_hex(32))
+    values.setdefault('HDC_SECRET_KEY', secrets.token_hex(32))
+    values.setdefault('HDC_DEPLOY_WEBHOOK_SECRET', secrets.token_hex(32))
+    values.setdefault('HDC_DEPLOY_TOKEN', secrets.token_urlsafe(32))
     if fresh:
-        values['HDC_BOOTSTRAP_ADMIN_USERNAME'] = ask('New admin username', 'admin')
-        password = getpass.getpass('New admin password (12+ chars; upper/lowercase, number, symbol): ')
-        if (len(password) < 12 or not re.search('[A-Z]', password) or not re.search('[a-z]', password)
-                or not re.search('[0-9]', password) or not re.search(r'[^A-Za-z0-9]', password)):
-            raise ValueError('Password must have 12+ characters and upper/lowercase, number, symbol.')
-        values['HDC_BOOTSTRAP_ADMIN_PASSWORD'] = password
-    payload = serialize(values)
-    print(f'\nCode: {project}\nDatabase: {db}\nInstance: {instance}\nConfig: {env_path}')
-    print('Existing databases may receive application schema migrations during deployment.')
-    if not confirm('Have you backed up existing data, and should setup save config and install dependencies?'):
-        return
+        admin_user = values.get('HDC_BOOTSTRAP_ADMIN_USERNAME', '').strip() or 'admin'
+        values['HDC_BOOTSTRAP_ADMIN_USERNAME'] = admin_user
+        values.setdefault('HDC_BOOTSTRAP_ADMIN_PASSWORD', strong_password())
+
+    # 7. Persist config + hook credentials (both backed up, both mode 600).
+    log_dir = values.get('HDC_DEPLOY_STATE_DIR', '').strip() or str(instance / 'deploy')
+    admin = ((values['HDC_BOOTSTRAP_ADMIN_USERNAME'], values['HDC_BOOTSTRAP_ADMIN_PASSWORD'])
+             if fresh else None)
+    credentials = build_credentials(domain, values['HDC_DEPLOY_WEBHOOK_SECRET'],
+                                    values['HDC_DEPLOY_TOKEN'], admin=admin, log_dir=log_dir)
+    credentials_path = project / CREDENTIALS_FILE
     backup(env_path)
-    write_private(env_path, payload)
-    print('Private configuration saved (permissions 600). Existing valid secrets preserved.')
-    run(venv / 'bin/python', '-m', 'pip', 'install', '-r', project / 'requirements.txt')
+    write_private(env_path, serialize(values))
+    backup(credentials_path)
+    write_private(credentials_path, credentials)
+    print(f'Config saved: {env_path} (mode 600; previous file backed up)')
+    print(f'Hook credentials saved: {credentials_path} (mode 600)')
+    print('Existing databases may receive application schema migrations during deployment.')
 
-    print(f'\nIn the Web tab set Source code to: {project}\nVirtualenv to: {venv}')
-    print('The Web-tab Python version MUST match that virtualenv. This script cannot change Web-tab settings.')
+    # 8. Install dependencies, then deploy main and install the WSGI dispatcher.
+    no_deploy = os.environ.get('HDC_SETUP_NO_DEPLOY', '').strip().lower() in ('1', 'true', 'yes', 'on')
+    run(venv / 'bin/pip', 'install', '-r', project / 'requirements.txt')
+    deployed = False
+    if no_deploy:
+        print('\nHDC_SETUP_NO_DEPLOY is set: deploy.sh was skipped; '
+              'rerun without it to deploy.')
+    elif wsgi_ready:
+        env = os.environ.copy()
+        env['HDC_DEPLOY_ENV_FILE'] = str(env_path)
+        subprocess.run(['bash', str(project / 'ops/pythonanywhere/deploy.sh')], env=env, check=True)
+        deployed = True
+        if fresh:
+            values['HDC_ALLOW_NEW_DB'] = '0'
+            write_private(env_path, serialize(values))
+    else:
+        print('\nDeploy skipped: no PythonAnywhere WSGI file was found or creatable.')
+        print('Create/select a web app in the Web tab (Manual configuration), then rerun:')
+        print('    python3 ops/pythonanywhere/setup.py')
+        print('It will ask nothing and finish the deploy with the saved secrets.')
+
+    if wsgi_ready:
+        # Existing WSGI stays in place until the first deployment passes all checks.
+        template = (project / 'ops/pythonanywhere/wsgi_deploy_with_receiver.example.py').read_text()
+        template = template.replace('/home/yourname', str(home))
+        template = template.replace(
+            f'PROJECT_DIR_DEFAULT = "{home}/HDC-MAIN"', f'PROJECT_DIR_DEFAULT = {str(project)!r}')
+        compile(template, str(wsgi), 'exec')
+        backup(wsgi)
+        # PythonAnywhere manages the WSGI inode; write it in place, then touch to reload.
+        wsgi.write_text(template)
+        wsgi.touch()
+
+    print('\n' + '=' * 70)
+    print('SETUP ' + ('COMPLETE - reload requested. Verify /hdc/ and the health URL below.'
+                      if deployed else
+                      'PREPARATION COMPLETE - one remaining step printed above.'))
+    print('=' * 70)
+    print(f'Code:          {project}')
+    print(f'Database:      {db}')
+    print(f'Instance:      {instance}')
+    print(f'Config:        {env_path}')
+    print(f'Credentials:   {credentials_path}')
+    print(f'Web-tab Source code: {project}   |   Virtualenv: {venv}')
+    print('The Web-tab Python version MUST match that virtualenv; this script cannot change Web-tab settings.')
     print('Deployment follows origin/main. Unmerged feature-branch changes will not be deployed.')
-    if not confirm('Are those Web-tab settings correct, and should setup deploy main and replace WSGI?'):
-        print('Configuration saved. Rerun when ready; your secrets will be reused.')
-        return
-    # Existing WSGI stays in place until the first deployment passes all checks.
-    env = os.environ.copy()
-    env['HDC_DEPLOY_ENV_FILE'] = str(env_path)
-    subprocess.run(['bash', str(project / 'ops/pythonanywhere/deploy.sh')], env=env, check=True)
-    if fresh:
-        values['HDC_ALLOW_NEW_DB'] = '0'
-        write_private(env_path, serialize(values))
-    template = (project / 'ops/pythonanywhere/wsgi_deploy_with_receiver.example.py').read_text()
-    template = template.replace('/home/yourname', str(home))
-    template = template.replace(f'PROJECT_DIR_DEFAULT = "{home}/HDC-MAIN"', f'PROJECT_DIR_DEFAULT = {str(project)!r}')
-    compile(template, str(wsgi), 'exec')
-    backup(wsgi)
-    # PythonAnywhere manages the WSGI inode; write it in place, then touch to reload.
-    wsgi.write_text(template)
-    wsgi.touch()
-
-    print('\nSETUP COMPLETE — reload requested. Verify both /hdc/ and the health URL below.')
-    print(f'Health URL: https://{domain}/deploy/health')
+    print('')
+    print('GITHUB HOOK CREDENTIALS (also in the credentials file):')
+    print(f'   Settings page:   https://github.com/{REPO}/settings/hooks')
+    print(f'   Payload URL:     https://{domain}/deploy/github')
+    print('   Content type:    application/json')
+    print('   SSL verification: on')
+    print('   Events:          Just the push event')
+    print('   Secret:          ' + values['HDC_DEPLOY_WEBHOOK_SECRET'])
+    print('   Manual trigger:  ' + values['HDC_DEPLOY_TOKEN']
+          + '  (bearer token; only when HDC_DEPLOY_ALLOW_MANUAL=1)')
+    print(f'   Health URL:      https://{domain}/deploy/health')
+    if admin:
+        print('   Fresh-install login: ' + admin[0] + ' / ' + admin[1])
+    print('')
     print('Health must show deploy_enabled: true before activating the GitHub hook.')
-    print(f'\nGitHub: https://github.com/{REPO}/settings/hooks')
-    print('Add ONE webhook (or edit the existing one):')
-    print(f'Payload URL: https://{domain}/deploy/github')
-    print('Content type: application/json')
-    print('SSL verification: Enable SSL verification')
-    print('Events: Just the push event')
-    print('Active: checked after the health check succeeds')
-    print('Branch filtering: main, handled by the receiver; no GitHub branch field needed.')
-    print(f'\nSecret is saved in {env_path}; never send it in chat or commit it.')
-    if confirm('Show the webhook secret in this PRIVATE terminal to copy into GitHub?'):
-        print('\nSecret: ' + values['HDC_DEPLOY_WEBHOOK_SECRET'] + '\n')
-    print(f'Deploy log: {values.get("HDC_DEPLOY_STATE_DIR", str(instance / "deploy"))}/deploy.log')
-    print('GitHub ping only tests connectivity. A push 202 means accepted; check the deploy log for completion.')
+    print(f'Deploy log: {log_dir}/deploy.log')
+    print('A GitHub ping only tests connectivity. A push 202 means accepted; '
+          'check the deploy log for completion.')
+    print('Never send these secrets in chat or commit them.')
+    return 0
 
 
 if __name__ == '__main__':
     try:
-        main()
+        raise SystemExit(main())
     except (ValueError, OSError, subprocess.CalledProcessError) as exc:
-        print(f'\nSETUP STOPPED: {exc}\nNo database was deleted. Fix the error and rerun; saved secrets are reused.', file=sys.stderr)
-        sys.exit(1)
-    except (KeyboardInterrupt, EOFError):
+        print(f'\nSETUP STOPPED: {exc}\nNo database was deleted or moved. Fix the problem '
+              f'and rerun; saved secrets are reused.', file=sys.stderr)
+        raise SystemExit(1)
+    except KeyboardInterrupt:
         print('\nSetup cancelled. Any configuration already saved remains in place.', file=sys.stderr)
-        sys.exit(1)
+        raise SystemExit(1)

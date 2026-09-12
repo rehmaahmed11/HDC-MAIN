@@ -18,7 +18,7 @@ git push origin main  ->  GitHub "push" webhook
         ->  state in $HDC_INSTANCE_DIR/deploy/{deploy_state.json,deploy.log}
 ```
 
-## Interactive setup (recommended)
+## Unattended setup (recommended)
 
 Run the standard-library setup app in a **PythonAnywhere Bash console**, using
 Python 3.10 or newer:
@@ -27,28 +27,41 @@ Python 3.10 or newer:
 python3 ops/pythonanywhere/setup.py
 ```
 
-You can also upload `setup.py` to your home directory and run
-`python3 ~/setup.py`; it asks for the checkout path and can clone GitHub into an
-empty folder. It refuses to overwrite a nonempty ZIP-extracted application.
-Create/select a web app in PythonAnywhere's Web tab first so its WSGI file exists.
+It asks **no questions**.  Every value is resolved in this order: values already
+saved in `~/.config/hdc/production.env` (secrets are reused on reruns), `HDC_*`
+environment variables, and defaults derived from the checkout and your account
+name.  You can also upload `setup.py` to your home directory and run
+`python3 ~/setup.py`; it works from any checkout path and clones GitHub into a
+missing or empty folder.  It refuses to overwrite a nonempty ZIP-extracted
+application, and it never moves or deletes a database.
 
-The wizard generates missing application/webhook secrets, preserves existing
-valid secrets on reruns, and writes `~/.config/hdc/production.env` with mode 600.
-It asks for existing data paths (no database is moved or deleted), requires the
-literal confirmation `CREATE NEW DATABASE` for an empty installation, sets up a
-virtualenv if needed, installs dependencies, and can run the guarded deployment
-script. After deployment succeeds, it backs up and installs the WSGI dispatcher
-and requests reload. Configuration backups are private, timestamped files.
+In one run it generates the missing secrets (site key, webhook secret, deploy
+token, and for a brand-new database a strong admin password), saves
+`~/.config/hdc/production.env` with mode 600 (timestamped private backup),
+writes `github_hook_credentials.txt` into the checkout root (mode 600,
+gitignored) with every GitHub hook field in one place, creates the virtualenv
+if needed, installs the requirements, and — whenever the Web-tab WSGI file
+exists or can be created — runs the guarded deployment script, backs up and
+installs the WSGI dispatcher, and requests the reload.  If the web app has not
+been created in the Web tab yet, it writes the dispatcher to the expected WSGI
+path anyway and prints that single remaining click instead of stopping.
+
 Existing data must be backed up before deployment: application startup may run
-schema migrations. If replacing another application or a custom WSGI dispatcher,
-review the replacement first; the wizard installs the HDC-only dispatcher.
+schema migrations.  If replacing another application or a custom WSGI
+dispatcher, review the backup before the reload takes effect; the setup
+installs the HDC-only dispatcher.
 
-The wizard cannot change the Web-tab Python version or virtualenv setting: it
-prints the paths and asks you to confirm those settings before deployment.
-It prints every GitHub webhook field after setup and shows the secret only on
-explicit confirmation in your private terminal. Verify `/deploy/health` and
-`/hdc/` before enabling the hook. A successful GitHub ping or push acceptance is
-not proof of deployment completion; check the deployment log.
+The setup cannot change the Web-tab Python version or virtualenv setting: it
+prints both paths so you can confirm them in the Web tab.  It prints every
+GitHub webhook field after setup (also stored in
+`github_hook_credentials.txt`).  Verify `/deploy/health` and `/hdc/` before
+enabling the hook.  A successful GitHub ping or push acceptance is not proof of
+deployment completion; check the deployment log.
+
+Optional environment overrides: `HDC_APP_DIR` (checkout folder), `HDC_DOMAIN`
+(web domain), `HDC_PYTHON` (virtualenv interpreter), and
+`HDC_SETUP_NO_DEPLOY=1` (save config + credentials + dependencies, skip the
+deploy step).
 
 **Deployment always follows `origin/main`.** Merge reviewed code into main first.
 This wizard does not register a GitHub webhook or ask for GitHub/API credentials.
