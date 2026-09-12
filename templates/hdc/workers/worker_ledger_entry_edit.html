@@ -1,0 +1,146 @@
+{% extends "shared/base.html" %}
+{% block title %}Edit Ledger Entry{% endblock %}
+{% block page_heading %}Edit {{ entry.entry_type | title }} Entry — {{ w.name }}{% endblock %}
+
+{% block content %}
+{% set et = (entry.entry_type or '')|lower %}
+{% set type_color = 'warning' if et == 'advance' else ('success' if et == 'payment' else ('info' if et == 'tip' else ('primary' if et == 'settlement' else 'secondary'))) %}
+{% set type_icon  = 'fa-hand-holding-usd' if et == 'advance' else ('fa-money-bill-wave' if et == 'payment' else ('fa-gift' if et == 'tip' else ('fa-balance-scale' if et == 'settlement' else 'fa-pen-to-square'))) %}
+
+<div class="row justify-content-center mt-2">
+<div class="col-md-7">
+<div class="card hdc-card">
+    <div class="card-header hdc-card-header d-flex flex-wrap align-items-center justify-content-between gap-2">
+        <span><i class="fas {{ type_icon }} me-2"></i>Edit {{ entry.entry_type | title }} for {{ w.name }}</span>
+        <div class="d-flex gap-2 align-items-center">
+            <span class="badge bg-{{ type_color }}">{{ entry.entry_type | title }}</span>
+            <span class="badge bg-secondary">Entry #{{ entry.id }}</span>
+        </div>
+    </div>
+    <div class="card-body">
+        {# READ-ONLY REFERENCE PANEL — so you can see what you're editing without losing context #}
+        <div class="alert alert-{{ type_color }} py-2 small mb-3 mb-md-3">
+            <div class="row g-2">
+                <div class="col-md-4"><strong>Worker:</strong> {{ w.name }} <span class="text-muted">({{ w.worker_code }})</span></div>
+                <div class="col-md-4"><strong>Entry Type:</strong> {{ entry.entry_type | title }}</div>
+                <div class="col-md-4"><strong>Created:</strong> {{ entry.created_at.strftime('%Y-%m-%d %H:%M') if entry.created_at else '-' }}</div>
+                <div class="col-md-4"><strong>Original Date:</strong> {{ entry.date.isoformat() if entry.date else '-' }}</div>
+                <div class="col-md-4"><strong>Original Amount:</strong> {{ "{:,.2f}".format(entry.amount or 0) }} PKR</div>
+                <div class="col-md-4">
+                    <strong>Linked Time Entry:</strong>
+                    {% if entry.time_entry_id %}#{{ entry.time_entry_id }}{% else %}-{% endif %}
+                </div>
+            </div>
+        </div>
+
+        <form method="POST">
+            {# DATE + AMOUNT #}
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label">Date *</label>
+                    <input type="date" name="date" class="form-control"
+                           value="{{ entry.date.isoformat() if entry.date else '' }}" required>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Amount (PKR) *</label>
+                    <input type="number" step="0.01" min="0.01" name="amount" class="form-control"
+                           value="{{ '%.2f'|format(entry.amount or 0) }}" required>
+                </div>
+            </div>
+
+            {# PROJECT (searchable combobox) — matches create-form structure #}
+            <div class="mt-3">
+                <label class="form-label">
+                    Project
+                    {% if et in ['tip', 'settlement'] %}<span class="text-danger">*</span>{% endif %}
+                </label>
+                <input type="text" id="ledgerEditProjectInput" class="form-control mb-1"
+                       placeholder="Type to search project..." autocomplete="off">
+                <select name="project_id" class="form-select" id="ledgerEditProject"
+                        {% if et in ['tip', 'settlement'] %}required{% endif %}>
+                    <option value="">{{ 'Select Project' if et in ['tip','settlement'] else 'General' }}</option>
+                    {% for p in projects %}
+                    <option value="{{ p.id }}" {% if entry.project_id == p.id %}selected{% endif %}>{{ p.name }} | {{ p.project_code }} | {{ p.client or 'No Owner' }} | {{ p.location or 'No Location' }}</option>
+                    {% endfor %}
+                </select>
+                {% if et in ['tip', 'settlement'] %}
+                <div class="form-text">Project is required for {{ entry.entry_type|title }} entries (stage-level trace).</div>
+                {% endif %}
+            </div>
+
+            {# STAGE — filtered by selected project #}
+            <div class="mt-3">
+                <label class="form-label">
+                    Stage
+                    {% if et in ['tip', 'settlement'] %}<span class="text-danger">*</span>{% endif %}
+                </label>
+                <input type="text" id="ledgerEditStageInput" class="form-control mb-1"
+                       placeholder="Type to search stage..." autocomplete="off">
+                <select name="stage_id" class="form-select" id="ledgerEditStage"
+                        {% if et in ['tip', 'settlement'] %}required{% endif %}>
+                    <option value="">{{ 'Select Stage' if et in ['tip','settlement'] else 'No Stage' }}</option>
+                    {% for s in stages %}
+                    <option value="{{ s.id }}" data-project="{{ s.project_id }}" {% if entry.stage_id == s.id %}selected{% endif %}>{{ s.project.name }} - {{ s.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            {# NOTES — full textarea like create form #}
+            <div class="mt-3">
+                <label class="form-label">Notes</label>
+                <textarea name="notes" class="form-control" rows="3" placeholder="e.g. {{ 'Eid advance, medical' if et == 'advance' else ('Monthly salary, final settlement' if et == 'payment' else ('Quality bonus' if et == 'tip' else 'Adjustment reason')) }}">{{ entry.notes or '' }}</textarea>
+            </div>
+
+            {# VOID/AUDIT TRAIL — read only, helps user understand state #}
+            {% if entry.is_void %}
+            <div class="alert alert-secondary py-2 small mt-3 mb-0">
+                <strong>Voided:</strong> {{ entry.void_reason or '(no reason)' }}
+                {% if entry.voided_at %} on {{ entry.voided_at.strftime('%Y-%m-%d %H:%M') }}{% endif %}
+            </div>
+            {% endif %}
+
+            <div class="d-flex flex-wrap gap-2 mt-4 align-items-center">
+                <button type="submit" class="btn btn-{{ type_color }}">
+                    <i class="fas fa-save me-1"></i>Save Changes
+                </button>
+                <a href="{{ url_for('hdc_worker_ledger', wid=w.id) }}" class="btn btn-outline-secondary">Cancel</a>
+                {% if not entry.is_void and et in ['payment', 'tip', 'settlement', 'advance'] %}
+                <a href="{{ url_for('hdc_worker_payment_receipt', wid=w.id, lid=entry.id) }}"
+                   class="btn btn-outline-primary ms-auto" target="_blank">
+                    <i class="fas fa-receipt me-1"></i>Open Receipt
+                </a>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+</div>
+</div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function(){
+    var projSel  = document.getElementById('ledgerEditProject');
+    var stageSel = document.getElementById('ledgerEditStage');
+    function syncStages(){
+        if (!projSel || !stageSel) return;
+        var pid = projSel.value;
+        Array.from(stageSel.options).forEach(function(opt){
+            if (!opt.value) return;
+            var ok = !pid || opt.getAttribute('data-project') === pid;
+            opt.style.display = ok ? '' : 'none';
+            if (!ok && opt.selected) stageSel.value = '';
+        });
+    }
+    if (projSel) {
+        projSel.addEventListener('change', syncStages);
+        syncStages();
+    }
+    if (window.HDCComboList) {
+        window.HDCComboList.attach('ledgerEditProjectInput', 'ledgerEditProject', { includeEmpty: true });
+        window.HDCComboList.attach('ledgerEditStageInput',   'ledgerEditStage',   { includeEmpty: true });
+    }
+})();
+</script>
+{% endblock %}

@@ -1,9 +1,8 @@
-import os
+"""WSGI entrypoint (gunicorn / PythonAnywhere).
 
-# Use the validated integrated DB by default unless explicitly overridden.
-os.environ.setdefault(
-    "HDC_DB_PATH",
-    r"e:\WORKINGS\current working\rep hdc\hdc\hdc_instance\hdc_erp_integrated.db"
-)
+Database and instance paths come from the environment (HDC_DB_PATH,
+HDC_INSTANCE_DIR) with safe defaults — no machine-specific paths here.
+"""
+from hdc.app import create_app
 
-from hdc_erp import app
+app = create_app()

@@ -1,0 +1,268 @@
+{% extends "shared/base.html" %}
+{% block title %}Accounts Reconciliation{% endblock %}
+{% block page_heading %}Accounts Reconciliation{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+    <div>
+        <h5 class="mb-1"><i class="fas fa-shield-halved me-2 text-primary"></i>Forensic Reconciliation</h5>
+        <div class="small text-muted">
+            Scanned at {{ fmt_pkt(scanned_at) }} ·
+            <strong class="{% if total_issues == 0 %}text-success{% else %}text-danger{% endif %}">
+                {{ total_issues }} issue{{ '' if total_issues == 1 else 's' }} found
+            </strong>
+        </div>
+    </div>
+    <div class="d-flex gap-2">
+        <a href="{{ back_url }}" class="btn btn-outline-secondary btn-sm">Back to Accounts</a>
+        <a href="{{ url_for('hdc_accounts_reconciliation') }}" class="btn btn-primary btn-sm">
+            <i class="fas fa-rotate-right me-1"></i>Re-scan
+        </a>
+    </div>
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col-6 col-md">
+        <div class="rc-kpi {% if findings.totals.orphan_txns %}rc-kpi-bad{% else %}rc-kpi-ok{% endif %}">
+            <div class="rc-kpi-num">{{ findings.totals.orphan_txns }}</div>
+            <div class="rc-kpi-lbl">Orphan transactions</div>
+        </div>
+    </div>
+    <div class="col-6 col-md">
+        <div class="rc-kpi {% if findings.totals.void_mismatch %}rc-kpi-bad{% else %}rc-kpi-ok{% endif %}">
+            <div class="rc-kpi-num">{{ findings.totals.void_mismatch }}</div>
+            <div class="rc-kpi-lbl">Void state mismatch</div>
+        </div>
+    </div>
+    <div class="col-6 col-md">
+        <div class="rc-kpi {% if findings.totals.duplicate_active %}rc-kpi-bad{% else %}rc-kpi-ok{% endif %}">
+            <div class="rc-kpi-num">{{ findings.totals.duplicate_active }}</div>
+            <div class="rc-kpi-lbl">Active duplicates</div>
+        </div>
+    </div>
+    <div class="col-6 col-md">
+        <div class="rc-kpi {% if findings.totals.group_inconsistent %}rc-kpi-bad{% else %}rc-kpi-ok{% endif %}">
+            <div class="rc-kpi-num">{{ findings.totals.group_inconsistent }}</div>
+            <div class="rc-kpi-lbl">Split inconsistencies</div>
+        </div>
+    </div>
+    <div class="col-6 col-md">
+        <div class="rc-kpi {% if findings.totals.orphan_sources %}rc-kpi-bad{% else %}rc-kpi-ok{% endif %}">
+            <div class="rc-kpi-num">{{ findings.totals.orphan_sources }}</div>
+            <div class="rc-kpi-lbl">Sources without cash entry</div>
+        </div>
+    </div>
+</div>
+
+{% if total_issues == 0 %}
+<div class="alert alert-success">
+    <i class="fas fa-circle-check me-1"></i>
+    All clear. Every account transaction is correctly linked to its source row, no duplicates, no split inconsistencies.
+</div>
+{% endif %}
+
+{% macro section_open(title, count, hint) %}
+<div class="card mb-3">
+    <div class="card-header d-flex justify-content-between align-items-center bg-light">
+        <div><strong>{{ title }}</strong> <span class="text-muted small">— {{ hint }}</span></div>
+        <span class="badge {% if count %}bg-danger{% else %}bg-success{% endif %}">{{ count }}</span>
+    </div>
+    <div class="card-body p-0">
+{% endmacro %}
+{% macro section_close() %}</div></div>{% endmacro %}
+
+{# ---------- Orphan transactions ---------- #}
+{{ section_open(
+    'Orphan transactions (linked source row missing)',
+    findings.totals.orphan_txns,
+    'Account txn says it came from a worker/supplier/expense row that no longer exists.'
+) }}
+{% if findings.orphan_txns %}
+<div class="table-responsive">
+    <table class="table table-sm table-striped mb-0">
+        <thead><tr>
+            <th>Txn ID</th><th>Date</th><th>Type</th><th>Party</th>
+            <th class="text-end">Amount</th><th>Source</th><th>Active?</th><th>Receipt</th>
+        </tr></thead>
+        <tbody>
+        {% for r in findings.orphan_txns %}
+        <tr>
+            <td>#{{ r.id }}</td>
+            <td>{{ r.date or '-' }}</td>
+            <td>{{ r.type|replace('_', ' ')|title }}</td>
+            <td>{{ r.party or '-' }}</td>
+            <td class="text-end">{{ "{:,.2f}".format(r.amount or 0.0) }}</td>
+            <td><code class="small">{{ r.source_type }} #{{ r.source_id }}</code><div class="small text-muted">{{ r.label }}</div></td>
+            <td>{% if r.is_void %}<span class="badge bg-secondary">Void</span>{% else %}<span class="badge bg-success">Active</span>{% endif %}</td>
+            <td class="text-nowrap">
+                <a href="{{ r.receipt_url }}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary py-0 px-2">Open</a>
+                {% if not r.is_void %}
+                <form method="POST" action="{{ url_for('hdc_accounts') }}" class="d-inline"
+                      onsubmit="return confirm('Void orphan transaction #{{ r.id }}?');">
+                    <input type="hidden" name="action" value="void_transaction">
+                    <input type="hidden" name="transaction_id" value="{{ r.id }}">
+                    <input type="hidden" name="void_reason" value="Orphan source row (recon)">
+                    <button type="submit" class="btn btn-sm btn-outline-danger py-0 px-2">Void</button>
+                </form>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="p-3 text-muted small">No orphan transactions.</div>
+{% endif %}
+{{ section_close() }}
+
+{# ---------- Void mismatch ---------- #}
+{{ section_open(
+    'Void state mismatch',
+    findings.totals.void_mismatch,
+    'Source row and account txn disagree on whether the entry is voided.'
+) }}
+{% if findings.void_mismatch %}
+<div class="table-responsive">
+    <table class="table table-sm table-striped mb-0">
+        <thead><tr>
+            <th>Txn ID</th><th>Date</th><th>Party</th>
+            <th class="text-end">Amount</th><th>Source</th>
+            <th>Txn void?</th><th>Source void?</th><th>Receipt</th>
+        </tr></thead>
+        <tbody>
+        {% for r in findings.void_mismatch %}
+        <tr>
+            <td>#{{ r.id }}</td>
+            <td>{{ r.date or '-' }}</td>
+            <td>{{ r.party or '-' }}</td>
+            <td class="text-end">{{ "{:,.2f}".format(r.amount or 0.0) }}</td>
+            <td><code class="small">{{ r.source_type }} #{{ r.source_id }}</code><div class="small text-muted">{{ r.label }}</div></td>
+            <td>{% if r.txn_void %}<span class="badge bg-danger">Yes</span>{% else %}<span class="badge bg-success">No</span>{% endif %}</td>
+            <td>{% if r.src_void %}<span class="badge bg-danger">Yes</span>{% else %}<span class="badge bg-success">No</span>{% endif %}</td>
+            <td><a href="{{ r.receipt_url }}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary py-0 px-2">Open</a></td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="p-3 text-muted small">No void mismatches.</div>
+{% endif %}
+{{ section_close() }}
+
+{# ---------- Duplicate active txns ---------- #}
+{{ section_open(
+    'Active duplicate transactions',
+    findings.totals.duplicate_active,
+    'Two or more active rows share identical date / type / amount / accounts / party / reference (and are not part of the same intentional split).'
+) }}
+{% if findings.duplicate_active %}
+<div class="table-responsive">
+    <table class="table table-sm table-striped mb-0">
+        <thead><tr>
+            <th>Count</th><th>Date</th><th>Type</th><th>Party</th>
+            <th class="text-end">Amount</th><th>Reference</th><th>IDs</th>
+        </tr></thead>
+        <tbody>
+        {% for r in findings.duplicate_active %}
+        <tr>
+            <td><span class="badge bg-danger">{{ r.count }}×</span></td>
+            <td>{{ r.date or '-' }}</td>
+            <td>{{ r.type|replace('_', ' ')|title }}</td>
+            <td>{{ r.party or '-' }}</td>
+            <td class="text-end">{{ "{:,.2f}".format(r.amount or 0.0) }}</td>
+            <td class="small text-muted"><code>{{ r.reference_id or '-' }}</code></td>
+            <td>
+                {% for tid in r.ids %}
+                <a href="{{ url_for('hdc_account_transaction_receipt', txn_id=tid) }}" target="_blank" rel="noopener" class="badge bg-light text-dark border me-1">#{{ tid }}</a>
+                {% endfor %}
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="p-3 text-muted small">No duplicates.</div>
+{% endif %}
+{{ section_close() }}
+
+{# ---------- Group split inconsistencies ---------- #}
+{{ section_open(
+    'Split / group inconsistencies',
+    findings.totals.group_inconsistent,
+    'Same group_id has a mix of active+voided rows or step amounts that do not agree.'
+) }}
+{% if findings.group_inconsistent %}
+<div class="table-responsive">
+    <table class="table table-sm table-striped mb-0">
+        <thead><tr><th>Group ID</th><th>Issue</th><th>Detail</th><th>Rows</th></tr></thead>
+        <tbody>
+        {% for g in findings.group_inconsistent %}
+        <tr>
+            <td><code class="small">{{ g.group_id }}</code></td>
+            <td>{{ g.kind|replace('_', ' ')|title }}</td>
+            <td class="small">{{ g.detail }}</td>
+            <td>
+                {% for tid in g.ids %}
+                <a href="{{ url_for('hdc_account_transaction_receipt', txn_id=tid) }}" target="_blank" rel="noopener" class="badge bg-light text-dark border me-1">#{{ tid }}</a>
+                {% endfor %}
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="p-3 text-muted small">All split groups consistent.</div>
+{% endif %}
+{{ section_close() }}
+
+{# ---------- Source rows without an account txn ---------- #}
+{{ section_open(
+    'Source rows without a paired account transaction',
+    findings.totals.orphan_sources,
+    'Worker/staff/owner/expense source rows that should have moved cash but no account entry exists.'
+) }}
+{% if findings.orphan_sources %}
+<div class="table-responsive">
+    <table class="table table-sm table-striped mb-0">
+        <thead><tr>
+            <th>Family</th><th>Source</th><th>Date</th><th>Party</th><th class="text-end">Amount</th>
+        </tr></thead>
+        <tbody>
+        {% for s in findings.orphan_sources %}
+        <tr>
+            <td>{{ s.family }}</td>
+            <td><code class="small">{{ s.source_type }} #{{ s.source_id }}</code></td>
+            <td>{{ s.date or '-' }}</td>
+            <td>{{ s.party or '-' }}</td>
+            <td class="text-end">{{ "{:,.2f}".format(s.amount or 0.0) }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="p-3 text-muted small">Every source row has a paired cash entry.</div>
+{% endif %}
+{{ section_close() }}
+
+<style>
+.rc-kpi {
+    border: 1px solid #d8e6f2;
+    border-radius: 10px;
+    padding: 12px 14px;
+    text-align: center;
+    background: #fff;
+    height: 100%;
+}
+.rc-kpi-num { font-size: 24px; font-weight: 800; line-height: 1; }
+.rc-kpi-lbl { font-size: 12px; color: #5a728a; margin-top: 4px; }
+.rc-kpi-ok { border-color: #c8e3d2; background: linear-gradient(180deg, #f4fbf7 0%, #ecf7f1 100%); }
+.rc-kpi-ok .rc-kpi-num { color: #1f7e4a; }
+.rc-kpi-bad { border-color: #f3c8b8; background: linear-gradient(180deg, #fff7f4 0%, #ffece4 100%); }
+.rc-kpi-bad .rc-kpi-num { color: #c0392b; }
+</style>
+{% endblock %}

@@ -1,0 +1,211 @@
+{% extends "shared/base.html" %}
+{% block title %}Material Purchases{% endblock %}
+{% block page_heading %}Material Purchases{% endblock %}
+
+{% block content %}
+<div class="row g-3 mt-1">
+    <div class="col-md-4">
+        <div class="card hdc-card">
+            <div class="card-header hdc-card-header"><i class="fas fa-shopping-cart me-2"></i>Material Movement</div>
+            <div class="card-body">
+                <form method="POST" id="purchaseForm">
+                    <div class="mb-3">
+                        <label class="form-label">Entry Type</label>
+                        <select name="action" id="entryTypeSelect" class="form-select">
+                            <option value="purchase" selected>Purchase</option>
+                            <option value="return">Return To Supplier</option>
+                        </select>
+                        <div class="form-text" id="entryTypeHint">Purchase adds stock and stage material cost.</div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Date</label>
+                        <input type="date" name="date" class="form-control" value="{{ today }}">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Project *</label>
+                        <select name="project_id" class="form-select" id="projSelect" required>
+                            <option value="">- Select Project -</option>
+                            {% for proj in projects %}
+                            <option value="{{ proj.id }}" {% if selected_project == proj.id %}selected{% endif %}>{{ proj.name }} | {{ proj.project_code }} | {{ proj.client or 'No Owner' }} | {{ proj.location or 'No Location' }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Stage *</label>
+                        <select name="stage_id" class="form-select" id="stageSelect" required>
+                            <option value="">Select Stage</option>
+                            {% for s in stages %}
+                            <option value="{{ s.id }}" data-project="{{ s.project_id }}">{{ s.project.name }} > {{ s.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Material *</label>
+                        <select name="material_id" class="form-select" required>
+                            <option value="">- Select Material -</option>
+                            {% for m in materials %}
+                            <option value="{{ m.id }}">{{ m.name }} ({{ m.unit }})</option>
+                            {% endfor %}
+                        </select>
+                        <div class="form-text">
+                            <a href="{{ url_for('hdc_materials') }}">+ Add new material</a>
+                        </div>
+                    </div>
+                    <div class="row g-2 mb-3">
+                        <div class="col-6">
+                            <label class="form-label">Qty</label>
+                            <input type="number" step="0.01" name="qty" id="qtyInput" class="form-control" placeholder="0" required>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Rate (PKR)</label>
+                            <input type="number" step="0.01" name="rate" id="rateInput" class="form-control" placeholder="0.00" required>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Total (auto)</label>
+                        <input type="text" id="totalDisplay" class="form-control" readonly placeholder="0.00" style="background:var(--card-bg)">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Notes</label>
+                        <input type="text" name="notes" class="form-control" placeholder="Supplier, remarks">
+                    </div>
+                    <div class="row g-2 mb-3">
+                        <div class="col-6">
+                            <label class="form-label">Supplier</label>
+                            <input type="text" name="supplier_name" class="form-control" placeholder="Supplier name">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Return Ref</label>
+                            <input type="text" name="return_ref" class="form-control" placeholder="Return reference">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Reason</label>
+                            <input type="text" name="return_reason" class="form-control" placeholder="Reason code/details">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Approved By</label>
+                            <input type="text" name="approved_by" class="form-control" placeholder="Approver name">
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-mint w-100" id="entrySubmitBtn"><i class="fas fa-save me-1"></i>Record Purchase</button>
+                </form>
+            </div>
+        </div>
+        <div class="card hdc-card mt-2 d-md-none">
+            <div class="card-body py-2 d-flex gap-2 sticky-bottom" style="z-index:5;">
+                <a href="{{ url_for('hdc_materials') }}" class="btn btn-outline-secondary w-50">Back</a>
+                <button type="submit" form="purchaseForm" class="btn btn-mint w-50">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-8">
+        <div class="card hdc-card">
+            <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-list me-2"></i>Purchase / Return Records</span>
+                <span class="badge {% if total < 0 %}bg-success{% elif total > 0 %}bg-danger{% else %}bg-secondary{% endif %} fs-6">Net Total: {{ "{:,.0f}".format(total) }} PKR</span>
+            </div>
+            <div class="px-3 pt-3">
+                <form method="GET" class="d-flex gap-2 mb-2">
+                    <select name="project_id" class="form-select form-select-sm" onchange="this.form.submit()">
+                        <option value="">All Projects</option>
+                        {% for proj in projects %}
+                        <option value="{{ proj.id }}" {% if selected_project == proj.id %}selected{% endif %}>{{ proj.name }} | {{ proj.project_code }} | {{ proj.client or 'No Owner' }} | {{ proj.location or 'No Location' }}</option>
+                        {% endfor %}
+                    </select>
+                    <a href="{{ url_for('hdc_purchases') }}" class="btn btn-sm btn-outline-secondary">Clear</a>
+                    <a href="{{ url_for('hdc_export_materials') }}" class="btn btn-sm btn-outline-success ms-auto">
+                        <i class="fas fa-download me-1"></i>CSV
+                    </a>
+                </form>
+            </div>
+            <div class="table-responsive">
+                <table class="table hdc-table table-sm">
+                    <thead><tr>
+                        <th>Date</th><th>Type</th><th>Project</th><th>Stage</th><th>Material</th>
+                        <th>Qty</th><th>Rate</th><th>Total</th><th>Supplier</th><th>Ref</th><th>Notes</th>
+                    </tr></thead>
+                    <tbody>
+                    {% for record in records %}
+                    {% set is_return = (record.Purchase.entry_type or 'purchase') == 'return' %}
+                    <tr>
+                        <td>{{ fmt_pkt(record.Purchase.activity_at or record.Purchase.created_at) }}</td>
+                        <td>
+                            <span class="badge {% if is_return %}bg-warning text-dark{% else %}bg-success{% endif %}">
+                                {{ 'Return' if is_return else 'Purchase' }}
+                            </span>
+                        </td>
+                        <td class="text-muted small">{{ record.Project.name }}</td>
+                        <td class="text-muted small">{{ record.Purchase.stage.name if record.Purchase.stage_id else '-' }}</td>
+                        <td><strong>{{ record.Material.name }}</strong> <small class="text-muted">({{ record.Material.unit }})</small></td>
+                        <td class="{% if is_return %}text-warning fw-bold{% endif %}">{{ "{:,.2f}".format(record.Purchase.qty or 0) }}</td>
+                        <td>{{ "{:,.0f}".format(record.Purchase.rate) }}</td>
+                        <td class="fw-bold {% if (record.Purchase.total or 0) < 0 %}text-success{% else %}text-danger{% endif %}">{{ "{:,.0f}".format(record.Purchase.total) }}</td>
+                        <td class="text-muted small">{{ record.Purchase.supplier_name or '-' }}</td>
+                        <td class="text-muted small">{{ record.Purchase.return_ref or '-' }}</td>
+                        <td class="text-muted small">{{ record.Purchase.notes or '-' }}</td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="11" class="text-center text-muted py-4">No purchase/return records found.</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const qty  = document.getElementById('qtyInput');
+const rate = document.getElementById('rateInput');
+const tot  = document.getElementById('totalDisplay');
+const entryType = document.getElementById('entryTypeSelect');
+const entryHint = document.getElementById('entryTypeHint');
+const submitBtn = document.getElementById('entrySubmitBtn');
+
+function calcTotal() {
+    const q = parseFloat(qty.value) || 0;
+    const r = parseFloat(rate.value) || 0;
+    tot.value = (q * r).toLocaleString('en-PK', {maximumFractionDigits: 0});
+}
+if (qty)  qty.addEventListener('input', calcTotal);
+if (rate) rate.addEventListener('input', calcTotal);
+
+function refreshEntryTypeUI() {
+    if (!entryType || !entryHint || !submitBtn) return;
+    var isReturn = entryType.value === 'return';
+    entryHint.textContent = isReturn
+        ? 'Return reduces stock and subtracts this cost from stage material cost.'
+        : 'Purchase adds stock and stage material cost.';
+    submitBtn.innerHTML = isReturn
+        ? '<i class="fas fa-undo me-1"></i>Record Return'
+        : '<i class="fas fa-save me-1"></i>Record Purchase';
+}
+if (entryType) {
+    entryType.addEventListener('change', refreshEntryTypeUI);
+    refreshEntryTypeUI();
+}
+
+const projSel  = document.getElementById('projSelect');
+const stageSel = document.getElementById('stageSelect');
+
+function filterStages() {
+    if (!projSel || !stageSel) return;
+    const pid = projSel.value;
+    Array.from(stageSel.options).forEach(opt => {
+        if (!opt.value) return;
+        opt.style.display = (!pid || opt.dataset.project === pid) ? '' : 'none';
+    });
+    const selected = stageSel.options[stageSel.selectedIndex];
+    if (selected && selected.value && selected.dataset.project !== pid && pid) {
+        stageSel.value = '';
+    }
+}
+if (projSel) {
+    projSel.addEventListener('change', filterStages);
+    filterStages();
+}
+</script>
+{% endblock %}

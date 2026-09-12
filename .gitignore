@@ -1,22 +1,26 @@
-# --- Local runtime data (never commit the live SQLite DB) ---
-hdc_instance/*.db
-hdc_instance/*.db-shm
-hdc_instance/*.db-wal
-hdc_instance/backups/
-hdc_instance/stage_drawings/
-hdc_instance/*.done
-hdc_instance/project_estimations.json
+# HDC ERP — never commit databases, backups, archives, secrets or envs
+hdc_instance/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.zip
+*.bak
+backups/
 attached_assets/
 
-# Archives / snapshots of the app
-all_files.zip
-backupprevios.zip
+# Local env (contains DB path / admin bootstrap password)
+.env
 
 # Python
 __pycache__/
-*.pyc
+*.py[cod]
 .venv/
 venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
 # Editor / shell dotfiles that came out of the zip (not app code)
 .bashrc
@@ -30,5 +34,8 @@ README.txt
 .ipython/
 .virtualenvs/
 
-# Local env (contains DB path / admin bootstrap password)
-.env
+# Misc
+node_modules/
+.DS_Store
+*.log
+instance/

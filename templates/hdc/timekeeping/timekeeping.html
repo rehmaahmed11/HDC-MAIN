@@ -1,0 +1,513 @@
+{% extends "shared/base.html" %}
+{% block title %}Timekeeping{% endblock %}
+{% block page_heading %}Timekeeping{% endblock %}
+
+{% block content %}
+<div class="row g-3 mt-1">
+    <div class="col-12">
+        <div class="card hdc-card">
+            <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-table me-2"></i>Daily Attendance Sheet (All Workers)</span>
+                <form method="GET" class="d-flex align-items-center gap-2">
+                    <label class="small text-muted mb-0">Sheet Date</label>
+                    <input type="date" name="sheet_date" class="form-control form-control-sm" value="{{ sheet_date or today }}">
+                    <button type="submit" class="btn btn-sm btn-outline-secondary">Load</button>
+                </form>
+            </div>
+            <div class="card-body">
+                <form method="POST" id="bulkAttendanceForm">
+                    <input type="hidden" name="bulk_mode" value="1">
+                    <input type="hidden" name="date" value="{{ sheet_date or today }}">
+                    <div class="mb-3">
+                        <small class="text-muted">All workers are listed automatically. Keep `Not Assigned` where no work is assigned.</small>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table hdc-table table-sm align-middle">
+                            <thead>
+                                <tr class="fw-bold">
+                                    <th>S.N</th>
+                                    <th>Worker</th>
+                                    <th>Status</th>
+                                    <th>Site Allocations</th>
+                                    <th class="text-end">Working Hrs</th>
+                                    <th class="text-end">OT Hrs</th>
+                                    <th>Remarks</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for row in daily_sheet_rows %}
+                                {% set w = row.worker %}
+                                <tr>
+                                    <td>{{ loop.index }}</td>
+                                    <td>
+                                        <strong>{{ w.name }}</strong><br>
+                                        <small class="text-muted">{{ w.role_type or 'Worker' }}</small>
+                                    </td>
+                                    <td>
+                                        <select name="status_{{ w.id }}" class="form-select form-select-sm js-row-status" data-worker-id="{{ w.id }}">
+                                            <option value="present" {% if row.status == 'Present' %}selected{% endif %}>Present</option>
+                                            <option value="absent" {% if row.status == 'Absent' %}selected{% endif %}>Absent</option>
+                                            <option value="leave" {% if row.status == 'Leave' %}selected{% endif %}>Leave</option>
+                                            <option value="not_assigned" {% if row.status == 'Not Assigned' %}selected{% endif %}>Not Assigned</option>
+                                        </select>
+                                    </td>
+                                    <td>
+                                        <input type="hidden" name="allocations_{{ w.id }}" id="allocations_{{ w.id }}" value='{{ row.allocations|tojson }}'>
+                                        <input type="hidden" name="working_hours_{{ w.id }}" id="working_hours_{{ w.id }}" value="{{ '%.2f'|format(row.working_hours or 0) }}">
+                                        <input type="hidden" name="overtime_hours_{{ w.id }}" id="overtime_hours_{{ w.id }}" value="{{ '%.2f'|format(row.overtime_hours or 0) }}">
+                                        <input type="hidden" name="project_id_{{ w.id }}" value="">
+                                        <input type="hidden" name="stage_id_{{ w.id }}" value="">
+                                        <div id="allocList_{{ w.id }}" class="small"></div>
+                                        <button type="button" class="btn btn-sm btn-outline-primary mt-1 js-add-allocation" data-worker-id="{{ w.id }}">
+                                            <i class="fas fa-plus me-1"></i>Add Site
+                                        </button>
+                                    </td>
+                                    <td class="text-end"><span id="workingDisplay_{{ w.id }}">{{ '%.2f'|format(row.working_hours or 0) }}</span></td>
+                                    <td class="text-end"><span id="overtimeDisplay_{{ w.id }}">{{ '%.2f'|format(row.overtime_hours or 0) }}</span></td>
+                                    <td><input type="text" name="remarks_{{ w.id }}" class="form-control form-control-sm" value="{{ row.remarks if row.remarks != '-' else '' }}" placeholder="e.g. Boundary wall"></td>
+                                </tr>
+                                {% else %}
+                                <tr><td colspan="7" class="text-center text-muted py-3">No active workers found.</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="modal fade" id="allocationModal" tabindex="-1" aria-hidden="true">
+                        <div class="modal-dialog modal-dialog-centered">
+                            <div class="modal-content">
+                                <div class="modal-header">
+                                    <h5 class="modal-title">Add Site Allocation</h5>
+                                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                </div>
+                                <div class="modal-body">
+                                    <input type="hidden" id="allocWorkerId">
+                                    <div class="mb-3">
+                                        <label class="form-label">Project</label>
+                                        <select id="allocProject" class="form-select">
+                                            <option value="">Select project</option>
+                                            {% for p in projects %}
+                                            <option value="{{ p.id }}">{{ p.name }} | {{ p.project_code }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">Stage</label>
+                                        <select id="allocStage" class="form-select">
+                                            <option value="">Select stage</option>
+                                            {% for s in stages %}
+                                            <option value="{{ s.id }}" data-project="{{ s.project_id }}">{{ s.name }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                    <div class="mb-2">
+                                        <label class="form-label">Hours</label>
+                                        <input id="allocHours" type="number" step="0.25" min="0.25" max="24" class="form-control" value="2">
+                                        <small class="text-muted">8 hours = 1 day wage. Hours above 8 become overtime automatically.</small>
+                                    </div>
+                                </div>
+                                <div class="modal-footer">
+                                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                                    <button type="button" class="btn btn-mint" id="saveAllocationBtn">Add</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="d-flex justify-content-end">
+                        <button type="submit" class="btn btn-mint"><i class="fas fa-save me-1"></i>Save Daily Sheet</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-12">
+        <div class="card hdc-card mb-3">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h6 class="mb-0"><i class="fas fa-users me-2 text-mint"></i>Worker Status Overview</h6>
+                    <small class="text-muted">Today: {{ status_cards_date }}</small>
+                </div>
+                <div class="row g-3 mt-1">
+                    <div class="col-12 col-md-4">
+                        <a href="{{ url_for('hdc_timekeeping_status', status_view='assigned', status_date=status_cards_date) }}" class="text-decoration-none">
+                            <div class="kpi-card kpi-green">
+                                <div class="kpi-icon"><i class="fas fa-user-check"></i></div>
+                                <div class="kpi-value">{{ assigned_count }}</div>
+                                <div class="kpi-label">Assigned</div>
+                            </div>
+                        </a>
+                    </div>
+                    <div class="col-12 col-md-4">
+                        <a href="{{ url_for('hdc_timekeeping_status', status_view='not_assigned', status_date=status_cards_date) }}" class="text-decoration-none">
+                            <div class="kpi-card kpi-orange">
+                                <div class="kpi-icon"><i class="fas fa-user-plus"></i></div>
+                                <div class="kpi-value">{{ not_assigned_count }}</div>
+                                <div class="kpi-label">Not Assigned</div>
+                            </div>
+                        </a>
+                    </div>
+                    <div class="col-12 col-md-4">
+                        <a href="{{ url_for('hdc_timekeeping_status', status_view='absent', status_date=status_cards_date) }}" class="text-decoration-none">
+                            <div class="kpi-card kpi-red">
+                                <div class="kpi-icon"><i class="fas fa-user-times"></i></div>
+                                <div class="kpi-value">{{ absent_count }}</div>
+                                <div class="kpi-label">Absent</div>
+                            </div>
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card hdc-card">
+            <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-list me-2"></i>{% if has_filters %}Filtered Attendance{% else %}Recent Attendance{% endif %}</span>
+                <span class="badge bg-secondary">{{ attendance_rows|length }} day(s)</span>
+            </div>
+            <div class="card-body border-bottom">
+                <form method="GET" class="row g-2 align-items-end">
+                    <div class="col-md-4">
+                        <label class="form-label text-muted small">Search Project</label>
+                        <input type="text" class="form-control form-control-sm mb-1" id="recordProjFilter" placeholder="Type project...">
+                        <select name="project_id" id="recordProjSelect" class="form-select form-select-sm">
+                            <option value="">All Projects</option>
+                            {% for p in projects %}
+                            <option value="{{ p.id }}" {% if filter_project_id == p.id %}selected{% endif %}>
+                                {{ p.name }} | {{ p.project_code }} | {{ p.client or 'No Owner' }} | {{ p.location or 'No Location' }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label text-muted small">Search Stage</label>
+                        <input type="text" class="form-control form-control-sm mb-1" id="recordStageFilter" placeholder="Type stage...">
+                        <select name="stage_id" id="recordStageSelect" class="form-select form-select-sm">
+                            <option value="">All Stages</option>
+                            {% for s in stages %}
+                            <option value="{{ s.id }}" data-project="{{ s.project_id }}" {% if filter_stage_id == s.id %}selected{% endif %}>
+                                {{ s.project.name }} - {{ s.name }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label text-muted small">Search Worker</label>
+                        <input type="text" class="form-control form-control-sm mb-1" id="recordWorkerFilter" placeholder="Type worker...">
+                        <select name="worker_id" id="recordWorkerSelect" class="form-select form-select-sm">
+                            <option value="">All Workers</option>
+                            {% for w in workers %}
+                            <option value="{{ w.id }}" {% if filter_worker_id == w.id %}selected{% endif %}>{{ w.name }} ({{ w.role_type or 'Worker' }})</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Trade</label>
+                        <input type="text" class="form-control form-control-sm mb-1" id="recordTradeFilter" value="{{ filter_trade or '' }}" placeholder="Type trade...">
+                        <select name="trade" id="recordTradeSelect" class="form-select form-select-sm">
+                            <option value="">All Trades</option>
+                            {% for tr in trade_options %}
+                            <option value="{{ tr }}" {% if filter_trade == tr %}selected{% endif %}>{{ tr }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">From</label>
+                        <input type="date" name="date_from" class="form-control form-control-sm" value="{{ filter_date_from or '' }}">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">To</label>
+                        <input type="date" name="date_to" class="form-control form-control-sm" value="{{ filter_date_to or '' }}">
+                    </div>
+                    <div class="col-md-1">
+                        <label class="form-label">Voided</label>
+                        <div class="form-check mt-1">
+                            <input class="form-check-input" type="checkbox" id="showVoidedCheck" name="show_voided" value="1" {% if filter_show_voided %}checked{% endif %}>
+                            <label class="form-check-label small" for="showVoidedCheck">Show</label>
+                        </div>
+                    </div>
+                    <div class="col-md-2 d-flex gap-2">
+                        <button type="submit" class="btn btn-mint btn-sm w-100"><i class="fas fa-filter me-1"></i>Filter</button>
+                        {% if has_filters %}
+                        <a href="{{ url_for('hdc_attendance') }}" class="btn btn-outline-secondary btn-sm w-100">Clear</a>
+                        {% endif %}
+                    </div>
+                </form>
+            </div>
+
+            <div class="table-responsive">
+                <table class="table hdc-table table-sm">
+                    <thead>
+                        <tr>
+                            <th>Date</th><th>Worker</th><th>Summary</th><th>Detailed Entries (Site -> Stage -> Hours)</th><th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    {% for row in attendance_rows %}
+                    <tr class="{% if row.status == 'Voided' %}table-secondary{% endif %}">
+                        <td>{{ row.date.isoformat() }}</td>
+                        <td>
+                            <a href="{{ url_for('hdc_worker_ledger', wid=row.worker.id) }}" class="text-decoration-none">
+                                <strong>{{ row.worker.name }}</strong>
+                            </a><br>
+                            <small class="text-muted">{{ row.worker.role_type or '' }}</small>
+                        </td>
+                        <td>
+                            <div><strong>Total:</strong> {{ "{:,.2f}".format(row.total_hours) }}h</div>
+                            <div><strong>Day:</strong> {{ row.day }}</div>
+                            <div><strong>Overtime:</strong> {{ "{:,.2f}".format(row.overtime) }}h</div>
+                            <div><strong>Wage:</strong> {{ "{:,.0f}".format(row.total_wage) }}</div>
+                        </td>
+                        <td>
+                            {% for e in row.entries %}
+                            <div class="border rounded px-2 py-1 mb-1 {% if e.is_void %}bg-body-secondary{% endif %}">
+                                <div class="small">
+                                    <strong>{{ e.project.name }}</strong> -> {{ e.stage.name if e.stage else '-' }} -> {{ "{:,.2f}".format(e.hours) }}h
+                                    {% if e.overtime > 0 %}<span class="text-warning">(OT {{ "{:,.2f}".format(e.overtime) }}h)</span>{% endif %}
+                                    {% if e.is_void %}<span class="badge bg-secondary ms-1">Voided</span>{% endif %}
+                                </div>
+                                <div class="mt-1">
+                                    {% if e.is_void %}
+                                    <form method="POST" action="{{ url_for('hdc_reactivate_attendance', tid=e.id) }}" class="d-inline" onsubmit="return confirm('Reactivate this entry?');">
+                                        <button type="submit" class="btn btn-sm btn-outline-success"><i class="fas fa-undo"></i></button>
+                                    </form>
+                                    {% else %}
+                                    <a href="{{ url_for('hdc_edit_attendance', tid=e.id) }}" class="btn btn-sm btn-outline-primary"><i class="fas fa-edit"></i></a>
+                                    <form method="POST" action="{{ url_for('hdc_delete_attendance', tid=e.id) }}" class="d-inline" onsubmit="return confirm('Void this entry?');">
+                                        <input type="hidden" name="void_reason" value="Voided from timekeeping list">
+                                        <button type="submit" class="btn btn-sm btn-outline-danger"><i class="fas fa-ban"></i></button>
+                                    </form>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </td>
+                        <td>
+                            {% if row.status == 'Voided' %}
+                            <span class="badge bg-secondary">Voided</span>
+                            {% else %}
+                            <span class="badge bg-success">Active</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="5" class="text-center text-muted py-4">No attendance records found.</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    const workers = Array.from(document.querySelectorAll('.js-row-status')).map(function (el) {
+        return (el.getAttribute('data-worker-id') || '').trim();
+    }).filter(Boolean);
+    const allocationMap = {};
+    const projectNameById = {};
+    const stageInfoById = {};
+    {% for p in projects %}
+    projectNameById["{{ p.id }}"] = {{ (p.name ~ ' | ' ~ p.project_code)|tojson }};
+    {% endfor %}
+    {% for s in stages %}
+    stageInfoById["{{ s.id }}"] = {
+        name: {{ (s.name or '')|tojson }},
+        projectId: "{{ s.project_id }}"
+    };
+    {% endfor %}
+
+    function parseAllocations(wid) {
+        const input = document.getElementById('allocations_' + wid);
+        if (!input) return [];
+        try {
+            const rows = JSON.parse(input.value || '[]');
+            if (!Array.isArray(rows)) return [];
+            return rows.map(function (r) {
+                return {
+                    project_id: parseInt(r.project_id, 10) || 0,
+                    stage_id: parseInt(r.stage_id, 10) || 0,
+                    hours: Math.max(0, parseFloat(r.hours) || 0)
+                };
+            }).filter(function (r) {
+                return r.project_id > 0 && r.stage_id > 0 && r.hours > 0;
+            });
+        } catch (e) {
+            return [];
+        }
+    }
+
+    function syncStageByProject(stageSelect, projectId) {
+        if (!stageSelect) return;
+        Array.from(stageSelect.options).forEach(function (opt, idx) {
+            if (idx === 0) {
+                opt.hidden = false;
+                return;
+            }
+            const show = (opt.getAttribute('data-project') || '') === String(projectId || '');
+            opt.hidden = !show;
+            if (!show && opt.selected) {
+                opt.selected = false;
+            }
+        });
+        if (!projectId) {
+            stageSelect.value = '';
+        }
+    }
+
+    function renderAllocations(wid) {
+        const rows = allocationMap[wid] || [];
+        const wrap = document.getElementById('allocList_' + wid);
+        const hidden = document.getElementById('allocations_' + wid);
+        const workingDisplay = document.getElementById('workingDisplay_' + wid);
+        const overtimeDisplay = document.getElementById('overtimeDisplay_' + wid);
+        const workingInput = document.getElementById('working_hours_' + wid);
+        const overtimeInput = document.getElementById('overtime_hours_' + wid);
+        const statusSel = document.querySelector('.js-row-status[data-worker-id="' + wid + '"]');
+        const addBtn = document.querySelector('.js-add-allocation[data-worker-id="' + wid + '"]');
+
+        let totalHours = 0;
+        rows.forEach(function (r) { totalHours += (parseFloat(r.hours) || 0); });
+        const overtime = Math.max(0, totalHours - 8);
+        const working = Math.max(0, totalHours - overtime);
+
+        if (workingDisplay) workingDisplay.textContent = working.toFixed(2);
+        if (overtimeDisplay) overtimeDisplay.textContent = overtime.toFixed(2);
+        if (workingInput) workingInput.value = working.toFixed(2);
+        if (overtimeInput) overtimeInput.value = overtime.toFixed(2);
+        if (hidden) hidden.value = JSON.stringify(rows);
+
+        const canEdit = !statusSel || statusSel.value === 'present';
+        if (addBtn) addBtn.disabled = !canEdit;
+
+        if (!wrap) return;
+        if (!rows.length) {
+            wrap.innerHTML = '<span class="text-muted">No site entries added.</span>';
+            return;
+        }
+
+        const chips = rows.map(function (r, idx) {
+            const pName = projectNameById[String(r.project_id)] || ('Project #' + r.project_id);
+            const stg = stageInfoById[String(r.stage_id)];
+            const sName = stg ? stg.name : ('Stage #' + r.stage_id);
+            const rm = canEdit ? ('<button type="button" class="btn btn-link btn-sm p-0 ms-1 text-danger js-remove-allocation" data-worker-id="' + wid + '" data-index="' + idx + '"><i class="fas fa-times"></i></button>') : '';
+            return '<div class="border rounded px-2 py-1 mb-1 d-flex justify-content-between align-items-start"><span><strong>' + pName + '</strong> -> ' + sName + ' -> ' + Number(r.hours).toFixed(2) + 'h</span>' + rm + '</div>';
+        }).join('');
+        wrap.innerHTML = chips;
+    }
+
+    const modalEl = document.getElementById('allocationModal');
+    if (modalEl && modalEl.parentElement !== document.body) {
+        document.body.appendChild(modalEl);
+    }
+    const modal = modalEl ? new bootstrap.Modal(modalEl) : null;
+    const workerInput = document.getElementById('allocWorkerId');
+    const projectSelect = document.getElementById('allocProject');
+    const stageSelect = document.getElementById('allocStage');
+    const hoursInput = document.getElementById('allocHours');
+
+    if (projectSelect && stageSelect) {
+        projectSelect.addEventListener('change', function () {
+            syncStageByProject(stageSelect, projectSelect.value);
+        });
+    }
+
+    document.querySelectorAll('.js-add-allocation').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            if (!modal || !workerInput || !projectSelect || !stageSelect || !hoursInput) return;
+            const wid = btn.getAttribute('data-worker-id');
+            workerInput.value = wid || '';
+            projectSelect.value = '';
+            stageSelect.value = '';
+            hoursInput.value = '2';
+            syncStageByProject(stageSelect, '');
+            modal.show();
+        });
+    });
+
+    const saveBtn = document.getElementById('saveAllocationBtn');
+    if (saveBtn) {
+        saveBtn.addEventListener('click', function () {
+            const wid = (workerInput && workerInput.value) ? String(workerInput.value) : '';
+            const pid = projectSelect ? (parseInt(projectSelect.value, 10) || 0) : 0;
+            const sid = stageSelect ? (parseInt(stageSelect.value, 10) || 0) : 0;
+            const hrs = hoursInput ? Math.max(0, parseFloat(hoursInput.value) || 0) : 0;
+            if (!wid || !pid || !sid || hrs <= 0) {
+                alert('Please select project, stage, and valid hours.');
+                return;
+            }
+            if ((stageInfoById[String(sid)] || {}).projectId !== String(pid)) {
+                alert('Selected stage does not belong to selected project.');
+                return;
+            }
+            allocationMap[wid] = allocationMap[wid] || [];
+            allocationMap[wid].push({ project_id: pid, stage_id: sid, hours: hrs });
+            renderAllocations(wid);
+            if (modal) modal.hide();
+        });
+    }
+
+    if (modalEl) {
+        modalEl.addEventListener('hidden.bs.modal', function () {
+            document.body.classList.remove('modal-open');
+            document.body.style.removeProperty('padding-right');
+            document.querySelectorAll('.modal-backdrop').forEach(function (el) { el.remove(); });
+        });
+    }
+
+    document.addEventListener('click', function (e) {
+        const btn = e.target.closest('.js-remove-allocation');
+        if (!btn) return;
+        const wid = (btn.getAttribute('data-worker-id') || '').trim();
+        const idx = parseInt(btn.getAttribute('data-index'), 10);
+        if (!wid || Number.isNaN(idx)) return;
+        const rows = allocationMap[wid] || [];
+        if (idx < 0 || idx >= rows.length) return;
+        rows.splice(idx, 1);
+        allocationMap[wid] = rows;
+        renderAllocations(wid);
+    });
+
+    document.querySelectorAll('.js-row-status').forEach(function (statusSel) {
+        statusSel.addEventListener('change', function () {
+            const wid = (statusSel.getAttribute('data-worker-id') || '').trim();
+            if (!wid) return;
+            renderAllocations(wid);
+        });
+    });
+
+    workers.forEach(function (wid) {
+        allocationMap[wid] = parseAllocations(wid);
+        renderAllocations(wid);
+    });
+})();
+
+if (window.HDCComboList) {
+    window.HDCComboList.attach('recordProjFilter', 'recordProjSelect', { includeEmpty: true });
+    window.HDCComboList.attach('recordStageFilter', 'recordStageSelect', { includeEmpty: true });
+    window.HDCComboList.attach('recordWorkerFilter', 'recordWorkerSelect', { includeEmpty: true });
+    window.HDCComboList.attach('recordTradeFilter', 'recordTradeSelect', { includeEmpty: true });
+}
+
+const recordProjSel = document.getElementById('recordProjSelect');
+const recordStageSel = document.getElementById('recordStageSelect');
+function filterRecordStages() {
+    if (!recordProjSel || !recordStageSel) return;
+    const pid = recordProjSel.value;
+    Array.from(recordStageSel.options).forEach(opt => {
+        if (!opt.value) return;
+        opt.style.display = (!pid || opt.dataset.project === pid) ? '' : 'none';
+    });
+    const selected = recordStageSel.options[recordStageSel.selectedIndex];
+    if (selected && selected.value && selected.dataset.project !== pid && pid) {
+        recordStageSel.value = '';
+    }
+}
+if (recordProjSel) {
+    recordProjSel.addEventListener('change', filterRecordStages);
+    filterRecordStages();
+}
+</script>
+{% endblock %}
