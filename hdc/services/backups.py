@@ -12,7 +12,7 @@ from datetime import datetime
 
 import openpyxl
 
-from hdc.config import BASE_DIR, INSTANCE_DIR, _BACKUP_DIR, _DB_STORE, _ESTIMATION_STORE
+from hdc.config import BASE_DIR, get_runtime_settings
 from hdc.utils.dates import PKT_ZONE, _pkt_now_naive
 from hdc.utils.format import _quote_ident, _safe_sheet_name
 
@@ -21,6 +21,8 @@ def _backup_filename():
 
 
 def _create_backup_xlsx(dst_path):
+    settings = get_runtime_settings()
+    db_path = settings.db_path
     wb = openpyxl.Workbook()
     if wb.active:
         wb.remove(wb.active)
@@ -28,10 +30,10 @@ def _create_backup_xlsx(dst_path):
     # Metadata sheet
     ws_meta = wb.create_sheet(title='README')
     ws_meta.append(['Generated At (PKT)', _pkt_now_naive().strftime('%Y-%m-%d %H:%M:%S')])
-    ws_meta.append(['Database Path', _DB_STORE])
+    ws_meta.append(['Database Path', db_path])
     ws_meta.append(['Note', 'This file is a tabular export backup (not a direct restore source).'])
 
-    con = sqlite3.connect(_DB_STORE)
+    con = sqlite3.connect(db_path)
     cur = con.cursor()
     cur.execute("""
         SELECT name
@@ -77,14 +79,15 @@ def _create_backup_xlsx(dst_path):
 
 
 def _create_backup_zip(dst_path):
-    fd, xlsx_path = tempfile.mkstemp(prefix='hdc_data_export_', suffix='.xlsx', dir=INSTANCE_DIR)
+    settings = get_runtime_settings()
+    fd, xlsx_path = tempfile.mkstemp(prefix='hdc_data_export_', suffix='.xlsx', dir=settings.instance_dir)
     os.close(fd)
-    db_fd, db_snapshot_path = tempfile.mkstemp(prefix='hdc_db_snapshot_', suffix='.db', dir=INSTANCE_DIR)
+    db_fd, db_snapshot_path = tempfile.mkstemp(prefix='hdc_db_snapshot_', suffix='.db', dir=settings.instance_dir)
     os.close(db_fd)
     try:
         _create_backup_xlsx(xlsx_path)
         # Take a consistent SQLite snapshot so WAL data is included in backup DB.
-        src = sqlite3.connect(_DB_STORE)
+        src = sqlite3.connect(settings.db_path)
         try:
             dst = sqlite3.connect(db_snapshot_path)
             try:
@@ -104,8 +107,8 @@ def _create_backup_zip(dst_path):
         with zipfile.ZipFile(dst_path, 'w', compression=zipfile.ZIP_DEFLATED) as zf:
             if os.path.exists(db_snapshot_path):
                 zf.write(db_snapshot_path, arcname='hdc_erp.db')
-            if os.path.exists(_ESTIMATION_STORE):
-                zf.write(_ESTIMATION_STORE, arcname='project_estimations.json')
+            if os.path.exists(settings.estimation_store):
+                zf.write(settings.estimation_store, arcname='project_estimations.json')
             if os.path.exists(xlsx_path):
                 zf.write(xlsx_path, arcname='hdc_data_export.xlsx')
     finally:
@@ -122,11 +125,12 @@ def _create_backup_zip(dst_path):
 
 
 def _list_backups():
+    settings = get_runtime_settings()
     rows = []
-    for name in os.listdir(_BACKUP_DIR):
+    for name in os.listdir(settings.backup_dir):
         if not name.lower().endswith('.zip'):
             continue
-        p = os.path.join(_BACKUP_DIR, name)
+        p = os.path.join(settings.backup_dir, name)
         try:
             st = os.stat(p)
             # Always display backup file times in Pakistan Standard Time.
@@ -143,6 +147,7 @@ def _list_backups():
 
 
 def _prune_saved_backups(keep_latest=10):
+    settings = get_runtime_settings()
     try:
         keep = int(keep_latest or 0)
     except Exception:
@@ -155,7 +160,7 @@ def _prune_saved_backups(keep_latest=10):
         name = (r.get('name') or '').strip()
         if not name:
             continue
-        p = os.path.join(_BACKUP_DIR, name)
+        p = os.path.join(settings.backup_dir, name)
         try:
             if os.path.exists(p):
                 os.remove(p)
@@ -166,12 +171,13 @@ def _prune_saved_backups(keep_latest=10):
 
 
 def _cleanup_backup_temp_artifacts():
+    settings = get_runtime_settings()
     removed_files = 0
     removed_dirs = 0
     # Temporary snapshot/export files that may remain after interrupted backups.
     try:
-        for name in os.listdir(INSTANCE_DIR):
-            p = os.path.join(INSTANCE_DIR, name)
+        for name in os.listdir(settings.instance_dir):
+            p = os.path.join(settings.instance_dir, name)
             if not os.path.isfile(p):
                 continue
             if (name.startswith('hdc_db_snapshot_') and name.endswith('.db')) or \

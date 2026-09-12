@@ -1,10 +1,9 @@
 # Refactor notes — what changed beyond pure moves
 
-The conversion (MODULARIZATION_PLAN.md) is **moves only** except for the
-explicit items below. Every item exists because the code cannot work
-otherwise once the single file is split (no global `app`, separate module
-namespaces, deeper `config.py` location). No business logic, query, formula,
-validation rule, transaction boundary or template was altered.
+The original conversion (MODULARIZATION_PLAN.md) was **moves only** except
+for the explicit items below. The follow-up production-hardening pass is
+listed separately at the end of this document; it intentionally fixes
+configuration, security, and reporting defects identified by APP_REVIEW.md.
 
 ## Code transforms (applied by `scripts/split_monolith.py`)
 
@@ -71,8 +70,9 @@ endpoints were filed under their true domains: office/materials/projects).
 - URLs, endpoint names, template variables, form fields, JSON shapes.
 - Database schema (same 54 tables/columns/indexes; same SQLite file opens).
 - Transaction boundaries (all 181 `commit()` sites moved with their code).
-- Auth/roles/CSRF behaviour, password rules, bootstrap seeds and backfills.
-- No APP_REVIEW bug fixes (those come after, one module at a time).
+- Auth/roles/CSRF behaviour, password rules, bootstrap seeds and backfills
+  were unchanged by the original conversion. Production hardening below
+  intentionally strengthens CSRF and bootstrap-secret handling.
 - External surface: `import hdc_erp`, `hdc_erp.app`, `hdc_erp.db`, all models
   and helpers, `python hdc_erp.py`, `wsgi:app` all keep working.
 

@@ -7,10 +7,10 @@ import os
 import threading
 
 from flask import current_app
-from sqlalchemy import func
+from sqlalchemy import func, inspect as sa_inspect
 from werkzeug.security import generate_password_hash
 
-from hdc.config import INSTANCE_DIR, _DB_STORE
+from hdc.config import get_runtime_settings
 from hdc.core.flags import _runtime_flag_get, _runtime_flag_set
 from hdc.core.schema import _ensure_accounts_schema, _ensure_owner_payment_void_schema, _ensure_purchase_v2_schema, _ensure_runtime_flags_table, _ensure_timeentry_unique_indexes, _run_migrations
 from hdc.extensions import db
@@ -23,12 +23,13 @@ from hdc.services.timekeeping import _migrate_attendance_to_time_entries, _recon
 from hdc.utils.format import _is_strong_password
 
 def _migrate_legacy_done_markers_to_db():
+    instance_dir = get_runtime_settings().instance_dir
     marker_to_flag = {
         'time_entry_migration.done': 'time_entry_migration_done',
         'time_entry_dedupe.done': 'time_entry_dedupe_done',
     }
     for fname, fkey in marker_to_flag.items():
-        marker = os.path.join(INSTANCE_DIR, fname)
+        marker = os.path.join(instance_dir, fname)
         if os.path.exists(marker):
             if _runtime_flag_get(fkey) != '1':
                 _runtime_flag_set(fkey, '1')
@@ -53,7 +54,13 @@ def _bootstrap_hdc():
     _ensure_timeentry_unique_indexes()
     admin_username = (os.environ.get('HDC_BOOTSTRAP_ADMIN_USERNAME') or 'admin').strip() or 'admin'
     if not HDCUser.query.filter_by(username=admin_username).first():
+        environment = (os.environ.get('HDC_ENV') or 'dev').strip().lower()
         admin_pwd = os.environ.get('HDC_BOOTSTRAP_ADMIN_PASSWORD', '').strip()
+        if not admin_pwd and environment in ('prod', 'production'):
+            raise RuntimeError(
+                'HDC_BOOTSTRAP_ADMIN_PASSWORD must be set before '
+                'creating the first production admin.'
+            )
         if not admin_pwd:
             admin_pwd = (os.environ.get('HDC_DEFAULT_ADMIN_PASSWORD') or 'Admin@1234').strip()
         ok_pwd, pwd_msg = _is_strong_password(admin_pwd)
@@ -92,31 +99,52 @@ def _bootstrap_hdc():
     _mark_auto_generated_person_accounts()
 
 
-_HDC_BOOTSTRAP_DONE = False
+_HDC_BOOTSTRAP_DONE = False  # legacy compatibility flag; state is per app below
 
 
 _HDC_BOOTSTRAP_LOCK = threading.Lock()
 
 
+def _bootstrap_state(app_obj):
+    return app_obj.extensions.setdefault(
+        'hdc_bootstrap_state', {'done': False}
+    )
+
+
 def _ensure_bootstrap_once(app=None, force=False):
+    """Bootstrap the active app/database once, independently per app.
+
+    The old implementation used one process-global flag and one process-global
+    DB path.  That was unsafe for app-factory tests and for admin tooling that
+    opens more than one database in a process.
+    """
     global _HDC_BOOTSTRAP_DONE
-    if _HDC_BOOTSTRAP_DONE and not force:
+    _app_obj = (app if app is not None
+                else current_app._get_current_object())
+    state = _bootstrap_state(_app_obj)
+    if state['done'] and not force:
         return
     with _HDC_BOOTSTRAP_LOCK:
-        if _HDC_BOOTSTRAP_DONE and not force:
+        if state['done'] and not force:
             return
-        _app_obj = (app if app is not None
-                   else current_app._get_current_object())
         with _app_obj.app_context():
             _bootstrap_hdc()
-        if not os.path.exists(_DB_STORE):
-            raise RuntimeError(f'Database file was not created at required path: {_DB_STORE}')
+            if not sa_inspect(db.engine).has_table('hdc_user'):
+                raise RuntimeError('Database bootstrap did not create the hdc_user table.')
+        state['done'] = True
+        # Keep the old exported name meaningful for legacy callers, while it
+        # no longer controls whether another app is bootstrapped.
         _HDC_BOOTSTRAP_DONE = True
 
 
-
-
-def reset_bootstrap_for_tests():
-    """Allow a fresh bootstrap (test-only: fresh app + scratch DB)."""
+def reset_bootstrap_for_tests(app=None):
+    """Reset bootstrap state for one app (or the active app in tests)."""
     global _HDC_BOOTSTRAP_DONE
+    if app is None:
+        try:
+            app = current_app._get_current_object()
+        except RuntimeError:
+            app = None
+    if app is not None:
+        _bootstrap_state(app)['done'] = False
     _HDC_BOOTSTRAP_DONE = False

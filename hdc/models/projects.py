@@ -93,13 +93,17 @@ class Project(db.Model):
         cached = getattr(self, '_agg_total_expense_cost', None)
         if cached is not None:
             return float(cached or 0.0)
-        return sum(e.amount for e in self.expenses)
+        return sum(
+            e.amount for e in self.expenses
+            if not getattr(e, 'is_void', False)
+        )
 
     @property
     def total_tip_expense(self):
         return sum(
             e.amount for e in self.expenses
-            if (e.category or '').strip().lower() == 'tip'
+            if not getattr(e, 'is_void', False)
+            and (e.category or '').strip().lower() == 'tip'
         )
 
     @property
@@ -124,11 +128,18 @@ class Project(db.Model):
 
     @property
     def total_material_cost(self):
+        from hdc.models.materials import Purchase, UsageLogV2
         cached = getattr(self, '_agg_total_material_cost', None)
         if cached is not None:
             return float(cached or 0.0)
-        purchase_total = sum(p.total for p in self.purchases)
-        return purchase_total
+        legacy_total = sum(
+            p.total for p in Purchase.query.filter_by(project_id=self.id).all()
+        )
+        v2_total = (db.session.query(func.coalesce(func.sum(UsageLogV2.cost), 0.0))
+                    .filter(UsageLogV2.project_id == self.id,
+                            UsageLogV2.is_void == False)
+                    .scalar() or 0.0)
+        return float(legacy_total or 0.0) + float(v2_total or 0.0)
 
     @property
     def total_subcontract_cost(self):
@@ -266,12 +277,18 @@ class Stage(db.Model):
 
     @property
     def stage_material_cost(self):
-        from hdc.models.materials import Purchase
+        from hdc.models.materials import Purchase, UsageLogV2
         cached = getattr(self, '_agg_stage_material_cost', None)
         if cached is not None:
             return float(cached or 0.0)
-        purchase_total = sum(p.total for p in Purchase.query.filter_by(stage_id=self.id).all())
-        return purchase_total
+        legacy_total = sum(
+            p.total for p in Purchase.query.filter_by(stage_id=self.id).all()
+        )
+        v2_total = (db.session.query(func.coalesce(func.sum(UsageLogV2.cost), 0.0))
+                    .filter(UsageLogV2.stage_id == self.id,
+                            UsageLogV2.is_void == False)
+                    .scalar() or 0.0)
+        return float(legacy_total or 0.0) + float(v2_total or 0.0)
 
     @property
     def stage_subcontract_cost(self):

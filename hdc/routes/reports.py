@@ -504,7 +504,9 @@ def register(app):
         w.writerow(['Code','Name','Client','Contract Value','Stage Value','Total Received',
                     'Labour Cost','Material Cost','Expense Cost','Subcontract Cost',
                     'Total Cost','Gross Margin','Net Profit','Remaining'])
-        for p in Project.query.all():
+        projects = Project.query.all()
+        _apply_aggregated_project_costs(projects)
+        for p in projects:
             w.writerow([p.project_code, p.name, p.client or '',
                         p.owner_contract_value, p.stage_contract_value,
                         p.total_received, p.total_labour_cost, p.total_material_cost,

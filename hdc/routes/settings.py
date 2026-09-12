@@ -10,7 +10,7 @@ import tempfile
 from flask import abort, current_app, flash, redirect, render_template, request, send_file, url_for
 from flask_login import login_required, logout_user
 
-from hdc.config import _BACKUP_DIR
+from hdc.config import get_runtime_settings
 from hdc.core.admin import _WIPE_TARGETS, _restore_from_backup_zip, _restore_from_paths, _run_admin_maintenance, _wipe_selected_targets
 from hdc.extensions import _admin_only, db
 from hdc.services.accounts import _run_accounts_backfill
@@ -27,7 +27,7 @@ def register(app):
             try:
                 if action == 'create_backup':
                     name = _backup_filename()
-                    dst = os.path.join(_BACKUP_DIR, name)
+                    dst = os.path.join(get_runtime_settings().backup_dir, name)
                     _create_backup_zip(dst)
                     _cleanup_backup_temp_artifacts()
                     flash(f'Backup created: {name} (contains DB + XLSX export).', 'success')
@@ -67,7 +67,7 @@ def register(app):
                     if not name:
                         flash('Please select a backup to restore.', 'warning')
                         return redirect(url_for('hdc_settings'))
-                    src = os.path.join(_BACKUP_DIR, name)
+                    src = os.path.join(get_runtime_settings().backup_dir, name)
                     if not os.path.exists(src):
                         flash('Selected backup file not found.', 'danger')
                         return redirect(url_for('hdc_settings'))
@@ -81,7 +81,7 @@ def register(app):
                     if (not name) or (not name.lower().endswith('.zip')):
                         flash('Please select a valid backup file to delete.', 'warning')
                         return redirect(url_for('hdc_settings'))
-                    src = os.path.join(_BACKUP_DIR, name)
+                    src = os.path.join(get_runtime_settings().backup_dir, name)
                     if not os.path.exists(src):
                         flash('Selected backup file not found.', 'danger')
                         return redirect(url_for('hdc_settings'))
@@ -98,7 +98,7 @@ def register(app):
                         flash('Please choose a backup file (.zip or .db).', 'warning')
                         return redirect(url_for('hdc_settings'))
                     ext = os.path.splitext(up.filename)[1].lower()
-                    with tempfile.TemporaryDirectory(dir=_BACKUP_DIR) as tmpdir:
+                    with tempfile.TemporaryDirectory(dir=get_runtime_settings().backup_dir) as tmpdir:
                         upload_path = os.path.join(tmpdir, 'uploaded' + ext)
                         up.save(upload_path)
                         if ext == '.zip':
@@ -149,7 +149,7 @@ def register(app):
         safe_name = os.path.basename(filename or '')
         if not safe_name.lower().endswith('.zip'):
             abort(404)
-        p = os.path.join(_BACKUP_DIR, safe_name)
+        p = os.path.join(get_runtime_settings().backup_dir, safe_name)
         if not os.path.exists(p):
             abort(404)
         return send_file(p, as_attachment=True, download_name=safe_name)

@@ -7,7 +7,7 @@ import os
 
 from flask import Flask
 
-from hdc.config import BASE_DIR, ensure_dirs, get_flask_config
+from hdc.config import BASE_DIR, ensure_dirs, get_flask_config, settings_for_app
 from hdc.extensions import (db, login_manager, _csrf_protect,
                             _ensure_db_runtime_ready, _inject_alert_count,
                             load_user)
@@ -18,17 +18,21 @@ from hdc.utils.dates import _fmt_pkt
 
 
 def create_app(config_overrides=None):
-    """Create and fully initialise the HDC Flask application."""
-    ensure_dirs()
+    """Create and fully initialise one isolated HDC Flask application."""
+    settings = settings_for_app(config_overrides)
+    ensure_dirs(settings)
     app = Flask(
         __name__,
         template_folder=os.path.join(BASE_DIR, "templates", "hdc"),
         static_folder=os.path.join(BASE_DIR, "static", "hdc"),
         static_url_path="/hdc_static",
     )
-    app.config.update(get_flask_config())
+    app.config.update(get_flask_config(settings))
     if config_overrides:
         app.config.update(config_overrides)
+    # Path-bearing services read this per-app value instead of global module
+    # constants.  This is what makes two scratch apps safe in one process.
+    app.extensions['hdc_settings'] = settings
 
     db.init_app(app)
     login_manager.init_app(app)
@@ -39,6 +43,22 @@ def create_app(config_overrides=None):
     app.context_processor(_inject_alert_count)
     app.before_request(_ensure_db_runtime_ready)
     app.before_request(_csrf_protect)
+
+    @app.after_request
+    def _security_headers(response):
+        response.headers.setdefault('X-Content-Type-Options', 'nosniff')
+        response.headers.setdefault('X-Frame-Options', 'SAMEORIGIN')
+        response.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
+        response.headers.setdefault(
+            'Permissions-Policy',
+            'camera=(), microphone=(), geolocation=()'
+        )
+        if app.config.get('SESSION_COOKIE_SECURE'):
+            response.headers.setdefault(
+                'Strict-Transport-Security',
+                'max-age=31536000; includeSubDomains'
+            )
+        return response
 
     # Template formatter, available unconditionally (as before).
     app.jinja_env.globals["fmt_pkt"] = _fmt_pkt

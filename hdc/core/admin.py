@@ -11,7 +11,7 @@ from uuid import uuid4
 
 from sqlalchemy import text
 
-from hdc.config import BASE_DIR, _DB_STORE, _ESTIMATION_STORE
+from hdc.config import BASE_DIR, get_runtime_settings
 from hdc.core.bootstrap import _bootstrap_hdc, _ensure_bootstrap_once
 from hdc.extensions import db
 from hdc.models.workforce import TimeEntry
@@ -20,19 +20,25 @@ from hdc.services.subcontract import _reconcile_subcontract_links
 from hdc.services.timekeeping import _reconcile_worker_time_entries, _repair_worker_work_ledger_links
 
 def _restore_from_paths(db_path, estimation_path=None):
+    settings = get_runtime_settings()
+    target_db = settings.db_path
     db.session.remove()
     db.engine.dispose()
     # If SQLite WAL sidecar files from an older DB remain, they can override
     # pages after restore and make imported data appear missing.
     try:
-        for sidecar in (f"{_DB_STORE}-wal", f"{_DB_STORE}-shm"):
+        for sidecar in (f"{target_db}-wal", f"{target_db}-shm"):
             if os.path.exists(sidecar):
                 os.remove(sidecar)
     except Exception:
         pass
-    shutil.copy2(db_path, _DB_STORE)
+    tmp_target = f"{target_db}.restore-{uuid4().hex}.tmp"
+    shutil.copy2(db_path, tmp_target)
+    os.replace(tmp_target, target_db)
     if estimation_path and os.path.exists(estimation_path):
-        shutil.copy2(estimation_path, _ESTIMATION_STORE)
+        tmp_estimation = f"{settings.estimation_store}.restore-{uuid4().hex}.tmp"
+        shutil.copy2(estimation_path, tmp_estimation)
+        os.replace(tmp_estimation, settings.estimation_store)
     # Restored backups can be from older schema versions.
     # Force bootstrap/migrations so new columns (e.g. purchase_v2 usage links) exist immediately.
     _ensure_bootstrap_once(force=True)
