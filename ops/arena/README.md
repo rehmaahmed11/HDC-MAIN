@@ -67,3 +67,11 @@ git pull arena main                   # take the agent's edits back
 If the preview proxy does not pass Git's HTTP traffic, GitHub remains the
 working channel: the agent pushes to the session branch and
 `ops/pythonanywhere/sync.sh` pulls it in one command.
+
+## Checks
+
+`tests/test_arena_sync_server.py` pins the gating (no token = no service,
+401 on missing/wrong credentials, only the one repo name reachable, `..` and
+NUL rejected before `git-http-backend`) and runs a real `git clone` +
+`git push` round trip against a throwaway repository on 127.0.0.1. It is part
+of `python -m unittest discover -s tests`, which CI already runs.

@@ -206,6 +206,10 @@ The code itself always travels through Git. There is no path where code is
 pushed to PythonAnywhere from outside the repository, so the deployed commit is
 always identifiable with `git rev-parse HEAD`.
 
+`tests/test_sync_script.py` pins each of those behaviours (fast-forward, the
+conditional `pip`, the dirty-checkout refusal, `--dry-run`, the reload touch and
+the syntax check failing loudly when a target is missing).
+
 ## Manual trigger, rollback, kill switch
 
 Set `HDC_DEPLOY_ALLOW_MANUAL=1` and `HDC_DEPLOY_TOKEN=...` to enable:
