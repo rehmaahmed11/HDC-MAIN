@@ -41,10 +41,11 @@ URLs or database schema.
 
 ## Verification
 
-- Webhook deploys: `deploy_receiver.py` (stdlib only, HMAC-checked, no DB
-  access) runs `deploy.sh` detached; 48 unit/integration tests cover signature
-  rejection, branch/repo filtering, cooldowns, rollback, and "code moves, data
-  does not".
+- Webhook deploys: `deploy_hook.py` (stdlib only, HMAC-checked, no DB
+  access) runs `git pull` and touches the WSGI file to reload; unit tests
+  cover signature rejection, branch filtering, and the pull/reload/log flow,
+  and `scripts/check_db_safety.py` keeps databases out of Git ("code moves,
+  data does not").
 - 53-module layer check passes.
 - Python and JavaScript syntax checks pass.
 - Fresh production-mode boot passes with explicit secrets.

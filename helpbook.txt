@@ -4,35 +4,45 @@ Simple guide: updating code, updating secrets, settings,
 and everyday operations. Read the GOLDEN RULES first.
 ================================================================
 
-WHERE EVERYTHING LIVES
+WHERE EVERYTHING LIVES (on PythonAnywhere)
 ------------------------------------------------
 Your code (server copy)     ~/HDC-MAIN
-Private settings            ~/.config/hdc/production.env
-                            (permission 600, NEVER commit this)
-Hook credentials            ~/HDC-MAIN/github_hook_credentials.txt
-                            (permission 600, gitignored)
-Database                    path in production.env -> HDC_DB_PATH
-Deploy log                  ~/HDC-MAIN/hdc_instance/deploy/deploy.log
-Database backups            ~/HDC-MAIN/hdc_instance/backups/deployments/
+App settings                ~/HDC-MAIN/.env
+                            (the app reads this itself; NEVER commit it)
+Deploy secret (the "key")   ~/HDC-MAIN/deploy_secret.txt
+                            (ONE line; must match the GitHub webhook
+                            secret; NEVER commit it)
+Deploy log                  ~/HDC-MAIN/deploy.log
+                            (also visible at https://<you>.pythonanywhere.com/deploy)
+Database                    path in .env -> HDC_DB_PATH
 Web entry file (WSGI)       /var/www/<you>_pythonanywhere_com_wsgi.py
+                            (holds the small dispatch snippet from this repo)
+
+HOW DEPLOYING WORKS (the whole system, in one paragraph)
+------------------------------------------------
+You push to main on GitHub -> GitHub calls
+https://<you>.pythonanywhere.com/deploy -> that runs deploy_hook.py
+(one small file in this repo) -> it checks the secret, runs
+"git pull", and reloads the site. That is everything. There is no
+deploy server to start and nothing else to keep running.
 
 GOLDEN RULES
 ------------------------------------------------
-1. Do NOT run git pull by hand on the PythonAnywhere checkout.
-   You push from your own computer; the GitHub webhook pulls and
-   deploys for you. The safe manual path is deploy.sh, never raw git.
-2. Never commit databases, zips, .env, production.env or
-   github_hook_credentials.txt. They are gitignored for a reason.
-3. Every deploy backs up the database BEFORE touching code.
-   Do not skip or "fix" that step.
-4. After ANY edit to production.env you must reload the web app:
+1. Do NOT edit code by hand on the PythonAnywhere checkout.
+   You push from your own computer; the webhook pulls for you.
+2. Never commit databases, zips, .env, deploy_secret.txt or
+   deploy.log. They are gitignored for a reason.
+3. After ANY edit to .env you must reload the web app:
        touch /var/www/<you>_pythonanywhere_com_wsgi.py
    (or click Reload in the Web tab). Settings do not apply until reload.
-5. Secrets live in production.env and github_hook_credentials.txt.
+4. Secrets live ONLY in .env and deploy_secret.txt.
    Never paste them into chat, GitHub issues, or email.
+5. After every push, open https://<you>.pythonanywhere.com/deploy
+   in your browser. It shows the last few deploys - you should see
+   a new "OK deployed ..." line within about 30 seconds.
 
 
-1. GETTING NEW CODE (the normal, safe way)
+1. GETTING NEW CODE (the normal way)
 ------------------------------------------------
 You edit code on your own computer. There:
 
@@ -53,47 +63,92 @@ If git status shows uncommitted work you do not want to commit yet:
     git stash pop                    # bring it back
 
 After you push to main, GitHub's webhook automatically deploys to
-PythonAnywhere. Wait 1-2 minutes, then check:
+PythonAnywhere. Wait about 30 seconds, then open in your browser:
 
-    curl -s https://<you>.pythonanywhere.com/deploy/health
+    https://<you>.pythonanywhere.com/deploy
+
+You should see a new line like:
+    2026-09-13 14:02:11  OK deployed a1b2c3d: Fast-forward
 
 "Starting a fresh copy on a new computer"? Just clone the repository
-there, commit, and push as above. You do NOT copy production.env or
-the database between computers - the server keeps its own.
+there, commit, and push as above. You do NOT copy .env,
+deploy_secret.txt or the database between computers - the server
+keeps its own.
 
 
-2. SYNCING THE SERVER BY HAND (only if the webhook is broken)
+2. FIRST SETUP ON PYTHONANYWHERE (once only - then never again)
+------------------------------------------------
+Open a PythonAnywhere Bash console and run:
+
+    git clone https://github.com/rehmaahmed11/HDC-MAIN.git ~/HDC-MAIN
+    cd ~/HDC-MAIN
+    python3 -m venv ~/.virtualenvs/hdc
+    ~/.virtualenvs/hdc/bin/pip install -r requirements.txt
+
+Then create the app settings file (.env) in ~/HDC-MAIN:
+
+    nano ~/HDC-MAIN/.env
+
+It needs at least these lines (replace the passwords):
+
+    HDC_ENV=prod
+    HDC_SECRET_KEY=<long-random-string>
+    HDC_DB_PATH=/home/<you>/HDC-MAIN/hdc_instance/hdc_erp.db
+    HDC_INSTANCE_DIR=/home/<you>/HDC-MAIN/hdc_instance
+    HDC_BOOTSTRAP_ADMIN_USERNAME=admin
+    HDC_BOOTSTRAP_ADMIN_PASSWORD=<strong-password-for-first-login>
+
+Make new random strings any time with:
+    python3 -c "import secrets; print(secrets.token_hex(32))"
+
+Then create the deploy secret (the "key" - one line, anything random):
+
+    nano ~/HDC-MAIN/deploy_secret.txt
+    chmod 600 ~/HDC-MAIN/.env ~/HDC-MAIN/deploy_secret.txt
+
+Then open deploy_hook.py and edit the TWO paths near the top so they
+match your username:
+
+    REPO_DIR  = "/home/<you>/HDC-MAIN"
+    WSGI_FILE = "/var/www/<you>_pythonanywhere_com_wsgi.py"
+
+Then in the Web tab: set Source code to /home/<you>/HDC-MAIN,
+Virtualenv to /home/<you>/.virtualenvs/hdc, open the WSGI
+configuration file link, replace its whole content with the file
+wsgi_dispatch_snippet.py from this repo (edit the path at its top
+to your clone location too), and click Reload once by hand.
+
+Finally, on GitHub: repository -> Settings -> Webhooks -> Add webhook:
+
+    Payload URL:  https://<you>.pythonanywhere.com/deploy
+    Content type: application/json
+    Secret:       the exact line from deploy_secret.txt
+    Events:       Just the push event
+
+Done. Every future push to main now pulls + reloads automatically.
+
+
+3. SYNCING THE SERVER BY HAND (only if the webhook is broken)
 ------------------------------------------------
 Open a PythonAnywhere Bash console:
 
     cd ~/HDC-MAIN
-    bash ops/pythonanywhere/deploy.sh
+    git pull origin main
+    touch /var/www/<you>_pythonanywhere_com_wsgi.py
 
-This is the safe path: it backs up the database, refuses unsafe
-commits, updates the code, installs changed dependencies, and reloads
-the site. Watch it live:
+If requirements.txt changed in what you pulled, also update packages:
 
-    tail -f ~/HDC-MAIN/hdc_instance/deploy/deploy.log
+    ~/.virtualenvs/hdc/bin/pip install -r ~/HDC-MAIN/requirements.txt
 
-Do NOT use plain "git pull" or "git reset" in ~/HDC-MAIN. Those
-skip every safety check and can mix your database with Git.
-
-If you are only iterating on CODE and nothing touched the schema, there is a
-faster path (it skips the DB backup, the migrations and the full check suite):
-
-    cd ~/HDC-MAIN
-    bash ops/pythonanywhere/sync.sh
-
-sync.sh pulls the branch, reinstalls dependencies ONLY when requirements.txt
-changed, runs the quick syntax check, then touches the WSGI file to reload.
-It refuses to run when the checkout has uncommitted changes, so it can never
-eat your work. Options: --branch NAME, --pip, --no-reload, --dry-run.
-Anything that changes the database: use deploy.sh instead.
+Do NOT use "git reset" or "git clean" in ~/HDC-MAIN. If git pull
+complains about your own edits on the server, do not force it -
+those edits were never pushed to GitHub and forcing would delete
+them. Commit and push them from your own computer instead.
 
 
-3. ROLLING BACK TO AN OLDER VERSION
+4. ROLLING BACK TO AN OLDER VERSION
 ------------------------------------------------
-Find the old commit id (on the server or your computer):
+Find the old commit id:
 
     cd ~/HDC-MAIN
     git log --oneline | head -20
@@ -101,146 +156,123 @@ Find the old commit id (on the server or your computer):
 Roll back (Bash console, server):
 
     cd ~/HDC-MAIN
-    HDC_DEPLOY_REVISION=<old-commit-id> bash ops/pythonanywhere/deploy.sh
+    git checkout <old-commit-id>
+    touch /var/www/<you>_pythonanywhere_com_wsgi.py
 
-The site now runs that old version. Pushing a newer commit to main
-later moves it forward again.
+The site now runs that old version. To move forward again later:
+
+    cd ~/HDC-MAIN
+    git checkout main
+    git pull origin main
+    touch /var/www/<you>_pythonanywhere_com_wsgi.py
 
 
-4. UPDATING SECRETS
+5. UPDATING SECRETS
 ------------------------------------------------
-Open the settings file in a Bash console:
+The app settings live in ~/HDC-MAIN/.env - open with:
 
-    nano ~/.config/hdc/production.env
-
-Make a new random secret any time with:
-
-    python3 -c "import secrets; print(secrets.token_hex(32))"
+    nano ~/HDC-MAIN/.env
 
 Which secret does what:
 
     HDC_SECRET_KEY                  app/session key.
                                     Changing it logs ALL users out.
-    HDC_DEPLOY_WEBHOOK_SECRET       the GitHub hook signature.
-                                    MUST match the value on GitHub.
-    HDC_DEPLOY_TOKEN                bearer token for /deploy/status
-                                    and /deploy/trigger.
     HDC_BOOTSTRAP_ADMIN_PASSWORD    only used while the database has
                                     no users yet (fresh install).
                                     To change a login that already
-                                    exists, see section 7 - use
+                                    exists, see section 8 - use
                                     scripts/reset_admin_password.py.
+    deploy_secret.txt               the GitHub hook "key" (separate
+                                    file, one line). MUST match the
+                                    value on GitHub.
 
-The important one - changing the webhook secret. Do it in this order,
-as fast as you can (in between, GitHub pushes are rejected with 401):
+Changing the webhook secret. Do it in this order, as fast as you
+can (in between, GitHub pushes are rejected):
 
-    1. Generate a new random value (command above).
-    2. Edit production.env: replace HDC_DEPLOY_WEBHOOK_SECRET, save.
+    1. Generate a new random value:
+       python3 -c "import secrets; print(secrets.token_hex(32))"
+    2. Paste it into ~/HDC-MAIN/deploy_secret.txt (one line), save.
     3. On GitHub: repository -> Settings -> Webhooks -> click the
        hook -> Secret field -> paste THE SAME value -> Update hook.
-    4. Reload the site:  touch /var/www/<you>_pythonanywhere_com_wsgi.py
-    5. Check:  curl -s https://<you>.pythonanywhere.com/deploy/health
+    4. Push any small commit (or redeliver in Recent Deliveries) and
+       check https://<you>.pythonanywhere.com/deploy shows OK.
 
-Same procedure for the other secrets (steps 2, 4, 5 - no GitHub side).
-After changing HDC_SECRET_KEY expect everyone to be logged out once.
-
-Lost github_hook_credentials.txt? Just rerun the setup - it asks
-nothing, keeps your existing secrets, and rewrites the file:
-
-    cd ~/HDC-MAIN && python3 ops/pythonanywhere/setup.py
+Same idea for the other secrets (edit .env, then reload the site
+with touch, then check the site). After changing HDC_SECRET_KEY
+expect everyone to be logged out once.
 
 
-5. UPDATING OTHER SETTINGS
+6. UPDATING OTHER SETTINGS
 ------------------------------------------------
-All settings are in ~/.config/hdc/production.env, one per line:
+All app settings are in ~/HDC-MAIN/.env, one per line:
 
     KEY=value
 
-    HDC_DOMAIN              your web domain
-    HDC_WSGI_FILE           your WSGI file path
+    HDC_ENV                 prod on the server
+    HDC_SECRET_KEY          app/session key
     HDC_DB_PATH             the live database file
                             (do NOT change it if your data is there)
     HDC_INSTANCE_DIR        the data folder
-    HDC_VENV_PATH           the virtualenv
-    HDC_DEPLOY_BRANCH       branch that auto-deploys (main)
-    HDC_DEPLOY_REPO         only this repository may deploy
-    HDC_DEPLOY_ALLOW_MANUAL 0 = manual trigger off, 1 = on
-    HDC_DEPLOY_DISABLED     1 = emergency stop, 0 = normal
+    HDC_BOOTSTRAP_ADMIN_USERNAME / HDC_BOOTSTRAP_ADMIN_PASSWORD
+                            only used for a brand-new empty database
 
 Steps for any setting change:
 
-    1. nano ~/.config/hdc/production.env
+    1. nano ~/HDC-MAIN/.env
     2. change the line, save
     3. touch /var/www/<you>_pythonanywhere_com_wsgi.py   (reload)
-    4. curl -s https://<you>.pythonanywhere.com/deploy/health
-
-When in doubt about any setup question, rerun the unattended setup:
-it reuses your saved secrets and never asks anything.
+    4. open the site and check it still works
 
 
-6. DAILY OPERATIONS (copy-paste commands)
+7. DAILY OPERATIONS (copy-paste commands)
 ------------------------------------------------
-Health check (does auto-deploy work?):
-    curl -s https://<you>.pythonanywhere.com/deploy/health
+Did the last push deploy? (open in your browser):
+    https://<you>.pythonanywhere.com/deploy
+
+Read the same log on the server:
+    tail -20 ~/HDC-MAIN/deploy.log
 
 Watch the deploy log while you push:
-    tail -f ~/HDC-MAIN/hdc_instance/deploy/deploy.log
+    tail -f ~/HDC-MAIN/deploy.log
 
-Last deploy result:
-    cat ~/HDC-MAIN/hdc_instance/deploy/deploy_state.json
+Reload the site by hand:
+    touch /var/www/<you>_pythonanywhere_com_wsgi.py
 
-Deploy log tail from the web (needs your token):
-    curl -s -H "Authorization: Bearer <HDC_DEPLOY_TOKEN>" \
-        https://<you>.pythonanywhere.com/deploy/status
-
-EMERGENCY STOP (block all auto-deploys, site keeps running):
-    set HDC_DEPLOY_DISABLED=1 in production.env, then reload (touch)
-
-MANUAL DEPLOY ON DEMAND:
-    1. set HDC_DEPLOY_ALLOW_MANUAL=1 in production.env, reload
-    2. curl -X POST \
-          -H "Authorization: Bearer <HDC_DEPLOY_TOKEN>" \
-          https://<you>.pythonanywhere.com/deploy/trigger
-
-MANUAL ROLLBACK ON DEMAND (same, with the old commit id):
-    curl -X POST -H "Authorization: Bearer <HDC_DEPLOY_TOKEN>" \
-        -d '{"revision":"<old-commit-id>"}' \
-        https://<you>.pythonanywhere.com/deploy/trigger
-
-LIST DATABASE BACKUPS:
-    ls -lt ~/HDC-MAIN/hdc_instance/backups/deployments/
-
-RESTORE AN OLD DATABASE (last resort - stop first!):
-    1. Web tab -> stop the web app
-    2. cp ~/HDC-MAIN/hdc_instance/backups/deployments/hdc-erp-<stamp>.db <HDC_DB_PATH>
-    3. start the web app again (or touch the WSGI file)
+BACK UP THE DATABASE (before risky changes - last resort restore):
+    1. Web tab -> stop the web app (or just reload later)
+    2. cp <HDC_DB_PATH> ~/hdc_erp-backup-$(date +%Y%m%d).db
+    3. to restore: copy it back, then reload the web app
 
 
-7. IF SOMETHING GOES WRONG
+8. IF SOMETHING GOES WRONG
 ------------------------------------------------
-Site is broken but /deploy/health still answers:
-    push a fix to main (it auto-deploys), or roll back (section 3).
-
 Pushes are not deploying:
-    1. curl -s https://<you>.pythonanywhere.com/deploy/health
-       (must say "deploy_enabled": true - otherwise read the "reason")
-    2. check the deploy log (section 6)
-    3. on GitHub: Settings -> Webhooks -> look for red X deliveries,
-       click one to see the response.
+    1. open https://<you>.pythonanywhere.com/deploy in your browser
+       (a new line should appear within ~30 seconds of the push)
+    2. on GitHub: Settings -> Webhooks -> your webhook ->
+       "Recent Deliveries" -> click the red one to see the exact
+       error GitHub got back.
 
-Pushes get 401 (unauthorized):
-    the webhook secret on GitHub does not match production.env.
-    Follow section 4 exactly.
+Pushes get "bad signature" in deploy.log:
+    the secret on GitHub does not match deploy_secret.txt.
+    Follow section 5 exactly (both sides must be identical).
+
+Deploy log says FAILED (e.g. a merge conflict):
+    someone edited code on the server. Do NOT force anything.
+    Open a Bash console, look at "git status", and move those
+    edits into a real commit from your own computer instead.
+
+Site is broken after a deploy:
+    roll back (section 4), fix the code on your own computer,
+    push again.
 
 Locked out of an existing admin login:
     HDC_BOOTSTRAP_ADMIN_PASSWORD is only read while the user table is
-    EMPTY, so changing it in production.env does nothing to a login that
-    already exists. Reset the password from a Bash console instead - and
-    load the same settings file the site uses, or you will edit a
-    different database:
+    EMPTY, so changing it in .env does nothing to a login that
+    already exists. Reset the password from a Bash console instead:
 
       cd ~/HDC-MAIN
-      set -a; . ~/.config/hdc/production.env; set +a
+      set -a; . ./.env; set +a
       python3 scripts/reset_admin_password.py --show
       python3 scripts/reset_admin_password.py --username admin --prompt
 
@@ -248,20 +280,16 @@ Locked out of an existing admin login:
     weak passwords, never echoes what you type, and --role admin also
     promotes the account. Reload the site afterwards, then log in.
 
-The setup script stopped with an error:
-    read the message - it never deleted anything. Fix the problem,
-    rerun:  python3 ops/pythonanywhere/setup.py
-    Your saved secrets are reused; nothing is asked again.
-
 After any fix, verify the two URLs:
     https://<you>.pythonanywhere.com/hdc/login
-    https://<you>.pythonanywhere.com/deploy/health
+    https://<you>.pythonanywhere.com/deploy
 
 
-8. NEVER DO THIS
+9. NEVER DO THIS
 ------------------------------------------------
-- git pull / git reset / git clean inside ~/HDC-MAIN on the server
-- commit *.db, *.zip, .env, production.env, github_hook_credentials.txt
+- edit code by hand inside ~/HDC-MAIN on the server
+- git reset / git clean inside ~/HDC-MAIN on the server
+- commit *.db, *.zip, .env, deploy_secret.txt, deploy.log
 - paste secrets into chat, issues, or email
 - delete ~/HDC-MAIN/.git, the database file, or the instance folder
 - change the Web-tab Python version without matching the virtualenv
@@ -270,5 +298,5 @@ After any fix, verify the two URLs:
 ================================================================
 Keep this file somewhere safe (it contains NO secrets, so it is fine
 to keep it in the repository). The secrets themselves live only in
-~/.config/hdc/production.env and github_hook_credentials.txt.
+~/HDC-MAIN/.env and ~/HDC-MAIN/deploy_secret.txt.
 ================================================================

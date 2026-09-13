@@ -42,8 +42,9 @@ hdc/                    the application package (import here, not hdc_erp)
                         settings, api_purchase, api_accounts)
 hdc_erp.py              backward-compat shim: app, db, models, helpers
 wsgi.py                 gunicorn/PythonAnywhere entrypoint (env-configured)
-deploy_receiver.py      standalone stdlib-only WSGI app: GitHub webhook ->
-                        deploy.sh (mounted at /deploy/* on PythonAnywhere)
+deploy_hook.py          standalone stdlib-only WSGI app: GitHub push webhook ->
+                        git pull + touch WSGI to reload (mounted at /deploy
+                        on PythonAnywhere, see wsgi_dispatch_snippet.py)
 templates/hdc/<domain>/ 82 Jinja pages, one folder per feature
 static/hdc/             css/hdc.css, img/, js/core/*.js, js/pages/*.js
 scripts/                split_monolith, reorganize_frontend, parity_check,
@@ -52,8 +53,7 @@ scripts/                split_monolith, reorganize_frontend, parity_check,
                         audit), make_labour_audit_fixture (seeds a throwaway DB
                         with every known labour bug to verify that audit)
                         (reproducible conversion + verification + ops CLIs)
-ops/                    pythonanywhere/ (setup.py, deploy.sh, sync.sh, webhook
-                        receiver wiring), arena/ (local<->sandbox git pairer)
+ops/                    arena/ (local<->sandbox git pairer for agent sessions)
 LABOUR_AUDIT.md         labour wage/payment/tip/advance findings + live DB run
 ROW_TRACEABILITY.md     how every list shows who entered the row + grey voids
 tests/                  differential smoke test vs the pre-split baseline
@@ -102,8 +102,8 @@ backup archive (see `.gitignore`).
 .venv/bin/python tests/smoke_test.py --baseline /path/to/legacy-copy
 ```
 
-Deploy automation has its own suite (webhook receiver, `deploy.sh`, and the
-database guard): `.venv/bin/python -m unittest discover -s tests -p 'test_*.py'`.
+The full suite (deploy hook, database guard, labour fixes, traceability):
+`.venv/bin/python -m unittest discover -s tests -p 'test_*.py'`.
 
 The differential harness boots the legacy baseline and new package side by
 side (fresh scratch DBs), logs in, GETs ~90 pages/APIs, writes a project →
@@ -123,15 +123,16 @@ not shipped in this repository because it included a live database archive.
   tables.
 - **After any change:** run the three checks above.
 
-## Deploy / rollback
+## Deploy
 
-Pushing to `main` deploys itself: a GitHub webhook hits `/deploy/github` on
-PythonAnywhere, verifies the `X-Hub-Signature-256` HMAC, and runs
-`ops/pythonanywhere/deploy.sh` detached — back up the DB, update every tracked
-file, install requirements only when they changed, run checks and migrations,
-then touch the WSGI file to reload. Databases and instance data live outside
-Git and are never pulled, reset or cleaned, and `scripts/check_db_safety.py`
-aborts any deploy whose incoming commit tries to track a `.db`. Rollback is a
-signed `POST /deploy/trigger {"revision": "<commit>"}` (or the same script with
-`HDC_DEPLOY_REVISION=...`); code moves, data does not. Full setup, limits and
-troubleshooting: [`ops/pythonanywhere/README.md`](ops/pythonanywhere/README.md).
+Pushing to `main` deploys itself. One small stdlib-only file,
+[`deploy_hook.py`](deploy_hook.py), is mounted at `/deploy` on PythonAnywhere
+(via [`wsgi_dispatch_snippet.py`](wsgi_dispatch_snippet.py)): GitHub's push
+webhook verifies the `X-Hub-Signature-256` HMAC, runs `git pull`, and touches
+the WSGI file so the site reloads. Open `/deploy` in a browser to see the
+last few deploys. Databases and instance data live outside Git and are never
+pulled or reset, and `scripts/check_db_safety.py` (run by CI) fails any
+commit that tries to track a `.db`. Rollback is `git checkout <commit>` in a
+Bash console, then Reload. Full setup (secret file, WSGI paste, webhook):
+read the docstring at the top of `deploy_hook.py`, or `helpbook.txt`
+sections 2–6.

@@ -31,9 +31,9 @@ Promote a user to admin while you are there::
     python3 scripts/reset_admin_password.py --username admin --password 'YourNewPass!123' --role admin
 
 Target a specific database explicitly (recommended on PythonAnywhere, where
-the web app reads HDC_DB_PATH from production.env)::
+the web app reads HDC_DB_PATH from the .env file in the checkout)::
 
-    HDC_DB_PATH=/home/yourname/HDC_INSTANCE/hdc_erp.db \
+    HDC_DB_PATH=/home/yourname/HDC-MAIN/hdc_instance/hdc_erp.db \
       python3 scripts/reset_admin_password.py --username admin --prompt
 
 Always run this with the same environment as the web app, otherwise you will

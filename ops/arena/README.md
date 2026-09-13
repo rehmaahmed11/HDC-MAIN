@@ -65,8 +65,8 @@ git pull arena main                   # take the agent's edits back
 ## Fallback
 
 If the preview proxy does not pass Git's HTTP traffic, GitHub remains the
-working channel: the agent pushes to the session branch and
-`ops/pythonanywhere/sync.sh` pulls it in one command.
+working channel: the agent pushes to the session branch and you pull it
+with a plain `git pull`.
 
 ## Checks
 

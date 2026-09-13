@@ -17,8 +17,8 @@ Modes:
     --ref <rev>         inspect a committed tree instead, e.g. origin/main, so
                         a deploy can reject an unsafe *incoming* commit
 
-Used by ``ops/pythonanywhere/deploy.sh`` before anything is checked out, and by
-GitHub CI so the repo itself can never regress.
+Run by GitHub CI so the repo itself can never regress, and safe to run by
+hand on the server before any ``git pull``.
 
 Usage:
     python3 scripts/check_db_safety.py [--worktree] [--ref REV]
@@ -160,7 +160,7 @@ def main(argv=None):
             print(f'  tracked: {rel}' if not rel.startswith('/') else f'  {rel}',
                   file=sys.stderr)
         print('Databases, WAL files and backups must live outside Git (see '
-              '.gitignore and ops/pythonanywhere/README.md).', file=sys.stderr)
+              '.gitignore).', file=sys.stderr)
         return 0 if args.no_fail else 1
     if not args.quiet:
         print('DB safety: OK -- no database, backup or archive files in Git')
