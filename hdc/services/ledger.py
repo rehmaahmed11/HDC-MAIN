@@ -4,6 +4,7 @@ See MODULARIZATION_PLAN.md for the module map.
 """
 
 import calendar as pycal
+import re
 from datetime import date
 
 from sqlalchemy import and_, func, or_
@@ -12,7 +13,7 @@ from sqlalchemy.exc import OperationalError
 from hdc.extensions import db
 from hdc.models.accounts import Expense, ExpenseCategory, PersonalExpense
 from hdc.models.office import OfficeExpense, OfficeExpenseCategory, OfficeStaff, OfficeStaffAttendance, OfficeStaffLedger, StaffAllowance
-from hdc.models.workforce import LabourLedger, TimeEntry
+from hdc.models.workforce import Attendance, LabourLedger, TimeEntry
 from hdc.utils.dates import _pkt_now_naive, _pkt_today
 from hdc.utils.format import _activity_at_for
 
@@ -239,10 +240,33 @@ def _is_linked_office_salary_expense(exp):
     return bool(getattr(exp, 'office_staff_ledger_id', None))
 
 
+def _worker_legacy_earned(worker_id):
+    """Wages on legacy ``hdc_attendance`` rows that were never migrated.
+
+    ``Worker.total_earned`` counts these; the payable snapshot used to count
+    only ``hdc_time_entry`` rows, so the Workers list and the ledger page could
+    disagree about what a worker earned whenever the one-off migration had not
+    covered every legacy row (LABOUR_AUDIT #1/#12).
+    """
+    migrated = {
+        int(aid) for (aid,) in db.session.query(TimeEntry.attendance_id)
+        .filter(TimeEntry.worker_id == worker_id,
+                TimeEntry.is_void == False,
+                TimeEntry.attendance_id.isnot(None))
+        .distinct().all()
+    }
+    q = (db.session.query(func.coalesce(func.sum(Attendance.total_wage), 0.0))
+         .filter(Attendance.worker_id == worker_id))
+    if migrated:
+        q = q.filter(Attendance.id.notin_(migrated))
+    return float(q.scalar() or 0.0)
+
+
 def _worker_payable_snapshot(worker_id):
     earned = float(db.session.query(func.coalesce(func.sum(TimeEntry.wage_calculated), 0.0))
                    .filter(TimeEntry.worker_id == worker_id, TimeEntry.is_void == False)
                    .scalar() or 0.0)
+    earned += _worker_legacy_earned(worker_id)
     advanced = float(db.session.query(func.coalesce(func.sum(LabourLedger.amount), 0.0))
                      .filter(
                          LabourLedger.worker_id == worker_id,
@@ -337,11 +361,19 @@ def _worker_tip_expenses(worker):
         )
     )
 
+    # A voided tip expense is a cancelled cash event and must never be
+    # resurrected into a worker's ledger. Without this filter, voiding a tip
+    # ledger row (which never voided the linked expense) made the reconciler
+    # write a fresh tip row on the very next page load, so the void did not
+    # stick (LABOUR_AUDIT #3).
+    not_void = (Expense.is_void == False)
+
     try:
         return (Expense.query
                 .join(ExpenseCategory, Expense.category_id == ExpenseCategory.id)
                 .filter(
                     func.lower(ExpenseCategory.name) == 'tip',
+                    not_void,
                     legacy_match
                 )
                 .order_by(Expense.activity_at.asc(), Expense.id.asc())
@@ -355,6 +387,7 @@ def _worker_tip_expenses(worker):
                 .join(ExpenseCategory, Expense.category_id == ExpenseCategory.id)
                 .filter(
                     func.lower(ExpenseCategory.name) == 'tip',
+                    not_void,
                     or_(
                         or_(*_delim_patterns(tag)),
                         Expense.remarks.ilike(name_pat),
@@ -362,6 +395,75 @@ def _worker_tip_expenses(worker):
                 )
                 .order_by(Expense.activity_at.asc(), Expense.id.asc())
                 .all())
+
+
+_TIP_EXPENSE_ID_RE = re.compile(r'(?:^|[^\d])TIP_EXPENSE_ID:(\d+)(?!\d)')
+
+
+def _linked_expense_for_labour_ledger(row):
+    """Return the ``Expense`` that carries the same cash event as ``row``.
+
+    Tips and shortfall settlements are mirrored into ``hdc_expense``: a tip as a
+    positive 'Tip' expense, a settlement shortfall as a negative 'Settlement'
+    one. Voiding or restoring the ledger row has to move the expense with it,
+    otherwise the tip reconciler resurrects a voided tip (LABOUR_AUDIT #3) or a
+    project stays written off for a shortfall the worker now owes again.
+    """
+    if not row:
+        return None
+    et = (row.entry_type or '').strip().lower()
+    if et not in ('tip', 'settlement'):
+        return None
+
+    if et == 'tip':
+        # Preferred link: the expense id stamped into the ledger row's notes.
+        for eid in _TIP_EXPENSE_ID_RE.findall(row.notes or ''):
+            exp = Expense.query.get(int(eid))
+            if exp is not None:
+                return exp
+
+    cat = 'tip' if et == 'tip' else 'settlement'
+    tag = ('TIP_WORKER_ID:' if et == 'tip' else 'SETTLE_WORKER_ID:') + str(int(row.worker_id))
+
+    # Match the tag only when it ends the remarks or is followed by a non-digit
+    # delimiter, so ``..._ID:1`` cannot match ``..._ID:10`` -- the same
+    # prefix-substring leak that _worker_tip_expenses was hardened against.
+    delim_clauses = [
+        Expense.remarks.ilike(f'%{tag}'),
+        Expense.remarks.ilike(f'%{tag} %'),
+        Expense.remarks.ilike(f'%{tag}|%'),
+        Expense.remarks.ilike(f'%{tag},%'),
+        Expense.remarks.ilike(f'%{tag};%'),
+        Expense.remarks.ilike(f'%{tag}/%'),
+        Expense.remarks.ilike(f'%{tag}-%'),
+    ]
+    try:
+        cands = (Expense.query
+                 .join(ExpenseCategory, Expense.category_id == ExpenseCategory.id)
+                 .filter(
+                     func.lower(ExpenseCategory.name) == cat,
+                     or_(
+                         Expense.tip_worker_id == row.worker_id,
+                         or_(*delim_clauses),
+                     )
+                 )
+                 .order_by(Expense.id.asc())
+                 .all())
+    except OperationalError:
+        db.session.rollback()
+        cands = (Expense.query
+                 .join(ExpenseCategory, Expense.category_id == ExpenseCategory.id)
+                 .filter(func.lower(ExpenseCategory.name) == cat,
+                         or_(*delim_clauses))
+                 .order_by(Expense.id.asc())
+                 .all())
+
+    amount = float(row.amount or 0.0)
+    for exp in cands:
+        if exp.date == row.date and abs(abs(float(exp.amount or 0.0)) - amount) <= 0.01:
+            return exp
+    # No exact date/amount match: only trust a single unambiguous candidate.
+    return cands[0] if len(cands) == 1 else None
 
 
 def _get_all_office_expense_categories():

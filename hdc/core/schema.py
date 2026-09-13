@@ -20,6 +20,20 @@ def _ensure_timeentry_unique_indexes():
             conn.rollback()
 
 
+def _ensure_timeentry_attendance_day_schema():
+    """Give ``hdc_time_entry`` a dedicated link to its AttendanceDay summary.
+
+    ``attendance_id`` is owned by the one-off legacy migration and points at
+    ``hdc_attendance``. Day recalculation used to overwrite it with an
+    ``hdc_attendance_day`` id, which made three readers (``Worker.total_earned``,
+    ``Project.total_labour_cost`` and ``Stage.stage_labour_cost``) treat a legacy
+    attendance wage as already migrated and drop it (LABOUR_AUDIT #6).
+    """
+    _ensure_table_columns_sqlite('hdc_time_entry', {
+        'attendance_day_id': 'attendance_day_id INTEGER REFERENCES hdc_attendance_day(id)',
+    })
+
+
 def _ensure_runtime_flags_table():
     db.session.execute(text("""
         CREATE TABLE IF NOT EXISTS hdc_runtime_flag (

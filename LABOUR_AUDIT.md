@@ -28,30 +28,64 @@ database seeded with each bug so the checks can be verified end to end.
 
 ## Verdict
 
-There **is** a real inconsistency, and it is not cosmetic: the app computes a
-worker's "balance due" with **two different formulas**, and the two disagree by
-exactly the amount of tips paid. Beyond that there are eight further defects,
-four of which can silently move real money (duplicate tips, resurrected voided
-tips, orphaned cash after deleting a payroll run, and per-sqft workers who work
-for free).
+There **was** a real inconsistency, and it was not cosmetic: the app computed a
+worker's "balance due" with **two different formulas**, and the two disagreed by
+exactly the amount of tips paid. Beyond that were nine further defects, four of
+which could silently move real money (duplicate tips, resurrected voided tips,
+orphaned cash after deleting a payroll run, and per-sqft workers who work for
+free).
 
-| # | Severity | Area | Finding |
-|---|----------|------|---------|
-| 1 | 🔴 CRITICAL | Balances | Workers list and Advance screen subtract tips; ledger and payment screen do not |
-| 2 | 🔴 CRITICAL | Tips | Worker-ledger tips are not tagged with `TIP_EXPENSE_ID` — reconciler can duplicate them |
-| 3 | 🔴 CRITICAL | Tips | Voiding a tip does not void its expense, so the tip silently comes back |
-| 4 | 🔴 CRITICAL | Payroll | Deleting a payroll run deletes the worker payments but leaves the cash in accounts |
-| 5 | 🔴 CRITICAL | Wages | Per-sqft workers are paid `rate × 0` — the attendance screens never set `qty_sqft` |
-| 6 | 🔴 CRITICAL | Legacy data | `TimeEntry.attendance_id` means two different things; legacy wages get dropped |
-| 7 | 🟠 HIGH | Payroll | Overlapping payroll runs let the same days be paid twice |
-| 8 | 🟠 HIGH | Payroll | Advances above period gross are silently clamped to zero |
-| 9 | 🟠 HIGH | Wages | Hourly workers earn nothing for overtime; daily workers get no OT premium |
-| 10 | 🟠 HIGH | Ledger | Running balance uses `work` ledger rows while payable uses time entries |
-| 11 | 🟡 MEDIUM | Timekeeping | Day recalculation overwrites real clock-in/out times |
-| 12 | 🟡 MEDIUM | Wages | Voided migrated attendance makes the wage vanish from both totals |
-| 13 | 🟡 MEDIUM | Tips | Editing a tip ledger row can desynchronise it from its expense |
-| 14 | 🟡 MEDIUM | Safety | The duplicate guard is a 12-second window, not a real idempotency key |
-| 15 | 🔵 LOW | Robustness | `Worker.total_*` sums crash on `NULL` amounts |
+**All CRITICAL and HIGH findings are now fixed**, plus #12, #13 and #15. Every
+fix is pinned by a regression test in `tests/test_labour_audit_fixes.py`
+(31 tests). #11 and #14 are documented as deliberate/deferred.
+
+| # | Severity | Area | Finding | Status |
+|---|----------|------|---------|--------|
+| 1 | 🔴 CRITICAL | Balances | Workers list and Advance screen subtract tips; ledger and payment screen do not | ✅ Fixed |
+| 2 | 🔴 CRITICAL | Tips | Worker-ledger tips are not tagged with `TIP_EXPENSE_ID` — reconciler can duplicate them | ✅ Fixed |
+| 3 | 🔴 CRITICAL | Tips | Voiding a tip does not void its expense, so the tip silently comes back | ✅ Fixed |
+| 4 | 🔴 CRITICAL | Payroll | Deleting a payroll run deletes the worker payments but leaves the cash in accounts | ✅ Fixed |
+| 5 | 🔴 CRITICAL | Wages | Per-sqft workers are paid `rate × 0` — the attendance screens never set `qty_sqft` | ✅ Fixed |
+| 6 | 🔴 CRITICAL | Legacy data | `TimeEntry.attendance_id` means two different things; legacy wages get dropped | ✅ Fixed |
+| 7 | 🟠 HIGH | Payroll | Overlapping payroll runs let the same days be paid twice | ✅ Fixed |
+| 8 | 🟠 HIGH | Payroll | Advances above period gross are silently clamped to zero | ✅ Fixed |
+| 9 | 🟠 HIGH | Wages | Hourly workers earn nothing for overtime | ✅ Fixed (straight time) |
+| 10 | 🟠 HIGH | Ledger | Running balance uses `work` ledger rows while payable uses time entries | ✅ Fixed |
+| 11 | 🟡 MEDIUM | Timekeeping | Day recalculation overwrites real clock-in/out times | ⚠️ Deferred |
+| 12 | 🟡 MEDIUM | Wages | Voided migrated attendance makes the wage vanish from both totals | ✅ Fixed |
+| 13 | 🟡 MEDIUM | Tips | Editing a tip ledger row can desynchronise it from its expense | ✅ Fixed |
+| 14 | 🟡 MEDIUM | Safety | The duplicate guard is a 12-second window, not a real idempotency key | ⚠️ Deferred |
+| 15 | 🔵 LOW | Robustness | `Worker.total_*` sums crash on `NULL` amounts | ✅ Fixed |
+
+---
+
+## What changed
+
+| Fix | Files |
+|---|---|
+| #1 One balance formula — `total_paid` excludes tips, new `total_tips` for display | `hdc/models/workforce.py`, `templates/hdc/workers/workers.html`, `worker_advance.html` |
+| #1/#12 Snapshot counts unmigrated legacy wages, voided migration rows no longer hide them | `hdc/services/ledger.py` (`_worker_legacy_earned`), `hdc/models/workforce.py` |
+| #2 Tips from the Workers screen get `TIP_EXPENSE_ID` in both the expense and the ledger row | `hdc/routes/workers.py` |
+| #3 Voiding/restoring a tip or settlement moves its mirrored expense; voided expenses are never resurrected | `hdc/routes/workers.py`, `hdc/services/ledger.py` (`_linked_expense_for_labour_ledger`, `_worker_tip_expenses`) |
+| #4 Deleting a payroll run voids the payments **and** their account transactions instead of hard-deleting | `hdc/routes/payroll.py` |
+| #5 Per-sqft quantity is captured on the bulk sheet, the allocation modal and the edit form, and preserved on edit | `hdc/routes/timekeeping.py`, `hdc/services/timekeeping.py`, `templates/hdc/timekeeping/*.html` |
+| #6 New `attendance_day_id` column; `attendance_id` stays exclusively the legacy link | `hdc/models/workforce.py`, `hdc/services/timekeeping.py`, `hdc/core/schema.py`, `hdc/core/bootstrap.py` |
+| #7 Overlapping payroll runs are refused at generation | `hdc/routes/payroll.py` |
+| #8 Unrecovered advances are reported as "carried fwd" on the salary card and run summary | `hdc/routes/payroll.py`, `templates/hdc/payroll/*.html` |
+| #9 Hourly workers are paid overtime at straight time | `hdc/services/timekeeping.py` |
+| #10 Ledger running balance reads wages from the time entry, not the `work` row | `hdc/routes/workers.py` |
+| #13 Editing a tip/settlement syncs its expense and cannot drop the identity tag | `hdc/routes/workers.py` |
+| #15 `NULL`-safe sums in the worker model properties | `hdc/models/workforce.py` |
+
+**Schema change:** `hdc_time_entry.attendance_day_id` is added automatically by
+`_ensure_timeentry_attendance_day_schema()` on boot (same idempotent
+`ALTER TABLE … ADD COLUMN` pattern the rest of the app uses). No manual
+migration step is needed, and existing rows keep working — the column simply
+starts out `NULL` and is populated the next time a day is recalculated.
+
+**Deliberately not changed:** overtime stays at **straight time** for both daily
+and hourly workers (confirmed as correct practice) — the fix was only to stop
+hourly workers losing their overtime entirely.
 
 ---
 
@@ -106,6 +140,14 @@ and expose `tip_total` separately so the Workers list can show it as
 informational gratis cash (exactly as the ledger page already does at
 `worker_ledger.html:169`).
 
+**Fix applied.** `Worker.total_paid` now counts `'payment'` rows only, and a new
+`Worker.total_tips` exposes tips separately; the Workers list and the Advance
+screen show tips as informational gratis cash instead of deducting them. The
+snapshot side was also aligned on *earnings*: `_worker_payable_snapshot` now adds
+unmigrated legacy `hdc_attendance` wages via `_worker_legacy_earned`, so both
+formulas agree on earned **and** paid. Tests: `TestBalanceFormula`,
+`TestLegacyEarnings`.
+
 ---
 
 ## 2. 🔴 Tips written from the Workers screen are not tagged with their expense id
@@ -148,9 +190,12 @@ belt-and-suspenders fallback that matches on **worker + date + amount**
 * two legitimate tips of the same amount on the same day are indistinguishable
   to the fallback, so the tag backfill can bind the wrong rows together.
 
-**Fix.** Port the accounts implementation into `hdc_worker_payment`: flush the
-`Expense`, then write `TIP_EXPENSE_ID:<id>` into **both** `Expense.remarks` and
-the `LabourLedger.notes`.
+**Fix applied.** The accounts implementation was ported into
+`hdc_worker_payment`: it flushes the tip `Expense` first, then writes
+`TIP_EXPENSE_ID:<id>` into **both** `Expense.remarks` and the
+`LabourLedger.notes`. The duplicate guards were made remarks-independent (the tag
+is per-expense, so comparing remarks could never match a repeat submission).
+Tests: `TestTipTagging`.
 
 ---
 
@@ -175,6 +220,19 @@ restore tips (`:677`), so there is no way back.
 **Fix.** When a tip ledger row is voided, void the expense it points at (parse
 `TIP_EXPENSE_ID` from the notes, fall back to the date/amount match), and make
 the reconciler skip expenses whose matching ledger row was voided deliberately.
+
+**Fix applied.** Three changes together make the void stick:
+
+* `_worker_tip_expenses` filters out voided expenses, so a cancelled tip is never
+  reconciled back into a ledger;
+* voiding a tip/settlement row now voids its mirrored `Expense` (resolved by
+  `_linked_expense_for_labour_ledger`, which prefers the `TIP_EXPENSE_ID` tag and
+  falls back to delimited `TIP_WORKER_ID`/`SETTLE_WORKER_ID` matching so id `1`
+  cannot match id `10`);
+* restoring is now allowed for tips and settlements, and un-voids the expense
+  with them.
+
+Tests: `TestTipVoidCascade`, `TestSettlementCascade`.
 
 ---
 
@@ -206,6 +264,12 @@ screen never notices (its check only runs one way: ledger → accounts,
 `_accounts_set_void_by_source('labour_ledger_payment', l.id, True)` before
 deleting, or flip the rows to `is_void` and leave them.
 
+**Fix applied.** `hdc_payroll_delete` voids the payment rows instead of
+hard-deleting them, and calls `_accounts_set_void_by_source` for both
+`labour_ledger_payment` and `worker_payment` so the unified-accounts mirror is
+reversed in the same transaction. The audit trail survives and the cash returns
+to the company account. Tests: `TestPayrollDelete`.
+
 ---
 
 ## 5. 🔴 Per-sqft workers are paid `rate × 0`
@@ -233,6 +297,20 @@ like they were never paid.
 **Fix.** Add a quantity field to the attendance screens (or, if per-sqft work is
 actually measured elsewhere, e.g. stage progress, either wire it up or block
 `per_sqft` workers from the daily attendance flow so the gap is visible).
+
+**Fix applied.** Quantity is now captured end to end:
+
+* `_parse_attendance_entries_payload` accepts `qty_sqft` per allocation row;
+* the bulk sheet and the single-entry form pass it to `_calc_time_wage` and store
+  it on the `TimeEntry`;
+* the allocation modal shows a **Quantity (sq ft)** field for per-sqft workers
+  only, with the worker's rate in the hint, and refuses to save `0`;
+* the edit form exposes the field for per-sqft workers and — importantly — no
+  longer wipes an existing quantity when only the hours change.
+
+Historical rows that were paid 0 still need their quantity entered (the audit
+reports them as `WAGE_PERSQFT_NO_QTY`). Tests: `TestPerSqftQuantity`,
+`TestWageEngine`.
 
 ---
 
@@ -272,6 +350,13 @@ silently. The audit script reports this as `ATTENDANCE_ID_COLLISION`.
 **Fix.** Give `AttendanceDay` its own foreign key column on `TimeEntry` (e.g.
 `attendance_day_id`) and stop reusing `attendance_id`.
 
+**Fix applied.** `hdc_time_entry` gained a dedicated `attendance_day_id` foreign
+key; `_recalculate_attendance_day` writes the day link there and leaves
+`attendance_id` alone, so the column once again means only "legacy
+`hdc_attendance` row". `Worker.total_earned` also only treats **active** time
+entries as migrated (see #12). The new column is added on boot by
+`_ensure_timeentry_attendance_day_schema()`. Tests: `TestAttendanceDayLink`.
+
 ---
 
 ## 7. 🟠 Overlapping payroll runs let the same days be paid twice
@@ -288,6 +373,11 @@ until you read the ledger (see #1).
 
 **Fix.** Block generation when the range overlaps an existing run, and compute
 `paid` per run as *period* payments rather than by note-string matching.
+
+**Fix applied.** Generation now normalises a reversed range and refuses any range
+that overlaps an existing run, redirecting to the clashing run with an
+explanation. Disjoint ranges still generate normally. Tests:
+`TestPayrollOverlap`.
 
 ---
 
@@ -316,6 +406,12 @@ by design.
 carried forward") instead of clamping, and state on the card that payroll is
 period-scoped while the ledger is all-time.
 
+**Fix applied.** The clamp is still there (net pay cannot go negative) but the
+unrecovered amount is now computed as `advance_carried` and surfaced on both the
+run summary and the printed salary card as "+N carried fwd", with the totals row
+summing it. The card makes it explicit that payroll is period-scoped while the
+worker ledger is all-time. Tests: `TestAdvanceCarriedForward`.
+
 ---
 
 ## 9. 🟠 Overtime is unpaid for hourly workers; there is no OT premium anywhere
@@ -335,6 +431,12 @@ time**, with no premium. Both may well be deliberate local practice; flagging it
 because nothing in the UI says so, and a 1.0× "overtime" rate is unusual enough
 to be worth confirming.
 
+**Fix applied — and confirmed as intended practice.** Overtime is paid at
+**straight time** for both wage types; the bug was that hourly workers lost their
+overtime entirely. `_calc_time_wage` now returns `rate × (hours + overtime)` for
+hourly workers. No OT premium was introduced, per confirmation that straight time
+is correct. Tests: `TestWageEngine`.
+
 ---
 
 ## 10. 🟠 The ledger running balance and the payable figure use different sources of earnings
@@ -351,6 +453,12 @@ worker's ledger page is opened.
 column wrong while the headline "Balance" KPI stays right (or vice versa), and
 the drift is invisible until someone adds the column up. The audit script
 reports this as `BALANCE_WORK_LEDGER_DRIFT`.
+
+**Fix applied.** The ledger's running balance now reads each `work` row's wage
+from the `TimeEntry` it mirrors (and contributes 0 when that entry is missing or
+voided), so the column is driven by the same source of truth as the payable KPI.
+Orphaned and duplicated `work` rows can no longer move the balance. Test:
+`TestRunningBalance`.
 
 ---
 
@@ -371,6 +479,14 @@ bulk save, single save, edit, void and reactivate
 of a day is always stamped 00:00. This also means the unique index on
 `(worker_id, check_in)` is defending synthetic values, and the OT boundary
 (regular vs overtime) is decided by row order rather than by the clock.
+
+**Deferred — deliberate behaviour.** The synthetic timeline is how the app keeps
+multi-site allocations on one day from colliding on the
+`(worker_id, check_in)` unique index, and the regular/overtime split is defined
+by cumulative hours rather than by the clock. Changing it would alter the
+meaning of existing data, so it is left as-is and documented here. If real
+clock-in times are ever captured (e.g. from a biometric device), they should go
+in new columns rather than replacing these.
 
 ---
 
@@ -394,6 +510,12 @@ row is excluded from `legacy_total` **and** the voided entry is excluded from
 `time_total`. The wage is counted nowhere. Reported as
 `ATTENDANCE_WAGE_LOST_VOID`.
 
+**Fix applied.** `Worker.total_earned` builds `migrated_attendance_ids` from
+**active** time entries only, so a voided migration row no longer hides the
+legacy wage; `_worker_payable_snapshot` counts the same legacy wages through
+`_worker_legacy_earned`. Both totals now agree, and a voided migration cannot
+make a wage vanish. Tests: `TestLegacyEarnings`.
+
 ---
 
 ## 13. 🟡 Editing a tip ledger row can desynchronise it from its expense
@@ -402,6 +524,11 @@ row is excluded from `legacy_total` **and** the voided entry is excluded from
 project and stage and calls `_accounts_upsert_labour_ledger_txn` — but never
 touches the linked `Expense`. Combined with the date/amount-based fallback in
 #2, an edit is enough to make the reconciler write a duplicate tip.
+
+**Fix applied.** The edit handler resolves the mirrored expense *before* mutating
+the row, then syncs the expense's amount (negative for settlements), date,
+project and stage. It also refuses to let an edit drop the `TIP_EXPENSE_ID` tag —
+user notes are preserved and the tag is re-appended. Tests: `TestTipEditSync`.
 
 ---
 
@@ -414,6 +541,13 @@ submission only if the identical row was created within **12 seconds**.
 through; a slow form (or a slow phone on site, which is the normal case) fails
 to be protected. Tips, advances and payments all rely on it.
 
+**Deferred.** A real idempotency key needs a client-supplied token persisted per
+submission, which is a change to every money form in the app rather than to the
+labour path alone. The labour flows are now much less exposed to it: tips are
+identified by expense id rather than by date+amount, so a repeat submission
+creates a distinguishable event instead of an invisible duplicate. Worth doing
+app-wide as its own piece of work.
+
 ---
 
 ## 15. 🔵 `Worker.total_*` can raise `TypeError` on `NULL` amounts
@@ -422,6 +556,10 @@ to be protected. Tips, advances and payments all rely on it.
 `or 0.0` guard used elsewhere, and `Attendance.total_wage` is summed bare at
 `:51`. Any row with a `NULL` amount (possible for rows written before the
 column default existed, or by direct SQL) takes down the Workers list page.
+
+**Fix applied.** All of the worker model's aggregate properties now sum
+`(x or 0.0)`, so a `NULL` amount can no longer raise `TypeError` and take down
+the Workers list.
 
 ---
 
@@ -438,15 +576,18 @@ python3 scripts/labour_audit.py --db hdc_instance/hdc_erp.db \
 # validate the checks themselves (builds a DB seeded with every bug)
 python3 scripts/make_labour_audit_fixture.py --db /tmp/hdc_fixture.db
 python3 scripts/labour_audit.py --db /tmp/hdc_fixture.db
+
+# the regression tests that pin every fix in this report
+python -m unittest tests.test_labour_audit_fixes -v
 ```
 
 Checks performed (`--json` includes the check id on every finding):
 
 | Area | Check ids |
 |---|---|
-| Wages | `WAGE_MISMATCH`, `WAGE_ZERO_WITH_HOURS`, `WAGE_PERSQFT_NO_QTY`, `WAGE_HOURLY_OT_UNPAID`, `WAGE_ORPHAN_WORKER` |
+| Wages | `WAGE_MISMATCH`, `WAGE_ZERO_WITH_HOURS`, `WAGE_PERSQFT_NO_QTY`, `WAGE_ORPHAN_WORKER` |
 | Balances | `BALANCE_TWO_FORMULAS`, `BALANCE_OVERPAID`, `BALANCE_WORK_LEDGER_DRIFT`, `ADVANCE_EXCEEDS_EARNINGS` |
-| Tips | `TIP_DUPLICATE`, `TIP_RESURRECTS`, `TIP_EXPENSE_WITHOUT_LEDGER`, `TIP_LEDGER_WITHOUT_EXPENSE`, `TIP_UNTAGGED`, `TIP_AMOUNT_MISMATCH`, `TIP_LEDGER_VOID_EXPENSE`, `TIP_NO_WORKER` |
+| Tips | `TIP_DUPLICATE`, `TIP_RESURRECTS`, `TIP_EXPENSE_WITHOUT_LEDGER`, `TIP_LEDGER_WITHOUT_EXPENSE`, `TIP_UNTAGGED`, `TIP_AMOUNT_MISMATCH`, `TIP_LEDGER_VOID_EXPENSE`, `TIP_NO_WORKER`, `TIPS_INFORMATIONAL` |
 | Settlements | `SETTLEMENT_NO_EXPENSE`, `SETTLEMENT_EXPENSE_NO_LEDGER`, `SETTLEMENT_VOID_LEDGER_LIVE_EXPENSE`, `SETTLEMENT_POSTED_AS_CASH` |
 | Accounts | `ACCOUNTS_MISSING`, `ACCOUNTS_DOUBLE_POSTED`, `ACCOUNTS_AMOUNT_MISMATCH`, `ACCOUNTS_ORPHAN_TXN`, `ACCOUNTS_VOID_NOT_PROPAGATED`, `ACCOUNTS_TXN_ON_VOIDED_ROW` |
 | Payroll | `PAYROLL_RUN_OVERLAP`, `PAYROLL_OVERPAID_RUN`, `PAYROLL_ADVANCE_CLAMPED`, `PAYROLL_NET_MISMATCH`, `PAYROLL_TOTAL_MISMATCH` |

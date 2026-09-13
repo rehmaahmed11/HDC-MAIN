@@ -156,7 +156,7 @@
       <tbody>
         <tr><th>Work Entries</th><td class="num">{{ c.work_entries }}</td><th>Total Days Worked</th><td class="num">{{ c.worked_days }}</td></tr>
         <tr><th>Per Day Wage</th><td class="num">Rs {{ "{:,.0f}".format(c.per_day_wage or 0) }}</td><th>Overtime Total (Hours)</th><td class="num">{{ "{:,.2f}".format(c.overtime_total or 0) }}</td></tr>
-        <tr><th>Total Wage</th><td class="num">Rs {{ "{:,.0f}".format(c.total_wage or 0) }}</td><th>Advance Deducted</th><td class="num">Rs {{ "{:,.0f}".format(c.advance or 0) }}</td></tr>
+        <tr><th>Total Wage</th><td class="num">Rs {{ "{:,.0f}".format(c.total_wage or 0) }}</td><th>Advance Deducted</th><td class="num">Rs {{ "{:,.0f}".format(c.advance or 0) }}{% if (c.advance_carried or 0) > 0 %} <small>(Rs {{ "{:,.0f}".format(c.advance_carried or 0) }} carried fwd)</small>{% endif %}</td></tr>
         <tr><th>Net Payable</th><td class="num">Rs {{ "{:,.0f}".format(c.payable or 0) }}</td><th>Paid</th><td class="num">Rs {{ "{:,.0f}".format(c.paid or 0) }}</td></tr>
         <tr><th>Balance Pending</th><td class="num">Rs {{ "{:,.0f}".format(c.balance or 0) }}</td><th>Payment Status</th><td>{% if c.status == 'Paid' %}<span class="status paid">Paid</span>{% else %}<span class="status not-paid">Not Paid</span>{% endif %}</td></tr>
       </tbody>

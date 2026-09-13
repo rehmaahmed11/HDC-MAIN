@@ -137,7 +137,8 @@ def calc_time_wage(worker, rate_rows, hours, overtime, qty_sqft, on_date):
     if wt == 'per_sqft':
         return max(0.0, base * f2(qty_sqft)), wt, base
     if wt == 'hourly':
-        return max(0.0, base * max(0.0, f2(hours))), wt, base
+        # Overtime is paid at straight time for hourly workers too.
+        return max(0.0, base * (max(0.0, f2(hours)) + max(0.0, f2(overtime)))), wt, base
     hours = max(0.0, f2(hours))
     full_day = min(1.0, hours / 8.0) if hours > 0 else 0.0
     hourly = (base / 8.0) if base > 0 else 0.0
@@ -240,7 +241,6 @@ def tip_expense_ids(notes):
 def check_wages(d):
     out = []
     per_sqft_zero = defaultdict(int)
-    hourly_ot = defaultdict(float)
 
     for te in d['time_entries']:
         if te['is_void']:
@@ -290,27 +290,15 @@ def check_wages(d):
 
         if wt == 'per_sqft' and f2(te['qty_sqft']) <= 0.0:
             per_sqft_zero[w['id']] += 1
-        if wt == 'hourly' and ot > HOUR_TOL:
-            hourly_ot[w['id']] += ot
 
     for wid, n in per_sqft_zero.items():
         out.append(finding(
             'WAGE_PERSQFT_NO_QTY', 'HIGH',
             'Per-sqft worker has entries with no quantity',
             f"{n} time entr(y/ies) for a per-sqft worker carry qty_sqft = 0, so "
-            f"wage = rate x 0 = 0. The attendance screens never set qty_sqft "
-            f"(hdc/routes/timekeeping.py hard-codes qty_sqft=0.0 and the edit "
-            f"form clears it), so these days are silently unpaid.",
-            worker=d['wname'].get(wid), amount=0.0))
-
-    for wid, ot_h in hourly_ot.items():
-        out.append(finding(
-            'WAGE_HOURLY_OT_UNPAID', 'MEDIUM',
-            'Hourly worker overtime is not paid',
-            f"{ot_h:.2f}h of overtime is recorded but _calc_time_wage pays "
-            f"hourly workers rate x regular-hours only, so the overtime is "
-            f"unpaid. (Daily workers are paid OT at straight time; there is no "
-            f"OT premium anywhere.)",
+            f"wage = rate x 0 = 0 and those days are unpaid. The quantity is "
+            f"captured on the attendance screens now, but these historical rows "
+            f"still need their quantity entered (edit the entry).",
             worker=d['wname'].get(wid), amount=0.0))
     return out
 
@@ -318,13 +306,15 @@ def check_wages(d):
 # --------------------------------------------------------------------------
 # CHECK 2 -- worker balance: the two competing formulas
 # --------------------------------------------------------------------------
-def snapshot(ledger_rows):
-    """Mirror of ``_worker_payable_snapshot`` (tips are NOT deducted)."""
+def snapshot(ledger_rows, earned):
+    """Mirror of ``_worker_payable_snapshot`` (tips are NOT deducted).
+
+    ``earned`` is passed in because the service derives it from time entries
+    (plus unmigrated legacy attendance), not from the ledger's ``work`` rows.
+    """
     def total(etype, void=False):
         return sum(f2(r['amount']) for r in ledger_rows
                    if (r['entry_type'] or '') == etype and bool(r['is_void']) == void)
-    earned = sum(f2(r['amount']) for r in ledger_rows
-                 if (r['entry_type'] or '') == 'work' and not r['is_void'])
     advanced = total('advance')
     salary_paid = total('payment')
     tip = total('tip')
@@ -340,26 +330,63 @@ def time_wage_total(d, wid):
                if t['worker_id'] == wid and not t['is_void'])
 
 
+def legacy_wage_total(d, wid):
+    """Legacy ``hdc_attendance`` wages not covered by a time entry.
+
+    Mirrors ``Worker.total_earned``: a legacy row counts as already migrated
+    when an *active* time entry carries its id in ``attendance_id``.
+    """
+    migrated = {int(t['attendance_id']) for t in d['time_entries']
+                if t['worker_id'] == wid and t.get('attendance_id') and not t['is_void']}
+    return sum(f2(a['total_wage']) for a in d['attendance']
+               if a['worker_id'] == wid and a['id'] not in migrated)
+
+
+def model_earned_total(d, wid):
+    """``Worker.total_earned``: time entries + unmigrated legacy attendance."""
+    return time_wage_total(d, wid) + legacy_wage_total(d, wid)
+
+
 def check_balances(d):
     out = []
     for w in d['workers']:
         wid = w['id']
         lr = d['ledger_by_worker'].get(wid, [])
-        snap = snapshot(lr)
+        # Both readers must agree: the ledger/payment screens use
+        # _worker_payable_snapshot and the Workers list / Advance screen use
+        # Worker.balance_due. Tips are excluded from both and legacy attendance
+        # wages are included in both (LABOUR_AUDIT #1).
+        model_earned = model_earned_total(d, wid)
+        snap = snapshot(lr, model_earned)
         tips = snap['tip']
 
-        # --- the ledger page (services/ledger._worker_payable_snapshot) ------
-        # --- vs the workers list (models/workforce.Worker.balance_due) -------
-        if tips > MONEY_TOL:
+        # --- the two balance formulas must produce the same number -----------
+        # Mirrors Worker.balance_due after the fix: total_paid counts 'payment'
+        # rows only, so tips never reduce the balance due.
+        model_balance = (model_earned
+                         - sum(f2(r['amount']) for r in lr
+                               if r['entry_type'] == 'advance' and not r['is_void'])
+                         - snap['salary_paid']
+                         - snap['settled'])
+        if abs(model_balance - snap['balance']) > MONEY_TOL:
             out.append(finding(
                 'BALANCE_TWO_FORMULAS', 'HIGH',
                 'Same worker shows two different "balance due" figures',
-                f"Ledger page shows {snap['balance']:,.0f} PKR "
-                f"(_worker_payable_snapshot ignores tips) while the Workers list "
-                f"and the Advance screen show {snap['balance'] - tips:,.0f} PKR "
-                f"(Worker.balance_due subtracts tips as if they were salary). "
-                f"The gap is exactly the {tips:,.0f} PKR of tips. A tip is gratis "
-                f"cash, so it must not reduce what the worker is still owed.",
+                f"Worker.balance_due (Workers list, Advance screen) gives "
+                f"{model_balance:,.0f} PKR but _worker_payable_snapshot (worker "
+                f"ledger, payment screen, accounts) gives "
+                f"{snap['balance']:,.0f} PKR -- a {model_balance - snap['balance']:+,.0f} PKR "
+                f"gap. Tips are gratis cash and must not be deducted from what "
+                f"the worker is owed.",
+                worker=d['wname'].get(wid),
+                amount=model_balance - snap['balance']))
+
+        if tips > MONEY_TOL:
+            out.append(finding(
+                'TIPS_INFORMATIONAL', 'INFO',
+                'Tips paid to this worker (gratis cash, not deducted)',
+                f"{tips:,.0f} PKR of tips recorded. These are shown for "
+                f"information only and correctly do not reduce the balance due.",
                 worker=d['wname'].get(wid), amount=tips))
 
         # --- earnings: time entries vs work ledger rows ----------------------
@@ -888,10 +915,12 @@ def check_attendance(d):
                 f"{d['wname'].get(a['worker_id'], a['worker_id'])}, {a['date']}, "
                 f"{f2(a['total_wage']):,.2f} PKR) is referenced by time entr(y/ies) "
                 f"{', '.join('#' + str(t['id']) for t in linked)} belonging to a "
-                f"different worker/date. The migration points attendance_id at "
-                f"Attendance.id while _recalculate_attendance_day overwrites it "
-                f"with AttendanceDay.id, so Worker.total_earned and the project "
-                f"labour cost both treat this wage as already migrated and drop it.",
+                f"different worker/date. attendance_id is meant to point only at "
+                f"hdc_attendance; older builds also wrote AttendanceDay.id into "
+                f"it, so Worker.total_earned and the project labour cost treat "
+                f"this wage as already migrated and drop it. This is pre-existing "
+                f"data damage -- clear attendance_id on the listed time entries "
+                f"(the day link now lives in attendance_day_id).",
                 worker=d['wname'].get(a['worker_id']), amount=a['total_wage'],
                 refs=f"attendance#{a['id']}"))
 

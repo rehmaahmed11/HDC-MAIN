@@ -41,29 +41,48 @@ class Worker(db.Model):
 
     @property
     def total_earned(self):
-        time_total = sum(t.wage_calculated or 0 for t in self.time_entries if not t.is_void)
+        time_total = sum((t.wage_calculated or 0.0) for t in self.time_entries if not t.is_void)
+        # Only *active* migrated rows count as migrated. A voided migration row
+        # used to hide the legacy wage from this total AND from the time-entry
+        # total, so the wage was counted nowhere (LABOUR_AUDIT #12).
         migrated_attendance_ids = {
             int(t.attendance_id) for t in self.time_entries
-            if getattr(t, 'attendance_id', None)
+            if getattr(t, 'attendance_id', None) and not t.is_void
         }
         legacy_total = sum(
-            a.total_wage for a in self.attendance
+            (a.total_wage or 0.0) for a in self.attendance
             if a.id not in migrated_attendance_ids
         )
         return time_total + legacy_total
 
     @property
     def total_advanced(self):
-        return sum(e.amount for e in self.ledger if e.entry_type == 'advance' and not e.is_void)
+        return sum((e.amount or 0.0) for e in self.ledger
+                   if e.entry_type == 'advance' and not e.is_void)
 
     @property
     def total_paid(self):
-        cash_paid = sum(e.amount for e in self.ledger if e.entry_type in ('payment', 'tip') and not e.is_void)
-        return cash_paid
+        """Cash paid *against earnings* — tips are deliberately excluded.
+
+        A tip is gratis cash given on top of what the worker earned, so it must
+        not reduce the amount still owed. This keeps the model in step with
+        ``services.ledger._worker_payable_snapshot``; before this the Workers
+        list and the Advance screen disagreed with the worker ledger by exactly
+        the tip total (LABOUR_AUDIT #1).
+        """
+        return sum((e.amount or 0.0) for e in self.ledger
+                   if e.entry_type == 'payment' and not e.is_void)
+
+    @property
+    def total_tips(self):
+        """Gratis cash paid on top of earnings (informational, never deducted)."""
+        return sum((e.amount or 0.0) for e in self.ledger
+                   if e.entry_type == 'tip' and not e.is_void)
 
     @property
     def total_settled(self):
-        return sum(e.amount for e in self.ledger if e.entry_type == 'settlement' and not e.is_void)
+        return sum((e.amount or 0.0) for e in self.ledger
+                   if e.entry_type == 'settlement' and not e.is_void)
 
     @property
     def balance_due(self):
@@ -133,7 +152,13 @@ class TimeEntry(db.Model):
     qty_sqft       = db.Column(db.Float, default=0.0)
     wage_calculated= db.Column(db.Float, default=0.0)
     legacy_calc    = db.Column(db.Boolean, default=False)
+    # ``attendance_id`` belongs to the one-off legacy migration and points at
+    # hdc_attendance.id. It must NOT be reused for hdc_attendance_day: three
+    # readers (Worker.total_earned, Project.total_labour_cost and
+    # Stage.stage_labour_cost) join it against hdc_attendance, so reusing the
+    # column made legacy wages disappear from every total (LABOUR_AUDIT #6).
     attendance_id  = db.Column(db.Integer, nullable=True)
+    attendance_day_id = db.Column(db.Integer, db.ForeignKey('hdc_attendance_day.id'), nullable=True)
     is_void        = db.Column(db.Boolean, default=False)
     void_reason    = db.Column(db.String(250))
     voided_at      = db.Column(db.DateTime, nullable=True)

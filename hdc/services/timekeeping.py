@@ -34,10 +34,14 @@ def _parse_attendance_entries_payload(raw_payload):
         except Exception:
             pid = 0
             sid = 0
+        qty = _flt(row.get('qty_sqft'), 0.0)
         items.append({
             'project_id': pid,
             'stage_id': sid,
-            'hours': _flt(row.get('hours'), 0.0)
+            'hours': _flt(row.get('hours'), 0.0),
+            # Performed quantity for per-sqft workers. Without this a per-sqft
+            # worker is paid rate x 0 and earns nothing (LABOUR_AUDIT #5).
+            'qty_sqft': max(0.0, qty),
         })
     return items
 
@@ -78,7 +82,11 @@ def _recalculate_attendance_day(worker_id, work_date):
         regular_hours = min(hours, remaining_regular)
         overtime_hours = max(0.0, hours - regular_hours)
 
-        te.attendance_id = day_row.id
+        # Link to the AttendanceDay summary in its own column. Writing this to
+        # ``attendance_id`` used to masquerade as a legacy hdc_attendance link
+        # and silently dropped that attendance wage from the worker's earnings
+        # and from project/stage labour cost (LABOUR_AUDIT #6).
+        te.attendance_day_id = day_row.id
         te.check_in = base_dt + timedelta(hours=total_hours)
         te.check_out = te.check_in + timedelta(hours=hours)
         te.overtime = overtime_hours
@@ -207,7 +215,11 @@ def _calc_time_wage(worker, hours, overtime, qty_sqft=0.0, work_date=None):
     if wtype == 'per_sqft':
         return max(0.0, base_rate * qty_sqft)
     if wtype == 'hourly':
-        return max(0.0, base_rate * hours)
+        # Overtime is paid at straight time (same rate as regular hours), which
+        # is the company's practice -- but it must be paid at all. Previously
+        # the OT hours were dropped entirely for hourly workers
+        # (LABOUR_AUDIT #9).
+        return max(0.0, base_rate * (hours + overtime))
     full_day = min(1.0, hours / 8.0) if hours > 0 else 0.0
     hourly = (base_rate / 8.0) if base_rate > 0 else 0.0
     return max(0.0, base_rate * full_day + (overtime or 0) * hourly)
