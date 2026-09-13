@@ -31,8 +31,10 @@ from hdc.app import create_app                                    # noqa: E402
 from hdc.extensions import db                                     # noqa: E402
 from hdc.models.accounts import Expense                           # noqa: E402
 from hdc.models.auth import UserActivity                          # noqa: E402
-from hdc.models.projects import Project                           # noqa: E402
-from hdc.models.workforce import LabourLedger, Worker, WorkerTrade  # noqa: E402
+from hdc.models.projects import Project, Stage                    # noqa: E402
+from hdc.models.workforce import (                                 # noqa: E402
+    LabourLedger, TimeEntry, Worker, WorkerTrade,
+)
 from hdc.services.actors import (                                 # noqa: E402
     _derive_labour_ledger, actor_map, actor_payload, entity_type_of,
     row_attrs_html, row_is_void,
@@ -231,6 +233,32 @@ class TestListPagesCarryRowTags(RowTraceabilityTestCase):
         html = self.client.get(f'/hdc/workers/{worker.id}/ledger').get_data(as_text=True)
         self.assertIn('data-hdc-void="1"', html)
         self.assertIn('data-hdc-void-reason="entered twice"', html)
+
+    def test_timekeeping_tags_each_detailed_entry(self):
+        """The grouped day row and every nested time entry use its own id."""
+        from datetime import datetime
+
+        worker = self._add_worker()
+        project = Project(
+            name='Trace Site', project_code='TR-1', client='Owner',
+            location='Nowhere', contract_type='lump_sum', owner_lump_sum=1000,
+        )
+        db.session.add(project)
+        db.session.flush()
+        stage = Stage(project_id=project.id, name='Foundation')
+        db.session.add(stage)
+        db.session.flush()
+        entry = TimeEntry(
+            worker_id=worker.id, project_id=project.id, stage_id=stage.id,
+            check_in=datetime(2026, 8, 1, 8), check_out=datetime(2026, 8, 1, 16),
+            hours=8, overtime=0, wage_calculated=1000,
+        )
+        db.session.add(entry)
+        db.session.commit()
+
+        html = self.client.get('/hdc/timekeeping').get_data(as_text=True)
+        marker = f'data-hdc-ent="hdc_time_entry" data-hdc-id="{entry.id}"'
+        self.assertGreaterEqual(html.count(marker), 2)
 
 
 if __name__ == '__main__':

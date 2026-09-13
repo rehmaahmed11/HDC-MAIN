@@ -69,8 +69,9 @@ timekeeping 169, purchase-v2 stock 244, accounts 28, subcontractor ledgers and
 payments, payroll, office staff, personal expenses.
 
 `GET /hdc/api/row_actors` answers a 600-row page in ~0.01 s, and
-`tests/test_row_traceability.py` (14 tests) pins the filter shapes, the void
-flag, the endpoint and the ledger derivation; the whole suite is 149 tests.
+`tests/test_row_traceability.py` (15 tests) pins the filter shapes, the void
+flag, the endpoint, the ledger derivation, and the exact nested timekeeping
+entry tags; the whole suite is 127 tests.
 
 ## Which user is shown
 

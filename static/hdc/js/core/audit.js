@@ -75,7 +75,10 @@
             none.title = trailText(info || {}, label);
             td.appendChild(none);
         } else {
-            var who = info.last_by || info.created_by || '—';
+            // "Entered by" means the user who created the row.  Keep the
+            // last editor in the tooltip, but do not replace the creator with
+            // a later system/reconciliation event in the visible column.
+            var who = info.created_by || info.last_by || '—';
             var badge = el('span', 'hdc-actor-badge');
             badge.appendChild(el('i', 'fas fa-user-check hdc-actor-icon'));
             badge.appendChild(document.createTextNode(who));
@@ -96,7 +99,7 @@
         var wrap = el('span', 'hdc-actor-inline');
         wrap.appendChild(el('i', 'fas fa-user-check'));
         wrap.appendChild(document.createTextNode(
-            (info && (info.last_by || info.created_by)) || 'no entry trail'
+            (info && (info.created_by || info.last_by)) || 'no entry trail'
         ));
         if (voided) wrap.appendChild(el('span', 'hdc-void-badge', 'Void'));
         wrap.title = trailText(info || {}, label);

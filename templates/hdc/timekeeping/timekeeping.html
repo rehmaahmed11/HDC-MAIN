@@ -269,7 +269,7 @@
                         </td>
                         <td>
                             {% for e in row.entries %}
-                            <div class="border rounded px-2 py-1 mb-1 {% if e.is_void %}bg-body-secondary{% endif %}">
+                            <div {{ e|hdc_row_attrs }} class="border rounded px-2 py-1 mb-1 {% if e.is_void %}bg-body-secondary{% endif %}">
                                 <div class="small">
                                     <strong>{{ e.project.name }}</strong> -> {{ e.stage.name if e.stage else '-' }} -> {{ "{:,.2f}".format(e.hours) }}h
                                     {% if e.overtime > 0 %}<span class="text-warning">(OT {{ "{:,.2f}".format(e.overtime) }}h)</span>{% endif %}
