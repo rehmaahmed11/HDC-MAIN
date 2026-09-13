@@ -128,7 +128,7 @@
                     <tbody>
                     {% for record in records %}
                     {% set is_return = (record.Purchase.entry_type or 'purchase') == 'return' %}
-                    <tr>
+                    <tr {{ record|hdc_row_attrs }}>
                         <td>{{ fmt_pkt(record.Purchase.activity_at or record.Purchase.created_at) }}</td>
                         <td>
                             <span class="badge {% if is_return %}bg-warning text-dark{% else %}bg-success{% endif %}">
@@ -146,7 +146,7 @@
                         <td class="text-muted small">{{ record.Purchase.notes or '-' }}</td>
                     </tr>
                     {% else %}
-                    <tr><td colspan="11" class="text-center text-muted py-4">No purchase/return records found.</td></tr>
+                    <tr {{ record|hdc_row_attrs }}><td colspan="11" class="text-center text-muted py-4">No purchase/return records found.</td></tr>
                     {% endfor %}
                     </tbody>
                 </table>

@@ -695,3 +695,118 @@ code {
     .topbar-user { display: none; }
     .main-content { padding-left: 12px !important; padding-right: 12px !important; }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Row traceability: "entered by" column + grey highlight for voided rows
+   ──────────────────────────────────────────────────────────────────────────
+   Every list row carries data-hdc-ent / data-hdc-id (rendered by the
+   `hdc_row_attrs` Jinja filter).  Voided rows carry data-hdc-void="1" and are
+   highlighted grey, which works with or without JavaScript.
+   ══════════════════════════════════════════════════════════════════════════ */
+:root,
+[data-theme="light"] {
+    --void-row-bg: #d8d8d8;
+    --void-row-edge: #9aa0a6;
+    --void-badge-bg: #6b7280;
+}
+
+[data-theme="dark"] {
+    --void-row-bg: rgba(148, 163, 184, 0.28);
+    --void-row-edge: #94a3b8;
+    --void-badge-bg: #64748b;
+}
+
+/* Grey highlighter for every voided entry, in any table on any page. */
+tr[data-hdc-void="1"] > td,
+tr[data-hdc-void="1"] > th,
+li[data-hdc-void="1"],
+div[data-hdc-void="1"].hdc-void-row {
+    background-color: var(--void-row-bg) !important;
+    background-image: none !important;
+}
+
+tr[data-hdc-void="1"] > td:first-child {
+    box-shadow: inset 3px 0 0 var(--void-row-edge);
+}
+
+tr[data-hdc-void="1"]:hover > td {
+    background-color: var(--void-row-bg) !important;
+}
+
+tr[data-hdc-void="1"] > td {
+    color: var(--text-muted);
+}
+
+tr[data-hdc-void="1"] > td .text-success,
+tr[data-hdc-void="1"] > td .text-danger,
+tr[data-hdc-void="1"] > td .text-info,
+tr[data-hdc-void="1"] > td .text-warning {
+    color: var(--text-muted) !important;
+}
+
+/* The "Entered by" column added by static/hdc/js/core/audit.js */
+.hdc-audit-col {
+    white-space: nowrap;
+}
+
+.hdc-audit-cell {
+    font-size: 0.74rem;
+    line-height: 1.35;
+    white-space: nowrap;
+    vertical-align: middle;
+}
+
+.hdc-actor-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: var(--accent-soft);
+    color: var(--accent-strong);
+    font-weight: 600;
+    font-size: 0.72rem;
+    white-space: nowrap;
+}
+
+[data-theme="dark"] .hdc-actor-badge {
+    color: var(--accent);
+}
+
+.hdc-actor-badge .hdc-actor-icon {
+    font-size: 0.66rem;
+    opacity: 0.85;
+}
+
+.hdc-actor-meta {
+    display: block;
+    color: var(--text-muted);
+    font-size: 0.68rem;
+}
+
+.hdc-void-badge {
+    display: inline-block;
+    margin-left: 4px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: var(--void-badge-bg);
+    color: #fff;
+    font-size: 0.66rem;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+}
+
+.hdc-actor-inline {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 6px;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+}
+
+.hdc-audit-none {
+    color: var(--text-muted);
+    opacity: 0.65;
+}

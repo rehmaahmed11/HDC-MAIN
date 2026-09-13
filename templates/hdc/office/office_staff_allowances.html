@@ -92,7 +92,7 @@
             </thead>
             <tbody>
                 {% for allowance, category in allowances %}
-                <tr>
+                <tr {{ allowance|hdc_row_attrs }}>
                     <td>
                         <strong>{{ category.name }}</strong>
                         {% if category.description %}

@@ -31,7 +31,8 @@ hdc/                    the application package (import here, not hdc_erp)
                         workforce, office, subcontract, materials, accounts)
   services/             business engines: accounts, purchase, timekeeping,
                         ledger, subcontract, aggregation, reporting, audit,
-                        lookups, backups, estimation, receipts
+                        actors (row traceability), lookups, backups,
+                        estimation, receipts
   core/                 runtime platform: flags, schema/migrations,
                         bootstrap, admin ops (restore/wipe/maintenance)
   routes/               one file per page group; register(app) each
@@ -53,6 +54,8 @@ scripts/                split_monolith, reorganize_frontend, parity_check,
                         (reproducible conversion + verification + ops CLIs)
 ops/                    pythonanywhere/ (setup.py, deploy.sh, sync.sh, webhook
                         receiver wiring), arena/ (local<->sandbox git pairer)
+LABOUR_AUDIT.md         labour wage/payment/tip/advance findings + live DB run
+ROW_TRACEABILITY.md     how every list shows who entered the row + grey voids
 tests/                  differential smoke test vs the pre-split baseline
 ```
 

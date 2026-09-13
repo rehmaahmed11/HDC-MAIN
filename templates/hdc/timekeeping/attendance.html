@@ -75,7 +75,7 @@
                     </tr></thead>
                     <tbody>
                     {% for a, w, proj in records %}
-                    <tr>
+                    <tr {{ a|hdc_row_attrs }}>
                         <td>{{ fmt_pkt(a.activity_at or a.created_at) }}</td>
                         <td>
                             <a href="{{ url_for('hdc_worker_ledger', wid=w.id) }}" class="text-decoration-none">

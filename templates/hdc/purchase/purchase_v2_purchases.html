@@ -118,7 +118,7 @@
                 {% for r in rows %}
                 {% set delivered = (delivered_map.get(r.id) if delivered_map else 0) or 0 %}
                 {% set pct = [((delivered / r.quantity * 100)|int), 100]|min if r.quantity else 0 %}
-                <tr>
+                <tr {{ r|hdc_row_attrs }}>
                     <td class="text-muted small">#{{ r.id }}</td>
                     <td class="small">{{ r.date or (r.created_at.strftime('%Y-%m-%d') if r.created_at else '-') }}</td>
                     <td><span class="fw-semibold">{{ r.supplier.name if r.supplier else '-' }}</span></td>
@@ -155,7 +155,7 @@
                     </td>
                 </tr>
                 {% else %}
-                <tr><td colspan="13" class="text-center text-muted py-4">
+                <tr {{ r|hdc_row_attrs }}><td colspan="13" class="text-center text-muted py-4">
                     <i class="fas fa-inbox fa-2x mb-2 d-block opacity-30"></i>No purchase orders found.
                 </td></tr>
                 {% endfor %}

@@ -174,7 +174,7 @@
             <tbody>
                 {% for r in history_rows %}
                 {% set dir = account_tx_direction_for_type(r.type) %}
-                <tr {% if latest_print_txn and (latest_print_txn.id == r.id) %}class="table-warning"{% endif %}>
+                <tr {{ r|hdc_row_attrs }} {% if latest_print_txn and (latest_print_txn.id == r.id) %}class="table-warning"{% endif %}>
                     <td>
                         <div class="fw-semibold">{{ (r.type or '')|replace('_', ' ')|title }}</div>
                         <div class="small text-muted">
@@ -229,7 +229,7 @@
                     </td>
                 </tr>
                 {% else %}
-                <tr><td colspan="8" class="text-center text-muted py-3">No transactions found.</td></tr>
+                <tr {{ r|hdc_row_attrs }}><td colspan="8" class="text-center text-muted py-3">No transactions found.</td></tr>
                 {% endfor %}
             </tbody>
         </table>

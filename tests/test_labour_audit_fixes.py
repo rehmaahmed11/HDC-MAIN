@@ -64,6 +64,16 @@ class LabourTestCase(unittest.TestCase):
         self._fund_treasury()
         self.project, self.stage = self._make_project()
 
+    def _audit(self, extra_args=('--exit-zero',)):
+        """Run the read-only audit against this test's database."""
+        import subprocess
+        script = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
+                                              'scripts', 'labour_audit.py'))
+        return subprocess.run(
+            [sys.executable, script, '--db', self.db_path, *extra_args],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False
+        ).stdout.decode('utf-8', 'replace')
+
     def _fund_treasury(self, amount=10_000_000.0):
         """Give the company cash accounts an opening balance.
 
@@ -776,6 +786,43 @@ class TestAuditScript(LabourTestCase):
         out = self._audit()
         self.assertIn('WAGE_MISMATCH', out)
         self.assertNotIn('WAGE_RATE_CARD_GAP', out)
+
+
+class TestCashRowChecks(LabourTestCase):
+    """LABOUR_AUDIT -- duplicate / misattributed / backdated cash rows."""
+
+    def test_same_day_duplicate_payment_is_reported(self):
+        w = self._make_worker()
+        self._ledger(w, 'advance', 2500.0, 1, notes='auto advance')
+        self._ledger(w, 'advance', 2500.0, 1, notes='auto advance retry')
+        db.session.commit()
+
+        out = self._audit()
+        self.assertIn('CASH_DUPLICATE_SAME_DAY', out)
+        self.assertIn('2,500.00', out)
+
+    def test_single_payment_is_not_reported(self):
+        w = self._make_worker()
+        self._ledger(w, 'payment', 2500.0, 1)
+        db.session.commit()
+        self.assertNotIn('CASH_DUPLICATE_SAME_DAY', self._audit())
+
+    def test_tip_booked_to_wrong_worker_is_reported(self):
+        a = self._make_worker(code='W-A', name='Tip Owner')
+        b = self._make_worker(code='W-B', name='Wrong Worker')
+        self._ledger(a, 'tip', 25.0, 1, notes=f'TIP_WORKER_ID:{b.id}')
+        db.session.commit()
+
+        out = self._audit()
+        self.assertIn('TIP_LEDGER_WRONG_WORKER', out)
+
+    def test_cash_dated_before_worker_created_is_reported(self):
+        w = self._make_worker()
+        self._ledger(w, 'payment', 100.0, -30)   # before today's created_at
+        db.session.commit()
+
+        out = self._audit()
+        self.assertIn('CASH_BEFORE_WORKER_RECORD', out)
 
 
 if __name__ == '__main__':

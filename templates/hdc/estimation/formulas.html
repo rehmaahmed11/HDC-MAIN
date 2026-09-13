@@ -49,7 +49,7 @@
                     <thead><tr><th>Name</th><th>Category</th><th>Expression</th><th>Variables</th><th></th></tr></thead>
                     <tbody>
                     {% for f in formulas %}
-                    <tr>
+                    <tr {{ f|hdc_row_attrs }}>
                         <td><strong>{{ f.name }}</strong><br><small class="text-muted">{{ f.description or '' }}</small></td>
                         <td><span class="badge bg-info text-dark">{{ f.category }}</span></td>
                         <td><code class="small">{{ f.expression }}</code></td>

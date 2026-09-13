@@ -12,7 +12,7 @@
                     <thead><tr><th>Period</th><th>Total</th><th></th></tr></thead>
                     <tbody>
                     {% for r in runs %}
-                    <tr>
+                    <tr {{ r|hdc_row_attrs }}>
                         <td>{{ r.date_from }} to {{ r.date_to }}</td>
                         <td>{{ "{:,.0f}".format(r.total_amount or 0) }}</td>
                         <td class="text-end text-nowrap">
@@ -23,7 +23,7 @@
                         </td>
                     </tr>
                     {% else %}
-                    <tr><td colspan="3" class="text-center text-muted py-3">No runs yet.</td></tr>
+                    <tr {{ r|hdc_row_attrs }}><td colspan="3" class="text-center text-muted py-3">No runs yet.</td></tr>
                     {% endfor %}
                     </tbody>
                 </table>
@@ -70,7 +70,7 @@
                         <thead><tr><th>Worker</th><th>Net Pay</th><th></th></tr></thead>
                         <tbody>
                         {% for row in salary_rows %}
-                        <tr>
+                        <tr {{ row|hdc_row_attrs }}>
                             <td>{{ row.worker.name if row.worker else '' }}</td>
                             <td class="fw-bold">{{ "{:,.0f}".format(row.net_pay or 0) }}</td>
                             <td class="text-end">
@@ -82,7 +82,7 @@
                             </td>
                         </tr>
                         {% else %}
-                        <tr><td colspan="3" class="text-center text-muted py-3">No workers found.</td></tr>
+                        <tr {{ row|hdc_row_attrs }}><td colspan="3" class="text-center text-muted py-3">No workers found.</td></tr>
                         {% endfor %}
                         </tbody>
                     </table>

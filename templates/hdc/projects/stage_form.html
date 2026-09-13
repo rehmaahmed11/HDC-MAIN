@@ -118,7 +118,7 @@
                         <thead><tr><th>Date</th><th>Old Basis</th><th>Old Rate</th><th>New Basis</th><th>New Rate</th><th>Reason</th></tr></thead>
                         <tbody>
                         {% for h in stage.rate_history | sort(attribute='changed_at', reverse=True) %}
-                        <tr>
+                        <tr {{ h|hdc_row_attrs }}>
                             <td>{{ h.changed_at }}</td>
                             <td>{{ h.old_contract_basis or '—' }}</td>
                             <td>{{ "{:,.0f}".format(h.old_rate_per_sqft) }} / {{ "{:,.0f}".format(h.old_lump_sum_value) }}</td>

@@ -144,14 +144,14 @@
                     <thead><tr><th>Project</th><th class="text-end">Net Profit</th><th class="text-end">Receivable</th><th class="text-end">Cost %</th></tr></thead>
                     <tbody>
                         {% for r in risk_project_rows %}
-                        <tr>
+                        <tr {{ r|hdc_row_attrs }}>
                             <td><a href="{{ url_for('hdc_project_detail', pid=r.project.id) }}" class="text-decoration-none">{{ r.project.name }}</a></td>
                             <td class="text-end {% if (r.profit or 0) >= 0 %}text-success{% else %}text-danger fw-bold{% endif %}">{{ "{:,.0f}".format(r.profit or 0) }}</td>
                             <td class="text-end">{{ "{:,.0f}".format(r.remaining or 0) }}</td>
                             <td class="text-end">{{ "{:,.1f}".format(r.cost_ratio or 0) }}%</td>
                         </tr>
                         {% else %}
-                        <tr><td colspan="4" class="text-center text-muted py-3">No project risk rows.</td></tr>
+                        <tr {{ r|hdc_row_attrs }}><td colspan="4" class="text-center text-muted py-3">No project risk rows.</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>
@@ -166,14 +166,14 @@
                     <thead><tr><th>Project</th><th>Stage</th><th>Due</th><th>Status</th></tr></thead>
                     <tbody>
                         {% for s in delayed_stage_rows %}
-                        <tr>
+                        <tr {{ s|hdc_row_attrs }}>
                             <td>{{ s.project.name if s.project else '-' }}</td>
                             <td><a href="{{ url_for('hdc_stage_ledger', sid=s.id) }}" class="text-decoration-none">{{ s.name }}</a></td>
                             <td>{{ s.end_date.strftime('%Y-%m-%d') if s.end_date else '-' }}</td>
                             <td><span class="badge bg-warning text-dark">{{ s.status or 'Pending' }}</span></td>
                         </tr>
                         {% else %}
-                        <tr><td colspan="4" class="text-center text-muted py-3">No delayed stages.</td></tr>
+                        <tr {{ s|hdc_row_attrs }}><td colspan="4" class="text-center text-muted py-3">No delayed stages.</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>
@@ -191,14 +191,14 @@
                     <thead><tr><th>Name</th><th class="text-end">Payable Bal</th><th class="text-end">Labour Cost</th><th class="text-end">P/L</th></tr></thead>
                     <tbody>
                         {% for r in subcontract_watch_rows %}
-                        <tr>
+                        <tr {{ r|hdc_row_attrs }}>
                             <td><a href="{{ url_for('hdc_subcontractor_ledger', sid=r.sub.id) }}" class="text-decoration-none">{{ r.sub.name }}</a></td>
                             <td class="text-end">{{ "{:,.0f}".format(r.sub.payable_balance or 0) }}</td>
                             <td class="text-end">{{ "{:,.0f}".format(r.labour_cost or 0) }}</td>
                             <td class="text-end {% if (r.pnl or 0) >= 0 %}text-success{% else %}text-danger fw-bold{% endif %}">{{ "{:,.0f}".format(r.pnl or 0) }}</td>
                         </tr>
                         {% else %}
-                        <tr><td colspan="4" class="text-center text-muted py-3">No subcontractor watch rows.</td></tr>
+                        <tr {{ r|hdc_row_attrs }}><td colspan="4" class="text-center text-muted py-3">No subcontractor watch rows.</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>
@@ -213,7 +213,7 @@
                     <thead><tr><th>Material</th><th class="text-end">Purchased</th><th class="text-end">Used</th><th class="text-end">Remaining</th></tr></thead>
                     <tbody>
                         {% for r in low_stock_rows %}
-                        <tr>
+                        <tr {{ r|hdc_row_attrs }}>
                             <td><a href="{{ url_for('hdc_materials') }}" class="text-decoration-none">{{ r.material.name }}</a></td>
                             <td class="text-end">{{ "{:,.2f}".format(r.purchased or 0) }}</td>
                             <td class="text-end">{{ "{:,.2f}".format(r.used or 0) }}</td>
@@ -222,7 +222,7 @@
                             </td>
                         </tr>
                         {% else %}
-                        <tr><td colspan="4" class="text-center text-muted py-3">No material records.</td></tr>
+                        <tr {{ r|hdc_row_attrs }}><td colspan="4" class="text-center text-muted py-3">No material records.</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>
@@ -241,14 +241,14 @@
                     <thead><tr><th>Project</th><th class="text-end">Budget</th><th class="text-end">Actual</th><th class="text-end">Overrun</th></tr></thead>
                     <tbody>
                         {% for r in project_budget_overrun_rows %}
-                        <tr>
+                        <tr {{ r|hdc_row_attrs }}>
                             <td><a href="{{ url_for('hdc_project_detail', pid=r.project.id) }}" class="text-decoration-none">{{ r.project.name }}</a></td>
                             <td class="text-end">{{ "{:,.0f}".format(r.budget or 0) }}</td>
                             <td class="text-end">{{ "{:,.0f}".format(r.actual or 0) }}</td>
                             <td class="text-end text-danger fw-bold">{{ "{:,.0f}".format(r.overrun or 0) }}</td>
                         </tr>
                         {% else %}
-                        <tr><td colspan="4" class="text-center text-muted py-3">No project overruns.</td></tr>
+                        <tr {{ r|hdc_row_attrs }}><td colspan="4" class="text-center text-muted py-3">No project overruns.</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>
@@ -266,7 +266,7 @@
                     <thead><tr><th>Time</th><th>Level</th><th>Message</th></tr></thead>
                     <tbody>
                         {% for a in open_alerts %}
-                        <tr>
+                        <tr {{ a|hdc_row_attrs }}>
                             <td>{{ fmt_pkt(a.created_at) if a.created_at else '-' }}</td>
                             <td>
                                 <span class="badge {% if (a.level or '') == 'danger' %}bg-danger{% elif (a.level or '') == 'warning' %}bg-warning text-dark{% else %}bg-info{% endif %}">
@@ -276,7 +276,7 @@
                             <td class="small">{{ a.message }}</td>
                         </tr>
                         {% else %}
-                        <tr><td colspan="3" class="text-center text-muted py-3">No open alerts.</td></tr>
+                        <tr {{ a|hdc_row_attrs }}><td colspan="3" class="text-center text-muted py-3">No open alerts.</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>

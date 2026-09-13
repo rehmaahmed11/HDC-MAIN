@@ -86,7 +86,7 @@
         </tr></thead>
         <tbody>
         {% for r in findings.orphan_txns %}
-        <tr>
+        <tr {{ r|hdc_row_attrs }}>
             <td>#{{ r.id }}</td>
             <td>{{ r.date or '-' }}</td>
             <td>{{ r.type|replace('_', ' ')|title }}</td>
@@ -132,7 +132,7 @@
         </tr></thead>
         <tbody>
         {% for r in findings.void_mismatch %}
-        <tr>
+        <tr {{ r|hdc_row_attrs }}>
             <td>#{{ r.id }}</td>
             <td>{{ r.date or '-' }}</td>
             <td>{{ r.party or '-' }}</td>
@@ -166,7 +166,7 @@
         </tr></thead>
         <tbody>
         {% for r in findings.duplicate_active %}
-        <tr>
+        <tr {{ r|hdc_row_attrs }}>
             <td><span class="badge bg-danger">{{ r.count }}×</span></td>
             <td>{{ r.date or '-' }}</td>
             <td>{{ r.type|replace('_', ' ')|title }}</td>
@@ -200,7 +200,7 @@
         <thead><tr><th>Group ID</th><th>Issue</th><th>Detail</th><th>Rows</th></tr></thead>
         <tbody>
         {% for g in findings.group_inconsistent %}
-        <tr>
+        <tr {{ g|hdc_row_attrs }}>
             <td><code class="small">{{ g.group_id }}</code></td>
             <td>{{ g.kind|replace('_', ' ')|title }}</td>
             <td class="small">{{ g.detail }}</td>
@@ -233,7 +233,7 @@
         </tr></thead>
         <tbody>
         {% for s in findings.orphan_sources %}
-        <tr>
+        <tr {{ s|hdc_row_attrs }}>
             <td>{{ s.family }}</td>
             <td><code class="small">{{ s.source_type }} #{{ s.source_id }}</code></td>
             <td>{{ s.date or '-' }}</td>

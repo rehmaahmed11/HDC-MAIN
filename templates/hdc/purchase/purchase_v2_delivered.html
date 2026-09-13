@@ -238,7 +238,7 @@
             </thead>
             <tbody>
                 {% for r in rows %}
-                <tr>
+                <tr {{ r|hdc_row_attrs }}>
                     <td class="text-muted small">#{{ r.id }}</td>
                     <td class="small">{{ r.date.strftime('%Y-%m-%d') if r.date else (r.created_at.strftime('%Y-%m-%d') if r.created_at else '-') }}</td>
                     <td class="fw-semibold">
@@ -281,7 +281,7 @@
                     </td>
                 </tr>
                 {% else %}
-                <tr><td colspan="11" class="text-center text-muted py-4">
+                <tr {{ r|hdc_row_attrs }}><td colspan="11" class="text-center text-muted py-4">
                     <i class="fas fa-inbox fa-2x mb-2 d-block opacity-30"></i>No deliveries recorded yet.
                 </td></tr>
                 {% endfor %}

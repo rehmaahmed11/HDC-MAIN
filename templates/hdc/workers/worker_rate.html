@@ -57,7 +57,7 @@
                 <thead><tr><th>Effective From</th><th>Old Rate</th><th>New Rate</th><th>Reason</th></tr></thead>
                 <tbody>
                 {% for rh in w.rate_history | sort(attribute='effective_from', reverse=True) %}
-                <tr>
+                <tr {{ rh|hdc_row_attrs }}>
                     <td>{{ rh.effective_from }}</td>
                     <td class="text-muted">{{ "{:,.0f}".format(rh.old_rate) }}</td>
                     <td class="fw-bold">{{ "{:,.0f}".format(rh.new_rate) }}</td>

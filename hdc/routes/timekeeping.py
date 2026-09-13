@@ -400,6 +400,8 @@ def register(app):
                 row = {
                     'date': te.check_in.date(),
                     'worker': wk,
+                    # the newest time entry of the group -- tag the row with it
+                    'entry': te,
                     'entries': [],
                     'total_hours': 0.0,
                     'overtime': 0.0,
@@ -408,6 +410,8 @@ def register(app):
                     'void_count': 0
                 }
                 grouped[key] = row
+            if row.get('entry') is None or (te.check_in or datetime.min) > (row['entry'].check_in or datetime.min):
+                row['entry'] = te
             row['entries'].append({
                 'id': te.id,
                 'project': proj,
@@ -493,6 +497,7 @@ def register(app):
             } for r in rows]
             daily_sheet_rows.append({
                 'worker': wk,
+                'mark': mk,
                 'status': status_txt,
                 'project_name': projects_txt,
                 'stage_name': stages_txt,

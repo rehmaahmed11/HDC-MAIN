@@ -188,7 +188,7 @@
                     </tr></thead>
                     <tbody>
                     {% for p in recent_projects %}
-                    <tr onclick="location.href='{{ url_for('hdc_project_detail', pid=p.id) }}'" style="cursor:pointer">
+                    <tr {{ p|hdc_row_attrs }} onclick="location.href='{{ url_for('hdc_project_detail', pid=p.id) }}'" style="cursor:pointer">
                         <td><span class="badge bg-secondary">{{ p.project_code }}</span></td>
                         <td>{{ p.name }}</td>
                         <td>{{ "{:,.0f}".format(p.owner_contract_value) }}</td>

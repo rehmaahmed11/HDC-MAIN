@@ -92,7 +92,7 @@
             </thead>
             <tbody>
                 {% for r in rows %}
-                <tr class="{% if r.get('_is_subtotal') %}table-secondary fw-bold{% endif %}">
+                <tr {{ r|hdc_row_attrs }} class="{% if r.get('_is_subtotal') %}table-secondary fw-bold{% endif %}">
                     {% for c in columns %}
                     {% set val = r.get(c.key) %}
                     <td class="{{ c.align or '' }}">
@@ -109,7 +109,7 @@
                     {% endfor %}
                 </tr>
                 {% else %}
-                <tr><td colspan="{{ columns|length }}" class="text-center text-muted py-4">No detail rows found.</td></tr>
+                <tr {{ r|hdc_row_attrs }}><td colspan="{{ columns|length }}" class="text-center text-muted py-4">No detail rows found.</td></tr>
                 {% endfor %}
             </tbody>
             {% if rows and show_table_footer %}

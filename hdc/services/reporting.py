@@ -17,8 +17,9 @@ from hdc.utils.dates import _pkt_now_naive, _pkt_today
 def _build_stage_event_ledger(stage):
     rows = []
 
-    def _push(*, dt, event_type, source, notes, amount, impact, status, category, ref):
-        rows.append({
+    def _push(*, dt, event_type, source, notes, amount, impact, status, category, ref,
+              entity=None, row_id=None):
+        row = {
             'dt': dt or _pkt_now_naive(),
             'event_type': event_type,
             'source': source or '-',
@@ -28,7 +29,12 @@ def _build_stage_event_ledger(stage):
             'status': status or 'Active',
             'category': category or 'other',
             'ref': ref or '-'
-        })
+        }
+        # lets the ledger table show who entered this row (hdc_row_attrs)
+        if entity and row_id is not None:
+            row['_hdc_entity'] = entity
+            row['_hdc_id'] = int(row_id)
+        rows.append(row)
 
     time_rows = (TimeEntry.query
                  .filter(TimeEntry.stage_id == stage.id)
@@ -47,7 +53,8 @@ def _build_stage_event_ledger(stage):
             impact=(t.wage_calculated or 0.0) if is_active else 0.0,
             status=status,
             category='labour',
-            ref=f'TIME#{t.id}'
+            ref=f'TIME#{t.id}',
+            entity='hdc_time_entry', row_id=t.id
         )
 
     ledger_rows = (LabourLedger.query
@@ -75,7 +82,8 @@ def _build_stage_event_ledger(stage):
             impact=0.0,
             status=status,
             category='finance',
-            ref=f'LEDGER#{l.id}'
+            ref=f'LEDGER#{l.id}',
+            entity='hdc_labour_ledger', row_id=l.id
         )
 
     expense_rows = (Expense.query
@@ -93,7 +101,8 @@ def _build_stage_event_ledger(stage):
             impact=e.amount or 0.0,
             status='Active',
             category='expense',
-            ref=f'EXP#{e.id}'
+            ref=f'EXP#{e.id}',
+            entity='hdc_expense', row_id=e.id
         )
 
     purchase_rows = (Purchase.query
@@ -113,7 +122,8 @@ def _build_stage_event_ledger(stage):
             impact=p.total or 0.0,
             status='Active',
             category='material',
-            ref=f'PUR#{p.id}'
+            ref=f'PUR#{p.id}',
+            entity='hdc_purchase', row_id=p.id
         )
     usage_v2_rows = (UsageLogV2.query
                      .filter(UsageLogV2.stage_id == stage.id, UsageLogV2.is_void == False)
@@ -131,7 +141,8 @@ def _build_stage_event_ledger(stage):
             impact=u.cost or 0.0,
             status='Active',
             category='material',
-            ref=f'USEV2#{u.id}'
+            ref=f'USEV2#{u.id}',
+            entity='hdc_usage_log_v2', row_id=u.id
         )
 
     subs = (Subcontractor.query
@@ -148,7 +159,8 @@ def _build_stage_event_ledger(stage):
             impact=0.0,
             status='Active',
             category='finance',
-            ref=f'SUB#{s.id}'
+            ref=f'SUB#{s.id}',
+            entity='hdc_subcontractor', row_id=s.id
         )
         att_rows = (SubcontractAttendance.query
                     .filter(SubcontractAttendance.subcontractor_id == s.id)
@@ -169,7 +181,8 @@ def _build_stage_event_ledger(stage):
                 impact=0.0,
                 status='Active',
                 category='other',
-                ref=f'SATT#{sa.id}'
+                ref=f'SATT#{sa.id}',
+                entity='hdc_subcontract_attendance', row_id=sa.id
             )
     rows.sort(key=lambda r: (r['dt'], r['ref']))
     running = 0.0

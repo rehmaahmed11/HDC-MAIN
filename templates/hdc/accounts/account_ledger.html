@@ -65,7 +65,7 @@
                     <td class="text-end {% if (account.opening_balance or 0) < 0 %}text-danger fw-bold{% endif %}">{{ "{:,.2f}".format(account.opening_balance or 0) }}</td>
                 </tr>
                 {% for row in rows %}
-                <tr class="{% if row.is_void %}table-light text-muted{% endif %}">
+                <tr {{ row|hdc_row_attrs }} class="{% if row.is_void %}table-light text-muted{% endif %}">
                     <td>{{ fmt_pkt(row.timestamp) }}</td>
                     <td>
                         {{ row.tx_type }}
@@ -87,7 +87,7 @@
                     <td class="text-end {% if row.running_balance < 0 %}text-danger fw-bold{% endif %}">{{ "{:,.2f}".format(row.running_balance) }}</td>
                 </tr>
                 {% else %}
-                <tr>
+                <tr {{ row|hdc_row_attrs }}>
                     <td colspan="8" class="text-center text-muted py-4">No ledger entries found for this account.</td>
                 </tr>
                 {% endfor %}

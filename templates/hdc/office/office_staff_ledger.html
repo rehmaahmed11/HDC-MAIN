@@ -100,7 +100,7 @@
             <thead><tr><th>Date</th><th>Type</th><th>Amount</th><th>Notes</th><th>Status</th><th class="text-end">Actions</th></tr></thead>
             <tbody>
                 {% for entry in ledger_entries %}
-                <tr>
+                <tr {{ entry|hdc_row_attrs }}>
                     <td>{{ fmt_pkt(entry.activity_at or entry.created_at) }}</td>
                     <td><span class="badge {% if entry.entry_type == 'advance' %}bg-warning text-dark{% else %}bg-success{% endif %}">{{ entry.entry_type|title }}</span></td>
                     <td class="fw-bold {% if entry.entry_type == 'advance' %}text-warning{% else %}text-success{% endif %}">{{ "{:,.0f}".format(entry.amount or 0) }}</td>
@@ -127,7 +127,7 @@
                     </td>
                 </tr>
                 {% else %}
-                <tr><td colspan="6" class="text-center text-muted py-4">No ledger entries yet.</td></tr>
+                <tr {{ entry|hdc_row_attrs }}><td colspan="6" class="text-center text-muted py-4">No ledger entries yet.</td></tr>
                 {% endfor %}
             </tbody>
         </table>

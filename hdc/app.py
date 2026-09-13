@@ -64,6 +64,15 @@ def create_app(config_overrides=None):
     app.jinja_env.globals["fmt_pkt"] = _fmt_pkt
     app.jinja_env.filters["fmt_pkt"] = _fmt_pkt
 
+    # Row traceability: every list row carries the id of the user who entered
+    # it (``{{ row|hdc_row_attrs }}``) so the audit column on the page can be
+    # filled in, and templates can look the actors up directly with
+    # ``actor_map(rows)``.  See hdc/services/actors.py.
+    from hdc.services.actors import actor_map, actor_for, row_attrs_html
+    app.jinja_env.globals["actor_map"] = actor_map
+    app.jinja_env.globals["actor_for"] = actor_for
+    app.jinja_env.filters["hdc_row_attrs"] = row_attrs_html
+
     register_audit_events()
     register_all(app)
     _ensure_bootstrap_once(app)

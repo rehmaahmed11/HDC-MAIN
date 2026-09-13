@@ -167,7 +167,7 @@
                 </thead>
                 <tbody>
                     {% for s in split_rows %}
-                    <tr class="{% if s.is_current %}rx-row-current{% endif %} {% if s.is_void %}rx-row-void{% endif %}">
+                    <tr {{ s|hdc_row_attrs }} class="{% if s.is_current %}rx-row-current{% endif %} {% if s.is_void %}rx-row-void{% endif %}">
                         <td>{{ loop.index }}</td>
                         <td>{{ s.date or '-' }}</td>
                         <td>
@@ -225,7 +225,7 @@
                 </thead>
                 <tbody>
                     {% for r in recent_entries %}
-                    <tr>
+                    <tr {{ r|hdc_row_attrs }}>
                         <td>{{ r.date or '-' }}</td>
                         <td>{{ r.type or '-' }}</td>
                         <td>

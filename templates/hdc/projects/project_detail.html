@@ -183,7 +183,7 @@
             </tr></thead>
             <tbody>
             {% for s in stages %}
-            <tr>
+            <tr {{ s|hdc_row_attrs }}>
                 <td>
                     <a href="{{ url_for('hdc_stage_ledger', sid=s.id) }}" class="text-decoration-none fw-bold">
                         {{ s.name }}
@@ -285,7 +285,7 @@
                     </form>
                 </td>
             </tr>
-            <tr class="collapse" id="sub-comp-{{ s.id }}">
+            <tr {{ s|hdc_row_attrs }} class="collapse" id="sub-comp-{{ s.id }}">
                 <td colspan="18" class="bg-light-subtle">
                     <form method="POST" action="{{ url_for('hdc_stage_sub_progress', sid=s.id) }}" class="d-flex flex-wrap gap-2 align-items-center py-2">
                         <span class="small text-muted fw-bold">Subcontractor completion:</span>
@@ -300,7 +300,7 @@
                     </form>
                 </td>
             </tr>
-            <tr class="collapse" id="shift-sub-{{ s.id }}">
+            <tr {{ s|hdc_row_attrs }} class="collapse" id="shift-sub-{{ s.id }}">
                 <td colspan="18" class="bg-light-subtle">
                     <form method="POST" action="{{ url_for('hdc_stage_shift_to_subcontractor', sid=s.id) }}" class="d-flex flex-wrap gap-2 align-items-center py-2">
                         <span class="small text-muted fw-bold">Assign to subcontractor:</span>
@@ -329,7 +329,7 @@
                     </form>
                 </td>
             </tr>
-            <tr class="collapse" id="drawings-{{ s.id }}">
+            <tr {{ s|hdc_row_attrs }} class="collapse" id="drawings-{{ s.id }}">
                 <td colspan="18" class="bg-light-subtle">
                     <div class="d-flex flex-column gap-2 py-2">
                         <form method="POST" action="{{ url_for('hdc_stage_drawings_upload', sid=s.id) }}" enctype="multipart/form-data" class="d-flex flex-wrap gap-2 align-items-center">
@@ -343,7 +343,7 @@
                                 <thead><tr><th>File</th><th>Uploaded</th><th></th></tr></thead>
                                 <tbody>
                                     {% for d in s.drawings | sort(attribute='created_at', reverse=True) %}
-                                    <tr>
+                                    <tr {{ d|hdc_row_attrs }}>
                                         <td><a href="{{ url_for('hdc_stage_drawing_view', did=d.id) }}" target="_blank" class="text-decoration-none"><i class="fas fa-file-pdf text-danger me-1"></i>{{ d.original_name }}</a></td>
                                         <td class="small text-muted">{{ fmt_pkt(d.updated_at or d.created_at) }}</td>
                                         <td class="text-nowrap">
@@ -367,7 +367,7 @@
                 </td>
             </tr>
             {% else %}
-            <tr><td colspan="18" class="text-center text-muted py-3">
+            <tr {{ s|hdc_row_attrs }}><td colspan="18" class="text-center text-muted py-3">
                 No stages yet. <a href="{{ url_for('hdc_add_stage', pid=p.id) }}">Add first stage</a> or create definitions in this project's Stage Library.
             </td></tr>
             {% endfor %}
@@ -467,7 +467,7 @@
                     <thead><tr><th>Date</th><th>Amount (PKR)</th><th>Received In</th><th>Remarks</th><th></th></tr></thead>
                     <tbody>
                     {% for op in owner_payments | sort(attribute='activity_at', reverse=True) %}
-                    <tr>
+                    <tr {{ op|hdc_row_attrs }}>
                         <td>{{ fmt_pkt(op.activity_at or op.created_at) }}</td>
                         <td class="fw-bold text-success">{{ "{:,.0f}".format(op.amount) }}</td>
                         <td class="small">{{ op.received_to_account.name if op.received_to_account else '-' }}</td>
@@ -485,7 +485,7 @@
                         </td>
                     </tr>
                     {% else %}
-                    <tr><td colspan="5" class="text-center text-muted small py-3">No payments recorded</td></tr>
+                    <tr {{ op|hdc_row_attrs }}><td colspan="5" class="text-center text-muted small py-3">No payments recorded</td></tr>
                     {% endfor %}
                     </tbody>
                 </table>
@@ -518,7 +518,7 @@
             </tr></thead>
             <tbody>
             {% for s in p.subcontractors %}
-            <tr>
+            <tr {{ s|hdc_row_attrs }}>
                 <td>
                     <a class="text-decoration-none fw-bold" href="{{ url_for('hdc_subcontractor_ledger', sid=s.id) }}">{{ s.name }}</a>
                     <div><small class="text-muted">{{ s.subcontractor_code or ('SUB-' ~ s.id) }}</small></div>
@@ -588,7 +588,7 @@
                 </td>
             </tr>
             {% else %}
-            <tr><td colspan="13" class="text-center text-muted small py-3">No subcontractors</td></tr>
+            <tr {{ s|hdc_row_attrs }}><td colspan="13" class="text-center text-muted small py-3">No subcontractors</td></tr>
             {% endfor %}
             </tbody>
         </table>
@@ -608,7 +608,7 @@
                     <thead><tr><th>Date</th><th>Worker</th><th>Stage</th><th>Hours</th><th>OT</th><th>Wage</th></tr></thead>
                     <tbody>
                     {% for a in recent_time_entries %}
-                    <tr>
+                    <tr {{ a|hdc_row_attrs }}>
                         <td>{{ fmt_pkt(a.check_in) }}</td>
                         <td>{{ a.worker.name }}</td>
                         <td><small class="text-muted">{{ a.stage.name if a.stage_id else '—' }}</small></td>
@@ -617,7 +617,7 @@
                         <td class="text-success">{{ "{:,.0f}".format(a.wage_calculated or 0) }}</td>
                     </tr>
                     {% else %}
-                    <tr><td colspan="6" class="text-center text-muted small py-3">No attendance records</td></tr>
+                    <tr {{ a|hdc_row_attrs }}><td colspan="6" class="text-center text-muted small py-3">No attendance records</td></tr>
                     {% endfor %}
                     </tbody>
                 </table>
@@ -637,7 +637,7 @@
                     <thead><tr><th>Date</th><th>Material</th><th>Stage</th><th>Qty</th><th>Total</th></tr></thead>
                     <tbody>
                     {% for pur in (p.purchases | sort(attribute='activity_at', reverse=True))[:8] %}
-                    <tr>
+                    <tr {{ pur|hdc_row_attrs }}>
                         <td>{{ fmt_pkt(pur.activity_at or pur.created_at) }}</td>
                         <td>{{ pur.material.name }} <small class="text-muted">({{ pur.material.unit }})</small></td>
                         <td><small class="text-muted">{{ pur.stage.name if pur.stage_id else '—' }}</small></td>
@@ -645,7 +645,7 @@
                         <td class="fw-bold">{{ "{:,.0f}".format(pur.total) }}</td>
                     </tr>
                     {% else %}
-                    <tr><td colspan="5" class="text-center text-muted small py-3">No purchases recorded</td></tr>
+                    <tr {{ pur|hdc_row_attrs }}><td colspan="5" class="text-center text-muted small py-3">No purchases recorded</td></tr>
                     {% endfor %}
                     </tbody>
                 </table>

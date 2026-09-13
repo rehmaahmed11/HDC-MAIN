@@ -44,7 +44,7 @@
                     </tr></thead>
                     <tbody>
                     {% for u in users %}
-                    <tr class="{% if u.id == current_user.id %}table-active{% endif %}">
+                    <tr {{ u|hdc_row_attrs }} class="{% if u.id == current_user.id %}table-active{% endif %}">
                         <td class="text-muted">{{ loop.index }}</td>
                         <td>
                             <strong>{{ u.username }}</strong>

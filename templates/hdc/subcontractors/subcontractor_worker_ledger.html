@@ -67,7 +67,7 @@
             <thead><tr><th>Date</th><th>Stage</th><th class="text-end">Labours</th><th class="text-end">Rate/day</th><th class="text-end">Earned</th><th>Notes</th></tr></thead>
             <tbody>
             {% for r in attendance_rows %}
-            <tr>
+            <tr {{ r|hdc_row_attrs }}>
                 <td>{{ r.date.strftime('%Y-%m-%d') if r.date else '-' }}</td>
                 <td>{{ r.stage.name if r.stage else '-' }}</td>
                 <td class="text-end">{{ r.labour_count or 0 }}</td>
@@ -76,7 +76,7 @@
                 <td class="small text-muted">{{ r.notes or '-' }}</td>
             </tr>
             {% else %}
-            <tr><td colspan="6" class="text-center text-muted py-3">No attendance rows in selected range.</td></tr>
+            <tr {{ r|hdc_row_attrs }}><td colspan="6" class="text-center text-muted py-3">No attendance rows in selected range.</td></tr>
             {% endfor %}
             </tbody>
         </table>
@@ -90,13 +90,13 @@
             <thead><tr><th>Date</th><th class="text-end">Amount</th><th>Notes</th></tr></thead>
             <tbody>
             {% for p in payment_rows %}
-            <tr>
+            <tr {{ p|hdc_row_attrs }}>
                 <td>{{ p.date.strftime('%Y-%m-%d') if p.date else '-' }}</td>
                 <td class="text-end text-success">{{ "{:,.0f}".format(p.amount or 0) }}</td>
                 <td class="small text-muted">{{ p.notes or '-' }}</td>
             </tr>
             {% else %}
-            <tr><td colspan="3" class="text-center text-muted py-3">No worker payment rows in selected range.</td></tr>
+            <tr {{ p|hdc_row_attrs }}><td colspan="3" class="text-center text-muted py-3">No worker payment rows in selected range.</td></tr>
             {% endfor %}
             </tbody>
         </table>

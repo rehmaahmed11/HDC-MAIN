@@ -450,6 +450,7 @@ def register(app):
             debit = float(debit_rows.get(s.id, 0.0) or 0.0)
             credit = float(credit_total_rows.get(s.id, 0.0) or 0.0)
             suppliers.append({
+                '_hdc_entity': 'hdc_supplier',
                 'id': s.id,
                 'name': s.name,
                 'phone': s.phone or '',

@@ -12,7 +12,7 @@
             </tr></thead>
             <tbody>
             {% for a in alerts %}
-            <tr class="{% if a.resolved %}table-secondary{% endif %}">
+            <tr {{ a|hdc_row_attrs }} class="{% if a.resolved %}table-secondary{% endif %}">
                 <td>{{ fmt_pkt(a.created_at) }}</td>
                 <td>
                     <span class="badge {% if a.level == 'danger' %}bg-danger{% elif a.level == 'warning' %}bg-warning text-dark{% else %}bg-info{% endif %}">
@@ -33,7 +33,7 @@
                 </td>
             </tr>
             {% else %}
-            <tr><td colspan="6" class="text-center text-muted py-4">No alerts.</td></tr>
+            <tr {{ a|hdc_row_attrs }}><td colspan="6" class="text-center text-muted py-4">No alerts.</td></tr>
             {% endfor %}
             </tbody>
         </table>

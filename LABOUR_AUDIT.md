@@ -10,10 +10,10 @@ payroll runs, and their mirror in unified accounts.
 `hdc/routes/payroll.py`, `hdc/services/accounts.py`), cross-checked against the
 templates that display the numbers.
 
-**This repository contains no database** (`*.db` is git-ignored and no
-`hdc_instance/` is checked in), so nothing here is a statement about your live
-figures — it is a statement about what the code *will* do to them. To check the
-actual data, run the audit script shipped with this report:
+**This repository ships one database** (`hdc_erp/hdc_erp (1).db`, tracked even
+though `*.db` is git-ignored). The *Live database run* section at the end of this
+report is the audit of that file; the findings above are what the code does to
+whatever database it is pointed at. To check a database yourself:
 
 ```bash
 python3 scripts/labour_audit.py --db hdc_instance/hdc_erp.db --json audit.json
@@ -642,7 +642,68 @@ Checks performed (`--json` includes the check id on every finding):
 | Settlements | `SETTLEMENT_NO_EXPENSE`, `SETTLEMENT_EXPENSE_NO_LEDGER`, `SETTLEMENT_VOID_LEDGER_LIVE_EXPENSE`, `SETTLEMENT_POSTED_AS_CASH` |
 | Accounts | `ACCOUNTS_MISSING`, `ACCOUNTS_DOUBLE_POSTED`, `ACCOUNTS_AMOUNT_MISMATCH`, `ACCOUNTS_ORPHAN_TXN`, `ACCOUNTS_VOID_NOT_PROPAGATED`, `ACCOUNTS_TXN_ON_VOIDED_ROW` |
 | Payroll | `PAYROLL_RUN_OVERLAP`, `PAYROLL_OVERPAID_RUN`, `PAYROLL_ADVANCE_CLAMPED`, `PAYROLL_NET_MISMATCH`, `PAYROLL_TOTAL_MISMATCH` |
+| Cash rows | `CASH_DUPLICATE_SAME_DAY`, `TIP_LEDGER_WRONG_WORKER`, `CASH_BEFORE_WORKER_RECORD` |
 | Timekeeping | `ATTENDANCE_ID_COLLISION`, `ATTENDANCE_WAGE_LOST_VOID`, `TIMEENTRY_VOID_LIVE_WORK`, `TIMEENTRY_DUPLICATE`, `TIMEENTRY_OVER_24H`, `TIMEENTRY_DANGLING_ATTENDANCE_ID`, `ATTENDANCE_DAY_DRIFT` |
 
 The script re-implements `_calc_time_wage` and `_worker_rate_on` exactly as the
 app does, so `WAGE_MISMATCH` is a true recomputation rather than a guess.
+
+---
+
+## Live database run — `hdc_erp/hdc_erp (1).db` (2026-09-13)
+
+```bash
+python3 scripts/labour_audit.py --db "hdc_erp/hdc_erp (1).db" \
+        --json audit.json --csv findings.csv      # exit status 1
+```
+
+61 findings: **4 CRITICAL, 29 HIGH, 21 MEDIUM, 4 LOW, 3 INFO**. The database
+holds 77 workers, 6,413 time entries (4,610 void), 6,898 labour-ledger rows,
+273 expenses, 1,776 attendance marks and no payroll runs.
+
+| Check | Sev | n | PKR | What it means here |
+|---|---|---|---|---|
+| `TIP_RESURRECTS` | CRITICAL | 2 | 175 | Allah Ditta ledger #495 was voided but its expense #14 is still live; Abid Bwp ledger #300 is voided while expense #7 is untagged, so the next ledger visit re-creates the tip. |
+| `WAGE_ZERO_WITH_HOURS` | CRITICAL | 2 | 1,375 | Hourly workers with a zero rate worked and earned nothing: Inayat Bhuch te#1612 (3h), Zabi-ullah te#1820 (5h). |
+| `WAGE_RATE_CARD_GAP` | HIGH | 6 | 549,827.50 | Work dated before the first rate row, so `_worker_rate_on` falls back to today's profile rate. 546,890 of it is the "Rupowal old attendance" worker (base_daily_wage 65,000; 5 lump-sum entries before its first rate row). That worker's single payment #2825 (865,890) equals the stored wages exactly, so the cash is balanced and the gap is the missing rate history — not an unpaid wage. |
+| `BALANCE_OVERPAID` | HIGH | 17 | 164,852.77 | Paid more than earned. Largest: Inaam JPS −41,650 (earned 252,276 / advance 269,789 / paid 24,125), Haji Ahmad −26,422, Arif BWP −24,000, Abdul Malik −13,500, Nadeem Shah Khori −12,150. The payable screen clamps these to 0, so they are invisible unless the ledger is read. |
+| `CASH_DUPLICATE_SAME_DAY` | HIGH | 2 | 12,000 | The same auto-advance booked twice: Atif 9,000 ×2 on 2026-08-01 (#5412/#5415), Inaam JPS 3,000 ×2 on 2026-09-02 (#6494/#6499). Both pairs say "Auto advance from overpayment" — the flow's duplicate guard is a 12-second window, not an idempotency key. |
+| `TIP_EXPENSE_WITHOUT_LEDGER` | HIGH | 1 | 150 | Expense #14 (Allah Ditta) has no live ledger row — it is the other half of the resurrected tip above. |
+| `TIP_LEDGER_WRONG_WORKER` | HIGH | 1 | 25 | Ledger #381 books 25 PKR to Inaam JPS while its own note tags worker #10 (Abid Bwp): the legacy `LIKE '%TIP_WORKER_ID:1%'` matched `1` inside `10`, so the same tip is counted twice. |
+| `ACCOUNTS_MISSING` | HIGH | 2 | 50 | Tips ledger #381 and #499 never reached unified accounts, so that cash left the worker ledger without hitting the company cash account. |
+| `ADVANCE_EXCEEDS_EARNINGS` | MEDIUM | 1 | 17,512.77 | Inaam JPS was advanced 269,789 against 252,276 earned. |
+| `TIP_NO_WORKER` | MEDIUM | 4 | 1,708 | Tip expenses #101 (1,000), #86 (500), #113 (200), #224 (8) belong to no worker, so no ledger row exists for them. |
+| `TIMEENTRY_DUPLICATE` | MEDIUM | 16 | — | Two active entries for the same worker/project/stage/day (e.g. Nazeer 2026-04-29 #1060/#1061). The UI collapses them, but any export or recomputation counts both. |
+| `CASH_BEFORE_WORKER_RECORD` | LOW | 4 | 10,500 | Cash dated before the worker existed: Baba Zafar (1,333.33 + 666.67 on 2026-04-20, added 04-21), Ali Hamza (500 on 05-04, added 05-05), Ehsan Meson Tibba (8,000 on 06-18, added 06-24). |
+| `TIPS_INFORMATIONAL` | INFO | 3 | 2,924.96 | Tips paid as gratis cash (Qamar 2,849.96, Inaam JPS 50, Abid Bwp 25). Correctly **not** deducted from the balance due. |
+
+What reconciles cleanly: all 6,413 `work` ledger rows match their time entries
+(`BALANCE_WORK_LEDGER_DRIFT` 0), attendance-day totals match the entries
+(`ATTENDANCE_DAY_DRIFT` 0), there are no orphan account transactions
+(`ACCOUNTS_ORPHAN_TXN` 0) and no payroll runs to recalibrate.
+
+### Suggested order of repair
+
+1. **Resurrected tips** (CRITICAL): void/delete expense #14 with ledger #495, and
+   tag/void expense #7 with ledger #300 — until then a page visit re-creates the
+   tip. Both write-path bugs are already fixed in code (`TIP_RESURRECTS` and
+   `TIP_VOID_CASCADE` in the bank above); these are legacy rows.
+2. **Hourly zero-rate rows** (CRITICAL): set the rate on Inayat Bhuch and
+   Zabi-ullah, then let the day be recalculated — 1,375 PKR of work is currently
+   unpaid.
+3. **Duplicate auto-advances** (12,000): confirm which of each pair is real and
+   void the other. Consider an idempotency key on the "auto advance from
+   overpayment" flow rather than the 12-second window.
+4. **Overpaid workers** (164,852.77): decide per worker whether the excess is a
+   recovery or a write-off and record it as a settlement, so the ledger stops
+   disagreeing with the payable screen.
+5. **Missing tip postings** (#381/#499): post the 50 PKR to accounts or void the
+   ledger rows.
+6. **Rupowal rate card**: add the historical rate rows (or suspend the worker) so
+   the 546,890 re-derivation warning goes away.
+7. **Backdated cash** (4 rows), **worker-less tips** (1,708) and the 16 duplicate
+   entries: housekeeping once the money decisions above are made.
+
+New checks added for this run (also covered by
+`tests/test_labour_audit_fixes.py`): `CASH_DUPLICATE_SAME_DAY`,
+`TIP_LEDGER_WRONG_WORKER`, `CASH_BEFORE_WORKER_RECORD`.

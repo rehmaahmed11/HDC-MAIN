@@ -34,7 +34,7 @@
             </thead>
             <tbody>
                 {% for cat in categories %}
-                <tr>
+                <tr {{ cat|hdc_row_attrs }}>
                     <td>{{ loop.index }}</td>
                     <td>
                         <form method="POST" class="d-flex gap-2 align-items-center">
@@ -57,7 +57,7 @@
                     </td>
                 </tr>
                 {% else %}
-                <tr><td colspan="3" class="text-center text-muted py-4">No categories found. Add one to get started.</td></tr>
+                <tr {{ cat|hdc_row_attrs }}><td colspan="3" class="text-center text-muted py-4">No categories found. Add one to get started.</td></tr>
                 {% endfor %}
             </tbody>
         </table>

@@ -37,7 +37,7 @@
                             <tbody>
                                 {% for row in daily_sheet_rows %}
                                 {% set w = row.worker %}
-                                <tr>
+                                <tr {{ row|hdc_row_attrs }}>
                                     <td>{{ loop.index }}</td>
                                     <td>
                                         <strong>{{ w.name }}</strong><br>
@@ -70,7 +70,7 @@
                                     <td><input type="text" name="remarks_{{ w.id }}" class="form-control form-control-sm" value="{{ row.remarks if row.remarks != '-' else '' }}" placeholder="e.g. Boundary wall"></td>
                                 </tr>
                                 {% else %}
-                                <tr><td colspan="7" class="text-center text-muted py-3">No active workers found.</td></tr>
+                                <tr {{ row|hdc_row_attrs }}><td colspan="7" class="text-center text-muted py-3">No active workers found.</td></tr>
                                 {% endfor %}
                             </tbody>
                         </table>
@@ -253,7 +253,7 @@
                     </thead>
                     <tbody>
                     {% for row in attendance_rows %}
-                    <tr class="{% if row.status == 'Voided' %}table-secondary{% endif %}">
+                    <tr {{ row|hdc_row_attrs }} class="{% if row.status == 'Voided' %}table-secondary{% endif %}">
                         <td>{{ row.date.isoformat() }}</td>
                         <td>
                             <a href="{{ url_for('hdc_worker_ledger', wid=row.worker.id) }}" class="text-decoration-none">
@@ -300,7 +300,7 @@
                         </td>
                     </tr>
                     {% else %}
-                    <tr><td colspan="5" class="text-center text-muted py-4">No attendance records found.</td></tr>
+                    <tr {{ row|hdc_row_attrs }}><td colspan="5" class="text-center text-muted py-4">No attendance records found.</td></tr>
                     {% endfor %}
                     </tbody>
                 </table>

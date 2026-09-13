@@ -177,7 +177,8 @@ def load(conn):
 
     data['workers'] = rows(conn, """
         SELECT id, worker_code, name, role_type, wage_type,
-               base_daily_wage, hourly_rate, rate_per_sqft, active_status
+               base_daily_wage, hourly_rate, rate_per_sqft, active_status,
+               created_at
         FROM hdc_worker ORDER BY id""")
     data['worker_by_id'] = {w['id']: w for w in data['workers']}
     wname = {w['id']: f"{w['name']} ({w['worker_code']})" for w in data['workers']}
@@ -1070,9 +1071,97 @@ def check_attendance(d):
 
 
 # --------------------------------------------------------------------------
+# CHECK 8 -- cash rows: duplicates, wrong worker, impossible dates
+# --------------------------------------------------------------------------
+def check_cash_rows(d):
+    """Advance / payment / tip / settlement rows that cannot all be right.
+
+    These are the money-movement mistakes the per-row checks cannot see:
+    the same amount booked twice on one day (the auto-advance flow that turns
+    an overpayment into an advance is *not* idempotent), a tip booked against
+    a worker the expense does not belong to, and cash dated before the worker
+    record existed.
+    """
+    out = []
+    cash_types = ('advance', 'payment', 'tip', 'settlement')
+    active = [r for r in d['ledger']
+              if (r['entry_type'] or '').strip().lower() in cash_types
+              and not r['is_void']]
+
+    # (a) identical amounts, same worker/type/day, recorded more than once
+    bucket = defaultdict(list)
+    for r in active:
+        bucket[(r['worker_id'], r['entry_type'], str(r['date'])[:10],
+                round(f2(r['amount']), 2))].append(r)
+    for key, group in sorted(bucket.items()):
+        if len(group) < 2:
+            continue
+        wid, etype, day, amount = key
+        extra = amount * (len(group) - 1)
+        notes = ' | '.join((r.get('notes') or '-')[:40] for r in group)
+        out.append(finding(
+            'CASH_DUPLICATE_SAME_DAY', 'HIGH',
+            'The same payment is recorded more than once on the same day',
+            f"{len(group)} active '{etype}' rows of {amount:,.2f} PKR on {day} "
+            f"(ids {', '.join('#' + str(r['id']) for r in group)}). Only one can "
+            f"be real: the worker is credited {extra:,.2f} PKR twice. This is "
+            f"exactly what the 'Auto advance from overpayment' flow produces "
+            f"when the same settlement is submitted twice (its duplicate guard "
+            f"is a 12-second window, not an idempotency key). Notes: {notes}",
+            worker=d['wname'].get(wid), amount=extra,
+            refs=' '.join(f"labour_ledger#{r['id']}" for r in group)))
+
+    # (b) tip ledger rows tagged with a different worker
+    for r in d['ledger']:
+        if (r['entry_type'] or '').strip().lower() != 'tip':
+            continue
+        notes = r.get('notes') or ''
+        owner = None
+        m = TIP_EXPENSE_RE.search(notes)
+        if m:
+            exp = d['expense_by_id'].get(int(m.group(1)))
+            if exp is not None:
+                owner = tip_worker_of(exp)
+        if owner is None:
+            m = TIP_WORKER_RE.search(notes)
+            if m:
+                owner = int(m.group(1))
+        if owner is None or owner == r['worker_id']:
+            continue
+        out.append(finding(
+            'TIP_LEDGER_WRONG_WORKER', 'HIGH' if not r['is_void'] else 'MEDIUM',
+            'Tip is booked against the wrong worker',
+            f"Labour ledger #{r['id']} books {f2(r['amount']):,.2f} PKR on "
+            f"{str(r['date'])[:10]} to {d['wname'].get(r['worker_id'])} but its "
+            f"own notes tag worker #{owner}. The legacy LIKE '%TIP_WORKER_ID:1%' "
+            f"matching made worker 1 match worker 10, so this tip is counted "
+            f"twice: once for the right worker and once here.",
+            worker=d['wname'].get(r['worker_id']), amount=r['amount'],
+            refs=f"labour_ledger#{r['id']}"))
+
+    # (c) cash dated before the worker record was created
+    for r in active:
+        worker = d['worker_by_id'].get(r['worker_id']) or {}
+        created = str(worker.get('created_at') or '')[:10]
+        day = str(r['date'])[:10]
+        if created and day and day < created:
+            out.append(finding(
+                'CASH_BEFORE_WORKER_RECORD', 'LOW',
+                'Payment recorded before the worker existed',
+                f"{r['entry_type'].title()} of {f2(r['amount']):,.2f} PKR is "
+                f"dated {day} but worker {d['wname'].get(r['worker_id'])} was "
+                f"only added on {created}. Either the date was backdated entry "
+                f"by entry or the amount belongs to another ledger.",
+                worker=d['wname'].get(r['worker_id']), amount=r['amount'],
+                refs=f"labour_ledger#{r['id']}"))
+    return out
+
+
+# --------------------------------------------------------------------------
 # reporting
 # --------------------------------------------------------------------------
 ALL_CHECKS = (
+    check_cash_rows,
     check_wages,
     check_balances,
     check_tips,
