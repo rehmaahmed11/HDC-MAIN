@@ -56,6 +56,7 @@ fix is pinned by a regression test in `tests/test_labour_audit_fixes.py`
 | 13 | 🟡 MEDIUM | Tips | Editing a tip ledger row can desynchronise it from its expense | ✅ Fixed |
 | 14 | 🟡 MEDIUM | Safety | The duplicate guard is a 12-second window, not a real idempotency key | ⚠️ Deferred |
 | 15 | 🔵 LOW | Robustness | `Worker.total_*` sums crash on `NULL` amounts | ✅ Fixed |
+| 16 | 🟠 HIGH | Wages | Historical wages aren't frozen — a rate-card gap lets one edit rewrite them | ⚠️ Needs a decision |
 
 ---
 
@@ -563,6 +564,56 @@ the Workers list.
 
 ---
 
+## 16. 🟠 Historical wages are not frozen — a rate gap lets one edit rewrite them
+
+Found while running the audit against live data, not in the original code trace.
+
+`_worker_rate_on` (`hdc/services/timekeeping.py:163-181`) resolves the rate for a
+work date by taking the latest `WorkerRate` row with
+`effective_from <= work_date`, and **falls back to the worker's current profile**
+when none matches:
+
+```python
+if on_date:
+    wr = (WorkerRate.query
+          .filter(WorkerRate.worker_id == worker.id,
+                  WorkerRate.effective_from <= on_date)   # ← nothing matches
+          ...
+# Fallback to current profile values
+return 'daily', float(worker.base_daily_wage or 0.0)
+```
+
+`hdc_worker_rate` sets `effective_from` to the day the change is *entered*
+(`hdc/routes/workers.py`, `_parse_date(request.form.get('effective_from'))`
+defaulting to today), so any day worked **before the first rate change** has no
+covering row.
+
+**Why it matters.** Those historical wages are correct for their date but cannot
+be reproduced from the rate card. Every path that recalculates a day —
+`hdc_edit_attendance`, `hdc_delete_attendance`, `hdc_reactivate_attendance` and
+the bulk sheet — calls `_recalculate_attendance_day`, which recomputes
+`wage_calculated` from scratch. Touching one of those days **silently rewrites
+the wage at today's rate**.
+
+In the live database this affects **17 time entries worth 886,952 PKR**, the
+largest being a single 454,190 PKR entry that would recalculate to 65,000 PKR.
+
+**Not fixed here** — it needs a product decision, because there are two
+defensible answers:
+
+1. **Freeze the wage**: store the rate and wage type used on the `TimeEntry` at
+   save time and never recompute historical days (only recompute when the user
+   explicitly asks). Safest, and it makes the ledger reproducible.
+2. **Fix the rate card**: backdate `WorkerRate` rows so every period is covered,
+   and make `effective_from` a required, validated field on the rate screen
+   rather than defaulting to today.
+
+Until one is chosen, the audit reports these as `WAGE_RATE_CARD_GAP` (kept
+separate from `WAGE_MISMATCH`, which means a rate row *does* cover the date and
+the stored wage is genuinely wrong).
+
+---
+
 ## Running the audit on your live database
 
 ```bash
@@ -585,7 +636,7 @@ Checks performed (`--json` includes the check id on every finding):
 
 | Area | Check ids |
 |---|---|
-| Wages | `WAGE_MISMATCH`, `WAGE_ZERO_WITH_HOURS`, `WAGE_PERSQFT_NO_QTY`, `WAGE_ORPHAN_WORKER` |
+| Wages | `WAGE_MISMATCH`, `WAGE_RATE_CARD_GAP`, `WAGE_ZERO_WITH_HOURS`, `WAGE_PERSQFT_NO_QTY`, `WAGE_ORPHAN_WORKER` |
 | Balances | `BALANCE_TWO_FORMULAS`, `BALANCE_OVERPAID`, `BALANCE_WORK_LEDGER_DRIFT`, `ADVANCE_EXCEEDS_EARNINGS` |
 | Tips | `TIP_DUPLICATE`, `TIP_RESURRECTS`, `TIP_EXPENSE_WITHOUT_LEDGER`, `TIP_LEDGER_WITHOUT_EXPENSE`, `TIP_UNTAGGED`, `TIP_AMOUNT_MISMATCH`, `TIP_LEDGER_VOID_EXPENSE`, `TIP_NO_WORKER`, `TIPS_INFORMATIONAL` |
 | Settlements | `SETTLEMENT_NO_EXPENSE`, `SETTLEMENT_EXPENSE_NO_LEDGER`, `SETTLEMENT_VOID_LEDGER_LIVE_EXPENSE`, `SETTLEMENT_POSTED_AS_CASH` |

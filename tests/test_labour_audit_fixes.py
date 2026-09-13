@@ -710,25 +710,72 @@ class TestSettlementCascade(LabourTestCase):
 # The audit CLI itself
 # --------------------------------------------------------------------------
 class TestAuditScript(LabourTestCase):
-    def test_clean_worker_produces_no_blocking_findings(self):
+    def _audit(self, extra_args=('--exit-zero',)):
         import subprocess
+        script = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
+                                              'scripts', 'labour_audit.py'))
+        return subprocess.run(
+            [sys.executable, script, '--db', self.db_path, *extra_args],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False
+        ).stdout.decode('utf-8', 'replace')
+
+    def test_clean_worker_produces_no_blocking_findings(self):
         w = self._make_worker()
         self._time_entry(w, 0, wage=1000.0)
         self._ledger(w, 'advance', 200.0, 1)
         self._ledger(w, 'payment', 800.0, 2)
         db.session.commit()
 
-        script = os.path.join(os.path.dirname(__file__), '..', 'scripts',
-                              'labour_audit.py')
-        proc = subprocess.run(
-            [sys.executable, os.path.abspath(script), '--db', self.db_path,
-             '--exit-zero'],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
-        out = proc.stdout.decode('utf-8', 'replace')
-        self.assertEqual(proc.returncode, 0, out)
+        out = self._audit()
         self.assertNotIn('BALANCE_TWO_FORMULAS', out)
         self.assertNotIn('WAGE_MISMATCH', out)
         self.assertNotIn('BALANCE_OVERPAID', out)
+
+    def test_hourly_rate_falls_back_to_daily_field(self):
+        """An hourly worker whose rate lives in base_daily_wage is paid, not 0.
+
+        The app resolves ``hourly_rate or hourly_wage`` (daily / 8). An audit
+        mirror that reads only ``hourly_rate`` reports every such worker as
+        unpaid -- which is what happened against the live database.
+        """
+        from hdc.models.workforce import WorkerRate
+        w = self._make_worker(wage_type='hourly', daily=2000.0, hourly=0.0)
+        db.session.add(WorkerRate(worker_id=w.id, wage_type='hourly', rate=250.0,
+                                  effective_from=D0, reason='derived'))
+        db.session.commit()
+        # 8h x 250 = 2000, which is what the app stores.
+        self._time_entry(w, 0, hours=8.0, wage=2000.0)
+
+        out = self._audit()
+        self.assertNotIn('WAGE_ZERO_WITH_HOURS', out)
+        self.assertNotIn('WAGE_MISMATCH', out)
+
+    def test_rate_card_gap_is_reported_separately_from_real_drift(self):
+        """Work dated before the first rate row is a rate-card gap, not a bug."""
+        from hdc.models.workforce import WorkerRate
+        w = self._make_worker(wage_type='daily', daily=2200.0)
+        # Rate history starts AFTER the work date, so the app cannot reproduce it.
+        db.session.add(WorkerRate(worker_id=w.id, wage_type='daily', rate=2200.0,
+                                  effective_from=D0 + timedelta(days=30),
+                                  reason='late'))
+        db.session.commit()
+        self._time_entry(w, 0, wage=2100.0)   # correct for its date
+
+        out = self._audit()
+        self.assertIn('WAGE_RATE_CARD_GAP', out)
+        self.assertNotIn('WAGE_MISMATCH', out)
+
+    def test_genuine_drift_is_still_reported(self):
+        from hdc.models.workforce import WorkerRate
+        w = self._make_worker(wage_type='daily', daily=2200.0)
+        db.session.add(WorkerRate(worker_id=w.id, wage_type='daily', rate=2200.0,
+                                  effective_from=D0, reason='covers the day'))
+        db.session.commit()
+        self._time_entry(w, 0, wage=5000.0)   # rate covers the date: real drift
+
+        out = self._audit()
+        self.assertIn('WAGE_MISMATCH', out)
+        self.assertNotIn('WAGE_RATE_CARD_GAP', out)
 
 
 if __name__ == '__main__':

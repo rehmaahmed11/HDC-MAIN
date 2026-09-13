@@ -125,10 +125,32 @@ def rate_on(worker, rate_rows, on_date):
             return (r['wage_type'] or worker['wage_type'] or 'daily'), f2(r['rate'])
     wt = (worker['wage_type'] or 'daily')
     if wt == 'hourly':
-        return wt, f2(worker.get('hourly_rate'))
+        # Mirror the app's fallback exactly: hourly_rate, else the derived
+        # hourly_wage (base_daily_wage / 8), else 0. Getting this wrong reports
+        # every hourly worker whose rate lives in the daily field as unpaid.
+        rate = f2(worker.get('hourly_rate'))
+        if rate <= 0.0:
+            rate = f2(worker.get('base_daily_wage')) / 8.0
+        return wt, rate
     if wt == 'per_sqft':
         return wt, f2(worker.get('rate_per_sqft'))
     return 'daily', f2(worker.get('base_daily_wage'))
+
+
+def rate_history_covers(worker, rate_rows, on_date):
+    """True when a rate row actually predates (or equals) the work date.
+
+    ``_worker_rate_on`` falls back to the worker's *current* profile rate when no
+    history row covers the date. Rate rows are created with ``effective_from``
+    defaulting to the day they were entered, so any day worked before the first
+    rate change resolves against today's rate -- and recalculating that day
+    silently rewrites the historical wage.
+    """
+    if not on_date:
+        return True
+    return any(r['worker_id'] == worker['id'] and r['effective_from']
+               and str(r['effective_from']) <= on_date
+               for r in rate_rows)
 
 
 def calc_time_wage(worker, rate_rows, hours, overtime, qty_sqft, on_date):
@@ -241,6 +263,7 @@ def tip_expense_ids(notes):
 def check_wages(d):
     out = []
     per_sqft_zero = defaultdict(int)
+    gap = defaultdict(list)
 
     for te in d['time_entries']:
         if te['is_void']:
@@ -266,16 +289,27 @@ def check_wages(d):
             regular, ot, te['qty_sqft'], work_date)
 
         if not te['legacy_calc'] and abs(expected - stored) > MONEY_TOL:
-            out.append(finding(
-                'WAGE_MISMATCH', 'HIGH' if abs(expected - stored) > 5 else 'MEDIUM',
-                'Stored wage does not match the wage formula',
-                f"Time entry #{te['id']} on {work_date}: stored "
-                f"{stored:,.2f} PKR but the rate card gives {expected:,.2f} PKR "
-                f"({wt} @ {base:,.2f}, {regular:.2f}h regular + {ot:.2f}h OT). "
-                f"Drift {stored - expected:+,.2f} PKR.",
-                worker=d['wname'].get(w['id']),
-                amount=stored - expected,
-                refs=f"time_entry#{te['id']}"))
+            if rate_history_covers(w, d['rates_by_worker'].get(w['id'], []),
+                                   work_date):
+                out.append(finding(
+                    'WAGE_MISMATCH',
+                    'HIGH' if abs(expected - stored) > 5 else 'MEDIUM',
+                    'Stored wage does not match the wage formula',
+                    f"Time entry #{te['id']} on {work_date}: stored "
+                    f"{stored:,.2f} PKR but the rate card gives {expected:,.2f} PKR "
+                    f"({wt} @ {base:,.2f}, {regular:.2f}h regular + {ot:.2f}h OT). "
+                    f"Drift {stored - expected:+,.2f} PKR. A rate row does cover "
+                    f"this date, so the stored value is genuinely out of step.",
+                    worker=d['wname'].get(w['id']),
+                    amount=stored - expected,
+                    refs=f"time_entry#{te['id']}"))
+            else:
+                # No rate row predates this work date, so the app resolved the
+                # wage against whatever the profile said at save time. The
+                # stored figure is probably right and the rate card is what is
+                # incomplete -- but the day is one recalculation away from being
+                # silently rewritten at today's rate.
+                gap[w['id']].append((te['id'], work_date, stored, expected))
 
         if hours > HOUR_TOL and stored <= 0.005 and not te['legacy_calc']:
             out.append(finding(
@@ -290,6 +324,26 @@ def check_wages(d):
 
         if wt == 'per_sqft' and f2(te['qty_sqft']) <= 0.0:
             per_sqft_zero[w['id']] += 1
+
+    for wid, entries in gap.items():
+        total = sum(abs(stored - exp) for _, _, stored, exp in entries)
+        first_rate = min((str(r['effective_from']) for r in d['rates']
+                          if r['worker_id'] == wid), default='(none)')
+        out.append(finding(
+            'WAGE_RATE_CARD_GAP', 'HIGH',
+            'Historical wages cannot be reproduced from the rate card',
+            f"{len(entries)} time entr(y/ies) were worked before this worker's "
+            f"first rate row ({first_rate}), so _worker_rate_on fell back to the "
+            f"profile rate in force at save time. Affected days: "
+            + '; '.join(f"#{tid} {dt} stored {st:,.0f} vs {ex:,.0f} today"
+                        for tid, dt, st, ex in entries[:6])
+            + ('; …' if len(entries) > 6 else '')
+            + f". The stored figures are probably correct for their date, but the "
+            f"rate card cannot prove it -- and editing, voiding or reactivating "
+            f"any of these days recalculates it at today's rate, silently "
+            f"rewriting {total:,.0f} PKR of history. Fix: backdate a rate row to "
+            f"cover each period.",
+            worker=d['wname'].get(wid), amount=total))
 
     for wid, n in per_sqft_zero.items():
         out.append(finding(
