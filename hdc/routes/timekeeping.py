@@ -413,6 +413,10 @@ def register(app):
             if row.get('entry') is None or (te.check_in or datetime.min) > (row['entry'].check_in or datetime.min):
                 row['entry'] = te
             row['entries'].append({
+                # Keep the ORM row with each detailed entry so the shared
+                # traceability filter can identify the exact time entry (not
+                # only the grouped worker/day row).
+                '_hdc_row': te,
                 'id': te.id,
                 'project': proj,
                 'stage': te.stage,
