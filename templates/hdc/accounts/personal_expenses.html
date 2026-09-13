@@ -60,7 +60,7 @@
                 </thead>
                 <tbody>
                     {% for row in rows.items %}
-                    <tr {% if row.is_void %}style="opacity: 0.6;"{% endif %}>
+                    <tr {{ row|hdc_row_attrs }} {% if row.is_void %}style="opacity: 0.6;"{% endif %}>
                         <td><small>{{ row.date.strftime('%Y-%m-%d') }}</small></td>
                         <td>
                             <strong>{{ row.beneficiary_name }}</strong>
@@ -113,7 +113,7 @@
                         <a class="page-link" href="{{ url_for('hdc_personal_expenses', page=rows.prev_num, show_void=('yes' if show_void else ''), date_from=filter_date_from, date_to=filter_date_to, category=filter_category) }}">Previous</a>
                     </li>
                 {% endif %}
-                {% for page_num in rows.iter_pages(left_edge=1, left_margin=1, right_margin=1, right_edge=1) %}
+                {% for page_num in rows.iter_pages(left_edge=1, left_current=1, right_current=1, right_edge=1) %}
                     {% if page_num %}
                         {% if page_num == rows.page %}
                             <li class="page-item active"><span class="page-link">{{ page_num }}</span></li>

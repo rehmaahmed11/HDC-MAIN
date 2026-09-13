@@ -175,7 +175,7 @@
     </tr></thead>
     <tbody>
     {% for w in workers %}
-    <tr data-worker-id="{{ w.id }}" data-worker-name="{{ (w.name or '')|lower }}" data-worker-code="{{ (w.worker_code or '')|lower }}" data-worker-role="{{ (w.role_type or '')|lower }}"
+    <tr {{ w|hdc_row_attrs }} data-worker-id="{{ w.id }}" data-worker-name="{{ (w.name or '')|lower }}" data-worker-code="{{ (w.worker_code or '')|lower }}" data-worker-role="{{ (w.role_type or '')|lower }}"
         data-worker-code-raw="{{ w.worker_code }}"
         data-worker-name-raw="{{ w.name }}"
         data-worker-role-raw="{{ w.role_type or '' }}"
@@ -228,7 +228,7 @@
         </td>
     </tr>
     {% else %}
-    <tr><td colspan="10" class="text-center text-muted py-4">No workers. Add one to get started.</td></tr>
+    <tr {{ w|hdc_row_attrs }}><td colspan="10" class="text-center text-muted py-4">No workers. Add one to get started.</td></tr>
     {% endfor %}
     </tbody>
 </table>

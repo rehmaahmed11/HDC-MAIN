@@ -121,7 +121,7 @@
                     </thead>
                     <tbody>
                         {% for b in backups %}
-                        <tr>
+                        <tr {{ b|hdc_row_attrs }}>
                             <td class="text-break">{{ b.name }}</td>
                             <td>{{ b.modified.strftime('%Y-%m-%d %H:%M:%S PKT') }}</td>
                             <td>{{ "{:,.1f}".format((b.size or 0) / 1024.0) }} KB</td>
@@ -142,7 +142,7 @@
                             </td>
                         </tr>
                         {% else %}
-                        <tr>
+                        <tr {{ b|hdc_row_attrs }}>
                             <td colspan="4" class="text-center text-muted py-3">No backups found yet.</td>
                         </tr>
                         {% endfor %}

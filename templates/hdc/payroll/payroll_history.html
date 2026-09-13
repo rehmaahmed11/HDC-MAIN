@@ -19,7 +19,7 @@
             </thead>
             <tbody>
                 {% for r in runs %}
-                <tr>
+                <tr {{ r|hdc_row_attrs }}>
                     <td><span class="badge bg-secondary">{{ r.id }}</span></td>
                     <td>{{ r.date_from }}</td>
                     <td>{{ r.date_to }}</td>
@@ -31,7 +31,7 @@
                     </td>
                 </tr>
                 {% else %}
-                <tr><td colspan="6" class="text-center text-muted py-4">No payroll runs yet.</td></tr>
+                <tr {{ r|hdc_row_attrs }}><td colspan="6" class="text-center text-muted py-4">No payroll runs yet.</td></tr>
                 {% endfor %}
             </tbody>
         </table>

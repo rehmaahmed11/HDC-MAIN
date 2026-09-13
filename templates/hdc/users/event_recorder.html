@@ -75,7 +75,7 @@
                     </thead>
                     <tbody>
                         {% for l in logs %}
-                        <tr>
+                        <tr {{ l|hdc_row_attrs }}>
                             <td>{{ fmt_pkt(l.created_at) }}</td>
                             <td>
                                 <strong>{{ l.username or 'system' }}</strong>
@@ -93,7 +93,7 @@
                             <td>{{ l.description or '-' }}</td>
                         </tr>
                         {% else %}
-                        <tr><td colspan="5" class="text-center text-muted py-4">No activity found for current filters.</td></tr>
+                        <tr {{ l|hdc_row_attrs }}><td colspan="5" class="text-center text-muted py-4">No activity found for current filters.</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>

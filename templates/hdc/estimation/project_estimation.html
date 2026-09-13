@@ -97,7 +97,7 @@
                 </thead>
                 <tbody>
                 {% for e in estimations %}
-                    <tr>
+                    <tr {{ e|hdc_row_attrs }}>
                         <td class="text-muted small">{{ fmt_pkt(e.created_at) }}</td>
                         <td>{{ e.name or 'Untitled Estimation' }}</td>
                         <td class="text-end fw-bold">{{ "{:,.0f}".format(e.total_cost or 0) }}</td>

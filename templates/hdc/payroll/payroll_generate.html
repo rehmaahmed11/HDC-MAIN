@@ -124,7 +124,7 @@
                     </tr></thead>
                     <tbody>
                     {% for it in items %}
-                    <tr>
+                    <tr {{ it|hdc_row_attrs }}>
                         <td>{{ it.worker.name if it.worker else '' }}</td>
                         <td>{{ "{:,.2f}".format(it.total_hours or 0) }}</td>
                         <td>{{ "{:,.2f}".format(it.total_overtime or 0) }}</td>
@@ -133,7 +133,7 @@
                         <td class="fw-bold text-success">{{ "{:,.0f}".format(it.net_pay or 0) }}</td>
                     </tr>
                     {% else %}
-                    <tr><td colspan="6" class="text-center text-muted py-3">Select a run to view items.</td></tr>
+                    <tr {{ it|hdc_row_attrs }}><td colspan="6" class="text-center text-muted py-3">Select a run to view items.</td></tr>
                     {% endfor %}
                     </tbody>
                 </table>
@@ -148,14 +148,14 @@
                     <thead><tr><th>Date</th><th>Work Entries</th><th>Absent Entries</th><th>Not Assigned Entries</th></tr></thead>
                     <tbody>
                     {% for d in day_status_rows %}
-                    <tr>
+                    <tr {{ d|hdc_row_attrs }}>
                         <td>{{ d.date }}</td>
                         <td class="text-success fw-bold">{{ d.work_entries }}</td>
                         <td class="text-warning fw-bold">{{ d.absent_entries }}</td>
                         <td class="text-muted fw-bold">{{ d.not_assigned_entries }}</td>
                     </tr>
                     {% else %}
-                    <tr><td colspan="4" class="text-center text-muted py-3">No day summary available.</td></tr>
+                    <tr {{ d|hdc_row_attrs }}><td colspan="4" class="text-center text-muted py-3">No day summary available.</td></tr>
                     {% endfor %}
                     </tbody>
                     <tfoot>
@@ -192,7 +192,7 @@
                     </tr></thead>
                     <tbody>
                     {% for r in payroll_summary_rows %}
-                    <tr>
+                    <tr {{ r|hdc_row_attrs }}>
                         <td>
                             <strong>{{ r.worker.name }}</strong><br>
                             <small class="text-muted">{{ r.worker.worker_code }}</small>
@@ -237,7 +237,7 @@
                         </td>
                     </tr>
                     {% else %}
-                    <tr><td colspan="14" class="text-center text-muted py-3">No worker report available.</td></tr>
+                    <tr {{ r|hdc_row_attrs }}><td colspan="14" class="text-center text-muted py-3">No worker report available.</td></tr>
                     {% endfor %}
                     </tbody>
                     <tfoot>
@@ -282,7 +282,7 @@
                     </thead>
                     <tbody>
                     {% for row in worker_calendar_rows %}
-                        <tr>
+                        <tr {{ row|hdc_row_attrs }}>
                             <td>
                                 <strong>{{ row.worker.name }}</strong><br>
                                 <small class="text-muted">{{ row.worker.worker_code }}</small>
@@ -296,7 +296,7 @@
                             {% endfor %}
                         </tr>
                     {% else %}
-                        <tr><td colspan="100" class="text-center text-muted py-3">No calendar rows available.</td></tr>
+                        <tr {{ row|hdc_row_attrs }}><td colspan="100" class="text-center text-muted py-3">No calendar rows available.</td></tr>
                     {% endfor %}
                     </tbody>
                 </table>

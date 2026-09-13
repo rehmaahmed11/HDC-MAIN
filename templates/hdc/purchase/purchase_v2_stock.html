@@ -76,7 +76,7 @@
             </thead>
             <tbody>
                 {% for r in summary_rows %}
-                <tr>
+                <tr {{ r|hdc_row_attrs }}>
                     <td class="fw-semibold">{{ r.material.name }}</td>
                     <td>{{ r.material.unit or '' }}</td>
                     <td class="text-end">{{ "{:,.2f}".format(r.sent_qty or 0) }}</td>
@@ -86,7 +86,7 @@
                     </td>
                 </tr>
                 {% else %}
-                <tr><td colspan="5" class="text-center text-muted py-4">No stock/usage data for selected filters.</td></tr>
+                <tr {{ r|hdc_row_attrs }}><td colspan="5" class="text-center text-muted py-4">No stock/usage data for selected filters.</td></tr>
                 {% endfor %}
             </tbody>
         </table>
@@ -112,7 +112,7 @@
             </thead>
             <tbody>
                 {% for d in delivery_rows %}
-                <tr>
+                <tr {{ d|hdc_row_attrs }}>
                     <td class="small">{{ d.date.strftime('%Y-%m-%d') if d.date else (d.created_at.strftime('%Y-%m-%d') if d.created_at else '-') }}</td>
                     <td>{{ d.material.name if d.material else '-' }}</td>
                     <td>{{ d.project.name if d.project else '-' }}</td>
@@ -162,7 +162,7 @@
                     </td>
                 </tr>
                 {% else %}
-                <tr><td colspan="9" class="text-center text-muted py-4">No deliveries for selected filters.</td></tr>
+                <tr {{ d|hdc_row_attrs }}><td colspan="9" class="text-center text-muted py-4">No deliveries for selected filters.</td></tr>
                 {% endfor %}
             </tbody>
         </table>

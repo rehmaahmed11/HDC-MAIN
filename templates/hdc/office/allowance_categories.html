@@ -52,7 +52,7 @@
             </thead>
             <tbody>
                 {% for category in categories %}
-                <tr>
+                <tr {{ category|hdc_row_attrs }}>
                     <td>
                         <strong>{{ category.name }}</strong>
                     </td>
@@ -76,7 +76,7 @@
                     </td>
                 </tr>
                 {% else %}
-                <tr><td colspan="5" class="text-center text-muted py-4">No allowance categories found.</td></tr>
+                <tr {{ category|hdc_row_attrs }}><td colspan="5" class="text-center text-muted py-4">No allowance categories found.</td></tr>
                 {% endfor %}
             </tbody>
         </table>

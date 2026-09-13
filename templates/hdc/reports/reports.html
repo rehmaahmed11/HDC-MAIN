@@ -106,7 +106,7 @@
             </tr></thead>
             <tbody>
             {% for row in stage_rows %}
-            <tr>
+            <tr {{ row|hdc_row_attrs }}>
                 <td><strong>{{ row.name }}</strong></td>
                 <td>
                     {% set st = (row.status or '')|lower %}
@@ -156,7 +156,7 @@
             </tr></thead>
             <tbody>
             {% for p in projects %}
-            <tr {% if pid == p.id %}class="table-active"{% endif %}>
+            <tr {{ p|hdc_row_attrs }} {% if pid == p.id %}class="table-active"{% endif %}>
                 <td><span class="badge bg-secondary">{{ p.project_code }}</span></td>
                 <td><a href="{{ url_for('hdc_project_detail', pid=p.id) }}" class="text-decoration-none">{{ p.name }}</a></td>
                 <td>{{ "{:,.0f}".format(p.owner_contract_value) }}</td>
@@ -171,7 +171,7 @@
                 <td class="text-warning">{{ "{:,.0f}".format(p.remaining_receivable) }}</td>
             </tr>
             {% else %}
-            <tr><td colspan="12" class="text-center text-muted py-4">No projects found.</td></tr>
+            <tr {{ p|hdc_row_attrs }}><td colspan="12" class="text-center text-muted py-4">No projects found.</td></tr>
             {% endfor %}
             </tbody>
         </table>
@@ -251,7 +251,7 @@
             </tr></thead>
             <tbody>
             {% for r in worker_detail_rows %}
-            <tr>
+            <tr {{ r|hdc_row_attrs }}>
                 <td>{{ r.work_date or '-' }}</td>
                 <td>{{ r.worker_name or (worker_selected.name if worker_selected else '-') }}</td>
                 <td>{{ r.project_name or '-' }}</td>
@@ -260,7 +260,7 @@
                 <td class="text-end">{{ "{:,.0f}".format(r.total_wage or 0) }}</td>
             </tr>
             {% else %}
-            <tr><td colspan="6" class="text-center text-muted py-4">No records found.</td></tr>
+            <tr {{ r|hdc_row_attrs }}><td colspan="6" class="text-center text-muted py-4">No records found.</td></tr>
             {% endfor %}
             </tbody>
             <tfoot class="table-secondary fw-bold">
@@ -278,7 +278,7 @@
             </tr></thead>
             <tbody>
             {% for r in worker_summary_rows %}
-            <tr>
+            <tr {{ r|hdc_row_attrs }}>
                 <td>{{ r.worker_name }}</td>
                 <td>{{ r.worker_trade or 'Worker' }}</td>
                 <td class="text-end">{{ "{:,.0f}".format(r.days_worked or 0) }}</td>
@@ -286,7 +286,7 @@
                 <td class="text-end">{{ "{:,.0f}".format(r.total_wage or 0) }}</td>
             </tr>
             {% else %}
-            <tr><td colspan="5" class="text-center text-muted py-4">No records found.</td></tr>
+            <tr {{ r|hdc_row_attrs }}><td colspan="5" class="text-center text-muted py-4">No records found.</td></tr>
             {% endfor %}
             </tbody>
             <tfoot class="table-secondary fw-bold">
@@ -520,7 +520,7 @@
             </tr></thead>
             <tbody>
             {% for r in stage_cost_rows %}
-            <tr>
+            <tr {{ r|hdc_row_attrs }}>
                 <td>{{ r.project }}</td>
                 <td>{{ r.stage }}</td>
                 <td>{{ "{:,.0f}".format(r.estimated) }}</td>
@@ -528,7 +528,7 @@
                 <td>{{ "{:,.0f}".format(r.progress) }}%</td>
             </tr>
             {% else %}
-            <tr><td colspan="5" class="text-center text-muted py-4">No records found.</td></tr>
+            <tr {{ r|hdc_row_attrs }}><td colspan="5" class="text-center text-muted py-4">No records found.</td></tr>
             {% endfor %}
             </tbody>
         </table>
@@ -587,7 +587,7 @@
             </tr></thead>
             <tbody>
             {% for e in expense_records %}
-            <tr>
+            <tr {{ e|hdc_row_attrs }}>
                 <td>{{ fmt_pkt(e.activity_at or e.created_at) }}</td>
                 <td>{{ e.project.name if e.project else '' }}</td>
                 <td>{{ e.stage.name if e.stage_id else '' }}</td>
@@ -595,7 +595,7 @@
                 <td class="fw-bold">{{ "{:,.0f}".format(e.amount or 0) }}</td>
             </tr>
             {% else %}
-            <tr><td colspan="5" class="text-center text-muted py-4">No records found.</td></tr>
+            <tr {{ e|hdc_row_attrs }}><td colspan="5" class="text-center text-muted py-4">No records found.</td></tr>
             {% endfor %}
             </tbody>
             <tfoot class="table-secondary fw-bold">

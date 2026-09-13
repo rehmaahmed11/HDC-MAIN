@@ -27,7 +27,7 @@
                 </thead>
                 <tbody>
                     {% for cat in categories %}
-                    <tr {% if not cat.active_status %}style="opacity: 0.6;"{% endif %}>
+                    <tr {{ cat|hdc_row_attrs }} {% if not cat.active_status %}style="opacity: 0.6;"{% endif %}>
                         <td><strong>{{ cat.name }}</strong></td>
                         <td><small>{{ cat.description or '-' }}</small></td>
                         <td>

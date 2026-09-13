@@ -116,7 +116,7 @@
                     </tr></thead>
                     <tbody>
                     {% for entry in ledger_entries %}
-                    <tr class="{% if entry.is_void %}table-secondary{% elif entry.entry_type == 'work' %}table-success-light{% elif entry.entry_type == 'advance' %}table-warning-light{% elif entry.entry_type == 'payment' %}table-danger-light{% elif entry.entry_type == 'tip' %}table-info{% elif entry.entry_type == 'settlement' %}table-primary{% endif %}">
+                    <tr {{ entry|hdc_row_attrs }} class="{% if entry.is_void %}table-secondary{% elif entry.entry_type == 'work' %}table-success-light{% elif entry.entry_type == 'advance' %}table-warning-light{% elif entry.entry_type == 'payment' %}table-danger-light{% elif entry.entry_type == 'tip' %}table-info{% elif entry.entry_type == 'settlement' %}table-primary{% endif %}">
                         <td>{{ fmt_pkt(entry.activity_at or entry.created_at) }}</td>
                         <td>
                             <span class="badge {% if entry.is_void %}bg-secondary{% elif entry.entry_type == 'work' %}bg-success{% elif entry.entry_type == 'advance' %}bg-warning text-dark{% elif entry.entry_type == 'payment' %}bg-danger{% elif entry.entry_type == 'tip' %}bg-info text-dark{% elif entry.entry_type == 'settlement' %}bg-primary{% else %}bg-secondary{% endif %}">
@@ -158,7 +158,7 @@
                         </td>
                     </tr>
                     {% else %}
-                    <tr><td colspan="8" class="text-center text-muted py-4 hdc-empty-row">No ledger entries yet.</td></tr>
+                    <tr {{ entry|hdc_row_attrs }}><td colspan="8" class="text-center text-muted py-4 hdc-empty-row">No ledger entries yet.</td></tr>
                     {% endfor %}
                     </tbody>
                     <tfoot class="table-secondary fw-bold">
@@ -183,7 +183,7 @@
                     <thead><tr><th>Date</th><th>Project</th><th>Stage</th><th>Hours</th><th>OT</th><th>Wage</th></tr></thead>
                     <tbody>
                     {% for a in time_entries %}
-                    <tr>
+                    <tr {{ a|hdc_row_attrs }}>
                         <td>{{ fmt_pkt(a.check_in) }}</td>
                         <td class="text-muted small">{{ a.project.name }}</td>
                         <td class="text-muted small">{{ a.stage.name if a.stage_id else '-' }}</td>
@@ -192,7 +192,7 @@
                         <td class="fw-bold text-success">{{ "{:,.0f}".format(a.wage_calculated or 0) }}</td>
                     </tr>
                     {% else %}
-                    <tr><td colspan="6" class="text-center text-muted py-3 hdc-empty-row">No attendance records</td></tr>
+                    <tr {{ a|hdc_row_attrs }}><td colspan="6" class="text-center text-muted py-3 hdc-empty-row">No attendance records</td></tr>
                     {% endfor %}
                     </tbody>
                 </table>
@@ -206,7 +206,7 @@
                     <thead><tr><th>Date</th><th>Project</th><th>Stage</th><th>Amount</th><th>Remarks</th></tr></thead>
                     <tbody>
                     {% for e in tip_rows %}
-                    <tr>
+                    <tr {{ e|hdc_row_attrs }}>
                         <td>{{ fmt_pkt(e.activity_at or e.created_at) }}</td>
                         <td class="text-muted small">{{ e.project.name if e.project else '-' }}</td>
                         <td class="text-muted small">{{ e.stage.name if e.stage else '-' }}</td>
@@ -214,7 +214,7 @@
                         <td class="text-muted small">{{ e.remarks or '-' }}</td>
                     </tr>
                     {% else %}
-                    <tr><td colspan="5" class="text-center text-muted py-3 hdc-empty-row">No tip expense trace for this worker.</td></tr>
+                    <tr {{ e|hdc_row_attrs }}><td colspan="5" class="text-center text-muted py-3 hdc-empty-row">No tip expense trace for this worker.</td></tr>
                     {% endfor %}
                     </tbody>
                 </table>
@@ -228,7 +228,7 @@
                     <thead><tr><th>Date</th><th>Project</th><th>Stage</th><th>Amount</th><th>Remarks</th></tr></thead>
                     <tbody>
                     {% for e in settlement_rows %}
-                    <tr>
+                    <tr {{ e|hdc_row_attrs }}>
                         <td>{{ fmt_pkt(e.activity_at or e.created_at) }}</td>
                         <td class="text-muted small">{{ e.project.name if e.project else '-' }}</td>
                         <td class="text-muted small">{{ e.stage.name if e.stage else '-' }}</td>
@@ -236,7 +236,7 @@
                         <td class="text-muted small">{{ e.notes or '-' }}</td>
                     </tr>
                     {% else %}
-                    <tr><td colspan="5" class="text-center text-muted py-3 hdc-empty-row">No settlement trace for this worker.</td></tr>
+                    <tr {{ e|hdc_row_attrs }}><td colspan="5" class="text-center text-muted py-3 hdc-empty-row">No settlement trace for this worker.</td></tr>
                     {% endfor %}
                     </tbody>
                 </table>

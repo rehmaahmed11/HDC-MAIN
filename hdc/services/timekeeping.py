@@ -433,16 +433,13 @@ def _timekeeping_status_dataset(status_date, status_view='assigned'):
         .distinct()
         .all()
     }
-    manual_absent_ids = {
-        wid for (wid,) in db.session.query(AttendanceMark.worker_id)
-        .filter(
-            AttendanceMark.worker_id.in_(active_worker_ids),
-            AttendanceMark.date == status_date,
-            AttendanceMark.status == 'absent'
-        )
-        .distinct()
-        .all()
-    }
+    absent_marks = (db.session.query(AttendanceMark)
+                    .filter(AttendanceMark.worker_id.in_(active_worker_ids),
+                            AttendanceMark.date == status_date,
+                            AttendanceMark.status == 'absent')
+                    .all())
+    absent_mark_by_worker = {int(m.worker_id): m for m in absent_marks}
+    manual_absent_ids = set(absent_mark_by_worker)
 
     absent_ids = ((has_before_ids - assigned_ids) | manual_absent_ids) - assigned_ids
     not_assigned_ids = (set(active_worker_ids) - has_any_ids) - manual_absent_ids
@@ -459,7 +456,9 @@ def _timekeeping_status_dataset(status_date, status_view='assigned'):
                 'trade': wk.role_type or '',
                 'project': pr.name if pr else '-',
                 'stage': te.stage.name if te.stage_id and te.stage else '-',
-                'entries_count': assigned_entry_counts.get(wid, 1)
+                'entries_count': assigned_entry_counts.get(wid, 1),
+                # row traceability: the latest time entry of the day
+                'entry': te,
             })
         status_rows.sort(key=lambda r: (r.get('worker_name') or '').lower())
     elif status_view == 'absent':
@@ -474,7 +473,8 @@ def _timekeeping_status_dataset(status_date, status_view='assigned'):
                 'trade': wk.role_type or '',
                 'project': '-',
                 'stage': '-',
-                'entries_count': '-'
+                'entries_count': '-',
+                'mark': absent_mark_by_worker.get(int(wid)),
             })
     else:
         worker_map = {w.id: w for w in workers}

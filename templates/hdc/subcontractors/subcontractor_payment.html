@@ -97,7 +97,7 @@
             <thead><tr><th>Date</th><th>Type</th><th>Project</th><th>Stage</th><th>Notes</th><th class="text-end">Amount</th><th></th></tr></thead>
             <tbody id="paymentHistoryBody">
             {% for p in payments %}
-            <tr data-project-id="{{ p.project_id or '' }}" data-stage-id="{{ p.stage_id or '' }}">
+            <tr {{ p|hdc_row_attrs }} data-project-id="{{ p.project_id or '' }}" data-stage-id="{{ p.stage_id or '' }}">
                 <td>{{ p.date.strftime('%Y-%m-%d') if p.date else '-' }}</td>
                 <td>
                     <span class="badge {% if (p.entry_type or 'payment')|lower == 'settlement' %}bg-primary{% else %}bg-success{% endif %}">
@@ -115,7 +115,7 @@
                 </td>
             </tr>
             {% else %}
-            <tr><td colspan="7" class="text-center text-muted py-3">No payments recorded yet.</td></tr>
+            <tr {{ p|hdc_row_attrs }}><td colspan="7" class="text-center text-muted py-3">No payments recorded yet.</td></tr>
             {% endfor %}
             </tbody>
         </table>

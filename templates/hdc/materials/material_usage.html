@@ -67,7 +67,7 @@
                     </tr></thead>
                     <tbody>
                     {% for r in records %}
-                    <tr>
+                    <tr {{ r|hdc_row_attrs }}>
                         <td>{{ fmt_pkt(r.activity_at or r.created_at) }}</td>
                         <td>{{ r.material.name if r.material else '' }}</td>
                         <td>{{ r.project.name if r.project else '' }}</td>
@@ -75,7 +75,7 @@
                         <td class="text-end">{{ "{:,.2f}".format(r.qty or 0) }}</td>
                     </tr>
                     {% else %}
-                    <tr><td colspan="5" class="text-center text-muted py-4">No usage records.</td></tr>
+                    <tr {{ r|hdc_row_attrs }}><td colspan="5" class="text-center text-muted py-4">No usage records.</td></tr>
                     {% endfor %}
                     </tbody>
                 </table>

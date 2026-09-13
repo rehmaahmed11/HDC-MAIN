@@ -199,7 +199,7 @@
             <tbody>
                 {% for p in purchases %}
                 {% set dq = (delivered_map.get(p.id) if delivered_map else 0) or 0 %}
-                <tr>
+                <tr {{ p|hdc_row_attrs }}>
                     <td class="text-muted small">#{{ p.id }}</td>
                     <td class="small">{{ p.date or (p.created_at.strftime('%Y-%m-%d') if p.created_at else '-') }}</td>
                     <td>{{ p.material.name if p.material else '-' }} <small class="text-muted">({{ p.material.unit if p.material else '' }})</small></td>
@@ -217,7 +217,7 @@
                     </td>
                 </tr>
                 {% else %}
-                <tr><td colspan="9" class="text-center text-muted py-3">No purchases yet.</td></tr>
+                <tr {{ p|hdc_row_attrs }}><td colspan="9" class="text-center text-muted py-3">No purchases yet.</td></tr>
                 {% endfor %}
             </tbody>
         </table>
@@ -245,7 +245,7 @@
             </thead>
             <tbody>
                 {% for r in ledger_items %}
-                <tr>
+                <tr {{ r|hdc_row_attrs }}>
                     <td class="text-muted small">{{ loop.index }}</td>
                     <td class="small">{{ r.date.strftime('%Y-%m-%d') if r.date else '-' }}</td>
                     <td>
@@ -274,7 +274,7 @@
                     </td>
                 </tr>
                 {% else %}
-                <tr><td colspan="10" class="text-center text-muted py-3">No ledger entries yet.</td></tr>
+                <tr {{ r|hdc_row_attrs }}><td colspan="10" class="text-center text-muted py-3">No ledger entries yet.</td></tr>
                 {% endfor %}
             </tbody>
         </table>

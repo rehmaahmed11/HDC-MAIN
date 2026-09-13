@@ -40,7 +40,7 @@
             </tr></thead>
             <tbody>
             {% for s in stages %}
-            <tr>
+            <tr {{ s|hdc_row_attrs }}>
                 <td>{{ s.project.name if s.project else '' }}</td>
                 <td>{{ s.name }}</td>
                 <td>{{ s.status }}</td>
@@ -50,7 +50,7 @@
                 <td>{{ s.end_date or '' }}</td>
             </tr>
             {% else %}
-            <tr><td colspan="7" class="text-center text-muted py-4">No stages found.</td></tr>
+            <tr {{ s|hdc_row_attrs }}><td colspan="7" class="text-center text-muted py-4">No stages found.</td></tr>
             {% endfor %}
             </tbody>
         </table>

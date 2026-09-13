@@ -94,7 +94,7 @@
                         {% for rec in records %}
                         {% set r = rec[0] %}
                         {% set staff = rec[1] %}
-                        <tr>
+                        <tr {{ rec|hdc_row_attrs }}>
                             <td>{{ fmt_pkt(r.activity_at or r.created_at) }}</td>
                             <td><span class="badge bg-info text-dark">{{ r.category or 'General' }}</span></td>
                             <td class="text-muted small">
@@ -118,7 +118,7 @@
                             </td>
                         </tr>
                         {% else %}
-                        <tr><td colspan="6" class="text-center text-muted py-4">No office expenses found.</td></tr>
+                        <tr {{ rec|hdc_row_attrs }}><td colspan="6" class="text-center text-muted py-4">No office expenses found.</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>

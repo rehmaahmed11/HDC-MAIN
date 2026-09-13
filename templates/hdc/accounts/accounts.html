@@ -349,7 +349,7 @@
                     </thead>
                     <tbody>
                         {% for a in accounts %}
-                        <tr>
+                        <tr {{ a|hdc_row_attrs }}>
                             <td>
                                 {{ a.name }}
                                 {% if a.auto_generated %}<span class="badge bg-secondary ms-1">Auto</span>{% endif %}
@@ -412,7 +412,7 @@
                             </td>
                         </tr>
                         {% else %}
-                        <tr><td colspan="8" class="text-center text-muted py-3">No accounts yet.</td></tr>
+                        <tr {{ a|hdc_row_attrs }}><td colspan="8" class="text-center text-muted py-3">No accounts yet.</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>
@@ -435,7 +435,7 @@
                     </thead>
                     <tbody>
                         {% for a in inactive_accounts %}
-                        <tr>
+                        <tr {{ a|hdc_row_attrs }}>
                             <td>{{ a.name }}</td>
                             <td>
                                 {{ a.account_group|replace('_', ' ')|title }}

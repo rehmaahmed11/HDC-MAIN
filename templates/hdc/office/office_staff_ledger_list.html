@@ -110,7 +110,7 @@
             <tbody>
                 {% for s in staff_rows %}
                 {% set snap = snapshots.get(s.id, {'advanced':0,'paid':0,'balance':0}) %}
-                <tr data-id="{{ s.id }}" data-code="{{ s.staff_code }}" data-name="{{ s.name }}" data-role="{{ s.role_type or '' }}" data-phone="{{ s.phone or '' }}" data-salary="{{ s.monthly_salary or 0 }}" data-status="{{ 'active' if s.active_status else 'suspended' }}">
+                <tr {{ s|hdc_row_attrs }} data-id="{{ s.id }}" data-code="{{ s.staff_code }}" data-name="{{ s.name }}" data-role="{{ s.role_type or '' }}" data-phone="{{ s.phone or '' }}" data-salary="{{ s.monthly_salary or 0 }}" data-status="{{ 'active' if s.active_status else 'suspended' }}">
                     <td><span class="badge bg-secondary">{{ s.staff_code }}</span></td>
                     <td>{{ s.name }}</td>
                     <td class="text-muted">{{ s.role_type or '-' }}</td>
@@ -137,7 +137,7 @@
                     </td>
                 </tr>
                 {% else %}
-                <tr><td colspan="12" class="text-center text-muted py-4">No office staff found.</td></tr>
+                <tr {{ s|hdc_row_attrs }}><td colspan="12" class="text-center text-muted py-4">No office staff found.</td></tr>
                 {% endfor %}
             </tbody>
         </table>

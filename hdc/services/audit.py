@@ -24,9 +24,19 @@ _AUDIT_EXCLUDE_TABLES = {
 }
 
 
+# Tables whose rows are machine-generated summaries of other audited rows.
+# ``hdc_labour_ledger`` is NOT here any more: advances, payments, tips and
+# settlements are real user actions on real money, so each cash row is recorded
+# with its author (its ``work`` mirror rows are still skipped -- see
+# _AUDIT_INTERNAL_ROW_RULES below -- because they duplicate the time entry).
 _AUDIT_INTERNAL_TABLES = {
     'hdc_attendance_day',
-    'hdc_labour_ledger'
+}
+
+# entity_type -> callable(obj) -> True when this particular row is internal
+# noise (auto-mirrored) and must not be written to the activity log.
+_AUDIT_INTERNAL_ROW_RULES = {
+    'hdc_labour_ledger': lambda obj: (str(getattr(obj, 'entry_type', '') or '').strip().lower() == 'work'),
 }
 
 
@@ -239,9 +249,16 @@ def _audit_custom_summary_payload(obj, event_type, changed):
     return _audit_summary(event_type, entity_type, _audit_entity_id(obj), changed), changed
 
 
-def _audit_is_noise_event(event_type, entity_type, changed):
+def _audit_is_noise_event(event_type, entity_type, changed, obj=None):
     if entity_type in _AUDIT_INTERNAL_TABLES:
         return True
+    row_rule = _AUDIT_INTERNAL_ROW_RULES.get(entity_type)
+    if row_rule is not None and obj is not None:
+        try:
+            if row_rule(obj):
+                return True
+        except Exception:
+            pass
     if event_type != 'update':
         return False
     keys = set((changed or {}).keys())
@@ -300,7 +317,7 @@ def _capture_user_activity_after_flush(session_obj, flush_context):
             changed = _audit_change_map(obj)
             if not changed:
                 return
-        if _audit_is_noise_event(event_type, entity_type, changed):
+        if _audit_is_noise_event(event_type, entity_type, changed, obj):
             return
         summary_txt, payload = _audit_custom_summary_payload(obj, event_type, changed)
         row = UserActivity(

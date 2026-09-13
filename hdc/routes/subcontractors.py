@@ -1040,7 +1040,12 @@ def register(app):
         for w in all_workers:
             earned = float(earned_map.get(w.id, 0.0) or 0.0)
             paid = float(paid_map.get(w.id, 0.0) or 0.0)
-            worker_stats.append({'worker': w, 'earned': earned, 'paid': paid, 'payable': max(0.0, earned - paid)})
+            worker_stats.append({
+                '_hdc_entity': 'hdc_subcontract_labour_worker',
+                '_hdc_id': int(w.id),
+                'worker': w, 'earned': earned, 'paid': paid,
+                'payable': max(0.0, earned - paid),
+            })
 
         sheet_worker_ids = [int(w.id) for w in labour_workers]
         day_rows = (SubcontractLabourAttendance.query
@@ -1240,6 +1245,8 @@ def register(app):
             if r.notes:
                 detail_parts.append(r.notes)
             events.append({
+                '_hdc_entity': 'hdc_subcontract_event',
+                '_hdc_id': int(r.id),
                 'dt': r.created_at,
                 'type': type_map.get((r.event_type or '').strip().lower(), (r.event_type or 'Event').title()),
                 'detail': ' | '.join(detail_parts) if detail_parts else '-',

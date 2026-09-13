@@ -36,7 +36,7 @@
                     <thead><tr><th>#</th><th>Stage Name</th><th>Order</th><th>Status</th><th>Used</th><th></th></tr></thead>
                     <tbody>
                     {% for d in defs %}
-                    <tr>
+                    <tr {{ d|hdc_row_attrs }}>
                         <td class="text-muted">{{ loop.index }}</td>
                         <td>
                             <form method="POST" class="d-flex gap-1 align-items-center">
@@ -74,7 +74,7 @@
                         </td>
                     </tr>
                     {% else %}
-                    <tr><td colspan="6" class="text-center text-muted py-4">No stage definitions yet for this project. Add your own stages above.</td></tr>
+                    <tr {{ d|hdc_row_attrs }}><td colspan="6" class="text-center text-muted py-4">No stage definitions yet for this project. Add your own stages above.</td></tr>
                     {% endfor %}
                     </tbody>
                 </table>

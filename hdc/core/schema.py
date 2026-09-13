@@ -634,6 +634,13 @@ def _run_migrations():
         except Exception:
             pass
         try:
+            # Row traceability: every list row is looked up by (entity_type,
+            # entity_id) in hdc_user_activity to show who entered it.
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_user_activity_entity ON hdc_user_activity(entity_type, entity_id, created_at, id)"))
+            conn.commit()
+        except Exception:
+            pass
+        try:
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_purchase_v2_mat_date ON hdc_purchase_v2(material_id, created_at, id)"))
             conn.commit()
         except Exception:

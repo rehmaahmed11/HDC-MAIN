@@ -64,7 +64,7 @@
             <tbody>
                 {% for item in materials %}
                 {% set m = item.row %}
-                <tr>
+                <tr {{ item|hdc_row_attrs }}>
                     <td class="fw-semibold">{{ m.name }}</td>
                     <td><span class="badge bg-secondary">{{ m.unit }}</span></td>
                     <td>
@@ -91,7 +91,7 @@
                     </td>
                 </tr>
                 {% else %}
-                <tr><td colspan="9" class="text-center text-muted py-4">
+                <tr {{ item|hdc_row_attrs }}><td colspan="9" class="text-center text-muted py-4">
                     <i class="fas fa-inbox fa-2x mb-2 d-block opacity-30"></i>No materials yet.
                 </td></tr>
                 {% endfor %}

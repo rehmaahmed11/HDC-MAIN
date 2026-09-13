@@ -60,7 +60,7 @@
                     <tbody>
                     {% for m in materials %}
                     {% set st = (stock_map.get(m.id) if stock_map else None) %}
-                    <tr class="{% if not m.is_active %}table-secondary{% endif %}">
+                    <tr {{ m|hdc_row_attrs }} class="{% if not m.is_active %}table-secondary{% endif %}">
                         <td class="text-muted">{{ loop.index }}</td>
                         <td>
                             <strong>{{ m.name }}</strong>
@@ -89,7 +89,7 @@
                         </td>
                     </tr>
                     {% else %}
-                    <tr><td colspan="8" class="text-center text-muted py-4">
+                    <tr {{ m|hdc_row_attrs }}><td colspan="8" class="text-center text-muted py-4">
                         No materials yet. Add cement, steel, bricks etc. to start tracking purchases.
                     </td></tr>
                     {% endfor %}

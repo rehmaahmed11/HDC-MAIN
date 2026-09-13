@@ -67,7 +67,7 @@
             <tbody>
                 {% for s in suppliers %}
                 {% set balance = (s.balance or 0)|float %}
-                <tr>
+                <tr {{ s|hdc_row_attrs }}>
                     <td>
                         <a href="{{ url_for('hdc_purchase_v2_supplier_detail', supplier_id=s.id) }}"
                            class="fw-bold text-decoration-none">{{ s.name }}</a>
@@ -115,7 +115,7 @@
                     </td>
                 </tr>
                 {% else %}
-                <tr><td colspan="9" class="text-center text-muted py-4">
+                <tr {{ s|hdc_row_attrs }}><td colspan="9" class="text-center text-muted py-4">
                     <i class="fas fa-inbox fa-2x mb-2 d-block opacity-30"></i>No suppliers found.
                 </td></tr>
                 {% endfor %}

@@ -89,7 +89,7 @@
                     {% set exp = record[0] %}
                     {% set proj = record[1] %}
                     {% set stg = record[2] %}
-                    <tr>
+                    <tr {{ record|hdc_row_attrs }}>
                         <td>{{ fmt_pkt(exp.activity_at or exp.created_at) }}</td>
                         <td class="text-muted small">{{ proj.name }}</td>
                         <td class="text-muted small">{{ stg.name if stg else '-' }}</td>
@@ -110,7 +110,7 @@
                         </td>
                     </tr>
                     {% else %}
-                    <tr><td colspan="7" class="text-center text-muted py-4">No expenses found.</td></tr>
+                    <tr {{ record|hdc_row_attrs }}><td colspan="7" class="text-center text-muted py-4">No expenses found.</td></tr>
                     {% endfor %}
                     </tbody>
                 </table>

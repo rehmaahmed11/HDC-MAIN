@@ -58,7 +58,7 @@
                     <tbody>
                         {% for s in staff_rows %}
                         {% set row = existing_rows.get(s.id) %}
-                        <tr>
+                        <tr {{ s|hdc_row_attrs }}>
                             <td>
                                 <div class="fw-bold">{{ s.name }}</div>
                                 <div class="small text-muted">{{ s.staff_code }}</div>
@@ -74,7 +74,7 @@
                             <td><input type="text" name="notes_{{ s.id }}" class="form-control form-control-sm" value="{{ row.notes if row else '' }}"></td>
                         </tr>
                         {% else %}
-                        <tr><td colspan="4" class="text-center text-muted py-4">No office staff found.</td></tr>
+                        <tr {{ s|hdc_row_attrs }}><td colspan="4" class="text-center text-muted py-4">No office staff found.</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>

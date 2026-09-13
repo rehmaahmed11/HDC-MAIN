@@ -505,6 +505,8 @@ def _list_accounts_with_balances(include_inactive=False):
         outgoing = float(outgoing or 0.0)
         acc_group, acc_mode = _account_group_mode_for_row(a)
         items.append({
+            # lets the list templates tag the row for "entered by" lookup
+            '_hdc_entity': 'hdc_account',
             'id': int(a.id),
             'name': a.name,
             'type': (a.type or '').lower(),
@@ -1571,6 +1573,7 @@ def _account_ledger_rows(account_id):
             running -= credit
         ts = (r.created_at or datetime.combine((r.date or _pkt_today()), datetime.min.time()))
         out.append({
+            '_hdc_entity': 'hdc_account_txn',
             'id': int(r.id),
             'timestamp': ts,
             'tx_type': str(r.type or '').replace('_', ' ').title(),

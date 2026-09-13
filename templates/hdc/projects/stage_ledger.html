@@ -159,7 +159,7 @@
             </thead>
             <tbody>
             {% for r in rows %}
-            <tr class="{% if r.status == 'Voided' %}table-secondary{% endif %}">
+            <tr {{ r|hdc_row_attrs }} class="{% if r.status == 'Voided' %}table-secondary{% endif %}">
                 <td>{{ fmt_pkt(r.dt) }}</td>
                 <td>{{ r.event_type }}</td>
                 <td class="text-muted small">{{ r.source }}</td>
@@ -177,7 +177,7 @@
                 <td class="small text-muted">{{ r.notes }}</td>
             </tr>
             {% else %}
-            <tr><td colspan="9" class="text-center text-muted py-4">No stage events recorded yet.</td></tr>
+            <tr {{ r|hdc_row_attrs }}><td colspan="9" class="text-center text-muted py-4">No stage events recorded yet.</td></tr>
             {% endfor %}
             </tbody>
             {% if rows %}

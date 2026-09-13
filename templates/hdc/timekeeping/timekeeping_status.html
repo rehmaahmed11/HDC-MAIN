@@ -75,7 +75,7 @@
             </thead>
             <tbody>
                 {% for r in status_rows %}
-                <tr>
+                <tr {{ r|hdc_row_attrs }}>
                     <td><span class="badge bg-secondary">{{ r.worker_code }}</span></td>
                     <td><strong>{{ r.worker_name }}</strong></td>
                     <td class="text-muted small">{{ r.trade or '-' }}</td>
@@ -84,7 +84,7 @@
                     <td>{{ r.entries_count if status_view == 'assigned' else '-' }}</td>
                 </tr>
                 {% else %}
-                <tr><td colspan="6" class="text-center text-muted py-4">No workers in this status for selected date.</td></tr>
+                <tr {{ r|hdc_row_attrs }}><td colspan="6" class="text-center text-muted py-4">No workers in this status for selected date.</td></tr>
                 {% endfor %}
             </tbody>
         </table>
