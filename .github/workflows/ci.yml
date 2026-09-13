@@ -28,7 +28,7 @@ jobs:
         run: python -m pip install -r requirements.txt
 
       - name: Compile Python
-        run: python -m compileall -q hdc hdc_erp.py wsgi.py deploy_receiver.py scripts tests ops
+        run: python -m compileall -q hdc hdc_erp.py wsgi.py deploy_hook.py wsgi_dispatch_snippet.py scripts tests ops
 
       - name: Check module layers
         run: python scripts/check_layers.py
