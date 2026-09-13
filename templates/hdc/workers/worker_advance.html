@@ -13,6 +13,10 @@
         <div class="alert alert-warning py-2 small mb-3">
             <strong>Current Balance Due:</strong> {{ "{:,.0f}".format(w.balance_due) }} PKR
             &nbsp;|&nbsp; <strong>Total Earned:</strong> {{ "{:,.0f}".format(w.total_earned) }} PKR
+            {%- if (w.total_tips or 0) > 0 %}
+            &nbsp;|&nbsp; <strong>Tips:</strong> {{ "{:,.0f}".format(w.total_tips) }} PKR
+            <div class="mt-1"><small>Tips are gratis cash on top of earnings — they do not reduce the balance due.</small></div>
+            {%- endif %}
         </div>
         <form method="POST">
             <div class="mb-3">

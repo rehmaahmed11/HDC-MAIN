@@ -198,6 +198,9 @@
         <td class="text-warning">{{ "{:,.0f}".format(w.total_advanced) }}</td>
         <td class="fw-bold {% if w.balance_due > 0 %}text-info{% else %}text-muted{% endif %}">
             {{ "{:,.0f}".format(w.balance_due) }} PKR
+            {%- if (w.total_tips or 0) > 0 %}
+            <div><small class="text-success" title="Tips are gratis cash on top of earnings and do not reduce the balance due">Tips: {{ "{:,.0f}".format(w.total_tips) }}</small></div>
+            {%- endif %}
         </td>
         <td>
             <span class="badge {% if w.active_status %}bg-success{% else %}bg-warning text-dark{% endif %}">

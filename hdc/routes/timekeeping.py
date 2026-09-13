@@ -75,7 +75,15 @@ def register(app):
                                 if (not stg) or (int(stg.project_id or 0) != int(pid or 0)):
                                     normalized = []
                                     break
-                                normalized.append({'project_id': pid, 'stage_id': sid, 'hours': hrs})
+                                normalized.append({
+                                    'project_id': pid,
+                                    'stage_id': sid,
+                                    'hours': hrs,
+                                    # Performed quantity for per-sqft workers;
+                                    # without it they are paid rate x 0 and earn
+                                    # nothing for a full day (LABOUR_AUDIT #5).
+                                    'qty_sqft': max(0.0, _flt(alloc.get('qty_sqft'), 0.0)),
+                                })
                                 total_hours += hrs
                         else:
                             total_hours = working_hours + overtime_hours
@@ -104,7 +112,8 @@ def register(app):
                             overtime_part = max(0.0, hrs - regular_hours)
                             check_in = day_start + timedelta(hours=running_hours)
                             check_out = check_in + timedelta(hours=hrs)
-                            wage = _calc_time_wage(wk, regular_hours, overtime_part, 0.0, work_date=entry_date)
+                            wage = _calc_time_wage(wk, regular_hours, overtime_part,
+                                                   row.get('qty_sqft', 0.0), work_date=entry_date)
                             te = TimeEntry(
                                 worker_id=wid,
                                 project_id=row['project_id'],
@@ -113,7 +122,7 @@ def register(app):
                                 check_out=check_out,
                                 hours=hrs,
                                 overtime=overtime_part,
-                                qty_sqft=0.0,
+                                qty_sqft=row.get('qty_sqft', 0.0),
                                 wage_calculated=wage,
                                 legacy_calc=False,
                                 attendance_id=None,
@@ -254,7 +263,12 @@ def register(app):
                 if (not stage) or stage.project_id != pid:
                     flash('Selected stage does not belong to selected site/project.', 'danger')
                     return redirect(url_for('hdc_attendance'))
-                normalized.append({'project_id': pid, 'stage_id': sid, 'hours': hrs})
+                normalized.append({
+                    'project_id': pid,
+                    'stage_id': sid,
+                    'hours': hrs,
+                    'qty_sqft': max(0.0, _flt(row.get('qty_sqft'), 0.0)),
+                })
                 total_hours += hrs
 
             if total_hours > 24:
@@ -287,7 +301,8 @@ def register(app):
                 overtime_hours = max(0.0, hrs - regular_hours)
                 ci = day_start + timedelta(hours=running_hours)
                 co = ci + timedelta(hours=hrs)
-                wage = _calc_time_wage(worker, regular_hours, overtime_hours, 0.0, work_date=entry_date)
+                qty = row.get('qty_sqft', 0.0)
+                wage = _calc_time_wage(worker, regular_hours, overtime_hours, qty, work_date=entry_date)
                 te = TimeEntry(
                     worker_id=wid,
                     project_id=row['project_id'],
@@ -296,10 +311,12 @@ def register(app):
                     check_out=co,
                     hours=hrs,
                     overtime=overtime_hours,
-                    qty_sqft=0.0,
+                    # Performed quantity for per-sqft workers; leaving this at 0
+                    # paid them rate x 0 for a full day (LABOUR_AUDIT #5).
+                    qty_sqft=qty,
                     wage_calculated=wage,
                     legacy_calc=False,
-                    attendance_id=day_row.id,
+                    attendance_day_id=day_row.id,
                     activity_at=ci
                 )
                 db.session.add(te)
@@ -471,7 +488,8 @@ def register(app):
             allocations = [{
                 'project_id': int(r.project_id or 0),
                 'stage_id': int(r.stage_id or 0),
-                'hours': float(r.hours or 0.0)
+                'hours': float(r.hours or 0.0),
+                'qty_sqft': float(r.qty_sqft or 0.0)
             } for r in rows]
             daily_sheet_rows.append({
                 'worker': wk,
@@ -567,7 +585,12 @@ def register(app):
             t.project_id = pid
             t.stage_id = sid
             t.hours = hours
-            t.qty_sqft = 0.0
+            # Keep the recorded quantity unless the form explicitly changes it.
+            # This used to hard-reset qty_sqft to 0, which silently zeroed the
+            # wage of any per-sqft worker whose entry was edited
+            # (LABOUR_AUDIT #5).
+            t.qty_sqft = max(0.0, _flt(request.form.get('qty_sqft'),
+                                       float(t.qty_sqft or 0.0)))
             _recalculate_attendance_day(t.worker_id, work_date)
             new_project = Project.query.get(pid)
             new_stage = Stage.query.get(sid)

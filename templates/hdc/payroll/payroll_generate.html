@@ -204,7 +204,11 @@
                         <td>{{ "{:,.0f}".format(r.per_day_wage or 0) }}</td>
                         <td>{{ "{:,.2f}".format(r.overtime_total or 0) }}</td>
                         <td class="text-success fw-bold">{{ "{:,.0f}".format(r.total_wage or 0) }}</td>
-                        <td class="text-warning">{{ "{:,.0f}".format(r.advance or 0) }}</td>
+                        <td class="text-warning">{{ "{:,.0f}".format(r.advance or 0) }}
+                            {%- if (r.advance_carried or 0) > 0 %}
+                            <div><small class="text-danger" title="Advance above this period's gross — not deducted here, still owed in the worker ledger">+{{ "{:,.0f}".format(r.advance_carried or 0) }} carried fwd</small></div>
+                            {%- endif %}
+                        </td>
                         <td>{{ "{:,.0f}".format(r.payable or 0) }}</td>
                         <td>{{ "{:,.0f}".format(r.paid or 0) }}</td>
                         <td class="{% if (r.balance or 0) > 0 %}text-danger fw-bold{% else %}text-success{% endif %}">
@@ -246,7 +250,11 @@
                             <th>-</th>
                             <th>-</th>
                             <th class="text-success">{{ "{:,.0f}".format(totals.total_wage or 0) }}</th>
-                            <th class="text-warning">{{ "{:,.0f}".format(totals.total_advance or 0) }}</th>
+                            <th class="text-warning">{{ "{:,.0f}".format(totals.total_advance or 0) }}
+                                {%- if (totals.total_advance_carried or 0) > 0 %}
+                                <div><small class="text-danger">+{{ "{:,.0f}".format(totals.total_advance_carried or 0) }} carried fwd</small></div>
+                                {%- endif %}
+                            </th>
                             <th>{{ "{:,.0f}".format(totals.total_payable or 0) }}</th>
                             <th>{{ "{:,.0f}".format(totals.total_paid or 0) }}</th>
                             <th class="{% if (totals.total_balance or 0) > 0 %}text-danger{% else %}text-success{% endif %}">

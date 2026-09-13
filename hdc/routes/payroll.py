@@ -13,7 +13,7 @@ from sqlalchemy import func
 
 from hdc.extensions import db
 from hdc.models.workforce import LabourLedger, PayrollItem, PayrollRun, TimeEntry, Worker
-from hdc.services.accounts import _accounts_post_labour_ledger_row
+from hdc.services.accounts import _accounts_post_labour_ledger_row, _accounts_set_void_by_source
 from hdc.services.timekeeping import _has_recent_duplicate
 from hdc.utils.dates import _pkt_now, _pkt_now_naive, _pkt_today
 from hdc.utils.format import _flt, _parse_date
@@ -144,6 +144,27 @@ def register(app):
 
             date_from = _parse_date(request.form.get('date_from'))
             date_to = _parse_date(request.form.get('date_to'))
+            if date_from > date_to:
+                date_from, date_to = date_to, date_from
+
+            # Refuse a run that overlaps an existing one. Each run recomputes
+            # the full gross wage for its window and 'Pay All' pays against its
+            # own run note, so overlapping runs pay the shared days twice and
+            # nothing downstream reconciles them (LABOUR_AUDIT #7).
+            clash = (PayrollRun.query
+                     .filter(PayrollRun.date_from <= date_to,
+                             PayrollRun.date_to >= date_from)
+                     .order_by(PayrollRun.id.asc())
+                     .first())
+            if clash:
+                flash(
+                    f'This range overlaps payroll run #{clash.id} '
+                    f'({clash.date_from} to {clash.date_to}). Generating it would '
+                    f'pay the shared days twice — delete or reuse run #{clash.id} first.',
+                    'danger'
+                )
+                return redirect(url_for('hdc_payroll_generate', run_id=clash.id))
+
             start_dt = datetime.combine(date_from, datetime.min.time())
             end_dt = datetime.combine(date_to, datetime.max.time())
 
@@ -203,6 +224,7 @@ def register(app):
             'not_assigned_days': 0,
             'total_wage': 0.0,
             'total_advance': 0.0,
+            'total_advance_carried': 0.0,
             'total_payable': 0.0,
             'total_paid': 0.0,
             'total_balance': 0.0
@@ -328,6 +350,11 @@ def register(app):
                                .filter(LabourLedger.date >= range_start, LabourLedger.date <= range_end)
                                .all())
                 payable = max(0.0, gross - advances)
+                # Advances above this period's gross cannot be deducted here;
+                # net pay is clamped at zero, so show what is being carried
+                # forward instead of letting it vanish silently. The worker
+                # ledger still owes it (LABOUR_AUDIT #8).
+                advance_carried = max(0.0, advances - gross)
                 run_note_key = f'Payroll run #{selected_run.id} '
                 paid = sum(float(l.amount or 0.0) for l in LabourLedger.query
                            .filter_by(worker_id=wid, entry_type='payment', is_void=False)
@@ -355,6 +382,7 @@ def register(app):
                     'overtime_total': ot,
                     'total_wage': gross,
                     'advance': advances,
+                    'advance_carried': advance_carried,
                     'payable': payable,
                     'paid': paid,
                     'balance': balance,
@@ -379,6 +407,7 @@ def register(app):
                 totals['work_entries'] += int(work_entries_count.get(wid, 0))
                 totals['total_wage'] += gross
                 totals['total_advance'] += advances
+                totals['total_advance_carried'] += advance_carried
                 totals['total_payable'] += payable
                 totals['total_paid'] += paid
                 totals['total_balance'] += balance
@@ -410,7 +439,12 @@ def register(app):
         worker_ids = [it.worker_id for it in items if it.worker_id]
         deleted_ledgers = 0
 
-        # Remove payroll payment entries linked with run-id note pattern.
+        # Undo payroll payment entries linked with the run-id note pattern.
+        # These rows are voided rather than hard-deleted: deleting them used to
+        # leave their unified-accounts transactions live, so the money stayed
+        # debited from the company while every worker's payable was restored --
+        # cash gone, debt back (LABOUR_AUDIT #4). Voiding keeps the audit trail
+        # and lets the accounts mirror be voided with them.
         if worker_ids:
             note_key = f'Payroll run #{run.id} '
             ledgers = (LabourLedger.query
@@ -420,14 +454,18 @@ def register(app):
                                LabourLedger.notes.ilike(f'%{note_key}%'))
                        .all())
             for l in ledgers:
-                db.session.delete(l)
+                l.is_void = True
+                l.void_reason = f'Payroll run #{run.id} deleted'
+                l.voided_at = _pkt_now_naive()
+                _accounts_set_void_by_source('labour_ledger_payment', l.id, True)
+                _accounts_set_void_by_source('worker_payment', l.id, True)
                 deleted_ledgers += 1
 
         db.session.delete(run)
         db.session.commit()
 
         if deleted_ledgers > 0:
-            flash(f'Payroll run #{run.id} deleted with {deleted_ledgers} linked payment entries.', 'success')
+            flash(f'Payroll run #{run.id} deleted with {deleted_ledgers} linked payment entries voided (cash postings reversed).', 'success')
         else:
             flash(f'Payroll run #{run.id} deleted. (No linked payment entries found for auto-cleanup.)', 'warning')
         return redirect(url_for('hdc_payroll_salary_cards_page'))
@@ -487,6 +525,7 @@ def register(app):
             'overtime_total': 0.0,
             'total_wage': 0.0,
             'advance': 0.0,
+            'advance_carried': 0.0,
             'payable': 0.0,
             'paid': 0.0,
             'balance': 0.0
@@ -518,6 +557,7 @@ def register(app):
                 LabourLedger.date <= run.date_to
             ).all())
             payable = max(0.0, total_wage - advance)
+            advance_carried = max(0.0, advance - total_wage)
 
             run_note_key = f'Payroll run #{run.id} '
             paid = sum(float(l.amount or 0.0) for l in LabourLedger.query.filter(
@@ -538,6 +578,7 @@ def register(app):
                 'overtime_total': overtime_total,
                 'total_wage': total_wage,
                 'advance': advance,
+                'advance_carried': advance_carried,
                 'payable': payable,
                 'paid': paid,
                 'balance': balance,
@@ -549,6 +590,7 @@ def register(app):
             totals['overtime_total'] += overtime_total
             totals['total_wage'] += total_wage
             totals['advance'] += advance
+            totals['advance_carried'] += advance_carried
             totals['payable'] += payable
             totals['paid'] += paid
             totals['balance'] += balance

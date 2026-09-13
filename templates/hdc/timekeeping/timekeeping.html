@@ -58,7 +58,10 @@
                                         <input type="hidden" name="project_id_{{ w.id }}" value="">
                                         <input type="hidden" name="stage_id_{{ w.id }}" value="">
                                         <div id="allocList_{{ w.id }}" class="small"></div>
-                                        <button type="button" class="btn btn-sm btn-outline-primary mt-1 js-add-allocation" data-worker-id="{{ w.id }}">
+                                        <button type="button" class="btn btn-sm btn-outline-primary mt-1 js-add-allocation"
+                                                data-worker-id="{{ w.id }}"
+                                                data-wage-type="{{ w.wage_type or 'daily' }}"
+                                                data-rate-sqft="{{ w.rate_per_sqft or 0 }}">
                                             <i class="fas fa-plus me-1"></i>Add Site
                                         </button>
                                     </td>
@@ -103,6 +106,13 @@
                                         <label class="form-label">Hours</label>
                                         <input id="allocHours" type="number" step="0.25" min="0.25" max="24" class="form-control" value="2">
                                         <small class="text-muted">8 hours = 1 day wage. Hours above 8 become overtime automatically.</small>
+                                    </div>
+                                    <div class="mb-2 d-none" id="allocQtyWrap">
+                                        <label class="form-label">Quantity (sq ft)</label>
+                                        <input id="allocQtySqft" type="number" step="0.25" min="0" class="form-control" value="0">
+                                        <small class="text-muted" id="allocQtyHint">
+                                            Required for per-sqft workers: wage = rate &times; quantity, so leaving it at 0 pays them nothing.
+                                        </small>
                                     </div>
                                 </div>
                                 <div class="modal-footer">
@@ -329,7 +339,8 @@
                 return {
                     project_id: parseInt(r.project_id, 10) || 0,
                     stage_id: parseInt(r.stage_id, 10) || 0,
-                    hours: Math.max(0, parseFloat(r.hours) || 0)
+                    hours: Math.max(0, parseFloat(r.hours) || 0),
+                    qty_sqft: Math.max(0, parseFloat(r.qty_sqft) || 0)
                 };
             }).filter(function (r) {
                 return r.project_id > 0 && r.stage_id > 0 && r.hours > 0;
@@ -393,7 +404,8 @@
             const stg = stageInfoById[String(r.stage_id)];
             const sName = stg ? stg.name : ('Stage #' + r.stage_id);
             const rm = canEdit ? ('<button type="button" class="btn btn-link btn-sm p-0 ms-1 text-danger js-remove-allocation" data-worker-id="' + wid + '" data-index="' + idx + '"><i class="fas fa-times"></i></button>') : '';
-            return '<div class="border rounded px-2 py-1 mb-1 d-flex justify-content-between align-items-start"><span><strong>' + pName + '</strong> -> ' + sName + ' -> ' + Number(r.hours).toFixed(2) + 'h</span>' + rm + '</div>';
+            const qtyTxt = (parseFloat(r.qty_sqft) > 0) ? (' -> ' + Number(r.qty_sqft).toFixed(2) + ' sq ft') : '';
+            return '<div class="border rounded px-2 py-1 mb-1 d-flex justify-content-between align-items-start"><span><strong>' + pName + '</strong> -> ' + sName + ' -> ' + Number(r.hours).toFixed(2) + 'h' + qtyTxt + '</span>' + rm + '</div>';
         }).join('');
         wrap.innerHTML = chips;
     }
@@ -414,6 +426,10 @@
         });
     }
 
+    const qtyWrap = document.getElementById('allocQtyWrap');
+    const qtyInput = document.getElementById('allocQtySqft');
+    const qtyHint = document.getElementById('allocQtyHint');
+
     document.querySelectorAll('.js-add-allocation').forEach(function (btn) {
         btn.addEventListener('click', function () {
             if (!modal || !workerInput || !projectSelect || !stageSelect || !hoursInput) return;
@@ -422,6 +438,21 @@
             projectSelect.value = '';
             stageSelect.value = '';
             hoursInput.value = '2';
+            // Per-sqft workers are paid rate x quantity, so the quantity input
+            // has to be collected here — without it their wage is 0.
+            const wageType = (btn.getAttribute('data-wage-type') || 'daily').trim();
+            const rateSqft = parseFloat(btn.getAttribute('data-rate-sqft') || '0') || 0;
+            const isSqft = wageType === 'per_sqft';
+            if (qtyWrap) qtyWrap.classList.toggle('d-none', !isSqft);
+            if (qtyInput) {
+                qtyInput.value = '0';
+                qtyInput.disabled = !isSqft;
+            }
+            if (qtyHint && isSqft) {
+                qtyHint.textContent = rateSqft > 0
+                    ? ('This worker is paid per sq ft at ' + Number(rateSqft).toFixed(2) + ' PKR/sq ft. Wage = rate x quantity, so 0 quantity pays 0.')
+                    : 'This worker is paid per sq ft but has no rate set. Wage = rate x quantity.';
+            }
             syncStageByProject(stageSelect, '');
             modal.show();
         });
@@ -442,8 +473,13 @@
                 alert('Selected stage does not belong to selected project.');
                 return;
             }
+            const qty = qtyInput ? Math.max(0, parseFloat(qtyInput.value) || 0) : 0;
+            if (qtyWrap && !qtyWrap.classList.contains('d-none') && qty <= 0) {
+                alert('Quantity is required for per-sqft workers: wage = rate x quantity, so 0 sq ft pays 0 PKR.');
+                return;
+            }
             allocationMap[wid] = allocationMap[wid] || [];
-            allocationMap[wid].push({ project_id: pid, stage_id: sid, hours: hrs });
+            allocationMap[wid].push({ project_id: pid, stage_id: sid, hours: hrs, qty_sqft: qty });
             renderAllocations(wid);
             if (modal) modal.hide();
         });

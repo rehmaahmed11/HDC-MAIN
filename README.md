@@ -15,7 +15,9 @@ served by gunicorn (`wsgi:app`).
 > [`MODULARIZATION_PLAN.md`](MODULARIZATION_PLAN.md) for the why/how,
 > [`REFACTOR_NOTES.md`](REFACTOR_NOTES.md) for every non-move edit,
 > [`PRODUCTION_HARDENING.md`](PRODUCTION_HARDENING.md) for deployment/security
-> hardening, and [`APP_REVIEW.md`](APP_REVIEW.md) for the deep functional review.
+> hardening, [`APP_REVIEW.md`](APP_REVIEW.md) for the deep functional review,
+> and [`LABOUR_AUDIT.md`](LABOUR_AUDIT.md) for the labour wage/payment/tip/advance
+> consistency audit (+ `scripts/labour_audit.py` to run it on live data).
 
 ## Layout
 
@@ -44,7 +46,10 @@ deploy_receiver.py      standalone stdlib-only WSGI app: GitHub webhook ->
 templates/hdc/<domain>/ 82 Jinja pages, one folder per feature
 static/hdc/             css/hdc.css, img/, js/core/*.js, js/pages/*.js
 scripts/                split_monolith, reorganize_frontend, parity_check,
-                        check_layers, check_db_safety, reset_admin_password
+                        check_layers, check_db_safety, reset_admin_password,
+                        labour_audit (read-only labour/payroll consistency
+                        audit), make_labour_audit_fixture (seeds a throwaway DB
+                        with every known labour bug to verify that audit)
                         (reproducible conversion + verification + ops CLIs)
 ops/                    pythonanywhere/ (setup.py, deploy.sh, sync.sh, webhook
                         receiver wiring), arena/ (local<->sandbox git pairer)

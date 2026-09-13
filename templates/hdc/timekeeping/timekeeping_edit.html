@@ -39,6 +39,16 @@
                         <label class="form-label">Hours *</label>
                         <input type="number" name="hours" step="0.25" min="0.25" max="24" class="form-control" value="{{ t.hours or 0 }}" required>
                     </div>
+                    {% if (t.worker.wage_type or 'daily') == 'per_sqft' %}
+                    <div class="mb-3">
+                        <label class="form-label">Quantity (sq ft) *</label>
+                        <input type="number" name="qty_sqft" step="0.25" min="0" class="form-control" value="{{ t.qty_sqft or 0 }}" required>
+                        <div class="form-text text-danger">
+                            This worker is paid per sq ft at {{ "{:,.2f}".format(t.worker.rate_per_sqft or 0) }} PKR/sq ft.
+                            Wage = rate &times; quantity — a quantity of 0 pays 0 PKR.
+                        </div>
+                    </div>
+                    {% endif %}
                     <div class="d-flex gap-2">
                         <button type="submit" class="btn btn-mint"><i class="fas fa-save me-1"></i>Save Changes</button>
                         <a href="{{ url_for('hdc_attendance') }}" class="btn btn-outline-secondary">Cancel</a>

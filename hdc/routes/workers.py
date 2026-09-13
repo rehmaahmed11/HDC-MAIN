@@ -4,6 +4,8 @@ Moved verbatim from hdc_erp.py; each handler keeps its
 original @app.route decorator and endpoint name.
 """
 
+import re
+
 from flask import abort, flash, redirect, render_template, request, url_for
 from flask_login import login_required
 from sqlalchemy import func
@@ -13,7 +15,7 @@ from hdc.models.accounts import Expense
 from hdc.models.projects import Project, Stage
 from hdc.models.workforce import LabourLedger, LabourRateHistory, TimeEntry, Worker, WorkerRate, WorkerTrade
 from hdc.services.accounts import _accounts_post_labour_ledger_row, _accounts_set_void_by_source, _accounts_upsert_labour_ledger_txn
-from hdc.services.ledger import _worker_payable_snapshot
+from hdc.services.ledger import _linked_expense_for_labour_ledger, _worker_payable_snapshot
 from hdc.services.lookups import _ensure_expense_category, _trade_options
 from hdc.services.receipts import _receipt_company_profile
 from hdc.services.timekeeping import _has_recent_duplicate, _reconcile_worker_time_entries, _reconcile_worker_tip_ledger, _repair_worker_work_ledger_links
@@ -199,7 +201,14 @@ def register(app):
                 et = str(getattr(entry, 'entry_type', '') or '').strip().lower()
                 amt = float(getattr(entry, 'amount', 0.0) or 0.0)
                 if et == 'work':
-                    delta = amt
+                    # Read the wage from the time entry it mirrors, so the
+                    # running balance is driven by the same source of truth as
+                    # the payable snapshot. Orphaned or duplicated 'work' rows
+                    # used to inflate/deflate this column while the "Balance"
+                    # KPI stayed correct (LABOUR_AUDIT #10).
+                    te = (TimeEntry.query.get(entry.time_entry_id)
+                          if entry.time_entry_id else None)
+                    delta = 0.0 if (te is None or te.is_void) else float(te.wage_calculated or 0.0)
                 elif et in ('advance', 'payment', 'settlement'):
                     delta = -amt
                 # tip → delta stays 0 (gratis cash, neutral on the worker's
@@ -389,7 +398,16 @@ def register(app):
 
             if tip_part > 0:
                 tip_cat = _ensure_expense_category('Tip')
-                tip_remarks = (notes + ' | ' if notes else '') + f'Tip for {w.name} via settlement overpayment | TIP_WORKER_ID:{wid}'
+                # The reconciler (_reconcile_worker_tip_ledger) keys on
+                # TIP_EXPENSE_ID, so the tag has to be written into BOTH the
+                # expense remarks and the ledger row notes -- exactly like the
+                # accounts payment flow does. Tagging only with TIP_WORKER_ID
+                # left the row surviving on a date+amount fallback, and editing
+                # the tip then produced a duplicate (LABOUR_AUDIT #2).
+                tip_base = (notes + ' | ' if notes else '') + f'Tip for {w.name} via settlement overpayment | TIP_WORKER_ID:{wid}'
+                # Duplicate guards are deliberately remarks-independent: the
+                # final remarks now carry a per-expense id, so comparing them
+                # would never match a repeat submission.
                 if _has_recent_duplicate(
                     Expense,
                     project_id=project_id,
@@ -397,12 +415,11 @@ def register(app):
                     tip_worker_id=wid,
                     category_id=(tip_cat.id if tip_cat else None),
                     amount=tip_part,
-                    date=entry_date,
-                    remarks=tip_remarks
+                    date=entry_date
                 ):
                     flash('Duplicate tip expense prevented.', 'warning')
                     return redirect(url_for('hdc_worker_ledger', wid=wid))
-                db.session.add(Expense(
+                tip_expense = Expense(
                     project_id=project_id,
                     stage_id=stage_id,
                     tip_worker_id=wid,
@@ -410,8 +427,12 @@ def register(app):
                     amount=tip_part,
                     date=entry_date,
                     activity_at=_activity_at_for(entry_date),
-                    remarks=tip_remarks
-                ))
+                    remarks=tip_base
+                )
+                db.session.add(tip_expense)
+                db.session.flush()   # capture the id for the TIP_EXPENSE_ID tag
+                tip_remarks = tip_base + f' | TIP_EXPENSE_ID:{tip_expense.id}'
+                tip_expense.remarks = tip_remarks
                 if _has_recent_duplicate(
                     LabourLedger,
                     worker_id=wid,
@@ -419,8 +440,7 @@ def register(app):
                     amount=tip_part,
                     date=entry_date,
                     project_id=project_id,
-                    stage_id=stage_id,
-                    notes=tip_remarks
+                    stage_id=stage_id
                 ):
                     flash('Duplicate tip ledger record prevented.', 'warning')
                     return redirect(url_for('hdc_worker_ledger', wid=wid))
@@ -629,19 +649,45 @@ def register(app):
             if amount <= 0:
                 flash('Amount must be greater than zero.', 'danger')
                 return redirect(url_for('hdc_worker_ledger_edit', wid=wid, lid=lid))
+            # Resolve the mirrored expense BEFORE the row is mutated: the lookup
+            # matches on date/amount, and tips/settlements are mirrored into
+            # hdc_expense. Leaving the expense behind meant an edited tip lost
+            # its identity and the reconciler wrote a second one
+            # (LABOUR_AUDIT #13).
+            linked = _linked_expense_for_labour_ledger(row)
+            old_tip_tag = ''
+            if linked is not None:
+                m = re.search(r'TIP_EXPENSE_ID:\d+', row.notes or '')
+                old_tip_tag = m.group(0) if m else ''
+
             row.amount = amount
             row.date = entry_date
             row.activity_at = _activity_at_for(entry_date)
             row.project_id = request.form.get('project_id', type=int) or None
             row.stage_id = request.form.get('stage_id', type=int) or None
-            row.notes = (request.form.get('notes') or '').strip()
+            new_notes = (request.form.get('notes') or '').strip()
+            # Never let an edit drop the tag that identifies the tip's expense;
+            # without it the reconciler can only guess by date+amount.
+            if old_tip_tag and old_tip_tag not in new_notes:
+                new_notes = (new_notes + ' | ' if new_notes else '') + old_tip_tag
+            row.notes = new_notes
+
+            if linked is not None:
+                linked.amount = (float(amount) if row.entry_type == 'tip'
+                                 else -float(amount))
+                linked.date = entry_date
+                linked.activity_at = _activity_at_for(entry_date)
+                linked.project_id = row.project_id
+                linked.stage_id = row.stage_id
+
             ok_txn, msg_txn, _ = _accounts_upsert_labour_ledger_txn(w, row, commit=False)
             if not ok_txn:
                 db.session.rollback()
                 flash(msg_txn or 'Unable to sync ledger entry to accounts.', 'danger')
                 return redirect(url_for('hdc_worker_ledger_edit', wid=wid, lid=lid))
             db.session.commit()
-            flash('Ledger entry updated.', 'success')
+            extra = ' Linked tip/settlement expense updated too.' if linked is not None else ''
+            flash('Ledger entry updated.' + extra, 'success')
             return redirect(url_for('hdc_worker_ledger', wid=wid))
         return render_template('workers/worker_ledger_entry_edit.html', w=w, entry=row, projects=projects, stages=stages)
 
@@ -664,10 +710,20 @@ def register(app):
         row.is_void = True
         row.void_reason = reason
         row.voided_at = _pkt_now_naive()
+        # Tips and settlements are mirrored into hdc_expense. If the expense is
+        # left alive the tip reconciler re-creates the tip on the next page load
+        # (LABOUR_AUDIT #3) or the project keeps a write-off the worker owes
+        # again -- so void the expense together with the ledger row.
+        linked = _linked_expense_for_labour_ledger(row)
+        if linked is not None and not linked.is_void:
+            linked.is_void = True
+            linked.void_reason = reason
+            linked.voided_at = row.voided_at
         _accounts_set_void_by_source(f'labour_ledger_{row.entry_type}', row.id, True)
         _accounts_set_void_by_source('worker_payment', row.id, True)
         db.session.commit()
-        flash('Ledger entry voided successfully.', 'success')
+        extra = ' Linked tip/settlement expense voided as well.' if linked is not None else ''
+        flash('Ledger entry voided successfully.' + extra, 'success')
         return redirect(url_for('hdc_worker_ledger', wid=wid))
 
 
@@ -679,8 +735,8 @@ def register(app):
         if row.worker_id != wid:
             flash('Ledger entry does not belong to selected worker.', 'danger')
             return redirect(url_for('hdc_worker_ledger', wid=wid))
-        if row.entry_type not in ('advance', 'payment'):
-            flash('Only advance/payment entries can be restored manually.', 'warning')
+        if row.entry_type not in ('advance', 'payment', 'tip', 'settlement'):
+            flash('Only advance/payment/tip/settlement entries can be restored manually.', 'warning')
             return redirect(url_for('hdc_worker_ledger', wid=wid))
         if not row.is_void:
             flash('Ledger entry is already active.', 'info')
@@ -688,10 +744,19 @@ def register(app):
         row.is_void = False
         row.void_reason = None
         row.voided_at = None
+        # Bring the mirrored expense back with it, otherwise the tip reconciler
+        # would treat the active tip as unsynced and project cost would stay
+        # reduced for a settlement that is owed again (LABOUR_AUDIT #3).
+        linked = _linked_expense_for_labour_ledger(row)
+        if linked is not None and linked.is_void:
+            linked.is_void = False
+            linked.void_reason = None
+            linked.voided_at = None
         _accounts_set_void_by_source(f'labour_ledger_{row.entry_type}', row.id, False)
         _accounts_set_void_by_source('worker_payment', row.id, False)
         db.session.commit()
-        flash('Ledger entry restored successfully.', 'success')
+        extra = ' Linked tip/settlement expense restored as well.' if linked is not None else ''
+        flash('Ledger entry restored successfully.' + extra, 'success')
         return redirect(url_for('hdc_worker_ledger', wid=wid))
 
 
