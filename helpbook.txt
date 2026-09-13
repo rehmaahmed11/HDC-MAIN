@@ -16,7 +16,13 @@ Deploy log                  ~/HDC-MAIN/deploy.log
                             (also visible at https://<you>.pythonanywhere.com/deploy)
 Database                    path in .env -> HDC_DB_PATH
 Web entry file (WSGI)       /var/www/<you>_pythonanywhere_com_wsgi.py
-                            (holds the small dispatch snippet from this repo)
+                            (written for you by the installer below;
+                            it routes /deploy to the hook and everything
+                            else to the app)
+Installer (one command)     ~/HDC-MAIN/ops/pythonanywhere/install_deploy_hook.py
+                            (creates the secret, writes the WSGI file,
+                            prints the GitHub webhook values; --check
+                            diagnoses, --restore undoes)
 
 HOW DEPLOYING WORKS (the whole system, in one paragraph)
 ------------------------------------------------
@@ -38,8 +44,9 @@ GOLDEN RULES
 4. Secrets live ONLY in .env and deploy_secret.txt.
    Never paste them into chat, GitHub issues, or email.
 5. After every push, open https://<you>.pythonanywhere.com/deploy
-   in your browser. It shows the last few deploys - you should see
-   a new "OK deployed ..." line within about 30 seconds.
+   in your browser. It shows what the hook detected and the last few
+   deploys - you should see a new "OK deployed ..." line within
+   about 30 seconds. (/deploy/health does the same thing.)
 
 
 1. GETTING NEW CODE (the normal way)
@@ -101,31 +108,45 @@ It needs at least these lines (replace the passwords):
 Make new random strings any time with:
     python3 -c "import secrets; print(secrets.token_hex(32))"
 
-Then create the deploy secret (the "key" - one line, anything random):
+    chmod 600 ~/HDC-MAIN/.env
 
-    nano ~/HDC-MAIN/deploy_secret.txt
-    chmod 600 ~/HDC-MAIN/.env ~/HDC-MAIN/deploy_secret.txt
+Now ONE command does the rest of the server side. It creates the
+deploy secret (the "key"), writes the WSGI file for you, and prints
+the exact values to paste into GitHub:
 
-Then open deploy_hook.py and edit the TWO paths near the top so they
-match your username:
+    cd ~/HDC-MAIN
+    python3 ops/pythonanywhere/install_deploy_hook.py
 
-    REPO_DIR  = "/home/<you>/HDC-MAIN"
-    WSGI_FILE = "/var/www/<you>_pythonanywhere_com_wsgi.py"
+You do NOT edit deploy_hook.py, and you do NOT paste anything into the
+WSGI file - paths are detected (your username comes from the WSGI
+file's own name, the repo from where the code lives). The installer
+backs up the old WSGI file first and carries over any os.environ
+lines it had, so a working site keeps working.
 
 Then in the Web tab: set Source code to /home/<you>/HDC-MAIN,
-Virtualenv to /home/<you>/.virtualenvs/hdc, open the WSGI
-configuration file link, replace its whole content with the file
-wsgi_dispatch_snippet.py from this repo (edit the path at its top
-to your clone location too), and click Reload once by hand.
+Virtualenv to /home/<you>/.virtualenvs/hdc, and click the green
+Reload button once.
 
-Finally, on GitHub: repository -> Settings -> Webhooks -> Add webhook:
+Open https://<you>.pythonanywhere.com/deploy in your browser. It
+prints what the hook detected (repo, wsgi file, secret, branch) plus
+the last few deploys. If any line says MISSING, the installer tells
+you which command fixes it. To re-check at any time without changing
+anything:
+
+    python3 ops/pythonanywhere/install_deploy_hook.py --check
+
+Finally, on GitHub: repository -> Settings -> Webhooks -> Add webhook,
+using the values the installer printed:
 
     Payload URL:  https://<you>.pythonanywhere.com/deploy
     Content type: application/json
-    Secret:       the exact line from deploy_secret.txt
+    Secret:       the line the installer printed (= deploy_secret.txt)
     Events:       Just the push event
 
 Done. Every future push to main now pulls + reloads automatically.
+If you ever need the old WSGI file back:
+
+    python3 ops/pythonanywhere/install_deploy_hook.py --restore
 
 
 3. SYNCING THE SERVER BY HAND (only if the webhook is broken)
