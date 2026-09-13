@@ -45,6 +45,8 @@ wsgi.py                 gunicorn/PythonAnywhere entrypoint (env-configured)
 deploy_hook.py          standalone stdlib-only WSGI app: GitHub push webhook ->
                         git pull + touch WSGI to reload (mounted at /deploy
                         on PythonAnywhere, see wsgi_dispatch_snippet.py)
+ops/pythonanywhere/     install_deploy_hook.py: one command that writes the
+                        secret + WSGI file and prints the webhook values
 templates/hdc/<domain>/ 82 Jinja pages, one folder per feature
 static/hdc/             css/hdc.css, img/, js/core/*.js, js/pages/*.js
 scripts/                split_monolith, reorganize_frontend, parity_check,
@@ -128,11 +130,30 @@ not shipped in this repository because it included a live database archive.
 Pushing to `main` deploys itself. One small stdlib-only file,
 [`deploy_hook.py`](deploy_hook.py), is mounted at `/deploy` on PythonAnywhere
 (via [`wsgi_dispatch_snippet.py`](wsgi_dispatch_snippet.py)): GitHub's push
-webhook verifies the `X-Hub-Signature-256` HMAC, runs `git pull`, and touches
-the WSGI file so the site reloads. Open `/deploy` in a browser to see the
-last few deploys. Databases and instance data live outside Git and are never
-pulled or reset, and `scripts/check_db_safety.py` (run by CI) fails any
-commit that tries to track a `.db`. Rollback is `git checkout <commit>` in a
-Bash console, then Reload. Full setup (secret file, WSGI paste, webhook):
-read the docstring at the top of `deploy_hook.py`, or `helpbook.txt`
-sections 2–6.
+webhook verifies the `X-Hub-Signature-256` HMAC, runs `git pull --ff-only`,
+and touches the WSGI file so the site reloads.
+
+**Setup is one command** — no file is edited by hand and nothing is pasted
+into `/var/www`:
+
+```bash
+cd ~/HDC-MAIN
+python3 ops/pythonanywhere/install_deploy_hook.py   # then click Reload once
+```
+
+It detects your username and paths, creates `deploy_secret.txt` (0600,
+gitignored), writes the WSGI dispatch file (backing up the old one and
+carrying over its `os.environ` lines), and prints the exact GitHub webhook
+values including your real Payload URL. `--check` diagnoses without writing,
+`--dry-run` shows the file it would write, `--restore` puts the backup back.
+
+Open `/deploy` (or `/deploy/health`) in a browser at any time: it prints the
+detected repo, WSGI file, secret and branch — flagging anything `MISSING` —
+plus the last few deploys. A failed pull logs `FAILED` and replies with the
+one command that fixes it (a dirty server checkout is stashed, never
+silently reset), so a deploy never half-applies. Databases and instance data
+live outside Git and are never pulled or reset, and `scripts/check_db_safety.py`
+(run by CI) fails any commit that tries to track a `.db`. Rollback is
+`git checkout <commit>` in a Bash console, then Reload. Full setup and daily
+operations: [`ops/pythonanywhere/README.md`](ops/pythonanywhere/README.md) or
+`helpbook.txt` sections 2–6.
