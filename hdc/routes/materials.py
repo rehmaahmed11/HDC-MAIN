@@ -21,7 +21,7 @@ def register(app):
     @app.route('/hdc/materials', methods=['GET', 'POST'])
     @login_required
     def hdc_materials():
-        flash('Materials module has moved to Purchase V2.', 'info')
+        flash('Materials are now managed in Purchases.', 'info')
         return redirect(url_for('hdc_purchase_v2_materials'))
         if request.method == 'POST':
             action = request.form.get('action','add')
@@ -48,7 +48,7 @@ def register(app):
     @app.route('/hdc/materials/usage', methods=['GET', 'POST'])
     @login_required
     def hdc_material_usage():
-        flash('Material Usage has moved to Purchase V2 Usage.', 'info')
+        flash('Material Usage is now managed in Purchases.', 'info')
         return redirect(url_for('hdc_purchase_v2_usage_page'))
         if request.method == 'POST':
             pid = request.form.get('project_id', type=int)
@@ -115,7 +115,7 @@ def register(app):
     @app.route('/hdc/purchases', methods=['GET', 'POST'])
     @login_required
     def hdc_purchases():
-        flash('Legacy Purchases has moved to Purchase V2 Purchase Orders.', 'info')
+        flash('Purchases are now managed in Purchase Orders.', 'info')
         return redirect(url_for('hdc_purchase_v2_purchases'))
         if request.method == 'POST':
             action = (request.form.get('action') or 'purchase').strip().lower()

@@ -28,63 +28,59 @@
 <!-- Add Purchase Form -->
 <div class="card hdc-card mb-4">
     <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
-        <span><i class="fas fa-plus me-2"></i>New Purchase Order</span>
+        <span><i class="fas fa-plus me-2"></i>New Purchase</span>
+        <span class="small text-muted">Add one or several materials in a single purchase</span>
     </div>
     <div class="card-body">
-        <form method="POST" class="row g-2" id="purchaseV2Form">
-            <div class="col-md-3">
-                <label class="form-label fw-semibold">Supplier <span class="text-danger">*</span></label>
-                <select name="supplier_id" class="form-select" required>
-                    <option value="">Select supplier</option>
-                    {% for s in suppliers %}
-                    <option value="{{ s.id }}">{{ s.name }}</option>
-                    {% endfor %}
-                </select>
+        <form method="POST" id="purchaseV2Form">
+            <div class="row g-2 mb-3">
+                <div class="col-md-4">
+                    <label class="form-label fw-semibold">Supplier <span class="text-danger">*</span></label>
+                    <select name="supplier_id" class="form-select" required>
+                        <option value="">Select supplier</option>
+                        {% for s in suppliers %}<option value="{{ s.id }}">{{ s.name }}</option>{% endfor %}
+                    </select>
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label fw-semibold">Date</label>
+                    <input type="date" name="date" class="form-control" value="{{ today }}">
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label fw-semibold">Payment</label>
+                    <select name="payment_status" class="form-select">
+                        <option value="unpaid">Unpaid</option><option value="paid">Paid</option>
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label fw-semibold">Challan / Ref</label>
+                    <input type="text" name="challan_no" class="form-control" placeholder="Bill / Challan # (optional)">
+                </div>
             </div>
-            <div class="col-md-3">
-                <label class="form-label fw-semibold">Material <span class="text-danger">*</span></label>
-                <select name="material_id" class="form-select" required>
-                    <option value="">Select material</option>
-                    {% for m in materials %}
-                    <option value="{{ m.id }}">{{ m.name }} ({{ m.unit or '' }})</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="col-6 col-md-2">
-                <label class="form-label fw-semibold">Qty <span class="text-danger">*</span></label>
-                <input type="number" step="0.01" min="0.01" name="quantity" id="p2Qty" class="form-control" required>
-            </div>
-            <div class="col-6 col-md-2">
-                <label class="form-label fw-semibold">Rate / Unit <span class="text-danger">*</span></label>
-                <input type="number" step="0.01" min="0.01" name="unit_price" id="p2Rate" class="form-control" required>
-            </div>
-            <div class="col-6 col-md-2">
-                <label class="form-label fw-semibold">Total (auto)</label>
-                <input type="text" id="p2Total" class="form-control bg-light" readonly tabindex="-1">
-            </div>
-            <div class="col-6 col-md-2">
-                <label class="form-label fw-semibold">Date</label>
-                <input type="date" name="date" class="form-control" value="{{ today }}">
-            </div>
-            <div class="col-6 col-md-2">
-                <label class="form-label fw-semibold">Payment</label>
-                <select name="payment_status" class="form-select">
-                    <option value="unpaid">Unpaid</option>
-                    <option value="paid">Paid</option>
-                </select>
-            </div>
-            <div class="col-6 col-md-2">
-                <label class="form-label fw-semibold">Challan / Ref</label>
-                <input type="text" name="challan_no" class="form-control" placeholder="Bill / Challan #">
-            </div>
-            <div class="col-md-4">
-                <label class="form-label fw-semibold">Notes</label>
-                <input type="text" name="notes" class="form-control" placeholder="Optional notes">
-            </div>
-            <div class="col-md-2 d-flex align-items-end">
-                <button class="btn btn-mint w-100" type="submit">
-                    <i class="fas fa-save me-1"></i>Save
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="mb-0 fw-bold"><i class="fas fa-list-ul me-2 text-success"></i>Items</h6>
+                <button type="button" class="btn btn-sm btn-outline-success" id="addPurchaseItem">
+                    <i class="fas fa-plus me-1"></i>Add item
                 </button>
+            </div>
+            <div id="purchaseItems" class="vstack gap-2">
+                <div class="purchase-item row g-2 align-items-end border rounded p-2 bg-light">
+                    <div class="col-md-4">
+                        <label class="form-label small fw-semibold">Material <span class="text-danger">*</span></label>
+                        <select name="material_id[]" class="form-select" required>
+                            <option value="">Select material</option>
+                            {% for m in materials %}<option value="{{ m.id }}">{{ m.name }} ({{ m.unit or '' }})</option>{% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-5 col-md-2"><label class="form-label small fw-semibold">Qty *</label><input type="number" step="0.01" min="0.01" name="quantity[]" class="form-control item-qty" required></div>
+                    <div class="col-5 col-md-2"><label class="form-label small fw-semibold">Rate / Unit *</label><input type="number" step="0.01" min="0.01" name="unit_price[]" class="form-control item-rate" required></div>
+                    <div class="col-8 col-md-2"><label class="form-label small fw-semibold">Line total</label><input type="text" class="form-control item-total bg-white" readonly tabindex="-1"></div>
+                    <div class="col-4 col-md-2"><button type="button" class="btn btn-outline-danger remove-purchase-item w-100" disabled><i class="fas fa-trash me-1"></i>Remove</button></div>
+                    <div class="col-12"><input type="text" name="notes[]" class="form-control form-control-sm" placeholder="Item notes (optional)"></div>
+                </div>
+            </div>
+            <div class="d-flex flex-wrap justify-content-between align-items-center mt-3 gap-2">
+                <div class="small text-muted"><i class="fas fa-circle-info me-1"></i>Each item becomes its own purchase order and ledger entry.</div>
+                <div class="d-flex align-items-center gap-3"><span class="fw-semibold">Grand total: <span id="purchaseGrandTotal">Rs 0</span></span><button class="btn btn-mint" type="submit"><i class="fas fa-save me-1"></i>Save purchase</button></div>
             </div>
         </form>
     </div>
@@ -155,7 +151,7 @@
                     </td>
                 </tr>
                 {% else %}
-                <tr {{ r|hdc_row_attrs }}><td colspan="13" class="text-center text-muted py-4">
+                <tr><td colspan="13" class="text-center text-muted py-4">
                     <i class="fas fa-inbox fa-2x mb-2 d-block opacity-30"></i>No purchase orders found.
                 </td></tr>
                 {% endfor %}
@@ -237,54 +233,71 @@
 {% block extra_js %}
 <script>
 (function () {
-    // Add form total calculation
-    var qty  = document.getElementById('p2Qty');
-    var rate = document.getElementById('p2Rate');
-    var tot  = document.getElementById('p2Total');
-    function refreshAdd() {
-        if (!tot) return;
-        var q = parseFloat((qty && qty.value) || '0') || 0;
-        var r = parseFloat((rate && rate.value) || '0') || 0;
-        tot.value = (q * r).toLocaleString('en-PK', {maximumFractionDigits:0});
-    }
-    if (qty) qty.addEventListener('input', refreshAdd);
-    if (rate) rate.addEventListener('input', refreshAdd);
-    refreshAdd();
+    var items = document.getElementById('purchaseItems');
+    var add = document.getElementById('addPurchaseItem');
+    var grand = document.getElementById('purchaseGrandTotal');
+    if (!items) return;
 
-    // Edit modal total calculation
-    var eQty  = document.getElementById('editQty');
-    var eRate = document.getElementById('editRate');
-    var eTot  = document.getElementById('editTotal');
-    function refreshEdit() {
-        if (!eTot) return;
-        var q = parseFloat((eQty && eQty.value) || '0') || 0;
-        var r = parseFloat((eRate && eRate.value) || '0') || 0;
-        eTot.value = (q * r).toLocaleString('en-PK', {maximumFractionDigits:0});
+    function update() {
+        var total = 0;
+        var rows = items.querySelectorAll('.purchase-item');
+        rows.forEach(function (row) {
+            var q = parseFloat(row.querySelector('.item-qty').value) || 0;
+            var r = parseFloat(row.querySelector('.item-rate').value) || 0;
+            var line = q * r;
+            row.querySelector('.item-total').value = line.toLocaleString('en-PK', {maximumFractionDigits: 0});
+            total += line;
+        });
+        grand.textContent = 'Rs ' + total.toLocaleString('en-PK', {maximumFractionDigits: 0});
+        rows.forEach(function (row) {
+            row.querySelector('.remove-purchase-item').disabled = rows.length === 1;
+        });
     }
-    if (eQty) eQty.addEventListener('input', refreshEdit);
-    if (eRate) eRate.addEventListener('input', refreshEdit);
+    function bind(row) {
+        row.querySelectorAll('.item-qty, .item-rate').forEach(function (input) { input.addEventListener('input', update); });
+        row.querySelector('.remove-purchase-item').addEventListener('click', function () { row.remove(); update(); });
+    }
+    bind(items.querySelector('.purchase-item'));
+    add.addEventListener('click', function () {
+        var row = items.querySelector('.purchase-item').cloneNode(true);
+        row.querySelector('select').selectedIndex = 0;
+        row.querySelectorAll('input').forEach(function (input) { input.value = ''; });
+        items.appendChild(row);
+        bind(row);
+        update();
+        row.querySelector('select').focus();
+    });
+    update();
 })();
 
+// Keep editing available for existing purchase rows.
 function openEditPurchaseModal(id, suppId, matId, qty, rate, payStatus, date, challan, notes) {
     var form = document.getElementById('editPurchaseForm');
     form.action = '/hdc/purchase-v2/purchases/' + id + '/edit';
     setSelectVal('editSupplier', suppId);
     setSelectVal('editMaterial', matId);
-    document.getElementById('editQty').value  = qty;
+    document.getElementById('editQty').value = qty;
     document.getElementById('editRate').value = rate;
     setSelectVal('editPayStatus', payStatus);
-    document.getElementById('editDate').value    = date;
+    document.getElementById('editDate').value = date;
     document.getElementById('editChallan').value = challan;
-    document.getElementById('editNotes').value   = notes;
-    // refresh total display
-    var q = parseFloat(qty||'0')||0, r = parseFloat(rate||'0')||0;
-    document.getElementById('editTotal').value = (q*r).toLocaleString('en-PK',{maximumFractionDigits:0});
+    document.getElementById('editNotes').value = notes;
+    var q = parseFloat(qty || '0') || 0, r = parseFloat(rate || '0') || 0;
+    var total = document.getElementById('editTotal');
+    total.value = (q * r).toLocaleString('en-PK', {maximumFractionDigits: 0});
+    function refreshEditTotal() {
+        var eq = parseFloat(document.getElementById('editQty').value) || 0;
+        var er = parseFloat(document.getElementById('editRate').value) || 0;
+        total.value = (eq * er).toLocaleString('en-PK', {maximumFractionDigits: 0});
+    }
+    document.getElementById('editQty').oninput = refreshEditTotal;
+    document.getElementById('editRate').oninput = refreshEditTotal;
     new bootstrap.Modal(document.getElementById('editPurchaseModal')).show();
 }
 function setSelectVal(id, val) {
     var el = document.getElementById(id);
     if (!el) return;
-    for (var i=0; i<el.options.length; i++) {
+    for (var i = 0; i < el.options.length; i++) {
         if (el.options[i].value == val) { el.selectedIndex = i; break; }
     }
 }

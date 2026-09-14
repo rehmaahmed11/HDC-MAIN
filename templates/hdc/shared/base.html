@@ -59,7 +59,7 @@
                 <a href="{{ url_for('hdc_expense_categories') }}"><i class="fas fa-tags"></i><span>Expense Categories</span></a>
             </li>
             <li class="nav-item {% if 'purchase_v2' in (request.endpoint or '') %}active{% endif %}">
-                <a href="{{ url_for('hdc_purchase_v2_page') }}"><i class="fas fa-cart-flatbed"></i><span>Purchase V2</span></a>
+                <a href="{{ url_for('hdc_purchase_v2_page') }}"><i class="fas fa-cart-flatbed"></i><span>Purchases</span></a>
             </li>
             <li class="nav-item {% if 'estimation' in (request.endpoint or '') or 'formula' in (request.endpoint or '') %}active{% endif %}">
                 <a href="{{ url_for('hdc_estimation') }}"><i class="fas fa-calculator"></i><span>Estimation</span></a>
