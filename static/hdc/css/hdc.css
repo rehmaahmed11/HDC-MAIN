@@ -76,6 +76,9 @@ body {
     width: 100%;
 }
 
+/* Off-canvas drawer: always overlays the page, never pushes it.
+   Hidden by default (`.collapsed` in the markup) so there is no flash of an
+   open sidebar before layout.js runs. */
 #sidebar {
     position: fixed;
     left: 0;
@@ -92,21 +95,49 @@ body {
     overflow-x: hidden;
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
-    transition: margin-left 0.26s ease, width 0.26s ease;
+    transform: translateX(0);
+    visibility: visible;
+    transition: transform 0.26s ease, visibility 0s linear 0s;
     box-shadow: 2px 0 20px rgba(2, 6, 23, 0.28);
     z-index: 120;
 }
 
-#sidebar.collapsed { margin-left: -234px; }
+#sidebar.collapsed {
+    transform: translateX(-100%);
+    margin-left: 0;
+    box-shadow: none;
+    /* hide only after the slide-out finishes so the animation stays smooth */
+    visibility: hidden;
+    transition: transform 0.26s ease, visibility 0s linear 0.26s;
+}
 
 #page-content {
-    margin-left: 234px;
-    transition: margin-left 0.26s ease;
+    margin-left: 0;
+    width: 100%;
 }
 
-#sidebar.collapsed ~ #page-content {
-    margin-left: 0;
+/* Veil behind the open drawer — click it to collapse the sidebar again. */
+.sidebar-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(2, 6, 23, 0.5);
+    backdrop-filter: blur(1.5px);
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 0.26s ease, visibility 0s linear 0.26s;
+    z-index: 110;
 }
+
+.sidebar-backdrop.show {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transition: opacity 0.26s ease, visibility 0s linear 0s;
+}
+
+/* Freeze the page behind the drawer on phones/tablets. */
+body.sidebar-scroll-lock { overflow: hidden; }
 
 #sidebar {
     scrollbar-width: thin;
@@ -149,6 +180,38 @@ body {
 
 .sidebar-brand .brand-text {
     color: #ffffff;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ✕ inside the drawer — the hamburger sits under the open drawer, so the
+   drawer needs its own way back to the collapsed state. */
+.sidebar-close {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--sidebar-text);
+    font-size: 0.95rem;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease;
+}
+
+.sidebar-close:hover,
+.sidebar-close:focus-visible {
+    background: var(--sidebar-hover);
+    border-color: rgba(255, 255, 255, 0.34);
+    color: var(--sidebar-text-active);
 }
 
 .sidebar-divider {
@@ -228,9 +291,28 @@ body {
     padding: 4px 9px;
     line-height: 1;
     font-size: 1.14rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 36px;
+    min-height: 34px;
+    cursor: pointer;
+    transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease;
 }
 
 .btn-hamburger:hover { background: var(--accent-soft); }
+
+.btn-hamburger:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+/* Hamburger reads as "open" while the drawer is expanded. */
+.btn-hamburger[aria-expanded="true"] {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: var(--accent-soft);
+}
 
 .topbar-title {
     flex: 1;
@@ -682,9 +764,11 @@ code {
         top: 0;
         height: 100%;
         z-index: 300;
+        box-shadow: 4px 0 28px rgba(2, 6, 23, 0.45);
     }
 
-    #sidebar.collapsed { margin-left: -234px; }
+    #sidebar.collapsed { transform: translateX(-100%); margin-left: 0; }
+    .sidebar-backdrop { z-index: 290; }
     #page-content { margin-left: 0; }
 
     .kpi-value { font-size: 1.22rem; }
@@ -694,6 +778,22 @@ code {
     .topbar { padding: 0 10px; }
     .topbar-user { display: none; }
     .main-content { padding-left: 12px !important; padding-right: 12px !important; }
+    #sidebar { width: min(234px, 86vw); min-width: 0; }
+}
+
+/* Respect users who ask for less motion: snap the drawer instead of sliding. */
+@media (prefers-reduced-motion: reduce) {
+    #sidebar,
+    .sidebar-backdrop { transition: none; }
+}
+
+/* Never print the drawer, its veil or the hamburger. */
+@media print {
+    #sidebar,
+    .sidebar-backdrop,
+    .btn-hamburger { display: none !important; }
+
+    #page-content { margin-left: 0 !important; }
 }
 
 /* ══════════════════════════════════════════════════════════════════════════

@@ -14,14 +14,34 @@
             document.documentElement.setAttribute('data-theme', t);
         })();
     </script>
+    <!-- No JavaScript: the drawer cannot be toggled, so fall back to the
+         classic docked sidebar instead of hiding the navigation completely. -->
+    <noscript>
+        <style>
+            #sidebar.collapsed {
+                position: static;
+                transform: none;
+                visibility: visible;
+                height: auto;
+                min-height: 100vh;
+                box-shadow: none;
+            }
+            .sidebar-backdrop,
+            .btn-hamburger,
+            .sidebar-close { display: none !important; }
+        </style>
+    </noscript>
 </head>
 <body>
 <div id="wrapper">
-    <!-- SIDEBAR -->
-    <nav id="sidebar">
+    <!-- SIDEBAR (off-canvas: hidden by default, opened with the hamburger) -->
+    <nav id="sidebar" class="collapsed" aria-label="Main navigation">
         <div class="sidebar-brand">
             <i class="fas fa-hard-hat"></i>
             <span class="brand-text">HDC ERP</span>
+            <button type="button" id="sidebarClose" class="sidebar-close" title="Close menu" aria-label="Close menu">
+                <i class="fas fa-xmark" aria-hidden="true"></i>
+            </button>
         </div>
         <div class="sidebar-divider"></div>
         <ul class="sidebar-nav">
@@ -107,12 +127,16 @@
         </ul>
     </nav>
 
+    <!-- Click-away veil shown while the sidebar is open -->
+    <div id="sidebarBackdrop" class="sidebar-backdrop" aria-hidden="true"></div>
+
     <!-- CONTENT -->
     <div id="page-content">
         <!-- TOPBAR -->
         <nav class="topbar">
-            <button id="sidebarToggle" class="btn-hamburger" title="Toggle Sidebar">
-                <i class="fas fa-bars"></i>
+            <button id="sidebarToggle" class="btn-hamburger" type="button" title="Open menu"
+                    aria-label="Toggle navigation menu" aria-controls="sidebar" aria-expanded="false">
+                <i class="fas fa-bars" id="sidebarToggleIcon" aria-hidden="true"></i>
             </button>
             <div class="topbar-title">{% block page_heading %}{% endblock %}</div>
             <div class="topbar-right">
