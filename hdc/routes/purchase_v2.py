@@ -172,76 +172,74 @@ def register(app):
     def hdc_purchase_v2_purchases():
         if request.method == 'POST':
             supplier_id = request.form.get('supplier_id', type=int)
-            material_id = request.form.get('material_id', type=int)
-            unit_price = max(0.0, _flt(request.form.get('unit_price'), 0.0))
-            quantity = max(0.0, _flt(request.form.get('quantity'), 0.0))
+            # The form accepts multiple item rows. Keep a single-item fallback so
+            # older clients/bookmarks posting the original field names still work.
+            material_ids = request.form.getlist('material_id[]') or request.form.getlist('material_id')
+            quantities = request.form.getlist('quantity[]') or request.form.getlist('quantity')
+            unit_prices = request.form.getlist('unit_price[]') or request.form.getlist('unit_price')
+            notes = request.form.getlist('notes[]') or request.form.getlist('notes')
+            if not material_ids or len(material_ids) != len(quantities) or len(material_ids) != len(unit_prices):
+                flash('Add at least one complete purchase item.', 'danger')
+                return redirect(url_for('hdc_purchase_v2_purchases'))
             payment_status = (request.form.get('payment_status') or 'unpaid').strip().lower()
             if payment_status not in ('paid', 'unpaid'):
                 payment_status = 'unpaid'
-            _date_raw = (request.form.get('date') or '').strip()
+            date_raw = (request.form.get('date') or '').strip()
             try:
-                _date = datetime.strptime(_date_raw, '%Y-%m-%d').date() if _date_raw else _pkt_today()
+                purchase_date = datetime.strptime(date_raw, '%Y-%m-%d').date() if date_raw else _pkt_today()
             except ValueError:
-                _date = _pkt_today()
-            _notes     = (request.form.get('notes') or '').strip() or None
-            _challan   = (request.form.get('challan_no') or '').strip() or None
+                purchase_date = _pkt_today()
+            challan = (request.form.get('challan_no') or '').strip() or None
             supplier = Supplier.query.get(supplier_id) if supplier_id else None
-            material = MaterialV2.query.get(material_id) if material_id else None
             if (not supplier) or supplier.is_void or (supplier.status or 'active').strip().lower() != 'active':
                 flash('Valid supplier is required.', 'danger')
                 return redirect(url_for('hdc_purchase_v2_purchases'))
-            if (not material) or material.is_void or (material.status or 'active').strip().lower() != 'active':
-                flash('Valid material is required.', 'danger')
-                return redirect(url_for('hdc_purchase_v2_purchases'))
-            if unit_price <= 0 or quantity <= 0:
-                flash('Unit price and quantity must be greater than 0.', 'danger')
-                return redirect(url_for('hdc_purchase_v2_purchases'))
-            total_amount = float(unit_price * quantity)
-            if _has_recent_duplicate(
-                PurchaseV2,
-                supplier_id=supplier.id,
-                material_id=material.id,
-                unit_price=unit_price,
-                quantity=quantity,
-                total_amount=total_amount,
-                payment_status=payment_status,
-                date=_date,
-                notes=_notes,
-                challan_no=_challan
-            ):
-                flash('Duplicate purchase prevented (same values submitted too quickly).', 'warning')
-                return redirect(url_for('hdc_purchase_v2_purchases'))
-            row = PurchaseV2(
-                supplier_id=supplier.id,
-                material_id=material.id,
-                unit_price=unit_price,
-                quantity=quantity,
-                total_amount=total_amount,
-                payment_status=payment_status,
-                date=_date,
-                notes=_notes,
-                challan_no=_challan,
-                is_void=False,
-                created_at=_pkt_now_naive(),
-                updated_at=_pkt_now_naive()
-            )
-            db.session.add(row)
-            db.session.flush()
-            _sync_purchase_v2_ledger(row)
-            if payment_status == 'paid':
-                ok_txn, msg_txn, _ = _accounts_upsert_purchase_paid_txn(row, supplier_name=supplier.name, commit=False)
-                if not ok_txn:
+
+            # Validate every row before creating anything, so a mistake in one
+            # item cannot leave a partially saved multi-item purchase.
+            items = []
+            for index, (material_raw, quantity_raw, price_raw) in enumerate(zip(material_ids, quantities, unit_prices)):
+                material_id = _flt(material_raw, 0)
+                quantity = max(0.0, _flt(quantity_raw, 0.0))
+                unit_price = max(0.0, _flt(price_raw, 0.0))
+                material = MaterialV2.query.get(int(material_id)) if material_id else None
+                if (not material) or material.is_void or (material.status or 'active').strip().lower() != 'active':
+                    flash(f'Valid material is required for item {index + 1}.', 'danger')
+                    return redirect(url_for('hdc_purchase_v2_purchases'))
+                if quantity <= 0 or unit_price <= 0:
+                    flash(f'Quantity and rate must be greater than 0 for item {index + 1}.', 'danger')
+                    return redirect(url_for('hdc_purchase_v2_purchases'))
+                item_notes = (notes[index] if index < len(notes) else '').strip() or None
+                items.append((material, quantity, unit_price, item_notes))
+
+            created = []
+            for material, quantity, unit_price, item_notes in items:
+                total_amount = float(unit_price * quantity)
+                if _has_recent_duplicate(PurchaseV2, supplier_id=supplier.id, material_id=material.id,
+                        unit_price=unit_price, quantity=quantity, total_amount=total_amount,
+                        payment_status=payment_status, date=purchase_date, notes=item_notes, challan_no=challan):
                     db.session.rollback()
-                    return jsonify(ok=False, message=(msg_txn or 'Unable to post paid purchase in unified accounts.')), 400
-            log_action(
-                current_user,
-                'create',
-                f'{current_user.username.title()} created purchase #{row.id}: {supplier.name}, {material.name}, {quantity:.2f} x {unit_price:.2f} = {total_amount:.2f} ({payment_status})',
-                'purchase_v2',
-                row.id
-            )
+                    flash(f'Duplicate purchase prevented for {material.name}.', 'warning')
+                    return redirect(url_for('hdc_purchase_v2_purchases'))
+                row = PurchaseV2(supplier_id=supplier.id, material_id=material.id,
+                    unit_price=unit_price, quantity=quantity, total_amount=total_amount,
+                    payment_status=payment_status, date=purchase_date, notes=item_notes,
+                    challan_no=challan, is_void=False, created_at=_pkt_now_naive(), updated_at=_pkt_now_naive())
+                db.session.add(row)
+                db.session.flush()
+                _sync_purchase_v2_ledger(row)
+                if payment_status == 'paid':
+                    ok_txn, msg_txn, _ = _accounts_upsert_purchase_paid_txn(row, supplier_name=supplier.name, commit=False)
+                    if not ok_txn:
+                        db.session.rollback()
+                        flash(msg_txn or 'Unable to post paid purchase in unified accounts.', 'danger')
+                        return redirect(url_for('hdc_purchase_v2_purchases'))
+                log_action(current_user, 'create',
+                    f'{current_user.username.title()} created purchase #{row.id}: {supplier.name}, {material.name}, {quantity:.2f} x {unit_price:.2f} = {total_amount:.2f} ({payment_status})',
+                    'purchase_v2', row.id)
+                created.append(row)
             db.session.commit()
-            flash(f'Purchase #{row.id} recorded.', 'success')
+            flash(f'{len(created)} purchase item(s) recorded successfully.', 'success')
             return redirect(url_for('hdc_purchase_v2_purchases'))
         supplier_id = request.args.get('supplier_id', type=int)
         q = PurchaseV2.query.filter(PurchaseV2.is_void == False)
