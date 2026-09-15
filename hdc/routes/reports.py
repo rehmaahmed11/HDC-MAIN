@@ -20,7 +20,7 @@ from hdc.models.accounts import Alert, Expense, ExpenseCategory, OwnerPayment
 from hdc.models.materials import Material, MaterialUsage, Purchase, UsageLogV2
 from hdc.models.office import OfficeExpense
 from hdc.models.projects import Project, Stage
-from hdc.models.subcontract import SubcontractLabourAttendance, SubcontractPayment, Subcontractor
+from hdc.models.subcontract import SubcontractLabourAttendance, SubcontractPayment, SubcontractTeamAttendance, Subcontractor
 from hdc.models.workforce import LabourLedger, PayrollItem, PayrollRun, TimeEntry, Worker
 from hdc.services.aggregation import _apply_aggregated_project_costs, _apply_aggregated_stage_costs
 from hdc.services.ledger import _office_expense_total
@@ -389,6 +389,18 @@ def register(app):
                 .all()
             ) if sid
         }
+        # Simple crew summaries (trade x days x workers x rate) feed the same
+        # labour cost so reports match the subcontractor attendance page.
+        for sid, total in (
+            db.session.query(
+                SubcontractTeamAttendance.subcontractor_id,
+                func.coalesce(func.sum(SubcontractTeamAttendance.total_amount), 0.0)
+            )
+            .group_by(SubcontractTeamAttendance.subcontractor_id)
+            .all()
+        ):
+            if sid:
+                sub_labour_cost_map[int(sid)] = sub_labour_cost_map.get(int(sid), 0.0) + float(total or 0.0)
         subcontract_total_payable = float(sum(float(s.payable_amount or 0.0) for s in subcontractors))
         subcontract_total_cleared = float(sum(float(s.total_cleared or 0.0) for s in subcontractors))
         subcontract_total_balance = float(sum(float(s.payable_balance or 0.0) for s in subcontractors))

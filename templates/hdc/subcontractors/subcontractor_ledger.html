@@ -9,7 +9,7 @@
             <label class="fw-bold text-muted mb-0">Filters:</label>
             <select name="event_type" class="form-select form-select-sm" style="max-width:220px">
                 <option value="" {% if not selected_event_type %}selected{% endif %}>All Events</option>
-                {% for et, lbl in [('create','Profile Created'),('shift','Shift Assigned'),('reassign','Stage Reassigned'),('unassign','Shift Back'),('status','Stage Status'),('price_update','Price Update'),('attendance','Attendance'),('labour_attendance','Labour Attendance'),('labour_worker_add','Worker Added'),('labour_worker_edit','Worker Edited'),('labour_worker_status','Worker Status'),('labour_worker_payment','Worker Payment'),('progress','Progress'),('payment','Payment'),('tip','Tip'),('settlement','Settlement')] %}
+                {% for et, lbl in [('create','Profile Created'),('shift','Shift Assigned'),('reassign','Stage Reassigned'),('unassign','Shift Back'),('status','Stage Status'),('price_update','Price Update'),('attendance','Attendance'),('labour_attendance','Labour Attendance'),('team_attendance','Crew Attendance'),('labour_worker_add','Worker Added'),('labour_worker_edit','Worker Edited'),('labour_worker_status','Worker Status'),('labour_worker_payment','Worker Payment'),('progress','Progress'),('payment','Payment'),('tip','Tip'),('settlement','Settlement')] %}
                 <option value="{{ et }}" {% if selected_event_type == et %}selected{% endif %}>{{ lbl }}</option>
                 {% endfor %}
             </select>
@@ -128,14 +128,14 @@
         <div class="kpi-card kpi-red">
             <div class="kpi-label">Labour Cost</div>
             <div class="kpi-value small">{{ "{:,.0f}".format(kpis.labour_cost_total or 0) }}</div>
-            <div class="kpi-sub">Avg/day: {{ "{:,.0f}".format(kpis.labour_avg_daily_cost or 0) }}</div>
+            <div class="kpi-sub">Crew entries: {{ kpis.labour_crew_rows or 0 }} | Avg/day: {{ "{:,.0f}".format(kpis.labour_avg_daily_cost or 0) }}</div>
         </div>
     </div>
     <div class="col-6 col-md-3">
         <div class="kpi-card kpi-purple">
             <div class="kpi-label">Labour Usage</div>
             <div class="kpi-value small">{{ kpis.labour_days or 0 }} day(s)</div>
-            <div class="kpi-sub">Men: {{ kpis.labour_men_total or 0 }} | Avg/day: {{ "{:,.1f}".format(kpis.labour_avg_men_per_day or 0) }}</div>
+            <div class="kpi-sub">Man-days: {{ kpis.labour_men_total or 0 }} | Avg/day: {{ "{:,.1f}".format(kpis.labour_avg_men_per_day or 0) }}</div>
         </div>
     </div>
     <div class="col-6 col-md-3">

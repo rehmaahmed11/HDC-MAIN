@@ -39,6 +39,184 @@
 </div>
 
 <div class="card hdc-card mt-2 mb-3">
+    <div class="card-header hdc-card-header"><i class="fas fa-clipboard-list me-2"></i>Crew Attendance (Simple)</div>
+    <div class="card-body py-2">
+        <div class="alert alert-info py-2 small mb-2">
+            <i class="fas fa-info-circle me-1"></i>
+            Subcontractor labour is recorded by <strong>crew only</strong>: trade, how many
+            <strong>days</strong>, how many <strong>workers per day</strong>, and the
+            <strong>rate per worker per day</strong> &mdash; total = days &times; workers &times; rate.
+            Exact day-wise / per-person attendance of the subcontractor's own labour is intentionally
+            <strong>not</strong> maintained &mdash; we only track how many workers worked how many days
+            and what the labour cost is.
+        </div>
+        <form method="POST" action="{{ url_for('hdc_subcontractor_team_attendance', sid=sub.id) }}" id="teamAttendanceForm">
+            <div class="row g-2 align-items-end">
+                <div class="col-6 col-md-2">
+                    <label class="form-label small text-muted mb-1">Worker Type</label>
+                    <input list="teamTradeList" name="worker_type" class="form-control form-control-sm" value="{{ selected_worker_type or '' }}" placeholder="e.g. Mason" required>
+                    <datalist id="teamTradeList">
+                        {% for t in trade_options %}<option value="{{ t }}">{% endfor %}
+                    </datalist>
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label small text-muted mb-1">Days</label>
+                    <input type="number" min="1" step="1" name="days_count" class="form-control form-control-sm js-team-days" placeholder="e.g. 17" required>
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label small text-muted mb-1">Workers / Day</label>
+                    <input type="number" min="1" step="1" name="workers_count" class="form-control form-control-sm js-team-workers" placeholder="e.g. 10" required>
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label small text-muted mb-1">Rate / Worker / Day</label>
+                    <input type="number" min="0" step="0.01" name="wage_rate" class="form-control form-control-sm js-team-rate" placeholder="e.g. 2000" required>
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label small text-muted mb-1">Total (auto)</label>
+                    <input type="number" min="0" step="0.01" name="total_amount" class="form-control form-control-sm js-team-total" placeholder="Days x Workers x Rate">
+                    <div class="form-check mt-1">
+                        <input class="form-check-input" type="checkbox" name="total_manual" id="teamTotalManual" value="1">
+                        <label class="form-check-label small" for="teamTotalManual">Manual total (rate back-derived)</label>
+                    </div>
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label small text-muted mb-1">Date</label>
+                    <input type="date" name="date" class="form-control form-control-sm" value="{{ sheet_date }}" required>
+                </div>
+                <div class="col-6 col-md-3">
+                    <label class="form-label small text-muted mb-1">Project</label>
+                    <select name="project_id" id="teamProjectSelect" class="form-select form-select-sm" required>
+                        <option value="">Select Project</option>
+                        {% for p in project_options %}
+                        <option value="{{ p.id }}" {% if selected_project_id == p.id %}selected{% endif %}>{{ p.project_code }} | {{ p.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-6 col-md-3">
+                    <label class="form-label small text-muted mb-1">Stage</label>
+                    <select name="stage_id" id="teamStageSelect" class="form-select form-select-sm" required>
+                        <option value="">Select Stage</option>
+                        {% for st in stage_options %}
+                        <option value="{{ st.id }}" data-project="{{ st.project_id }}">{{ st.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label small text-muted mb-1">Period From (optional)</label>
+                    <input type="date" name="period_from" class="form-control form-control-sm">
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label small text-muted mb-1">Period To (optional)</label>
+                    <input type="date" name="period_to" class="form-control form-control-sm">
+                </div>
+                <div class="col-12">
+                    <label class="form-label small text-muted mb-1">Notes</label>
+                    <input type="text" name="notes" class="form-control form-control-sm" placeholder="e.g. as per contractor's register">
+                </div>
+            </div>
+            <div class="d-flex justify-content-end mt-2">
+                <button type="submit" class="btn btn-sm btn-mint">Add Crew Entry</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card hdc-card mt-2 mb-3">
+    <div class="card-header hdc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span><i class="fas fa-table me-2"></i>Crew Summary</span>
+        <span class="small text-muted">
+            Days: <strong>{{ team_rollup.days or 0 }}</strong> |
+            Man-days: <strong>{{ team_rollup.man_days or 0 }}</strong> |
+            Labour cost (crew + legacy register): <strong>{{ "{:,.0f}".format(team_rollup.cost or 0) }}</strong>
+        </span>
+    </div>
+    <div class="table-responsive">
+        <table class="table hdc-table table-sm mb-0">
+            <thead>
+                <tr class="fw-bold">
+                    <th>S.N</th>
+                    <th>Worker Type</th>
+                    <th>Date</th>
+                    <th>Period</th>
+                    <th class="text-end">Days</th>
+                    <th class="text-end">Workers/Day</th>
+                    <th class="text-end">Man-days</th>
+                    <th class="text-end">Rate/Day</th>
+                    <th class="text-end">Total</th>
+                    <th>Stage</th>
+                    <th>Notes</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for r in team_rows %}
+            <tr {{ r|hdc_row_attrs }}>
+                <td class="fw-bold">{{ loop.index }}</td>
+                <td class="fw-bold">{{ r.worker_type }}</td>
+                <td>{{ r.date.strftime('%Y-%m-%d') if r.date else '-' }}</td>
+                <td class="small">
+                    {% if r.period_from or r.period_to %}
+                        {{ r.period_from.strftime('%Y-%m-%d') if r.period_from else '?' }} &rarr; {{ r.period_to.strftime('%Y-%m-%d') if r.period_to else '?' }}
+                    {% else %}
+                        -
+                    {% endif %}
+                </td>
+                <td class="text-end">{{ r.days_count or 0 }}</td>
+                <td class="text-end">{{ r.workers_count or 0 }}</td>
+                <td class="text-end">{{ r.man_days }}</td>
+                <td class="text-end">{{ "{:,.0f}".format(r.wage_rate or 0) }}</td>
+                <td class="text-end fw-bold">
+                    {{ "{:,.0f}".format(r.total_amount or 0) }}
+                    {% if r.total_manual %}<span class="badge bg-info text-dark ms-1" title="Total was typed manually; rate is back-derived">M</span>{% endif %}
+                </td>
+                <td class="small">{{ r.stage.name if r.stage else ('Stage#' ~ r.stage_id if r.stage_id else '-') }}</td>
+                <td class="small text-muted">{{ r.notes or '-' }}</td>
+                <td class="text-nowrap">
+                    <form method="POST" action="{{ url_for('hdc_subcontractor_team_attendance_delete', sid=sub.id, rid=r.id) }}" class="d-inline" onsubmit="return confirm('Delete this crew attendance entry?');">
+                        <button type="submit" class="btn btn-xs btn-outline-danger btn-sm" title="Delete entry"><i class="fas fa-trash"></i></button>
+                    </form>
+                </td>
+            </tr>
+            {% else %}
+            <tr {{ r|hdc_row_attrs }}><td colspan="12" class="text-center text-muted py-3">No crew entries yet. Add the first one above &mdash; e.g. Mason: 17 days &times; 10 workers &times; 2,000 = 340,000.</td></tr>
+            {% endfor %}
+            </tbody>
+            {% if team_rows %}
+            <tfoot>
+                <tr class="fw-bold border-top">
+                    <td colspan="4" class="text-end">Crew entry totals:</td>
+                    <td class="text-end">{{ team_rollup.summary_days or 0 }}</td>
+                    <td></td>
+                    <td class="text-end">{{ team_rollup.summary_man_days or 0 }}</td>
+                    <td></td>
+                    <td class="text-end">{{ "{:,.0f}".format(team_rollup.summary_cost or 0) }}</td>
+                    <td colspan="3"></td>
+                </tr>
+            </tfoot>
+            {% endif %}
+        </table>
+    </div>
+</div>
+
+<div class="card hdc-card mt-2 mb-3">
+    <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+        <span><i class="fas fa-layer-group me-2"></i>Advanced: Named Workers &amp; Daily Register (optional)</span>
+        <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#subAdvancedCards">
+            <i class="fas fa-chevron-down me-1"></i>Open / Close
+        </button>
+    </div>
+</div>
+
+<div class="collapse" id="subAdvancedCards">
+<div class="card hdc-card mt-2 mb-3">
+    <div class="card-body py-2 small text-muted">
+        Optional per-person register: individual workers marked Present / Absent each day.
+        Use it only when you need day-wise proof of individual workers; the simple crew sheet
+        above is the normal way to record subcontractor labour.
+    </div>
+</div>
+
+<div class="card hdc-card mt-2 mb-3">
     <div class="card-header hdc-card-header"><i class="fas fa-user-plus me-2"></i>Add New Worker</div>
     <div class="card-body py-2">
         <form method="POST" action="{{ url_for('hdc_subcontractor_add_worker', sid=sub.id) }}" class="d-flex gap-2 align-items-center flex-wrap">
@@ -307,9 +485,13 @@
         </div>
     </div>
 </div>
+</div>
 
 <div class="card hdc-card mt-2">
-    <div class="card-header hdc-card-header"><i class="fas fa-table me-2"></i>Subcontractor Attendance Sheet</div>
+    <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+        <span><i class="fas fa-table me-2"></i>Legacy Daily Register (history)</span>
+        <span class="small text-muted">Old per-person entries are kept for reference.</span>
+    </div>
     <div class="table-responsive">
         <table class="table hdc-table table-sm mb-0">
             <thead>
@@ -436,6 +618,44 @@
             });
         }
     });
+
+    // Crew Attendance (Simple): live total = days x workers x rate
+    var teamForm = document.getElementById('teamAttendanceForm');
+    if (teamForm) {
+        var teamDays = teamForm.querySelector('.js-team-days');
+        var teamWorkers = teamForm.querySelector('.js-team-workers');
+        var teamRate = teamForm.querySelector('.js-team-rate');
+        var teamTotal = teamForm.querySelector('.js-team-total');
+        var teamManual = document.getElementById('teamTotalManual');
+
+        function recalcTeamTotal() {
+            if (!teamTotal) return;
+            if (teamManual && teamManual.checked) return;
+            var d = parseInt(teamDays.value, 10) || 0;
+            var w = parseInt(teamWorkers.value, 10) || 0;
+            var r = parseFloat(teamRate.value || '0') || 0;
+            teamTotal.value = (d * w * r) ? (d * w * r).toFixed(2) : '';
+        }
+        function applyTeamManualState() {
+            if (!teamManual || !teamTotal) return;
+            teamTotal.disabled = teamManual.checked;
+            if (!teamManual.checked) recalcTeamTotal();
+        }
+        [teamDays, teamWorkers, teamRate].forEach(function (el) {
+            if (el) el.addEventListener('input', recalcTeamTotal);
+        });
+        if (teamManual) teamManual.addEventListener('change', applyTeamManualState);
+        applyTeamManualState();
+
+        var teamProjectSel = document.getElementById('teamProjectSelect');
+        var teamStageSel = document.getElementById('teamStageSelect');
+        if (teamProjectSel && teamStageSel) {
+            syncStageByProject(teamProjectSel, teamStageSel);
+            teamProjectSel.addEventListener('change', function () {
+                syncStageByProject(teamProjectSel, teamStageSel);
+            });
+        }
+    }
 
     var statusProjectSel = document.getElementById('statusProjectSelect');
     var statusStageSel = document.getElementById('statusStageSelect');
