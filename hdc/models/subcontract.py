@@ -111,16 +111,24 @@ class Subcontractor(db.Model):
         return self.payable_balance
 
     @property
+    def labour_rollup(self):
+        # Function-local import: services.subcontract imports this module at
+        # module level, so a top-level import here would be circular
+        # (same pattern as the other cross-model references, see REFACTOR_NOTES).
+        from hdc.services.subcontract import sub_labour_rollup
+        return sub_labour_rollup(self.id)
+
+    @property
     def labour_days_logged(self):
-        return len([r for r in (self.labour_attendance_logs or []) if (r.labour_count or 0) > 0])
+        return int(self.labour_rollup.get('days') or 0)
 
     @property
     def labour_headcount_total(self):
-        return sum(int(r.labour_count or 0) for r in (self.labour_attendance_logs or []))
+        return int(self.labour_rollup.get('man_days') or 0)
 
     @property
     def labour_cost_total(self):
-        return sum(float(r.total_labour_paid or 0.0) for r in (self.labour_attendance_logs or []))
+        return float(self.labour_rollup.get('cost') or 0.0)
 
 
 class SubcontractPayment(db.Model):
@@ -181,6 +189,42 @@ class SubcontractLabourAttendance(db.Model):
     worker = db.relationship('SubcontractLabourWorker', backref='attendance_rows')
 
     __table_args__ = (db.UniqueConstraint('subcontractor_id', 'stage_id', 'worker_id', 'date', name='uq_sub_labour_sub_stage_worker_date'),)
+
+
+class SubcontractTeamAttendance(db.Model):
+    """Simple crew-level attendance for a subcontractor's own labour.
+
+    Records a trade/crew, how many days they worked, how many workers per day
+    and the daily rate, so labour cost = days x workers x rate.  Exact
+    day-wise / per-person attendance is intentionally NOT maintained for
+    subcontractor labour (see SUBCONTRACT_SIMPLE_ATTENDANCE_PLAN.md).
+    """
+    __tablename__ = 'hdc_subcontract_team_attendance'
+    id               = db.Column(db.Integer, primary_key=True)
+    subcontractor_id = db.Column(db.Integer, db.ForeignKey('hdc_subcontractor.id'), nullable=False)
+    project_id       = db.Column(db.Integer, db.ForeignKey('hdc_project.id'), nullable=True)
+    stage_id         = db.Column(db.Integer, db.ForeignKey('hdc_stage.id'), nullable=True)
+    worker_type      = db.Column(db.String(80), nullable=False)
+    date             = db.Column(db.Date, default=_pkt_today, nullable=False)
+    period_from      = db.Column(db.Date, nullable=True)
+    period_to        = db.Column(db.Date, nullable=True)
+    days_count       = db.Column(db.Integer, default=0)
+    workers_count    = db.Column(db.Integer, default=0)
+    wage_rate        = db.Column(db.Float, default=0.0)
+    total_amount     = db.Column(db.Float, default=0.0)
+    total_manual     = db.Column(db.Boolean, default=False)
+    notes            = db.Column(db.String(250))
+    activity_at      = db.Column(db.DateTime, default=_pkt_now_naive)
+    created_at       = db.Column(db.DateTime, default=_pkt_now_naive)
+    updated_at       = db.Column(db.DateTime, default=_pkt_now_naive)
+
+    project = db.relationship('Project')
+    stage = db.relationship('Stage')
+    subcontractor = db.relationship('Subcontractor', backref='team_attendance_rows')
+
+    @property
+    def man_days(self):
+        return int(self.days_count or 0) * int(self.workers_count or 0)
 
 
 class SubcontractEvent(db.Model):

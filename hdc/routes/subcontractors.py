@@ -14,11 +14,12 @@ from sqlalchemy.exc import IntegrityError
 from hdc.extensions import db
 from hdc.models.accounts import Expense
 from hdc.models.projects import Project, Stage
-from hdc.models.subcontract import SubcontractAttendance, SubcontractEvent, SubcontractLabourAttendance, SubcontractLabourPayment, SubcontractLabourWorker, SubcontractPayment, Subcontractor
+from hdc.models.subcontract import SubcontractAttendance, SubcontractEvent, SubcontractLabourAttendance, SubcontractLabourPayment, SubcontractLabourWorker, SubcontractPayment, SubcontractTeamAttendance, Subcontractor
+from hdc.models.workforce import WorkerTrade
 from hdc.services.accounts import _accounts_post_subcontract_labour_payment_row, _accounts_post_subcontract_payment_row
 from hdc.services.lookups import _ensure_expense_category
 from hdc.services.receipts import _receipt_company_profile
-from hdc.services.subcontract import _ensure_subcontract_baseline_events, _ensure_subcontract_labour_attendance_schema, _log_subcontract_event, _next_subcontractor_code, _subcontract_scope_stages, _subcontract_stage_snapshot
+from hdc.services.subcontract import _ensure_subcontract_baseline_events, _ensure_subcontract_labour_attendance_schema, _log_subcontract_event, _next_subcontractor_code, _subcontract_scope_stages, _subcontract_stage_snapshot, sub_labour_rollup, subcontract_scope_ids
 from hdc.services.timekeeping import _has_recent_duplicate
 from hdc.utils.dates import _pkt_now_naive, _pkt_today
 from hdc.utils.format import _activity_at_for, _amount_to_words, _flt, _parse_date
@@ -695,6 +696,181 @@ def register(app):
         return redirect(url_for('hdc_subcontractor_attendance_page', sid=sub.id))
 
 
+    @app.route('/hdc/subcontractor/<int:sid>/team_attendance', methods=['POST'])
+    @login_required
+    def hdc_subcontractor_team_attendance(sid):
+        sub = Subcontractor.query.get_or_404(sid)
+        rid = request.form.get('rid', type=int)
+        worker_type = (request.form.get('worker_type') or '').strip()
+        att_date = _parse_date(request.form.get('date'), fallback=_pkt_today())
+        period_from = _parse_date(request.form.get('period_from'), fallback=None)
+        period_to = _parse_date(request.form.get('period_to'), fallback=None)
+        days_count = max(0, request.form.get('days_count', type=int) or 0)
+        workers_count = max(0, request.form.get('workers_count', type=int) or 0)
+        wage_rate = max(0.0, _flt(request.form.get('wage_rate')))
+        total_amount = max(0.0, _flt(request.form.get('total_amount')))
+        total_manual = (request.form.get('total_manual') or '').strip().lower() in ('1', 'true', 'on', 'yes')
+        notes = (request.form.get('notes', '') or '').strip()
+        project_id = request.form.get('project_id', type=int)
+        stage_id = request.form.get('stage_id', type=int)
+
+        back = url_for('hdc_subcontractor_attendance_page', sid=sub.id)
+        if not worker_type:
+            flash('Worker type is required (e.g. Mason, Labour).', 'warning')
+            return redirect(back)
+        if days_count <= 0:
+            flash('Days worked must be at least 1.', 'warning')
+            return redirect(back)
+        if workers_count <= 0:
+            flash('Workers per day must be at least 1.', 'warning')
+            return redirect(back)
+        if not project_id:
+            flash('Project is required for crew attendance.', 'warning')
+            return redirect(back)
+        if not stage_id:
+            flash('Stage is required for crew attendance.', 'warning')
+            return redirect(back)
+        stg = Stage.query.get(stage_id) if stage_id else None
+        if not stg:
+            flash('No stage selected for crew attendance.', 'warning')
+            return redirect(back)
+        if int(stg.project_id or 0) != int(project_id or 0):
+            flash('Selected stage does not belong to selected project.', 'danger')
+            return redirect(back)
+        scope_project_ids, scope_stage_ids = subcontract_scope_ids(sub)
+        if scope_project_ids and int(project_id) not in scope_project_ids:
+            flash('Selected project is outside subcontractor assigned scope.', 'danger')
+            return redirect(back)
+        if scope_stage_ids and int(stg.id) not in scope_stage_ids:
+            flash('Selected stage is outside subcontractor assigned scope.', 'danger')
+            return redirect(back)
+
+        man_days = days_count * workers_count
+        if total_manual and total_amount > 0:
+            # Hand-typed total wins; the rate is only back-derived for display.
+            wage_rate = (total_amount / man_days) if man_days > 0 else 0.0
+        else:
+            total_amount = float(man_days) * wage_rate
+        if wage_rate <= 0 and total_amount <= 0:
+            flash('Rate per worker per day is required (or tick Manual total and type the total).', 'warning')
+            return redirect(back)
+
+        row = None
+        if rid:
+            row = SubcontractTeamAttendance.query.get(rid)
+            if not row or row.subcontractor_id != sub.id:
+                flash('Unknown crew attendance row.', 'danger')
+                return redirect(back)
+        final_total_manual = bool(total_manual and total_amount > 0)
+        if row:
+            old_days = int(row.days_count or 0)
+            old_workers = int(row.workers_count or 0)
+            old_paid = float(row.total_amount or 0.0)
+            row.project_id = project_id
+            row.stage_id = stg.id
+            row.worker_type = worker_type
+            row.date = att_date
+            row.period_from = period_from
+            row.period_to = period_to
+            row.days_count = days_count
+            row.workers_count = workers_count
+            row.wage_rate = wage_rate
+            row.total_amount = total_amount
+            row.total_manual = final_total_manual
+            row.notes = notes
+            row.activity_at = _activity_at_for(att_date)
+            row.updated_at = _pkt_now_naive()
+            msg = 'Crew attendance updated.'
+        else:
+            if _has_recent_duplicate(
+                SubcontractTeamAttendance,
+                subcontractor_id=sub.id,
+                worker_type=worker_type,
+                date=att_date,
+                project_id=project_id,
+                stage_id=stg.id,
+                days_count=days_count,
+                workers_count=workers_count,
+                wage_rate=wage_rate,
+                total_amount=total_amount,
+                total_manual=final_total_manual,
+                notes=notes
+            ):
+                flash('Duplicate crew attendance prevented (same values submitted too quickly).', 'warning')
+                return redirect(back)
+            row = SubcontractTeamAttendance(
+                subcontractor_id=sub.id,
+                project_id=project_id,
+                stage_id=stg.id,
+                worker_type=worker_type,
+                date=att_date,
+                period_from=period_from,
+                period_to=period_to,
+                days_count=days_count,
+                workers_count=workers_count,
+                wage_rate=wage_rate,
+                total_amount=total_amount,
+                total_manual=final_total_manual,
+                notes=notes,
+                activity_at=_activity_at_for(att_date),
+                created_at=_pkt_now_naive(),
+                updated_at=_pkt_now_naive()
+            )
+            db.session.add(row)
+            old_days = 0
+            old_workers = 0
+            old_paid = 0.0
+            msg = 'Crew attendance recorded.'
+
+        _log_subcontract_event(
+            sub=sub,
+            event_type='team_attendance',
+            from_value=f'{old_days}d x {old_workers}w | Cost {old_paid:,.2f}',
+            to_value=f'{days_count}d x {workers_count}w x {wage_rate:,.2f} | Cost {total_amount:,.2f}',
+            amount=total_amount,
+            notes=f'{att_date.isoformat()} | {stg.name} | {worker_type} | {notes or "-"}',
+            project_id=project_id,
+            stage_id=stg.id
+        )
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            flash('Duplicate crew attendance detected. Existing row was kept unchanged.', 'warning')
+            return redirect(back)
+        flash(msg, 'success')
+        return redirect(back)
+
+
+    @app.route('/hdc/subcontractor/<int:sid>/team_attendance/<int:rid>/delete', methods=['POST'])
+    @login_required
+    def hdc_subcontractor_team_attendance_delete(sid, rid):
+        sub = Subcontractor.query.get_or_404(sid)
+        row = SubcontractTeamAttendance.query.get_or_404(rid)
+        if row.subcontractor_id != sub.id:
+            flash('Crew attendance row does not belong to this subcontractor.', 'danger')
+            return redirect(url_for('hdc_subcontractor_attendance_page', sid=sub.id))
+        old_days = int(row.days_count or 0)
+        old_workers = int(row.workers_count or 0)
+        old_paid = float(row.total_amount or 0.0)
+        old_date = row.date
+        old_stage_name = row.stage.name if row.stage else (f'Stage#{row.stage_id}' if row.stage_id else '-')
+        db.session.delete(row)
+        _log_subcontract_event(
+            sub=sub,
+            event_type='team_attendance_delete',
+            from_value=f'{old_days}d x {old_workers}w | Cost {old_paid:,.2f}',
+            to_value='Deleted',
+            amount=0.0,
+            notes=f'{old_date.isoformat() if old_date else "-"} | {old_stage_name} | {row.worker_type} | Crew attendance row deleted',
+            project_id=sub.project_id,
+            stage_id=row.stage_id
+        )
+        db.session.commit()
+        flash('Crew attendance entry deleted.', 'success')
+        return redirect(url_for('hdc_subcontractor_attendance_page', sid=sub.id))
+
+
     @app.route('/hdc/subcontractor/<int:sid>/labour_attendance/<int:rid>/delete', methods=['POST'])
     @login_required
     def hdc_subcontractor_labour_attendance_delete(sid, rid):
@@ -1133,6 +1309,28 @@ def register(app):
                 'remarks': row.get('remarks') or '-'
             })
 
+        tq = SubcontractTeamAttendance.query.filter(
+            SubcontractTeamAttendance.subcontractor_id == sub.id)
+        if date_from:
+            tq = tq.filter(SubcontractTeamAttendance.date >= date_from)
+        if date_to:
+            tq = tq.filter(SubcontractTeamAttendance.date <= date_to)
+        team_rows = tq.order_by(SubcontractTeamAttendance.date.desc(), SubcontractTeamAttendance.id.desc()).all()
+        team_rollup = sub_labour_rollup(sub.id, date_from=date_from, date_to=date_to)
+        trade_options = []
+        seen_trades = set()
+        for raw_trade in ([r.worker_type for r in team_rows]
+                          + [w.trade for w in all_workers if (w.trade or '').strip()]
+                          + [t.name for t in (WorkerTrade.query
+                                              .filter(WorkerTrade.active_status == True)
+                                              .order_by(WorkerTrade.name.asc()).all())]):
+            key = (raw_trade or '').strip().lower()
+            if not key or key in seen_trades:
+                continue
+            seen_trades.add(key)
+            trade_options.append((raw_trade or '').strip())
+        selected_worker_type = (request.args.get('worker_type') or '').strip()
+
         return render_template('subcontractors/subcontractor_attendance.html',
             sub=sub,
             sheet_date=sheet_date.isoformat(),
@@ -1154,7 +1352,11 @@ def register(app):
             selected_worker_id=filter_worker_id,
             selected_from=raw_from,
             selected_to=raw_to,
-            show_inactive=show_inactive
+            show_inactive=show_inactive,
+            team_rows=team_rows,
+            team_rollup=team_rollup,
+            trade_options=trade_options,
+            selected_worker_type=selected_worker_type
         )
 
 
@@ -1228,6 +1430,8 @@ def register(app):
             'settlement': 'Settlement',
             'attendance': 'Attendance',
             'labour_attendance': 'Labour Attendance',
+            'team_attendance': 'Crew Attendance',
+            'team_attendance_delete': 'Crew Attendance Deleted',
             'labour_worker_add': 'Worker Added',
             'labour_worker_edit': 'Worker Edited',
             'labour_worker_status': 'Worker Status',
@@ -1292,10 +1496,19 @@ def register(app):
             'shifts_count': sum(1 for r in base_rows if (r.event_type or '').lower() in ('shift', 'reassign')),
             'unassign_count': sum(1 for r in base_rows if (r.event_type or '').lower() == 'unassign'),
             'price_updates': sum(1 for r in base_rows if (r.event_type or '').lower() == 'price_update'),
-            'labour_days': sum(1 for r in lab_rows if (r.labour_count or 0) > 0),
-            'labour_men_total': sum(int(r.labour_count or 0) for r in lab_rows),
-            'labour_cost_total': sum(float(r.total_labour_paid or 0.0) for r in lab_rows)
+            # Labour KPIs read the shared roll-up (crew summaries + legacy
+            # per-worker rows) so the ledger, the attendance page and reports
+            # always agree.  crew_man_days/crew_cost expose the new simple
+            # entries on top of the legacy per-worker figures.
+            'labour_rollup': sub_labour_rollup(sub.id, date_from=date_from, date_to=date_to, stage_id=stage_filter_id),
+            'labour_days': 0,
+            'labour_men_total': 0,
+            'labour_cost_total': 0.0
         }
+        kpis['labour_days'] = kpis['labour_rollup']['days']
+        kpis['labour_men_total'] = kpis['labour_rollup']['man_days']
+        kpis['labour_cost_total'] = kpis['labour_rollup']['cost']
+        kpis['labour_crew_rows'] = kpis['labour_rollup']['crew_rows']
         kpis['labour_avg_daily_cost'] = (kpis['labour_cost_total'] / kpis['labour_days']) if kpis['labour_days'] > 0 else 0.0
         kpis['labour_avg_men_per_day'] = (kpis['labour_men_total'] / kpis['labour_days']) if kpis['labour_days'] > 0 else 0.0
         payable_now = float(sub.payable_amount or 0.0)

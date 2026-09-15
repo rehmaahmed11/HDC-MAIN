@@ -9,8 +9,94 @@ from sqlalchemy import func, text
 from hdc.core.schema import _ensure_table_columns_sqlite
 from hdc.extensions import db
 from hdc.models.projects import Stage
-from hdc.models.subcontract import SubcontractEvent, SubcontractPayment, Subcontractor
+from hdc.models.subcontract import (
+    SubcontractEvent, SubcontractLabourAttendance, SubcontractPayment,
+    SubcontractTeamAttendance, Subcontractor,
+)
 from hdc.utils.dates import _pkt_now_naive
+
+
+def subcontract_scope_ids(sub):
+    """Return ``(project_ids, stage_ids)`` a subcontractor may charge labour to.
+
+    Same scope rules as the legacy daily labour-attendance route: the project
+    the sub belongs to, the stage it is assigned to, every stage that points
+    back at it, and the projects of those stages.
+    """
+    scope_stage_ids = set()
+    scope_project_ids = set()
+    if sub and sub.project_id:
+        scope_project_ids.add(int(sub.project_id))
+        stage_ids = (db.session.query(Stage.id)
+                     .filter(Stage.project_id == sub.project_id)
+                     .all())
+        scope_stage_ids.update(int(v) for (v,) in stage_ids if v)
+    if sub and sub.stage_id:
+        scope_stage_ids.add(int(sub.stage_id))
+        sub_stage = Stage.query.get(sub.stage_id)
+        if sub_stage and sub_stage.project_id:
+            scope_project_ids.add(int(sub_stage.project_id))
+    if sub:
+        for srow in (Stage.query
+                     .filter(Stage.assigned_subcontractor_id == sub.id)
+                     .all()):
+            scope_stage_ids.add(int(srow.id))
+            if srow.project_id:
+                scope_project_ids.add(int(srow.project_id))
+        if scope_stage_ids:
+            for srow in Stage.query.filter(Stage.id.in_(list(scope_stage_ids))).all():
+                if srow.project_id:
+                    scope_project_ids.add(int(srow.project_id))
+    return scope_project_ids, scope_stage_ids
+
+
+def sub_labour_rollup(sub_id, date_from=None, date_to=None, stage_id=None):
+    """Combine the simple crew summary rows and the legacy daily rows.
+
+    This is the single source for subcontractor labour everywhere (attendance
+    page, ledger KPIs, project/reports P&L).  Both sources are summed exactly
+    once so no reader can disagree with the attendance page.
+    """
+    tq = SubcontractTeamAttendance.query.filter(
+        SubcontractTeamAttendance.subcontractor_id == sub_id)
+    lq = SubcontractLabourAttendance.query.filter(
+        SubcontractLabourAttendance.subcontractor_id == sub_id)
+    if date_from:
+        tq = tq.filter(SubcontractTeamAttendance.date >= date_from)
+        lq = lq.filter(SubcontractLabourAttendance.date >= date_from)
+    if date_to:
+        tq = tq.filter(SubcontractTeamAttendance.date <= date_to)
+        lq = lq.filter(SubcontractLabourAttendance.date <= date_to)
+    if stage_id:
+        tq = tq.filter(SubcontractTeamAttendance.stage_id == stage_id)
+        lq = lq.filter(SubcontractLabourAttendance.stage_id == stage_id)
+    team_rows = tq.all()
+    legacy_rows = lq.all()
+
+    summary_days = sum(int(r.days_count or 0) for r in team_rows)
+    summary_man_days = sum(int(r.days_count or 0) * int(r.workers_count or 0) for r in team_rows)
+    summary_cost = sum(float(r.total_amount or 0.0) for r in team_rows)
+    legacy_days = sum(1 for r in legacy_rows if (r.labour_count or 0) > 0)
+    legacy_man_days = sum(int(r.labour_count or 0) for r in legacy_rows)
+    legacy_cost = sum(float(r.total_labour_paid or 0.0) for r in legacy_rows)
+    man_days = summary_man_days + legacy_man_days
+    cost = float(summary_cost) + float(legacy_cost)
+    return {
+        'crew_rows': len(team_rows),
+        'legacy_rows': len(legacy_rows),
+        'summary_days': int(summary_days),
+        'legacy_days': int(legacy_days),
+        'days': int(summary_days) + int(legacy_days),
+        'summary_man_days': int(summary_man_days),
+        'legacy_man_days': int(legacy_man_days),
+        'man_days': int(man_days),
+        'summary_cost': float(summary_cost),
+        'legacy_cost': float(legacy_cost),
+        'cost': float(cost),
+        'avg_rate': (cost / man_days) if man_days > 0 else 0.0,
+        'workers_peak': max([int(r.workers_count or 0) for r in team_rows] or [0]),
+        'team_rows': team_rows,
+    }
 
 def _next_subcontractor_code():
     max_n = 0
