@@ -270,6 +270,43 @@ class TeamAttendanceTestCase(unittest.TestCase):
         self.assertIn('outside subcontractor assigned scope', self._page_text(r2))
         self.assertEqual(SubcontractTeamAttendance.query.count(), 0)
 
+    def test_crew_field_row_stays_on_one_line(self):
+        """Every crew field box must share one baseline (the reported bug).
+
+        The Total box used to carry the "Manual total" checkbox as a second
+        line inside its own cell, which made that cell taller: with the row's
+        ``align-items-end`` the other boxes were pushed down and Total floated
+        ~40px above Days / Workers / Rate. The fix keeps every cell to exactly
+        one label + one control and moves the checkbox below the row -- this
+        pins that shape so a future edit cannot push a box out of line again.
+        """
+        html = self._page_text(self._att_page())
+        form = html.split('id="teamAttendanceForm"', 1)[1].split('</form>', 1)[0]
+        grid = form.split('<div class="row g-2 align-items-end">', 1)[1]
+        grid = grid.split('<div class="d-flex flex-wrap justify-content-between', 1)[0]
+
+        # Six fields on the first line, in the order the crew sheet is read.
+        cells = re.findall(r'<div class="col-\d+ col-md-\d+">(.*?)</div>', grid, re.S)
+        labels = [re.search(r'<label[^>]*>(.*?)</label>', c, re.S).group(1).strip()
+                  for c in cells]
+        self.assertEqual(labels[:6], ['Worker Type', 'Days', 'Workers / Day',
+                                      'Rate / Worker / Day', 'Total (auto)', 'Date'])
+        for label, cell in zip(labels, cells):
+            controls = re.findall(r'<(?:input|select)\b', cell)
+            self.assertEqual(len(controls), 1,
+                             f'{label!r} cell must hold exactly one control '
+                             f'and nothing else (found {len(controls)})')
+        # Nothing that renders as a second line may sit inside the field grid.
+        self.assertNotIn('form-check', grid)
+        self.assertNotIn('<button', grid)
+        # The manual-total switch stays on its own line below the grid.
+        self.assertIn('id="teamTotalManual"', form)
+        self.assertNotIn('id="teamTotalManual"', grid)
+        # And the Total box must never end up disabled: a disabled box is not
+        # submitted, so a hand-typed manual total could never reach the route.
+        self.assertIn('teamTotal.disabled = false;', html)
+        self.assertNotIn('teamTotal.disabled = teamManual', html)
+
     def test_delete_removes_cost_from_rollup(self):
         self._post_team('Mason', 17, 10, 2000)
         self._post_team('Labour', 30, 10, 1200, stage=self.other_stage)

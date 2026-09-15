@@ -11,6 +11,28 @@ changes, same page style ("same vibe"), confirmed decisions:
   panel — still works, no longer the default path.
 - Free "number of days" entry with an anchor date + optional from/to reference.
 
+## Follow-up (2026-09-15) — crew field row alignment + manual-total fix
+
+Two defects found while reviewing the page after release:
+
+1. **The Total box was out of line.** The *Manual total* checkbox sat inside the
+   Total cell, so that cell was ~40 px taller than its neighbours; with the
+   row's `align-items-end` the other boxes were pushed down and **Total floated
+   above Days / Workers per Day / Rate**. Now every crew cell is exactly one
+   label + one control (nothing inside a cell can add a second line) and the
+   checkbox lives on its own line next to *Add Crew Entry*.
+2. **The manual switch was wired backwards.** Ticking *Manual total* **disabled**
+   the Total box — and a disabled box is not submitted, so a hand-typed total
+   could never reach the route (which expects to read it). Now: auto mode fills
+   a read-only Total (`days × workers × rate`), manual mode makes the Total
+   typable and shows the rate worked back from it. Unticking restores the exact
+   rate you had typed, so 2-dp rounding of the derived rate can never drift the
+   saved total.
+
+Pinned by `tests/test_subcontract_team_attendance.py::test_crew_field_row_stays_on_one_line`
+(one label + one control per cell, checkbox outside the grid, Total never
+disabled). No route, model, field name or formula changed.
+
 ## Implemented changes (map)
 
 | What | Where |

@@ -74,16 +74,12 @@
                 <div class="col-6 col-md-2">
                     <label class="form-label small text-muted mb-1">Total (auto)</label>
                     <input type="number" min="0" step="0.01" name="total_amount" class="form-control form-control-sm js-team-total" placeholder="Days x Workers x Rate">
-                    <div class="form-check mt-1">
-                        <input class="form-check-input" type="checkbox" name="total_manual" id="teamTotalManual" value="1">
-                        <label class="form-check-label small" for="teamTotalManual">Manual total (rate back-derived)</label>
-                    </div>
                 </div>
                 <div class="col-6 col-md-2">
                     <label class="form-label small text-muted mb-1">Date</label>
                     <input type="date" name="date" class="form-control form-control-sm" value="{{ sheet_date }}" required>
                 </div>
-                <div class="col-6 col-md-3">
+                <div class="col-6 col-md-4">
                     <label class="form-label small text-muted mb-1">Project</label>
                     <select name="project_id" id="teamProjectSelect" class="form-select form-select-sm" required>
                         <option value="">Select Project</option>
@@ -92,7 +88,7 @@
                         {% endfor %}
                     </select>
                 </div>
-                <div class="col-6 col-md-3">
+                <div class="col-6 col-md-4">
                     <label class="form-label small text-muted mb-1">Stage</label>
                     <select name="stage_id" id="teamStageSelect" class="form-select form-select-sm" required>
                         <option value="">Select Stage</option>
@@ -114,7 +110,13 @@
                     <input type="text" name="notes" class="form-control form-control-sm" placeholder="e.g. as per contractor's register">
                 </div>
             </div>
-            <div class="d-flex justify-content-end mt-2">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mt-2">
+                <div class="form-check mb-0">
+                    <input class="form-check-input" type="checkbox" name="total_manual" id="teamTotalManual" value="1">
+                    <label class="form-check-label small text-muted" for="teamTotalManual">
+                        <span class="fw-semibold">Manual total</span> &mdash; type the total yourself; the rate is worked back from it (total &divide; days &divide; workers).
+                    </label>
+                </div>
                 <button type="submit" class="btn btn-sm btn-mint">Add Crew Entry</button>
             </div>
         </form>
@@ -628,21 +630,60 @@
         var teamTotal = teamForm.querySelector('.js-team-total');
         var teamManual = document.getElementById('teamTotalManual');
 
+        function teamManDays() {
+            var d = parseInt((teamDays && teamDays.value) || '0', 10) || 0;
+            var w = parseInt((teamWorkers && teamWorkers.value) || '0', 10) || 0;
+            return d * w;
+        }
+        function teamManualOn() {
+            return !!(teamManual && teamManual.checked);
+        }
         function recalcTeamTotal() {
             if (!teamTotal) return;
-            if (teamManual && teamManual.checked) return;
-            var d = parseInt(teamDays.value, 10) || 0;
-            var w = parseInt(teamWorkers.value, 10) || 0;
-            var r = parseFloat(teamRate.value || '0') || 0;
-            teamTotal.value = (d * w * r) ? (d * w * r).toFixed(2) : '';
+            var manDays = teamManDays();
+            var rate = parseFloat((teamRate && teamRate.value) || '0') || 0;
+            teamTotal.value = (manDays > 0 && rate > 0) ? (manDays * rate).toFixed(2) : '';
         }
+        function showBackDerivedRate() {
+            // Display only: the route recomputes rate = total / man-days.
+            if (!teamRate) return;
+            var manDays = teamManDays();
+            var total = parseFloat((teamTotal && teamTotal.value) || '0') || 0;
+            if (manDays > 0 && total > 0) {
+                teamRate.value = (total / manDays).toFixed(2);
+            }
+        }
+        // Rate as typed in auto mode: kept aside while a manual total is shown
+        // so switching the checkbox back off returns the exact same rate (the
+        // derived rate is rounded to 2 dp and would drift the total by cents).
+        var teamAutoRate = null;
+        // Auto mode: the total is ours to fill, so it is read-only (a typed
+        // value would be ignored by the route anyway). Manual mode: the total
+        // becomes editable and the rate is the back-derived one.
         function applyTeamManualState() {
-            if (!teamManual || !teamTotal) return;
-            teamTotal.disabled = teamManual.checked;
-            if (!teamManual.checked) recalcTeamTotal();
+            if (teamTotal) {
+                teamTotal.disabled = false;
+                teamTotal.readOnly = !teamManualOn();
+            }
+            if (teamRate) teamRate.readOnly = teamManualOn();
+            if (teamManualOn()) {
+                if (teamAutoRate === null) teamAutoRate = teamRate ? teamRate.value : '';
+                showBackDerivedRate();
+            } else {
+                if (teamAutoRate !== null && teamRate) teamRate.value = teamAutoRate;
+                teamAutoRate = null;
+                recalcTeamTotal();
+            }
         }
-        [teamDays, teamWorkers, teamRate].forEach(function (el) {
-            if (el) el.addEventListener('input', recalcTeamTotal);
+        function onTeamFieldInput() {
+            if (teamManualOn()) {
+                showBackDerivedRate();
+            } else {
+                recalcTeamTotal();
+            }
+        }
+        [teamDays, teamWorkers, teamRate, teamTotal].forEach(function (el) {
+            if (el) el.addEventListener('input', onTeamFieldInput);
         });
         if (teamManual) teamManual.addEventListener('change', applyTeamManualState);
         applyTeamManualState();
