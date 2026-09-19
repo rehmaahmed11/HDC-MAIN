@@ -1,0 +1,513 @@
+{% extends "shared/base.html" %}
+{% block title %}{{ 'Add Account' if is_new else 'Edit Account' }}{% endblock %}
+{% block page_heading %}{{ 'Add Account' if is_new else 'Edit Account — ' ~ (account.name if account else '') }}{% endblock %}
+
+{% block content %}
+{#
+  Add / Edit Account — the full-page form AMS has at accounts/add_account.html
+  and accounts/edit_account.html, merged into one template because the two are
+  identical apart from the action URL.
+
+  The point of this page (over the old modal on the Transactions screen) is the
+  CLASSIFICATION HIERARCHY: Category → Subcategory → Account Type → Channel.
+  That hierarchy was ported into `hdc_account` from AMS but had no editor, so
+  the `class_*` / `channel` / `wallet_*` / `cash_*` columns were only ever
+  filled by the startup backfill.  Here they become user-editable, and the
+  server validates the combination against the same registry the browser
+  renders (services/account_classification.py), so an impossible account —
+  e.g. a "Client Ledger" holding a bank account number — cannot be saved.
+#}
+
+{% set return_to = form.get('return_to') or url_for('hdc_accounts_manage') %}
+{# A field's value: what the user just posted (so a failed save is not lost),
+   otherwise what is stored. #}
+{% macro fv(name, default='') %}{{ form.get(name, default) if form else default }}{% endmacro %}
+
+<div class="acc-page-header">
+    <div>
+        <h2>
+            <i class="fas {{ 'fa-circle-plus' if is_new else 'fa-pen-to-square' }} me-2"></i>
+            {{ 'Add New Account' if is_new else 'Edit Account' }}
+        </h2>
+        <div class="acc-subtitle">
+            {% if is_new %}
+            Create a cash, bank, wallet or party account. Pick the classification first —
+            it decides which detail fields this account needs.
+            {% else %}
+            {{ account.name }} · created {{ account.created_at or '—' }} ·
+            {{ txn_count }} posted transaction{{ '' if txn_count == 1 else 's' }}
+            {% endif %}
+        </div>
+    </div>
+    <div class="acc-toolbar">
+        <a href="{{ return_to }}" class="btn btn-outline-secondary btn-sm">
+            <i class="fas fa-arrow-left me-1"></i>Back to Accounts
+        </a>
+        {% if not is_new %}
+        <a href="{{ url_for('hdc_account_ledger', account_id=account.id) }}" class="btn btn-outline-dark btn-sm">
+            <i class="fas fa-book-open me-1"></i>Ledger
+        </a>
+        <a href="{{ url_for('hdc_accounts_entries', account_id=account.id) }}" class="btn btn-outline-info btn-sm">
+            <i class="fas fa-list me-1"></i>Transactions
+        </a>
+        {% endif %}
+    </div>
+</div>
+
+{% if not is_new and is_archived %}
+<div class="alert alert-warning d-flex align-items-center gap-2">
+    <i class="fas fa-box-archive"></i>
+    <div>
+        <strong>This account is archived.</strong>
+        It is kept for its ledger history and cannot be used for new transactions.
+        Editing here updates the master record only — it does not restore the account.
+    </div>
+</div>
+{% endif %}
+
+{% if not is_new %}
+<div class="row g-3 mb-3">
+    <div class="col-6 col-md-3">
+        <div class="acc-stat {{ 'acc-rose' if account.current_balance < 0 else 'acc-emerald' }}">
+            <div class="acc-stat-label"><i class="fas fa-scale-balanced me-1"></i>Current Balance</div>
+            <div class="acc-stat-value"><small>Rs.</small> {{ "{:,.2f}".format(account.current_balance or 0) }}</div>
+            <div class="acc-stat-sub">Opening {{ "{:,.2f}".format(account.opening_balance or 0) }} + ledger movement</div>
+            <i class="fas fa-wallet acc-stat-icon"></i>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="acc-stat acc-violet">
+            <div class="acc-stat-label"><i class="fas fa-sitemap me-1"></i>Classification</div>
+            <div class="acc-stat-value" style="font-size:1rem;line-height:1.35;">{{ account.class_account_type }}</div>
+            <div class="acc-stat-sub">{{ account.class_category }} / {{ account.class_subcategory }}</div>
+            <i class="fas fa-tags acc-stat-icon"></i>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="acc-stat acc-blue">
+            <div class="acc-stat-label"><i class="fas fa-tower-broadcast me-1"></i>Channel</div>
+            <div class="acc-stat-value" style="font-size:1.25rem;">{{ account.channel_label }}</div>
+            <div class="acc-stat-sub">How money actually moves in and out</div>
+            <i class="fas fa-money-bill-transfer acc-stat-icon"></i>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="acc-stat acc-slate">
+            <div class="acc-stat-label"><i class="fas fa-receipt me-1"></i>Posted Transactions</div>
+            <div class="acc-stat-value">{{ txn_count }}</div>
+            <div class="acc-stat-sub">
+                {% if txn_count %}Deleting will archive, not remove{% else %}No history — safe to delete{% endif %}
+            </div>
+            <i class="fas fa-file-invoice-dollar acc-stat-icon"></i>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<form method="POST"
+      action="{{ url_for('hdc_account_new') if is_new else url_for('hdc_account_edit', account_id=account.id) }}"
+      id="accEditForm" novalidate>
+    <input type="hidden" name="return_to" value="{{ return_to }}">
+
+    <div class="row g-3">
+        {# ── Classification ─────────────────────────────────────────────── #}
+        <div class="col-lg-7">
+            <div class="acc-section h-100">
+                <div class="acc-section-head">
+                    <h5><i class="fas fa-sitemap me-2" style="color:#8b5cf6;"></i>Classification</h5>
+                    <span class="small text-muted">Category &rarr; Subcategory &rarr; Account Type &rarr; Channel</span>
+                </div>
+                <div class="acc-section-body">
+                    <p class="small text-muted mb-3">
+                        This is the controlled hierarchy from the accounts model. Each Account Type allows only
+                        certain channels, and the channel decides which detail fields are required — so an
+                        invalid combination cannot be saved.
+                    </p>
+
+                    <div class="acc-class-path mb-3" id="accClassPath">
+                        <i class="fas fa-route"></i>
+                        <span id="accClassPathText">Choose a category to begin…</span>
+                    </div>
+
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold" for="class_category">Category <span class="text-danger">*</span></label>
+                            <select class="form-select" id="class_category" name="class_category" required></select>
+                            <div class="form-text" id="accCatHelp"></div>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold" for="class_subcategory">Subcategory <span class="text-danger">*</span></label>
+                            <select class="form-select" id="class_subcategory" name="class_subcategory" required></select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold" for="class_account_type">Account Type <span class="text-danger">*</span></label>
+                            <select class="form-select" id="class_account_type" name="class_account_type" required></select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold" for="channel">Channel <span class="text-danger">*</span></label>
+                            <select class="form-select" id="channel" name="channel" required></select>
+                            <div class="form-text" id="accChannelHelp"></div>
+                        </div>
+                    </div>
+
+                    <hr class="my-4">
+                    <div class="acc-form-section-title">Identity</div>
+
+                    <div class="row g-3">
+                        <div class="col-md-8">
+                            <label class="form-label fw-semibold" for="name">Account Name <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="name" name="name" maxlength="120" required
+                                   placeholder="e.g. Site Cash — DHA Villa, Meezan Bank Operating"
+                                   value="{{ fv('name', account.name if account else '') }}">
+                            <div class="form-text">Must be unique. Show up clearly in dropdowns across the app.</div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold" for="opening_balance">Opening Balance (Rs.)</label>
+                            <input type="text" inputmode="decimal" class="form-control" id="opening_balance"
+                                   name="opening_balance" placeholder="0.00"
+                                   value="{{ fv('opening_balance', '{:,.2f}'.format(account.opening_balance or 0) if account else '0.00') }}">
+                            <div class="form-text">Comma-formatted amounts accepted, e.g. 12,34,567.89</div>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold" for="linked_entity_type">Linked Entity</label>
+                            <select class="form-select" id="linked_entity_type" name="linked_entity_type">
+                                {% for key, label in entity_labels.items() %}
+                                <option value="{{ key }}">{{ label }}</option>
+                                {% endfor %}
+                            </select>
+                            {# A disabled <select> is not submitted, so the locked value is mirrored
+                               here. The server re-derives it from the registry regardless — this is
+                               belt-and-braces so the form always carries what the user saw. #}
+                            <input type="hidden" id="linked_entity_locked" name="linked_entity_locked" value="">
+                            <div class="form-text" id="accEntityHelp">
+                                Some account types require a specific link (e.g. Client Ledger → Client).
+                            </div>
+                        </div>
+                        <div class="col-md-6" id="accPartyWrap" style="display:none;">
+                            <label class="form-label fw-semibold" for="linked_party_name">Linked Party Name</label>
+                            <input type="text" class="form-control" id="linked_party_name" name="linked_party_name"
+                                   maxlength="160" placeholder="e.g. Mr. Akram (Client)"
+                                   value="{{ fv('linked_party_name', account.linked_party_name if account else '') }}">
+                            <div class="form-text">Descriptive label — HDC resolves parties through the ledger itself.</div>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label fw-semibold" for="note">Note <span class="text-muted small fw-normal">(optional)</span></label>
+                            <textarea class="form-control" id="note" name="note" rows="2" maxlength="500"
+                                      placeholder="What this account is for, who controls it, restrictions…">{{ fv('note', account.note if account else '') }}</textarea>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        {# ── Channel details ────────────────────────────────────────────── #}
+        <div class="col-lg-5">
+            <div class="acc-section h-100">
+                <div class="acc-section-head">
+                    <h5><i class="fas fa-vault me-2" style="color:#0891b2;"></i>Channel Details</h5>
+                    <span class="small text-muted" id="accDetailsHint">Only the fields this channel uses</span>
+                </div>
+                <div class="acc-section-body">
+
+                    {# Bank #}
+                    <div id="grpBank" class="acc-detail-group">
+                        <div class="acc-form-section-title"><i class="fas fa-landmark me-1"></i>Bank</div>
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold" for="bank_name">Bank Name <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="bank_name" name="bank_name" maxlength="120"
+                                   placeholder="e.g. Meezan Bank"
+                                   value="{{ fv('bank_name', account.bank_name if account else '') }}">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold" for="account_number">Account Number <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="account_number" name="account_number" maxlength="80"
+                                   placeholder="e.g. 01020304050607"
+                                   value="{{ fv('account_number', account.account_number if account else '') }}">
+                        </div>
+                        <div class="mb-1">
+                            <label class="form-label fw-semibold" for="iban">IBAN <span class="text-muted small fw-normal">(optional)</span></label>
+                            <input type="text" class="form-control" id="iban" name="iban" maxlength="80"
+                                   placeholder="PK36MEZN0001020304050607"
+                                   value="{{ fv('iban', account.iban if account else '') }}">
+                        </div>
+                    </div>
+
+                    {# Cash #}
+                    <div id="grpCash" class="acc-detail-group">
+                        <div class="acc-form-section-title"><i class="fas fa-money-bill-wave me-1"></i>Cash</div>
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold" for="cash_location">Cash Location</label>
+                            <input type="text" class="form-control" id="cash_location" name="cash_location" maxlength="120"
+                                   placeholder="e.g. Site office locker, Head office drawer"
+                                   value="{{ fv('cash_location', account.cash_location if account else '') }}">
+                        </div>
+                        <div class="mb-1">
+                            <label class="form-label fw-semibold" for="cash_responsible">Custodian / Responsible</label>
+                            <input type="text" class="form-control" id="cash_responsible" name="cash_responsible" maxlength="120"
+                                   placeholder="e.g. Site Accountant"
+                                   value="{{ fv('cash_responsible', account.cash_responsible if account else '') }}">
+                            <div class="form-text">Who physically holds this cash — used by Day Close.</div>
+                        </div>
+                    </div>
+
+                    {# Digital wallet #}
+                    <div id="grpWallet" class="acc-detail-group">
+                        <div class="acc-form-section-title"><i class="fas fa-mobile-screen me-1"></i>Digital Wallet</div>
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold" for="wallet_provider">Provider <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="wallet_provider" name="wallet_provider" maxlength="100"
+                                   placeholder="e.g. Easypaisa, JazzCash, SadaPay"
+                                   value="{{ fv('wallet_provider', account.wallet_provider if account else '') }}">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold" for="wallet_number">Wallet Number</label>
+                            <input type="text" class="form-control" id="wallet_number" name="wallet_number" maxlength="80"
+                                   placeholder="03XX XXXXXXX"
+                                   value="{{ fv('wallet_number', account.wallet_number if account else '') }}">
+                        </div>
+                        <div class="mb-1">
+                            <label class="form-label fw-semibold" for="wallet_holder">Account Holder</label>
+                            <input type="text" class="form-control" id="wallet_holder" name="wallet_holder" maxlength="120"
+                                   placeholder="Registered title of the wallet"
+                                   value="{{ fv('wallet_holder', account.wallet_holder if account else '') }}">
+                        </div>
+                    </div>
+
+                    {# Ledger only / other #}
+                    <div id="grpNone" class="acc-detail-group">
+                        <div class="acc-form-section-title"><i class="fas fa-book me-1"></i>Ledger Only</div>
+                        <div class="alert alert-light border mb-0 small" style="background:var(--card-header-bg);">
+                            <i class="fas fa-circle-info me-1"></i>
+                            This classification has no physical cash, bank or wallet behind it — the balance is
+                            tracked on the ledger only (e.g. a client receivable, a supplier payable or a worker
+                            advance). No extra details are needed.
+                        </div>
+                    </div>
+
+                    <hr class="my-4">
+                    <div class="d-flex gap-2 flex-wrap">
+                        <button type="submit" class="btn btn-mint">
+                            <i class="fas fa-floppy-disk me-1"></i>{{ 'Create Account' if is_new else 'Save Changes' }}
+                        </button>
+                        <a href="{{ return_to }}" class="btn btn-outline-secondary">Cancel</a>
+                        {% if not is_new and txn_count == 0 %}
+                        <button type="submit" form="accDeleteForm" class="btn btn-outline-danger ms-auto"
+                                onclick="return confirm('Delete “{{ account.name }}” permanently? It has no posted transactions.');">
+                            <i class="fas fa-trash me-1"></i>Delete
+                        </button>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</form>
+
+{% if not is_new %}
+<form method="POST" id="accDeleteForm" class="d-none"
+      action="{{ url_for('hdc_accounts_manage', show='active') }}">
+    <input type="hidden" name="action" value="delete_account">
+    <input type="hidden" name="account_id" value="{{ account.id }}">
+</form>
+{% endif %}
+
+<script id="accClassificationTree" type="application/json">{{ classification_tree|tojson }}</script>
+<script>
+(function () {
+    // Cascading classification selects driven by the server-side registry, so
+    // the browser can only ever offer combinations the server will accept.
+    var treeEl = document.getElementById('accClassificationTree');
+    if (!treeEl) return;
+    var TREE;
+    try { TREE = JSON.parse(treeEl.textContent || '{}'); } catch (e) { return; }
+
+    // Values to select on load: a posted (failed) save wins over stored data.
+    var INITIAL = {
+        category: {{ (form.get('class_category') or (account.class_category if account else ''))|tojson }},
+        subcategory: {{ (form.get('class_subcategory') or (account.class_subcategory if account else ''))|tojson }},
+        account_type: {{ (form.get('class_account_type') or (account.class_account_type if account else ''))|tojson }},
+        channel: {{ (form.get('channel') or (account.channel if account else ''))|tojson }},
+        entity: {{ (form.get('linked_entity_type') or (account.linked_entity_type if account else 'none'))|tojson }}
+    };
+
+    var elCat = document.getElementById('class_category');
+    var elSub = document.getElementById('class_subcategory');
+    var elType = document.getElementById('class_account_type');
+    var elChan = document.getElementById('channel');
+    var elEntity = document.getElementById('linked_entity_type');
+    var elPath = document.getElementById('accClassPathText');
+    var elCatHelp = document.getElementById('accCatHelp');
+    var elChanHelp = document.getElementById('accChannelHelp');
+    var elEntityHelp = document.getElementById('accEntityHelp');
+    var elPartyWrap = document.getElementById('accPartyWrap');
+
+    var CHANNEL_LABELS = {{ channel_labels|tojson }};
+    var CHANNEL_HINTS = {
+        cash: 'Physical cash — a drawer, box or site cash held by a custodian.',
+        bank: 'A real bank account. Bank name and account number are required.',
+        digital_wallet: 'Mobile wallet / payment app. The provider is required.',
+        ledger_only: 'No instrument behind it — the balance lives on the ledger only.',
+        other: 'Some other medium; describe it in the note.'
+    };
+    var GROUPS = {
+        cash: ['grpCash'],
+        bank: ['grpBank'],
+        digital_wallet: ['grpWallet'],
+        ledger_only: ['grpNone'],
+        other: ['grpNone']
+    };
+
+    function fill(select, items, selected, labelFn) {
+        select.innerHTML = '';
+        items.forEach(function (item) {
+            var value = (typeof item === 'string') ? item : item[0];
+            var label = labelFn ? labelFn(item) : value;
+            var opt = document.createElement('option');
+            opt.value = value;
+            opt.textContent = label;
+            if (value === selected) opt.selected = true;
+            select.appendChild(opt);
+        });
+    }
+
+    function currentLeaf() {
+        var cat = TREE[elCat.value];
+        if (!cat) return null;
+        var sub = (cat.subcategories || {})[elSub.value];
+        if (!sub) return null;
+        return (sub.account_types || {})[elType.value] || null;
+    }
+
+    function showGroups(channel) {
+        var visible = GROUPS[channel] || ['grpNone'];
+        ['grpCash', 'grpBank', 'grpWallet', 'grpNone'].forEach(function (id) {
+            var el = document.getElementById(id);
+            if (el) el.style.display = (visible.indexOf(id) !== -1) ? '' : 'none';
+        });
+        var hint = document.getElementById('accDetailsHint');
+        if (hint) hint.textContent = CHANNEL_LABELS[channel] || channel;
+    }
+
+    function syncEntity() {
+        var leaf = currentLeaf();
+        var required = leaf ? (leaf.entity || 'none') : 'none';
+        var locked = document.getElementById('linked_entity_locked');
+        if (required !== 'none') {
+            elEntity.value = required;
+            elEntity.disabled = true;   // registry-fixed: not the user's choice
+            elEntityHelp.innerHTML = '<i class="fas fa-lock me-1"></i>Locked to <strong>' +
+                ({{ entity_labels|tojson }}[required] || required) + '</strong> by this account type.';
+        } else {
+            elEntity.disabled = false;
+            elEntityHelp.textContent = 'Optional. Some account types require a specific link (e.g. Client Ledger → Client).';
+        }
+        // Mirror whatever is on screen so the POST always carries it.
+        if (locked) locked.value = elEntity.value || 'none';
+        // The party-name field only means something when an entity is linked.
+        elPartyWrap.style.display = (elEntity.value && elEntity.value !== 'none') ? '' : 'none';
+    }
+
+    function syncPath() {
+        var leaf = currentLeaf();
+        if (!leaf) { elPath.textContent = 'Choose a category to begin…'; return; }
+        elPath.innerHTML = '<strong>' + elCat.value + '</strong><span class="sep">→</span>' +
+            '<strong>' + elSub.value + '</strong><span class="sep">→</span>' +
+            '<strong>' + elType.value + '</strong><span class="sep">→</span>' +
+            '<strong>' + (CHANNEL_LABELS[elChan.value] || elChan.value) + '</strong>';
+    }
+
+    function fillChannels(preferred) {
+        var leaf = currentLeaf();
+        var channels = leaf ? leaf.channels : [];
+        var chosen = (channels.indexOf(preferred) !== -1) ? preferred : (leaf ? leaf.default_channel : '');
+        fill(elChan, channels, chosen, function (c) { return CHANNEL_LABELS[c] || c; });
+        elChanHelp.textContent = CHANNEL_HINTS[elChan.value] || '';
+        showGroups(elChan.value);
+    }
+
+    function fillTypes(preferredSub, preferredType) {
+        var cat = TREE[elCat.value] || {};
+        var subs = Object.keys(cat.subcategories || {});
+        fill(elSub, subs, (subs.indexOf(preferredSub) !== -1 ? preferredSub : subs[0]));
+        var sub = (cat.subcategories || {})[elSub.value] || {};
+        var types = Object.keys(sub.account_types || {});
+        fill(elType, types, (types.indexOf(preferredType) !== -1 ? preferredType : types[0]));
+        fillChannels(INITIAL.channel);
+    }
+
+    function fillCategories(preferred) {
+        var cats = Object.keys(TREE);
+        fill(elCat, cats, (cats.indexOf(preferred) !== -1 ? preferred : cats[0]));
+        elCatHelp.textContent = (TREE[elCat.value] || {}).description || '';
+    }
+
+    // --- wiring -----------------------------------------------------------
+    elCat.addEventListener('change', function () {
+        elCatHelp.textContent = (TREE[elCat.value] || {}).description || '';
+        fillTypes('', '');
+        INITIAL.channel = '';
+        syncEntity(); syncPath();
+    });
+    elSub.addEventListener('change', function () {
+        var cat = TREE[elCat.value] || {};
+        var sub = (cat.subcategories || {})[elSub.value] || {};
+        var types = Object.keys(sub.account_types || {});
+        fill(elType, types, types[0]);
+        INITIAL.channel = '';
+        fillChannels('');
+        syncEntity(); syncPath();
+    });
+    elType.addEventListener('change', function () {
+        fillChannels('');
+        syncEntity(); syncPath();
+    });
+    elChan.addEventListener('change', function () {
+        elChanHelp.textContent = CHANNEL_HINTS[elChan.value] || '';
+        showGroups(elChan.value);
+        syncPath();
+    });
+    elEntity.addEventListener('change', function () {
+        elPartyWrap.style.display = (elEntity.value && elEntity.value !== 'none') ? '' : 'none';
+    });
+
+    // --- initial render ---------------------------------------------------
+    fillCategories(INITIAL.category);
+    fillTypes(INITIAL.subcategory, INITIAL.account_type);
+    fill(elEntity, Object.keys({{ entity_labels|tojson }}), INITIAL.entity,
+         function (k) { return {{ entity_labels|tojson }}[k]; });
+    if (INITIAL.channel && Array.prototype.indexOf.call(
+            Array.prototype.map.call(elChan.options, function (o) { return o.value; }),
+            INITIAL.channel) !== -1) {
+        elChan.value = INITIAL.channel;
+        elChanHelp.textContent = CHANNEL_HINTS[INITIAL.channel] || '';
+        showGroups(INITIAL.channel);
+    }
+    syncEntity();
+    syncPath();
+
+    // --- client-side guard, mirroring the server rules --------------------
+    var form = document.getElementById('accEditForm');
+    form.addEventListener('submit', function (ev) {
+        var ch = elChan.value;
+        var need = function (id, label) {
+            var el = document.getElementById(id);
+            if (el && !(el.value || '').trim()) {
+                ev.preventDefault();
+                el.classList.add('is-invalid');
+                el.focus();
+                alert(label + ' is required for a ' + (CHANNEL_LABELS[ch] || ch).toLowerCase() + ' account.');
+                return false;
+            }
+            if (el) el.classList.remove('is-invalid');
+            return true;
+        };
+        var nameEl = document.getElementById('name');
+        if (!(nameEl.value || '').trim()) {
+            ev.preventDefault(); nameEl.focus(); alert('Account name is required.'); return;
+        }
+        if (ch === 'bank') { if (!need('bank_name', 'Bank name')) return; if (!need('account_number', 'Account number')) return; }
+        if (ch === 'digital_wallet') { if (!need('wallet_provider', 'Wallet provider')) return; }
+    });
+})();
+</script>
+{% endblock %}

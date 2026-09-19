@@ -1,6 +1,7 @@
 """Route registration: every domain module exposes register(app)."""
 
 from hdc.routes.accounts import register as _register_accounts
+from hdc.routes.accounts_manage import register as _register_accounts_manage
 from hdc.routes.api_accounts import register as _register_api_accounts
 from hdc.routes.api_actors import register as _register_api_actors
 from hdc.routes.api_purchase import register as _register_api_purchase
@@ -26,6 +27,7 @@ from hdc.routes.workers import register as _register_workers
 def register_all(app):
     """Attach all domain routes to the Flask app."""
     _register_accounts(app)
+    _register_accounts_manage(app)
     _register_api_accounts(app)
     _register_api_actors(app)
     _register_api_purchase(app)

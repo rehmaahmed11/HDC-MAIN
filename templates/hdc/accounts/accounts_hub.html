@@ -1,0 +1,375 @@
+{% extends "shared/base.html" %}
+{% block title %}Accounts Hub{% endblock %}
+{% block page_heading %}Accounts &amp; Cash — Hub{% endblock %}
+
+{% block content %}
+{#
+  Accounts hub — the landing page for the whole Accounts & Cash section.
+
+  The section grew five separate sidebar entries (Accounts, Cash Flow,
+  CF Register, Day Close, Reconciliation) with nothing explaining how they
+  relate or which one to open.  This page is that map: one line per page saying
+  what it is for, plus the live numbers that tell you whether anything needs
+  attention today.
+
+  It is read-only by design — every action links through to the page that owns
+  it, so there is exactly one place where each kind of change can happen.
+#}
+
+<div class="acc-page-header">
+    <div>
+        <h2><i class="fas fa-compass me-2"></i>Accounts &amp; Cash</h2>
+        <div class="acc-subtitle">
+            One map of the money side of the business: what each page is for, where to record a
+            transaction, and what needs attention today.
+        </div>
+    </div>
+    <div class="acc-toolbar">
+        <a href="{{ url_for('hdc_accounts_manage') }}" class="btn btn-outline-info btn-sm">
+            <i class="fas fa-list me-1"></i>Manage Accounts
+        </a>
+        <a href="{{ url_for('hdc_cashflow_register') }}" class="btn btn-mint btn-sm">
+            <i class="fas fa-plus me-1"></i>Record Cash Flow
+        </a>
+    </div>
+</div>
+
+{# ── Today at a glance ───────────────────────────────────────────────────── #}
+<div class="row g-3 mb-4">
+    <div class="col-6 col-xl-3">
+        <a class="acc-stat acc-emerald" href="{{ url_for('hdc_accounts_kpi_detail', metric='company_total') }}">
+            <div class="acc-stat-label"><i class="fas fa-building-columns me-1"></i>Company-Owned Total</div>
+            <div class="acc-stat-value"><small>Rs.</small> {{ "{:,.0f}".format(kpis.company_owned_total or 0) }}</div>
+            <div class="acc-stat-sub">Cash {{ "{:,.0f}".format(kpis.cash_total or 0) }} · Bank {{ "{:,.0f}".format(kpis.bank_total or 0) }}</div>
+            <i class="fas fa-sack-dollar acc-stat-icon"></i>
+        </a>
+    </div>
+    <div class="col-6 col-xl-3">
+        <a class="acc-stat acc-cyan" href="{{ url_for('hdc_cashflow_register', date_from=today, date_to=today) }}">
+            <div class="acc-stat-label"><i class="fas fa-arrow-down me-1"></i>Money In — Today</div>
+            <div class="acc-stat-value"><small>Rs.</small> {{ "{:,.0f}".format(today_summary.total_in or 0) }}</div>
+            <div class="acc-stat-sub">{{ today_summary.count or 0 }} register entr{{ 'y' if (today_summary.count or 0) == 1 else 'ies' }} today</div>
+            <i class="fas fa-hand-holding-dollar acc-stat-icon"></i>
+        </a>
+    </div>
+    <div class="col-6 col-xl-3">
+        <a class="acc-stat acc-rose" href="{{ url_for('hdc_cashflow_register', date_from=today, date_to=today, direction='out') }}">
+            <div class="acc-stat-label"><i class="fas fa-arrow-up me-1"></i>Money Out — Today</div>
+            <div class="acc-stat-value"><small>Rs.</small> {{ "{:,.0f}".format(today_summary.total_out or 0) }}</div>
+            <div class="acc-stat-sub">Transfers: {{ "{:,.0f}".format(today_summary.total_transfer or 0) }}</div>
+            <i class="fas fa-money-bill-transfer acc-stat-icon"></i>
+        </a>
+    </div>
+    <div class="col-6 col-xl-3">
+        <a class="acc-stat {{ 'acc-amber' if (today_summary.net or 0) < 0 else 'acc-blue' }}"
+           href="{{ url_for('hdc_cashflow_report') }}">
+            <div class="acc-stat-label"><i class="fas fa-coins me-1"></i>Net Movement — Today</div>
+            <div class="acc-stat-value"><small>Rs.</small> {{ "{:,.0f}".format(today_summary.net or 0) }}</div>
+            <div class="acc-stat-sub">
+                {% if lock_today %}Today is closed &amp; locked
+                {% else %}Day not closed yet{% endif %}
+            </div>
+            <i class="fas fa-scale-balanced acc-stat-icon"></i>
+        </a>
+    </div>
+</div>
+
+{# ── Attention strip ─────────────────────────────────────────────────────── #}
+{% set needs_attention = [] %}
+{% if summary.negative_count %}{% set _ = needs_attention.append(('rose', 'fa-triangle-exclamation', summary.negative_count ~ ' cash/bank account(s) are overdrawn — ' ~ summary.negative_accounts|map(attribute='name')|join(', '), url_for('hdc_accounts_manage', show='active'))) %}{% endif %}
+{% if summary.party_credit_count %}{% set _ = needs_attention.append(('cyan', 'fa-hand-holding-dollar', summary.party_credit_count ~ ' party ledger(s) are in credit — Rs. ' ~ '{:,.0f}'.format(summary.party_credit_total or 0) ~ ' received in advance', url_for('hdc_accounts_manage', show='active'))) %}{% endif %}
+{% if summary.unclassified_count %}{% set _ = needs_attention.append(('amber', 'fa-tags', summary.unclassified_count ~ ' account(s) are not classified yet', url_for('hdc_accounts_manage', show='active'))) %}{% endif %}
+{% if not lock_yesterday %}{% set _ = needs_attention.append(('amber', 'fa-calendar-xmark', 'Yesterday (' ~ yesterday ~ ') is not closed yet' ~ (' — expected closing Rs. {:,.2f}'.format(yesterday_expected) if yesterday_expected is not none else ''), url_for('hdc_cashflow_reconciliation'))) %}{% endif %}
+{% if summary.inactive_count %}{% set _ = needs_attention.append(('slate', 'fa-pause', summary.inactive_count ~ ' account(s) are suspended', url_for('hdc_accounts_manage', show='inactive'))) %}{% endif %}
+
+{% if needs_attention %}
+<div class="acc-section">
+    <div class="acc-section-head">
+        <h5><i class="fas fa-bell me-2" style="color:#f59e0b;"></i>Needs Attention</h5>
+        <span class="small text-muted">{{ needs_attention|length }} item{{ '' if needs_attention|length == 1 else 's' }}</span>
+    </div>
+    <div class="acc-section-body">
+        <div class="row g-2">
+            {% for tone, icon, text, link in needs_attention %}
+            <div class="col-12 col-md-6 col-xl-3">
+                <a class="acc-guide" href="{{ link }}">
+                    <div class="acc-guide-icon"><i class="fas {{ icon }}"></i></div>
+                    <div>
+                        <div class="acc-guide-text">{{ text }}</div>
+                        <div class="acc-guide-meta">Open <i class="fas fa-arrow-right ms-1"></i></div>
+                    </div>
+                </a>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% else %}
+<div class="alert alert-success d-flex align-items-center gap-2 mb-4">
+    <i class="fas fa-circle-check"></i>
+    <div>Nothing needs attention — no overdrawn cash or bank account, every account is classified, and yesterday's day is closed.</div>
+</div>
+{% endif %}
+
+{# ── What each page is for ───────────────────────────────────────────────── #}
+<div class="acc-section">
+    <div class="acc-section-head">
+        <h5><i class="fas fa-map me-2" style="color:#3b82f6;"></i>What Each Page Is For</h5>
+        <span class="small text-muted">Five pages, one ledger — each has a single job</span>
+    </div>
+    <div class="acc-section-body">
+        <div class="row g-3">
+            <div class="col-12 col-md-6 col-xl-4">
+                <a class="acc-guide" href="{{ url_for('hdc_accounts_manage') }}">
+                    <div class="acc-guide-icon"><i class="fas fa-list"></i></div>
+                    <div>
+                        <div class="acc-guide-title">Manage Accounts</div>
+                        <div class="acc-guide-text">
+                            The account master list. Create, classify, suspend, archive and review
+                            <strong>every</strong> account and its live balance.
+                        </div>
+                        <div class="acc-guide-meta">
+                            {{ summary.total_accounts }} account{{ '' if summary.total_accounts == 1 else 's' }} ·
+                            {{ summary.active_count }} active · {{ summary.archived_count }} archived
+                        </div>
+                    </div>
+                </a>
+            </div>
+
+            <div class="col-12 col-md-6 col-xl-4">
+                <a class="acc-guide" href="{{ url_for('hdc_cashflow_register') }}">
+                    <div class="acc-guide-icon"><i class="fas fa-book"></i></div>
+                    <div>
+                        <div class="acc-guide-title">CF Register <span class="acc-badge acc-badge-emerald ms-1">Record here</span></div>
+                        <div class="acc-guide-text">
+                            <strong>The place to record money in / out / transfer.</strong>
+                            Categorised, party-tagged, project-scoped documents with an audit trail.
+                            Entries are immutable — a mistake is voided and replaced, never edited.
+                        </div>
+                        <div class="acc-guide-meta">{{ "{:,.0f}".format(entry_total or 0) }} register entries</div>
+                    </div>
+                </a>
+            </div>
+
+            <div class="col-12 col-md-6 col-xl-4">
+                <a class="acc-guide" href="{{ url_for('hdc_accounts') }}">
+                    <div class="acc-guide-icon"><i class="fas fa-wallet"></i></div>
+                    <div>
+                        <div class="acc-guide-title">Accounts (Transactions)</div>
+                        <div class="acc-guide-text">
+                            The transaction workspace: KPI tiles with drilldown, project receivables and
+                            the full double-entry form for ledger postings that are not simple cash flow
+                            (owner receipts, party payments, advances, transfers).
+                        </div>
+                        <div class="acc-guide-meta">Company total Rs. {{ "{:,.0f}".format(kpis.company_owned_total or 0) }}</div>
+                    </div>
+                </a>
+            </div>
+
+            <div class="col-12 col-md-6 col-xl-4">
+                <a class="acc-guide" href="{{ url_for('hdc_cashflow') }}">
+                    <div class="acc-guide-icon"><i class="fas fa-money-bill-transfer"></i></div>
+                    <div>
+                        <div class="acc-guide-title">Cash Flow <span class="acc-badge acc-badge-blue ms-1">Report</span></div>
+                        <div class="acc-guide-text">
+                            The daily money-in / money-out <strong>report</strong> grouped by day, built straight
+                            off the unified ledger — so it includes flows posted from payroll, purchases,
+                            subcontract and office too, not only register entries.
+                        </div>
+                        <div class="acc-guide-meta">
+                            <a href="{{ url_for('hdc_cashflow_report') }}" class="me-2" onclick="event.stopPropagation();">Full report</a>
+                            <a href="{{ url_for('hdc_cashflow_export') }}" onclick="event.stopPropagation();">CSV</a>
+                        </div>
+                    </div>
+                </a>
+            </div>
+
+            <div class="col-12 col-md-6 col-xl-4">
+                <a class="acc-guide" href="{{ url_for('hdc_cashflow_reconciliation') }}">
+                    <div class="acc-guide-icon"><i class="fas fa-scale-balanced"></i></div>
+                    <div>
+                        <div class="acc-guide-title">Day Close</div>
+                        <div class="acc-guide-text">
+                            End-of-day verification: enter the <strong>physically counted</strong> cash and bank
+                            for each account, see the difference against the ledger, then lock the day.
+                            A locked day carries its counted closing forward as tomorrow's opening.
+                        </div>
+                        <div class="acc-guide-meta">
+                            {% if lock_today %}<i class="fas fa-lock me-1"></i>{{ today }} locked
+                            {% else %}<i class="fas fa-lock-open me-1"></i>{{ today }} open{% endif %}
+                        </div>
+                    </div>
+                </a>
+            </div>
+
+            <div class="col-12 col-md-6 col-xl-4">
+                <a class="acc-guide" href="{{ url_for('hdc_accounts_entries') }}">
+                    <div class="acc-guide-icon"><i class="fas fa-receipt"></i></div>
+                    <div>
+                        <div class="acc-guide-title">All Entries</div>
+                        <div class="acc-guide-text">
+                            Every ledger row across all modules with filters, receipts, void / restore and
+                            reversals. This is the audit view — the source of truth behind every balance.
+                        </div>
+                        <div class="acc-guide-meta">{{ "{:,.0f}".format(txn_total or 0) }} posted transactions</div>
+                    </div>
+                </a>
+            </div>
+
+            <div class="col-12 col-md-6 col-xl-4">
+                <a class="acc-guide" href="{{ url_for('hdc_accounts_reconciliation') }}">
+                    <div class="acc-guide-icon"><i class="fas fa-stethoscope"></i></div>
+                    <div>
+                        <div class="acc-guide-title">Reconciliation Check</div>
+                        <div class="acc-guide-text">
+                            Forensic scan of the link between ledger rows and the source records that created
+                            them (payroll, purchases, expenses, owner payments). Use it after an import or when
+                            a total looks wrong.
+                        </div>
+                        <div class="acc-guide-meta">Data health</div>
+                    </div>
+                </a>
+            </div>
+
+            <div class="col-12 col-md-6 col-xl-4">
+                <a class="acc-guide" href="{{ url_for('hdc_personal_management') }}">
+                    <div class="acc-guide-icon"><i class="fas fa-handshake"></i></div>
+                    <div>
+                        <div class="acc-guide-title">Personal Management</div>
+                        <div class="acc-guide-text">
+                            Owner / personal expenses kept separate from business cost, with their own
+                            categories and void trail.
+                        </div>
+                        <div class="acc-guide-meta">Personal spend</div>
+                    </div>
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3">
+    {# ── How money flows through the section ─────────────────────────────── #}
+    <div class="col-12 col-xl-7">
+        <div class="acc-section h-100">
+            <div class="acc-section-head">
+                <h5><i class="fas fa-diagram-project me-2" style="color:#8b5cf6;"></i>How It Fits Together</h5>
+                <span class="small text-muted">One ledger, no duplicate entry</span>
+            </div>
+            <div class="acc-section-body">
+                <p class="small text-muted">
+                    Every page reads and writes the <strong>same</strong> unified ledger
+                    (<code>hdc_account_txn</code>). Nothing is stored twice, so balances can never
+                    disagree between screens.
+                </p>
+                <ol class="small mb-3" style="line-height:1.9;">
+                    <li>
+                        <strong>Record</strong> — post money in / out / transfer in the
+                        <a href="{{ url_for('hdc_cashflow_register') }}">CF Register</a>.
+                        Each entry writes one document row <em>and</em> its double-entry ledger posting.
+                    </li>
+                    <li>
+                        <strong>Other modules post too</strong> — payroll, purchases, expenses, subcontract,
+                        office and owner payments all write to the same ledger automatically.
+                    </li>
+                    <li>
+                        <strong>Balances</strong> —
+                        <a href="{{ url_for('hdc_accounts_manage') }}">Manage Accounts</a> derives every
+                        balance from the ledger (opening + in − out). It is never stored, so it cannot drift.
+                    </li>
+                    <li>
+                        <strong>Review</strong> — <a href="{{ url_for('hdc_cashflow') }}">Cash Flow</a> shows the
+                        day-by-day report; <a href="{{ url_for('hdc_accounts_entries') }}">All Entries</a> shows
+                        every row with receipts.
+                    </li>
+                    <li>
+                        <strong>Close</strong> — <a href="{{ url_for('hdc_cashflow_reconciliation') }}">Day Close</a>
+                        compares the counted cash against the ledger and locks the day. A locked day rejects
+                        back-dated entries and rolls its counted closing forward as the next opening.
+                    </li>
+                </ol>
+                <div class="alert alert-light border small mb-0" style="background:var(--card-header-bg);">
+                    <i class="fas fa-circle-info me-1"></i>
+                    <strong>Cash Flow vs CF Register?</strong>
+                    The <strong>Register</strong> is where you <em>record</em> (it is the document: category,
+                    party, project, who and why, plus the audit trail).
+                    <strong>Cash Flow</strong> is where you <em>read</em> — the daily report over the whole
+                    ledger, including flows other modules posted. Record once, see it everywhere.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {# ── Right column: groups + day closes ───────────────────────────────── #}
+    <div class="col-12 col-xl-5">
+        <div class="acc-section">
+            <div class="acc-section-head">
+                <h5><i class="fas fa-tags me-2" style="color:#8b5cf6;"></i>Account Groups</h5>
+                <a href="{{ url_for('hdc_accounts_manage') }}" class="btn btn-sm btn-outline-secondary">Manage</a>
+            </div>
+            <div class="acc-section-body">
+                <div class="d-flex flex-wrap gap-2">
+                    {% for g in groups[:12] %}
+                    <span class="acc-chip" title="{{ g.accounts|join(', ') }}">
+                        <i class="fas fa-tag"></i>
+                        <span>{{ g.subcategory }}</span>
+                        <span class="acc-chip-count">{{ g.count }}</span>
+                        <span class="acc-chip-amount">{{ "{:,.0f}".format(g.balance or 0) }}</span>
+                    </span>
+                    {% else %}
+                    <div class="acc-empty w-100">
+                        <i class="fas fa-tags"></i>
+                        <div class="mt-2">No active accounts yet.</div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+
+        <div class="acc-section mb-0">
+            <div class="acc-section-head">
+                <h5><i class="fas fa-calendar-check me-2" style="color:#10b981;"></i>Recent Day Closes</h5>
+                <a href="{{ url_for('hdc_cashflow_reconciliation') }}" class="btn btn-sm btn-outline-secondary">Day Close</a>
+            </div>
+            <div class="acc-section-body flush">
+                <table class="table acc-table mb-0">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th class="text-end">Expected</th>
+                            <th class="text-end">Counted</th>
+                            <th class="text-end">Difference</th>
+                            <th>Locked By</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for l in lock_history %}
+                        <tr>
+                            <td class="acc-name">{{ l.lock_date.isoformat() }}</td>
+                            <td class="text-end acc-muted-amount">{{ "{:,.2f}".format(l.total_expected or 0) }}</td>
+                            <td class="text-end acc-muted-amount">{{ "{:,.2f}".format(l.total_counted or 0) }}</td>
+                            <td class="text-end acc-amount {{ 'neg' if (l.difference or 0) != 0 else 'pos' }}">
+                                {{ "{:,.2f}".format(l.difference or 0) }}
+                            </td>
+                            <td class="acc-meta">{{ l.locked_by or '—' }}</td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="5">
+                                <div class="acc-empty">
+                                    <i class="fas fa-calendar-day"></i>
+                                    <div class="mt-2">
+                                        No day has been closed yet.
+                                        <a href="{{ url_for('hdc_cashflow_reconciliation') }}">Open Day Close</a>
+                                    </div>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -30,18 +30,20 @@ hdc/                    the application package (import here, not hdc_erp)
   models/               61 ORM models, one file per domain (auth, projects,
                         workforce, office, subcontract, materials, accounts,
                         cashflow)
-  services/             business engines: accounts, purchase, timekeeping,
-                        ledger, subcontract, aggregation, reporting, audit,
-                        actors (row traceability), lookups, backups,
-                        estimation, receipts
+  services/             business engines: accounts, accounts_manage (account
+                        master list + classification editor), purchase,
+                        timekeeping, ledger, subcontract, aggregation,
+                        reporting, audit, actors (row traceability), lookups,
+                        backups, estimation, receipts, cashflow,
+                        cashflow_register, account_classification
   core/                 runtime platform: flags, schema/migrations,
                         bootstrap, admin ops (restore/wipe/maintenance)
   routes/               one file per page group; register(app) each
                         (auth, dashboard, projects, subcontractors, workers,
                         timekeeping, payroll, expenses, office, materials,
                         purchase_v2, estimation, reports, users, accounts,
-                        cashflow, cashflow_register, settings, api_purchase,
-                        api_accounts, api_actors)
+                        accounts_manage, cashflow, cashflow_register, settings,
+                        api_purchase, api_accounts, api_actors)
 hdc_erp.py              backward-compat shim: app, db, models, helpers
 wsgi.py                 gunicorn/PythonAnywhere entrypoint (env-configured)
 deploy_hook.py          standalone stdlib-only WSGI app: GitHub push webhook ->
@@ -49,8 +51,10 @@ deploy_hook.py          standalone stdlib-only WSGI app: GitHub push webhook ->
                         on PythonAnywhere, see wsgi_dispatch_snippet.py)
 ops/pythonanywhere/     install_deploy_hook.py: one command that writes the
                         secret + WSGI file and prints the webhook values
-templates/hdc/<domain>/ 82 Jinja pages, one folder per feature
-static/hdc/             css/hdc.css, img/, js/core/*.js, js/pages/*.js
+templates/hdc/<domain>/ 89 Jinja pages, one folder per feature
+static/hdc/             css/hdc.css, css/accounts.css (Accounts section look,
+                        ported from the AMS accounts UI), img/, js/core/*.js,
+                        js/pages/*.js
 scripts/                split_monolith, reorganize_frontend, parity_check,
                         check_layers, check_db_safety, reset_admin_password,
                         labour_audit (read-only labour/payroll consistency
@@ -69,7 +73,41 @@ tests/                  differential smoke test vs the pre-split baseline
 ```
 
 **Dependency rule:** `routes → services/core → models → utils`, never
-upwards. `scripts/check_layers.py` enforces it (acyclic, 53 modules).
+upwards. `scripts/check_layers.py` enforces it (acyclic, 64 modules).
+
+## Accounts &amp; Cash
+
+The money side of the app is one section with a single ledger
+(`hdc_account_txn`) behind it. Nothing is stored twice, so balances cannot
+disagree between screens. `/hdc/accounts/hub` is the landing page and explains
+each of these in the UI.
+
+| Page | URL | Job |
+|---|---|---|
+| **Accounts Hub** | `/hdc/accounts/hub` | Landing page: today's in/out, what needs attention, and what every other page is for |
+| **Manage Accounts** | `/hdc/accounts/manage` | The account master list — every account, live balances, classification groups, filters, suspend/archive/restore, CSV |
+| **Add / Edit Account** | `/hdc/accounts/new`, `/hdc/accounts/<id>/edit` | Full form for details *and* the Category → Subcategory → Account Type → Channel hierarchy |
+| **Transactions** | `/hdc/accounts` | Transaction workspace: KPI tiles with drilldown, project receivables, the full double-entry form |
+| **All Entries** | `/hdc/accounts/entries` | Every ledger row with filters, receipts, void/restore and reversals |
+| **CF Register** | `/hdc/accounts/cashflow/register` | **Where you record** money in / out / transfer — categorised, party-tagged, project-scoped, immutable (void + replace), audited |
+| **Cash Flow** | `/hdc/accounts/cashflow` | **Where you read** — the daily in/out report over the whole ledger, including flows other modules posted |
+| **Day Close** | `/hdc/accounts/cashflow/reconciliation` | Counted cash vs ledger per account, then lock the day; a locked day rolls its counted closing forward and rejects back-dated entries |
+| **Reconciliation Check** | `/hdc/accounts/reconciliation` | Forensic scan of ledger rows vs the source records that created them |
+
+Two rules worth knowing before changing this area:
+
+* **Balances are derived, never stored.** `opening + in − out` from the ledger,
+  on every read. The register writes double-entry rows and reads balances back.
+* **Nothing with history is deleted.** An account with posted transactions is
+  *archived* (`is_void`), and archiving is reversible via restore — recreating
+  an account instead would start a second ledger and split its history.
+
+The classification hierarchy lives in
+`hdc/services/account_classification.py` and is the single source of truth: the
+server validates against the same registry the browser renders, so a
+contradictory account (a client receivable holding a bank account number) cannot
+be saved. `hdc/services/accounts_manage.py` holds the list/edit/archive rules;
+`hdc/routes/accounts_manage.py` stays thin.
 
 ## Run
 
