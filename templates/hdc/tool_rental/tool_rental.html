@@ -1,0 +1,371 @@
+{% extends "shared/base.html" %}
+{% block title %}HDC Tool Rental{% endblock %}
+{% block page_heading %}HDC Tool Rental{% endblock %}
+
+{% block content %}
+<style>
+.tool-chain { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+.tool-chain .chain-item { padding:4px 10px; border-radius:999px; font-size:0.75rem; font-weight:600; background: var(--card-header-bg); border:1px solid var(--card-border); }
+.tool-chain .chain-item.active { background: linear-gradient(135deg,#16a34a,#22c55e); color:#fff; border-color:transparent; box-shadow:0 4px 12px rgba(34,197,94,0.35); }
+.tool-chain .chain-arrow { opacity:0.5; }
+.kpi-card .kpi-sub2 { font-size:0.7rem; opacity:0.8; margin-top:2px; }
+.filter-card { border:1px dashed var(--card-border); }
+.rental-row { cursor:pointer; }
+.badge-pending { background:#f59e0b; }
+.badge-credit { background:#ef4444; }
+.badge-nocharge { background:#6b7280; }
+.badge-paid { background:#16a34a; }
+</style>
+
+<!-- KPI CARDS -->
+<div class="row g-3 mt-1">
+    <div class="col-6 col-md-2">
+        <div class="kpi-card kpi-blue">
+            <div class="kpi-icon"><i class="fas fa-tools"></i></div>
+            <div class="kpi-value small">{{ "%.0f"|format(kpis.total_tools) }} <span style="font-size:0.8rem">qty</span></div>
+            <div class="kpi-label">Total Tools Owned ({{ kpis.total_tool_types }} types)</div>
+            <div class="kpi-sub2">Available: {{ "%.0f"|format(kpis.available) }}</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-2">
+        <div class="kpi-card kpi-orange">
+            <div class="kpi-icon"><i class="fas fa-dolly"></i></div>
+            <div class="kpi-value small">{{ "%.0f"|format(kpis.rented_out) }}</div>
+            <div class="kpi-label">Rented Out Qty</div>
+            <div class="kpi-sub2">Pending Tools: {{ "%.0f"|format(kpis.pending_tools) }}</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-2">
+        <div class="kpi-card kpi-teal">
+            <div class="kpi-icon"><i class="fas fa-file-contract"></i></div>
+            <div class="kpi-value small">{{ kpis.active_rentals }}</div>
+            <div class="kpi-label">Active Rentals</div>
+            <div class="kpi-sub2">Overdue: {{ kpis.overdue_rentals }} | Int: {{ kpis.internal_rentals }} Ext: {{ kpis.external_rentals }}</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-2">
+        <div class="kpi-card kpi-green">
+            <div class="kpi-icon"><i class="fas fa-hand-holding-usd"></i></div>
+            <div class="kpi-value small">{{ "{:,.0f}".format(kpis.total_amount) }}</div>
+            <div class="kpi-label">Total Rental Amount</div>
+            <div class="kpi-sub2">Paid: {{ "{:,.0f}".format(kpis.total_paid) }}</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-2">
+        <div class="kpi-card kpi-red">
+            <div class="kpi-icon"><i class="fas fa-clock"></i></div>
+            <div class="kpi-value small">{{ "{:,.0f}".format(kpis.pending_amount) }}</div>
+            <div class="kpi-label">Pending Amount</div>
+            <div class="kpi-sub2">Credit Rentals: {{ kpis.credit_rentals }} ({{ "{:,.0f}".format(kpis.credit_amount) }})</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-2">
+        <div class="kpi-card kpi-purple">
+            <div class="kpi-icon"><i class="fas fa-route"></i></div>
+            <div class="kpi-value small">{{ "%.0f"|format(kpis.pending_tools) }}</div>
+            <div class="kpi-label">Pending Tools Return</div>
+            <div class="kpi-sub2">Utilization: {{ "%.1f"|format((kpis.rented_out/kpis.total_tools*100) if kpis.total_tools>0 else 0) }}%</div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mt-3">
+    <div class="col-md-8">
+        <div class="card hdc-card filter-card">
+            <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-filter me-2"></i>Search & Filters — Reporting by Site / Tool / Date / Customer</span>
+                <div class="d-flex gap-2">
+                    <a href="{{ url_for('hdc_tool_rental_reports') }}" class="btn btn-sm btn-outline-secondary"><i class="fas fa-chart-bar me-1"></i>Reports</a>
+                    <a href="{{ url_for('hdc_tool_rental_tracking') }}" class="btn btn-sm btn-outline-secondary"><i class="fas fa-map-location-dot me-1"></i>Where Are My Tools</a>
+                    <a href="{{ url_for('hdc_tool_rental_inventory') }}" class="btn btn-sm btn-mint"><i class="fas fa-warehouse me-1"></i>Inventory</a>
+                </div>
+            </div>
+            <div class="card-body">
+                <form method="GET" class="row g-2">
+                    <div class="col-md-3">
+                        <label class="form-label">Search Code / Customer</label>
+                        <input type="text" name="q" value="{{ filters.search_text or '' }}" class="form-control" placeholder="RENT- , customer, phone">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">Site / Project</label>
+                        <select name="project_id" class="form-select">
+                            <option value="">All Sites</option>
+                            {% for p in projects %}
+                            <option value="{{ p.id }}" {% if filters.project_id==p.id %}selected{% endif %}>{{ p.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">Tool</label>
+                        <select name="tool_id" class="form-select">
+                            <option value="">All Tools</option>
+                            {% for t in tools %}
+                            <option value="{{ t.id }}" {% if filters.tool_id==t.id %}selected{% endif %}>{{ t.name }} ({{ t.tool_code }})</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">Renter Type</label>
+                        <select name="renter_type" class="form-select">
+                            <option value="">All</option>
+                            <option value="internal" {% if filters.renter_type=='internal' %}selected{% endif %}>Internal Site</option>
+                            <option value="external" {% if filters.renter_type=='external' %}selected{% endif %}>External Customer</option>
+                        </select>
+                    </div>
+                    <div class="col-md-1">
+                        <label class="form-label">Status</label>
+                        <select name="status" class="form-select">
+                            <option value="">All</option>
+                            <option value="active" {% if filters.status=='active' %}selected{% endif %}>Active</option>
+                            <option value="partially_returned" {% if filters.status=='partially_returned' %}selected{% endif %}>Partial</option>
+                            <option value="returned" {% if filters.status=='returned' %}selected{% endif %}>Returned</option>
+                            <option value="overdue" {% if filters.status=='overdue' %}selected{% endif %}>Overdue</option>
+                            <option value="closed" {% if filters.status=='closed' %}selected{% endif %}>Closed</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">Payment</label>
+                        <select name="payment_status" class="form-select">
+                            <option value="">All</option>
+                            <option value="unpaid" {% if filters.payment_status=='unpaid' %}selected{% endif %}>Unpaid</option>
+                            <option value="partial" {% if filters.payment_status=='partial' %}selected{% endif %}>Partial</option>
+                            <option value="paid" {% if filters.payment_status=='paid' %}selected{% endif %}>Paid</option>
+                            <option value="credit" {% if filters.payment_status=='credit' %}selected{% endif %}>Credit</option>
+                            <option value="no_charge" {% if filters.payment_status=='no_charge' %}selected{% endif %}>No Charge</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">Date From</label>
+                        <input type="date" name="date_from" value="{{ filters.date_from or '' }}" class="form-control">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">Date To</label>
+                        <input type="date" name="date_to" value="{{ filters.date_to or '' }}" class="form-control">
+                    </div>
+                    <div class="col-md-2 d-flex align-items-end gap-2">
+                        <button type="submit" class="btn btn-mint"><i class="fas fa-search me-1"></i>Filter</button>
+                        <a href="{{ url_for('hdc_tool_rental') }}" class="btn btn-outline-secondary">Reset</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card hdc-card">
+            <div class="card-header hdc-card-header"><i class="fas fa-plus me-2"></i>Create New Rental — Internal / External</div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('hdc_tool_rental_create') }}" id="createRentalForm">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+                    <div class="row g-2">
+                        <div class="col-6">
+                            <label class="form-label">Renter Type</label>
+                            <select name="renter_type" id="renterType" class="form-select" required onchange="toggleRenter()">
+                                <option value="internal">Internal Site (Project)</option>
+                                <option value="external">External Customer</option>
+                            </select>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Billing Type</label>
+                            <select name="billing_type" class="form-select" required>
+                                <option value="fixed_fee">Rental Fee (Fixed)</option>
+                                <option value="per_day">Per Day Rate</option>
+                                <option value="no_charge">No Payment - Contract Included</option>
+                            </select>
+                        </div>
+                        <div class="col-12" id="internalFields">
+                            <div class="row g-2">
+                                <div class="col-6">
+                                    <label class="form-label">Project / Site</label>
+                                    <select name="project_id" class="form-select">
+                                        <option value="">Select Site</option>
+                                        {% for p in projects %}
+                                        <option value="{{ p.id }}">{{ p.name }} ({{ p.project_code }})</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label">Stage (Optional)</label>
+                                    <select name="stage_id" class="form-select">
+                                        <option value="">No Stage</option>
+                                        {% for s in stages %}
+                                        <option value="{{ s.id }}">{{ s.name }} - {{ s.project.name if s.project else '' }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-12 d-none" id="externalFields">
+                            <div class="row g-2">
+                                <div class="col-6">
+                                    <label class="form-label">Customer Name</label>
+                                    <input type="text" name="customer_name" class="form-control" placeholder="Customer name">
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label">Phone</label>
+                                    <input type="text" name="customer_phone" class="form-control" placeholder="03xx-xxxxxxx">
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label">Address</label>
+                                    <input type="text" name="customer_address" class="form-control" placeholder="Address">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Rental Date</label>
+                            <input type="date" name="rental_date" value="{{ today }}" class="form-control" required>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Expected Return</label>
+                            <input type="date" name="expected_return_date" class="form-control">
+                        </div>
+
+                        <div class="col-12 mt-2">
+                            <label class="form-label fw-bold">Tools to Rent (example 50 tools case)</label>
+                            <div id="toolItemsContainer">
+                                <div class="row g-1 mb-1 tool-item-row">
+                                    <div class="col-5">
+                                        <select name="tool_id[]" class="form-select form-select-sm" required>
+                                            <option value="">Select Tool</option>
+                                            {% for t in tools %}
+                                            <option value="{{ t.id }}" data-rate="{{ t.rental_rate_per_day }}" data-avail="{{ t.available_qty }}">{{ t.name }} ({{ t.tool_code }}) - Avl: {{ "%.0f"|format(t.available_qty) }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                    <div class="col-2"><input type="number" name="qty[]" class="form-control form-control-sm" placeholder="Qty" min="0.1" step="0.1" required></div>
+                                    <div class="col-3"><input type="number" name="rate[]" class="form-control form-control-sm" placeholder="Rate" min="0" step="0.01"></div>
+                                    <div class="col-2"><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('.tool-item-row').remove()">X</button></div>
+                                </div>
+                            </div>
+                            <button type="button" class="btn btn-sm btn-outline-secondary mt-1" onclick="addToolRow()"><i class="fas fa-plus me-1"></i>Add Tool Line</button>
+                        </div>
+
+                        <div class="col-12">
+                            <label class="form-label">Notes / Contract Ref</label>
+                            <textarea name="notes" class="form-control" rows="2" placeholder="Contract included? Rental terms, etc"></textarea>
+                        </div>
+                        <div class="col-12">
+                            <button type="submit" class="btn btn-mint w-100"><i class="fas fa-check me-1"></i>Create Rental</button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- RENTALS LIST -->
+<div class="card hdc-card mt-3">
+    <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+        <span><i class="fas fa-list me-2"></i>Rentals — {{ rentals|length }} records | Tracking chain shows Site1 > Site2 > Site3 etc</span>
+        <span class="text-muted small">Click row to open detail — supports Full / Partial returns & payments</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table hdc-table table-sm mb-0">
+            <thead>
+                <tr>
+                    <th>Code</th>
+                    <th>Date</th>
+                    <th>Renter</th>
+                    <th>Site / Customer</th>
+                    <th>Tools (Qty)</th>
+                    <th>Tracking Chain</th>
+                    <th>Amount / Paid / Pending</th>
+                    <th>Tools Pending</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for r in rentals %}
+                <tr class="rental-row" onclick="location.href='{{ url_for('hdc_tool_rental_detail', rental_id=r.id) }}'">
+                    <td><span class="badge bg-secondary">{{ r.rental_code }}</span></td>
+                    <td>{{ r.rental_date }}<br><small class="text-muted">Exp: {{ r.expected_return_date or '-' }}</small></td>
+                    <td>
+                        <span class="badge {% if r.renter_type=='internal' %}bg-primary{% else %}bg-info{% endif %}">{{ r.renter_type }}</span><br>
+                        <small class="badge {% if r.billing_type=='no_charge' %}badge-nocharge{% else %}bg-dark{% endif %}">{{ r.billing_type }}</small>
+                    </td>
+                    <td>
+                        {% if r.renter_type=='internal' %}
+                            {{ r.project.name if r.project else '-' }}
+                            {% if r.stage %}<br><small>{{ r.stage.name }}</small>{% endif %}
+                        {% else %}
+                            {{ r.customer_name }}<br><small>{{ r.customer_phone or '' }}</small>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <strong>{{ "%.0f"|format(r.total_rented_qty or 0) }}</strong> rented<br>
+                        <small>Returned: {{ "%.0f"|format(r.total_returned_qty or 0) }}</small>
+                        {% for it in r.items[:2] %}
+                            <br><small>{{ it.tool.name if it.tool else '' }} x{{ "%.0f"|format(it.qty_rented or 0) }}</small>
+                        {% endfor %}
+                        {% if r.items|length>2 %}<br><small>+{{ r.items|length-2 }} more</small>{% endif %}
+                    </td>
+                    <td style="max-width:220px">
+                        <div class="tool-chain">
+                            {% for label in r.tracking_chain %}
+                                <span class="chain-item {% if loop.last %}active{% endif %}">{{ label }}</span>
+                                {% if not loop.last %}<span class="chain-arrow">›</span>{% endif %}
+                            {% endfor %}
+                        </div>
+                    </td>
+                    <td>
+                        {% if r.billing_type=='no_charge' %}
+                            <span class="badge badge-nocharge">No Charge (Contract)</span>
+                        {% else %}
+                            Total: {{ "{:,.0f}".format(r.total_amount or 0) }}<br>
+                            Paid: {{ "{:,.0f}".format(r.total_paid or 0) }}<br>
+                            <strong class="text-danger">Pending: {{ "{:,.0f}".format(r.total_pending_amount) }}</strong>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% set pend = r.total_pending_tools %}
+                        {% if pend>0 %}
+                            <span class="badge bg-warning text-dark">{{ "%.0f"|format(pend) }} pending</span>
+                        {% else %}
+                            <span class="badge bg-success">All returned</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <span class="badge {% if r.status=='active' %}bg-primary{% elif r.status=='partially_returned' %}bg-warning text-dark{% elif r.status=='overdue' %}bg-danger{% elif r.status=='closed' %}bg-success{% else %}bg-secondary{% endif %}">{{ r.status }}</span><br>
+                        <span class="badge {% if r.payment_status=='paid' %}badge-paid{% elif r.payment_status=='partial' %}bg-warning text-dark{% elif r.payment_status=='credit' %}badge-credit{% elif r.payment_status=='no_charge' %}badge-nocharge{% else %}bg-danger{% endif %}">{{ r.payment_status }}</span>
+                    </td>
+                </tr>
+            {% else %}
+                <tr><td colspan="9" class="text-center text-muted py-4">No rentals found. Create first rental from right panel. Example: rent 50 tools to Site1, then track Site1 > Site2 > Site3.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function toggleRenter(){
+    const type = document.getElementById('renterType').value;
+    const intF = document.getElementById('internalFields');
+    const extF = document.getElementById('externalFields');
+    if(type==='internal'){ intF.classList.remove('d-none'); extF.classList.add('d-none'); }
+    else { intF.classList.add('d-none'); extF.classList.remove('d-none'); }
+}
+function addToolRow(){
+    const container = document.getElementById('toolItemsContainer');
+    const row = document.createElement('div');
+    row.className = 'row g-1 mb-1 tool-item-row';
+    row.innerHTML = `
+        <div class="col-5">
+            <select name="tool_id[]" class="form-select form-select-sm" required>
+                <option value="">Select Tool</option>
+                {% for t in tools %}
+                <option value="{{ t.id }}" data-rate="{{ t.rental_rate_per_day }}" data-avail="{{ t.available_qty }}">{{ t.name }} ({{ t.tool_code }}) - Avl: {{ "%.0f"|format(t.available_qty) }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-2"><input type="number" name="qty[]" class="form-control form-control-sm" placeholder="Qty" min="0.1" step="0.1" required></div>
+        <div class="col-3"><input type="number" name="rate[]" class="form-control form-control-sm" placeholder="Rate" min="0" step="0.01"></div>
+        <div class="col-2"><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('.tool-item-row').remove()">X</button></div>
+    `;
+    container.appendChild(row);
+}
+</script>
+{% endblock %}

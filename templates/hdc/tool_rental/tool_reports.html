@@ -1,0 +1,130 @@
+{% extends "shared/base.html" %}
+{% block title %}Tool Rental Reports{% endblock %}
+{% block page_heading %}Tool Rental Reports — Search by Site / Tool / Date Range / All Possible{% endblock %}
+
+{% block content %}
+<div class="row g-3 mt-1">
+    <div class="col-6 col-md-2"><div class="kpi-card kpi-blue"><div class="kpi-icon"><i class="fas fa-tools"></i></div><div class="kpi-value">{{ "%.0f"|format(kpis.total_tools) }}</div><div class="kpi-label">Total Tools</div></div></div>
+    <div class="col-6 col-md-2"><div class="kpi-card kpi-orange"><div class="kpi-icon"><i class="fas fa-dolly"></i></div><div class="kpi-value">{{ "%.0f"|format(kpis.rented_out) }}</div><div class="kpi-label">Rented Out</div></div></div>
+    <div class="col-6 col-md-2"><div class="kpi-card kpi-teal"><div class="kpi-icon"><i class="fas fa-file-contract"></i></div><div class="kpi-value">{{ kpis.active_rentals }}</div><div class="kpi-label">Active Rentals</div></div></div>
+    <div class="col-6 col-md-2"><div class="kpi-card kpi-green"><div class="kpi-icon"><i class="fas fa-hand-holding-usd"></i></div><div class="kpi-value small">{{ "{:,.0f}".format(kpis.total_amount) }}</div><div class="kpi-label">Total Amount</div></div></div>
+    <div class="col-6 col-md-2"><div class="kpi-card kpi-red"><div class="kpi-icon"><i class="fas fa-clock"></i></div><div class="kpi-value small">{{ "{:,.0f}".format(kpis.pending_amount) }}</div><div class="kpi-label">Pending Amount</div></div></div>
+    <div class="col-6 col-md-2"><div class="kpi-card kpi-purple"><div class="kpi-icon"><i class="fas fa-exclamation-triangle"></i></div><div class="kpi-value">{{ "%.0f"|format(kpis.pending_tools) }}</div><div class="kpi-label">Pending Tools</div></div></div>
+</div>
+
+<div class="card hdc-card mt-3">
+    <div class="card-header hdc-card-header d-flex justify-content-between">
+        <span><i class="fas fa-filter me-2"></i>Filters — By Site, By Tool, By Date Range, By Customer, By Status, All Possible</span>
+        <div class="d-flex gap-2">
+            <a href="{{ url_for('hdc_tool_rental') }}" class="btn btn-sm btn-outline-secondary">Rentals Hub</a>
+            <a href="{{ url_for('hdc_tool_rental_tracking') }}" class="btn btn-sm btn-outline-secondary">Tracking</a>
+        </div>
+    </div>
+    <div class="card-body">
+        <form method="GET" class="row g-2">
+            <div class="col-md-2"><label class="form-label">Search</label><input type="text" name="q" value="{{ filters.search_text or '' }}" class="form-control" placeholder="Code / Customer"></div>
+            <div class="col-md-2"><label class="form-label">Site / Project</label><select name="project_id" class="form-select"><option value="">All Sites</option>{% for p in projects %}<option value="{{ p.id }}" {% if filters.project_id==p.id %}selected{% endif %}>{{ p.name }}</option>{% endfor %}</select></div>
+            <div class="col-md-2"><label class="form-label">Tool</label><select name="tool_id" class="form-select"><option value="">All Tools</option>{% for t in tools %}<option value="{{ t.id }}" {% if filters.tool_id==t.id %}selected{% endif %}>{{ t.name }}</option>{% endfor %}</select></div>
+            <div class="col-md-2"><label class="form-label">Renter Type</label><select name="renter_type" class="form-select"><option value="">All</option><option value="internal" {% if filters.renter_type=='internal' %}selected{% endif %}>Internal</option><option value="external" {% if filters.renter_type=='external' %}selected{% endif %}>External</option></select></div>
+            <div class="col-md-1"><label class="form-label">Status</label><select name="status" class="form-select"><option value="">All</option><option value="active" {% if filters.status=='active' %}selected{% endif %}>Active</option><option value="partially_returned" {% if filters.status=='partially_returned' %}selected{% endif %}>Partial</option><option value="returned" {% if filters.status=='returned' %}selected{% endif %}>Returned</option><option value="overdue" {% if filters.status=='overdue' %}selected{% endif %}>Overdue</option><option value="closed" {% if filters.status=='closed' %}selected{% endif %}>Closed</option></select></div>
+            <div class="col-md-1"><label class="form-label">Payment</label><select name="payment_status" class="form-select"><option value="">All</option><option value="unpaid" {% if filters.payment_status=='unpaid' %}selected{% endif %}>Unpaid</option><option value="partial" {% if filters.payment_status=='partial' %}selected{% endif %}>Partial</option><option value="paid" {% if filters.payment_status=='paid' %}selected{% endif %}>Paid</option><option value="credit" {% if filters.payment_status=='credit' %}selected{% endif %}>Credit</option><option value="no_charge" {% if filters.payment_status=='no_charge' %}selected{% endif %}>No Charge</option></select></div>
+            <div class="col-md-1"><label class="form-label">Billing</label><select name="billing_type" class="form-select"><option value="">All</option><option value="no_charge" {% if filters.billing_type=='no_charge' %}selected{% endif %}>No Charge</option><option value="fixed_fee" {% if filters.billing_type=='fixed_fee' %}selected{% endif %}>Fixed</option><option value="per_day" {% if filters.billing_type=='per_day' %}selected{% endif %}>Per Day</option></select></div>
+            <div class="col-md-2"><label class="form-label">Date From</label><input type="date" name="date_from" value="{{ filters.date_from or '' }}" class="form-control"></div>
+            <div class="col-md-2"><label class="form-label">Date To</label><input type="date" name="date_to" value="{{ filters.date_to or '' }}" class="form-control"></div>
+            <div class="col-md-2 d-flex align-items-end gap-2"><button type="submit" class="btn btn-mint"><i class="fas fa-search me-1"></i>Generate</button><a href="{{ url_for('hdc_tool_rental_reports') }}" class="btn btn-outline-secondary">Reset</a></div>
+        </form>
+    </div>
+</div>
+
+<div class="row g-3 mt-3">
+    <div class="col-md-3">
+        <div class="card hdc-card">
+            <div class="card-header hdc-card-header"><i class="fas fa-chart-pie me-2"></i>Summary — Filtered Rentals</div>
+            <div class="card-body">
+                <div class="hdc-info-list">
+                    <div class="hdc-info-item"><span class="hdc-info-label">Rentals Count</span><span class="hdc-info-value">{{ rentals|length }}</span></div>
+                    <div class="hdc-info-item"><span class="hdc-info-label">Total Rented Qty</span><span class="hdc-info-value">{{ "%.0f"|format(total_rented) }}</span></div>
+                    <div class="hdc-info-item"><span class="hdc-info-label">Total Returned</span><span class="hdc-info-value">{{ "%.0f"|format(total_returned) }}</span></div>
+                    <div class="hdc-info-item"><span class="hdc-info-label">Pending Tools</span><span class="hdc-info-value text-danger fw-bold">{{ "%.0f"|format(total_pending_tools) }}</span></div>
+                    <div class="hdc-info-item"><span class="hdc-info-label">Total Amount</span><span class="hdc-info-value">{{ "{:,.0f}".format(total_amount) }}</span></div>
+                    <div class="hdc-info-item"><span class="hdc-info-label">Total Paid</span><span class="hdc-info-value text-success">{{ "{:,.0f}".format(total_paid) }}</span></div>
+                    <div class="hdc-info-item"><span class="hdc-info-label">Pending Amount</span><span class="hdc-info-value text-danger fw-bold">{{ "{:,.0f}".format(total_pending_amount) }}</span></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card hdc-card mt-3">
+            <div class="card-header hdc-card-header"><i class="fas fa-tools me-2"></i>Per Tool Breakdown</div>
+            <div class="table-responsive">
+                <table class="table hdc-table table-sm mb-0">
+                    <thead><tr><th>Tool</th><th>Rented</th><th>Returned</th><th>Pending</th><th>Amount</th></tr></thead>
+                    <tbody>
+                    {% for tid, data in tool_breakdown.items() %}
+                        <tr><td>{{ data.tool.name if data.tool else tid }}<br><small>{{ data.tool.tool_code if data.tool else '' }}</small></td><td>{{ "%.0f"|format(data.rented) }}</td><td>{{ "%.0f"|format(data.returned) }}</td><td><span class="badge {% if data.pending>0 %}bg-warning text-dark{% else %}bg-success{% endif %}">{{ "%.0f"|format(data.pending) }}</span></td><td>{{ "{:,.0f}".format(data.amount) }}</td></tr>
+                    {% else %}
+                        <tr><td colspan="5" class="text-center text-muted">No data</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="card hdc-card mt-3">
+            <div class="card-header hdc-card-header"><i class="fas fa-map-location-dot me-2"></i>Per Site / Customer Breakdown</div>
+            <div class="table-responsive">
+                <table class="table hdc-table table-sm mb-0">
+                    <thead><tr><th>Site / Customer</th><th>Rentals</th><th>Rented</th><th>Pend Tools</th><th>Pend Amt</th></tr></thead>
+                    <tbody>
+                    {% for sid, data in site_breakdown.items() %}
+                        <tr><td>{{ data.label }}</td><td>{{ data.count }}</td><td>{{ "%.0f"|format(data.rented) }}</td><td>{{ "%.0f"|format(data.pending_tools) }}</td><td>{{ "{:,.0f}".format(data.pending_amount) }}</td></tr>
+                    {% else %}
+                        <tr><td colspan="5" class="text-center text-muted">No data</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-9">
+        <div class="card hdc-card">
+            <div class="card-header hdc-card-header"><i class="fas fa-list me-2"></i>Detailed Rentals — {{ rentals|length }} records | Click to view tracking chain</div>
+            <div class="table-responsive">
+                <table class="table hdc-table table-sm mb-0">
+                    <thead><tr><th>Code</th><th>Date</th><th>Renter</th><th>Location</th><th>Tools</th><th>Tracking Chain</th><th>Amount Details</th><th>Pending Tools / Amount</th><th>Status</th></tr></thead>
+                    <tbody>
+                    {% for r in rentals %}
+                        <tr style="cursor:pointer" onclick="location.href='{{ url_for('hdc_tool_rental_detail', rental_id=r.id) }}'">
+                            <td><span class="badge bg-secondary">{{ r.rental_code }}</span></td>
+                            <td>{{ r.rental_date }}<br><small>Exp: {{ r.expected_return_date or '-' }}</small></td>
+                            <td><span class="badge {% if r.renter_type=='internal' %}bg-primary{% else %}bg-info{% endif %}">{{ r.renter_type }}</span><br><small>{{ r.billing_type }}</small></td>
+                            <td>{% if r.renter_type=='internal' %}{{ r.project.name if r.project else '-' }}{% else %}{{ r.customer_name }}{% endif %}</td>
+                            <td>{{ "%.0f"|format(r.total_rented_qty or 0) }}<br><small>Ret: {{ "%.0f"|format(r.total_returned_qty or 0) }}</small></td>
+                            <td style="max-width:200px">
+                                <div style="display:flex; flex-wrap:wrap; gap:4px">
+                                {% for label in r.tracking_chain %}
+                                    <span style="padding:2px 8px; border-radius:999px; font-size:0.7rem; border:1px solid var(--card-border); {% if loop.last %}background:#16a34a; color:#fff; border-color:transparent{% else %}background:var(--card-header-bg){% endif %}">{{ label }}</span>
+                                {% endfor %}
+                                </div>
+                            </td>
+                            <td>
+                                {% if r.billing_type=='no_charge' %}<span class="badge bg-secondary">No Charge</span>{% else %}
+                                T: {{ "{:,.0f}".format(r.total_amount or 0) }}<br>P: {{ "{:,.0f}".format(r.total_paid or 0) }}<br><strong class="text-danger">Pend: {{ "{:,.0f}".format(r.total_pending_amount) }}</strong>
+                                {% endif %}
+                            </td>
+                            <td>
+                                Tools: <span class="badge {% if r.total_pending_tools>0 %}bg-warning text-dark{% else %}bg-success{% endif %}">{{ "%.0f"|format(r.total_pending_tools) }}</span><br>
+                                {% if r.billing_type!='no_charge' %}<small>Amt: {{ "{:,.0f}".format(r.total_pending_amount) }}</small>{% endif %}
+                            </td>
+                            <td><span class="badge {% if r.status=='active' %}bg-primary{% elif r.status=='partially_returned' %}bg-warning text-dark{% elif r.status=='overdue' %}bg-danger{% else %}bg-success{% endif %}">{{ r.status }}</span><br><span class="badge bg-secondary">{{ r.payment_status }}</span></td>
+                        </tr>
+                    {% else %}
+                        <tr><td colspan="9" class="text-center text-muted py-4">No rentals match filters. Try different date range / site / tool.</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

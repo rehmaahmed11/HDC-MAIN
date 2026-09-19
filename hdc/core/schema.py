@@ -1435,3 +1435,250 @@ def _ensure_cashflow_schema():
         'amends_entry_id': "amends_entry_id INTEGER REFERENCES hdc_cash_flow_entry(id)",
         'superseded_by_entry_id': "superseded_by_entry_id INTEGER REFERENCES hdc_cash_flow_entry(id)",
     })
+
+
+def _ensure_tool_rental_schema():
+    """Create HDC Tool Rental tables - flexible rental with partial returns, transfers, tracking."""
+    tables = [
+        """
+        CREATE TABLE IF NOT EXISTS hdc_tool_category (
+            id INTEGER PRIMARY KEY,
+            name VARCHAR(120) NOT NULL UNIQUE,
+            description VARCHAR(300),
+            active_status BOOLEAN DEFAULT 1,
+            created_at DATETIME
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS hdc_tool (
+            id INTEGER PRIMARY KEY,
+            tool_code VARCHAR(30) NOT NULL UNIQUE,
+            name VARCHAR(150) NOT NULL,
+            category_id INTEGER REFERENCES hdc_tool_category(id),
+            description VARCHAR(500),
+            unit VARCHAR(30) DEFAULT 'pcs',
+            total_quantity FLOAT DEFAULT 0,
+            purchase_cost FLOAT DEFAULT 0,
+            rental_rate_per_day FLOAT DEFAULT 0,
+            condition VARCHAR(30) DEFAULT 'good',
+            status VARCHAR(30) DEFAULT 'active',
+            is_void BOOLEAN DEFAULT 0,
+            created_at DATETIME,
+            updated_at DATETIME
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS hdc_tool_rental (
+            id INTEGER PRIMARY KEY,
+            rental_code VARCHAR(30) NOT NULL UNIQUE,
+            renter_type VARCHAR(20) DEFAULT 'internal',
+            project_id INTEGER REFERENCES hdc_project(id),
+            stage_id INTEGER REFERENCES hdc_stage(id),
+            customer_name VARCHAR(150),
+            customer_phone VARCHAR(40),
+            customer_address VARCHAR(300),
+            rental_date DATE,
+            expected_return_date DATE,
+            billing_type VARCHAR(30) DEFAULT 'fixed_fee',
+            billing_notes VARCHAR(300),
+            total_rented_qty FLOAT DEFAULT 0,
+            total_amount FLOAT DEFAULT 0,
+            total_paid FLOAT DEFAULT 0,
+            total_returned_qty FLOAT DEFAULT 0,
+            status VARCHAR(30) DEFAULT 'active',
+            payment_status VARCHAR(30) DEFAULT 'unpaid',
+            notes TEXT,
+            created_by INTEGER REFERENCES hdc_user(id),
+            created_at DATETIME,
+            updated_at DATETIME,
+            is_void BOOLEAN DEFAULT 0
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS hdc_tool_rental_item (
+            id INTEGER PRIMARY KEY,
+            rental_id INTEGER NOT NULL REFERENCES hdc_tool_rental(id),
+            tool_id INTEGER NOT NULL REFERENCES hdc_tool(id),
+            qty_rented FLOAT DEFAULT 0,
+            qty_returned FLOAT DEFAULT 0,
+            qty_pending FLOAT DEFAULT 0,
+            rate FLOAT DEFAULT 0,
+            amount FLOAT DEFAULT 0,
+            notes VARCHAR(300),
+            created_at DATETIME
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS hdc_tool_rental_return (
+            id INTEGER PRIMARY KEY,
+            rental_id INTEGER NOT NULL REFERENCES hdc_tool_rental(id),
+            return_date DATE,
+            return_type VARCHAR(20) DEFAULT 'partial',
+            payment_type VARCHAR(20) DEFAULT 'partial',
+            total_tools_returned FLOAT DEFAULT 0,
+            amount_paid FLOAT DEFAULT 0,
+            notes VARCHAR(500),
+            created_at DATETIME,
+            created_by INTEGER REFERENCES hdc_user(id)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS hdc_tool_rental_return_item (
+            id INTEGER PRIMARY KEY,
+            return_id INTEGER NOT NULL REFERENCES hdc_tool_rental_return(id),
+            rental_item_id INTEGER NOT NULL REFERENCES hdc_tool_rental_item(id),
+            tool_id INTEGER NOT NULL REFERENCES hdc_tool(id),
+            qty_returned FLOAT DEFAULT 0,
+            condition_notes VARCHAR(300)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS hdc_tool_rental_payment (
+            id INTEGER PRIMARY KEY,
+            rental_id INTEGER NOT NULL REFERENCES hdc_tool_rental(id),
+            return_id INTEGER REFERENCES hdc_tool_rental_return(id),
+            payment_date DATE,
+            amount FLOAT DEFAULT 0,
+            payment_mode VARCHAR(30) DEFAULT 'cash',
+            received_to_account_id INTEGER REFERENCES hdc_account(id),
+            reference VARCHAR(120),
+            notes VARCHAR(300),
+            is_void BOOLEAN DEFAULT 0,
+            void_reason VARCHAR(250),
+            voided_at DATETIME,
+            created_at DATETIME,
+            created_by INTEGER REFERENCES hdc_user(id)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS hdc_tool_rental_account_txn (
+            id INTEGER PRIMARY KEY,
+            payment_id INTEGER NOT NULL REFERENCES hdc_tool_rental_payment(id),
+            account_txn_id INTEGER NOT NULL REFERENCES hdc_account_txn(id),
+            created_at DATETIME
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS hdc_tool_rental_transfer (
+            id INTEGER PRIMARY KEY,
+            rental_id INTEGER NOT NULL REFERENCES hdc_tool_rental(id),
+            from_type VARCHAR(20) DEFAULT 'site',
+            from_project_id INTEGER REFERENCES hdc_project(id),
+            from_stage_id INTEGER REFERENCES hdc_stage(id),
+            from_customer_name VARCHAR(150),
+            from_location_label VARCHAR(300),
+            to_type VARCHAR(20) DEFAULT 'site',
+            to_project_id INTEGER REFERENCES hdc_project(id),
+            to_stage_id INTEGER REFERENCES hdc_stage(id),
+            to_customer_name VARCHAR(150),
+            to_location_label VARCHAR(300),
+            qty_transferred FLOAT DEFAULT 0,
+            transfer_date DATE,
+            notes VARCHAR(500),
+            created_at DATETIME,
+            created_by INTEGER REFERENCES hdc_user(id)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS hdc_tool_movement_log (
+            id INTEGER PRIMARY KEY,
+            tool_id INTEGER NOT NULL REFERENCES hdc_tool(id),
+            rental_id INTEGER REFERENCES hdc_tool_rental(id),
+            transfer_id INTEGER REFERENCES hdc_tool_rental_transfer(id),
+            return_id INTEGER REFERENCES hdc_tool_rental_return(id),
+            movement_type VARCHAR(30) DEFAULT 'rental_out',
+            from_location_label VARCHAR(300),
+            to_location_label VARCHAR(300),
+            qty FLOAT DEFAULT 0,
+            timestamp DATETIME,
+            notes VARCHAR(500)
+        )
+        """,
+    ]
+    with db.engine.connect() as conn:
+        for ddl in tables:
+            try:
+                conn.execute(text(ddl))
+                conn.commit()
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+        idx_sql = [
+            "CREATE INDEX IF NOT EXISTS idx_tool_rental_date ON hdc_tool_rental(rental_date, id)",
+            "CREATE INDEX IF NOT EXISTS idx_tool_rental_project ON hdc_tool_rental(project_id)",
+            "CREATE INDEX IF NOT EXISTS idx_tool_rental_customer ON hdc_tool_rental(customer_name)",
+            "CREATE INDEX IF NOT EXISTS idx_tool_rental_status ON hdc_tool_rental(status)",
+            "CREATE INDEX IF NOT EXISTS idx_tool_rental_item_rental ON hdc_tool_rental_item(rental_id)",
+            "CREATE INDEX IF NOT EXISTS idx_tool_rental_item_tool ON hdc_tool_rental_item(tool_id)",
+            "CREATE INDEX IF NOT EXISTS idx_tool_movement_tool_time ON hdc_tool_movement_log(tool_id, timestamp, id)",
+            "CREATE INDEX IF NOT EXISTS idx_tool_movement_rental ON hdc_tool_movement_log(rental_id)",
+            "CREATE INDEX IF NOT EXISTS idx_tool_transfer_rental ON hdc_tool_rental_transfer(rental_id, transfer_date)",
+        ]
+        for sql in idx_sql:
+            try:
+                conn.execute(text(sql))
+                conn.commit()
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+
+    # add columns if legacy
+    _ensure_table_columns_sqlite('hdc_tool', {
+        'tool_code': "tool_code VARCHAR(30)",
+        'purchase_cost': "purchase_cost FLOAT DEFAULT 0",
+        'rental_rate_per_day': "rental_rate_per_day FLOAT DEFAULT 0",
+        'is_void': "is_void BOOLEAN DEFAULT 0",
+    })
+    _ensure_table_columns_sqlite('hdc_tool_rental', {
+        'customer_phone': "customer_phone VARCHAR(40)",
+        'billing_notes': "billing_notes VARCHAR(300)",
+        'total_returned_qty': "total_returned_qty FLOAT DEFAULT 0",
+        'payment_status': "payment_status VARCHAR(30) DEFAULT 'unpaid'",
+        'is_void': "is_void BOOLEAN DEFAULT 0",
+    })
+    _ensure_table_columns_sqlite('hdc_tool_rental_payment', {
+        'received_to_account_id': "received_to_account_id INTEGER REFERENCES hdc_account(id)",
+        'is_void': "is_void BOOLEAN DEFAULT 0",
+        'void_reason': "void_reason VARCHAR(250)",
+        'voided_at': "voided_at DATETIME",
+    })
+    # Backfill is_void for legacy rows and ensure link table indexes - auto on reload
+    with db.engine.connect() as conn:
+        try:
+            conn.execute(text("UPDATE hdc_tool_rental_payment SET is_void = COALESCE(is_void, 0)"))
+            conn.commit()
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        try:
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_tool_rental_payment_rental ON hdc_tool_rental_payment(rental_id, payment_date)"))
+            conn.commit()
+        except Exception:
+            pass
+        try:
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_tool_rental_payment_recv_acc ON hdc_tool_rental_payment(received_to_account_id)"))
+            conn.commit()
+        except Exception:
+            pass
+        try:
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_tool_rental_acct_txn_payment ON hdc_tool_rental_account_txn(payment_id)"))
+            conn.commit()
+        except Exception:
+            pass
+        try:
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_tool_rental_acct_txn_acct ON hdc_tool_rental_account_txn(account_txn_id)"))
+            conn.commit()
+        except Exception:
+            pass
+        try:
+            # Log migration success for debugging - visible in app logs
+            conn.execute(text("SELECT 1 FROM hdc_tool_rental_payment LIMIT 1"))
+            print("[HDC ERP] Tool Rental schema migrated: received_to_account_id + is_void + account_txn link ready")
+        except Exception:
+            pass
