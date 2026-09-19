@@ -1646,3 +1646,39 @@ def _ensure_tool_rental_schema():
         'void_reason': "void_reason VARCHAR(250)",
         'voided_at': "voided_at DATETIME",
     })
+    # Backfill is_void for legacy rows and ensure link table indexes - auto on reload
+    with db.engine.connect() as conn:
+        try:
+            conn.execute(text("UPDATE hdc_tool_rental_payment SET is_void = COALESCE(is_void, 0)"))
+            conn.commit()
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        try:
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_tool_rental_payment_rental ON hdc_tool_rental_payment(rental_id, payment_date)"))
+            conn.commit()
+        except Exception:
+            pass
+        try:
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_tool_rental_payment_recv_acc ON hdc_tool_rental_payment(received_to_account_id)"))
+            conn.commit()
+        except Exception:
+            pass
+        try:
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_tool_rental_acct_txn_payment ON hdc_tool_rental_account_txn(payment_id)"))
+            conn.commit()
+        except Exception:
+            pass
+        try:
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_tool_rental_acct_txn_acct ON hdc_tool_rental_account_txn(account_txn_id)"))
+            conn.commit()
+        except Exception:
+            pass
+        try:
+            # Log migration success for debugging - visible in app logs
+            conn.execute(text("SELECT 1 FROM hdc_tool_rental_payment LIMIT 1"))
+            print("[HDC ERP] Tool Rental schema migrated: received_to_account_id + is_void + account_txn link ready")
+        except Exception:
+            pass
