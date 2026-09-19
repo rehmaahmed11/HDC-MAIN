@@ -115,6 +115,12 @@
             <li class="nav-item {% if request.endpoint in ['hdc_cashflow', 'hdc_cashflow_report', 'hdc_cashflow_export'] %}active{% endif %}">
                 <a href="{{ url_for('hdc_cashflow') }}"><i class="fas fa-money-bill-transfer"></i><span>Cash Flow</span></a>
             </li>
+            <li class="nav-item {% if request.endpoint in ['hdc_cashflow_register', 'hdc_cashflow_register_export'] %}active{% endif %}">
+                <a href="{{ url_for('hdc_cashflow_register') }}"><i class="fas fa-book"></i><span>CF Register</span></a>
+            </li>
+            <li class="nav-item {% if request.endpoint == 'hdc_cashflow_reconciliation' %}active{% endif %}">
+                <a href="{{ url_for('hdc_cashflow_reconciliation') }}"><i class="fas fa-scale-balanced"></i><span>Day Close</span></a>
+            </li>
             <li class="nav-item {% if request.endpoint == 'hdc_settings' %}active{% endif %}">
                 <a href="{{ url_for('hdc_settings') }}"><i class="fas fa-gear"></i><span>Settings</span></a>
             </li>

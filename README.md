@@ -27,8 +27,9 @@ hdc/                    the application package (import here, not hdc_erp)
   config.py             env loading, paths, secret, DB URI  (12-factor)
   extensions.py         db, login_manager, pragmas, CSRF + request hooks
   utils/                pure helpers: dates, format, normalize
-  models/               53 ORM models, one file per domain (auth, projects,
-                        workforce, office, subcontract, materials, accounts)
+  models/               61 ORM models, one file per domain (auth, projects,
+                        workforce, office, subcontract, materials, accounts,
+                        cashflow)
   services/             business engines: accounts, purchase, timekeeping,
                         ledger, subcontract, aggregation, reporting, audit,
                         actors (row traceability), lookups, backups,
@@ -39,7 +40,8 @@ hdc/                    the application package (import here, not hdc_erp)
                         (auth, dashboard, projects, subcontractors, workers,
                         timekeeping, payroll, expenses, office, materials,
                         purchase_v2, estimation, reports, users, accounts,
-                        settings, api_purchase, api_accounts)
+                        cashflow, cashflow_register, settings, api_purchase,
+                        api_accounts, api_actors)
 hdc_erp.py              backward-compat shim: app, db, models, helpers
 wsgi.py                 gunicorn/PythonAnywhere entrypoint (env-configured)
 deploy_hook.py          standalone stdlib-only WSGI app: GitHub push webhook ->
@@ -54,10 +56,15 @@ scripts/                split_monolith, reorganize_frontend, parity_check,
                         labour_audit (read-only labour/payroll consistency
                         audit), make_labour_audit_fixture (seeds a throwaway DB
                         with every known labour bug to verify that audit)
+                        seed_cashflow_register_demo (throwaway Cash Flow demo data)
                         (reproducible conversion + verification + ops CLIs)
 ops/                    arena/ (local<->sandbox git pairer for agent sessions)
 LABOUR_AUDIT.md         labour wage/payment/tip/advance findings + live DB run
 ROW_TRACEABILITY.md     how every list shows who entered the row + grey voids
+CASHFLOW_MODEL.md       Cash Flow register + day close: what was ported from
+                        the AMS accounts model, what was deliberately not, and
+                        why (derived vs stored balance, void+replace, minor
+                        units, period locks)
 tests/                  differential smoke test vs the pre-split baseline
 ```
 

@@ -1193,3 +1193,245 @@ def _ensure_accounts_schema():
         'is_void': "is_void BOOLEAN DEFAULT 0",
         'created_at': "created_at DATETIME",
     })
+    # --- Cash Flow v2: additive columns on the unified accounts tables ------
+    # (the new register tables themselves are created by
+    #  _ensure_cashflow_schema(); these ALTERs only widen existing tables).
+    _ensure_table_columns_sqlite('hdc_account', {
+        'opening_balance_minor': "opening_balance_minor BIGINT",
+        'class_category':       "class_category VARCHAR(50)",
+        'class_subcategory':    "class_subcategory VARCHAR(80)",
+        'class_account_type':   "class_account_type VARCHAR(100)",
+        'channel':              "channel VARCHAR(30)",
+        'cash_location':        "cash_location VARCHAR(120)",
+        'cash_responsible':     "cash_responsible VARCHAR(120)",
+        'wallet_provider':      "wallet_provider VARCHAR(100)",
+        'wallet_number':        "wallet_number VARCHAR(80)",
+        'wallet_holder':        "wallet_holder VARCHAR(120)",
+        'linked_entity_type':   "linked_entity_type VARCHAR(30)",
+        'linked_party_name':    "linked_party_name VARCHAR(160)",
+        'note':                 "note VARCHAR(500)",
+        'updated_by':           "updated_by VARCHAR(80)",
+        'updated_at':           "updated_at DATETIME",
+    })
+    _ensure_table_columns_sqlite('hdc_account_txn', {
+        'amount_minor':         "amount_minor BIGINT",
+        'reversal_of_txn_id':   "reversal_of_txn_id INTEGER REFERENCES hdc_account_txn(id)",
+        'reversed_by_txn_id':   "reversed_by_txn_id INTEGER REFERENCES hdc_account_txn(id)",
+        'reconciliation_id':    "reconciliation_id INTEGER REFERENCES hdc_account_reconciliation(id)",
+        'void_reason':          "void_reason VARCHAR(300)",
+        'voided_by':            "voided_by VARCHAR(80)",
+        'voided_at':            "voided_at DATETIME",
+        'reason':               "reason VARCHAR(300)",
+        'idempotency_key':      "idempotency_key VARCHAR(64)",
+        'updated_at':           "updated_at DATETIME",
+    })
+
+
+def _ensure_cashflow_schema():
+    """Create the Cash Flow v2 register / reconciliation tables.
+
+    ``CREATE TABLE IF NOT EXISTS`` + best-effort ``ALTER TABLE ADD COLUMN``
+    mirrors every other migration in this file, so an existing production
+    database is widened in place instead of being rebuilt.
+    """
+    tables = [
+        """
+        CREATE TABLE IF NOT EXISTS hdc_cash_flow_category (
+            id INTEGER PRIMARY KEY,
+            name VARCHAR(120) NOT NULL,
+            direction VARCHAR(10),
+            is_active BOOLEAN DEFAULT 1,
+            sort_order INTEGER DEFAULT 0,
+            notes VARCHAR(300),
+            created_at DATETIME,
+            updated_at DATETIME
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS hdc_cash_flow_subcategory (
+            id INTEGER PRIMARY KEY,
+            category_id INTEGER NOT NULL REFERENCES hdc_cash_flow_category(id),
+            name VARCHAR(120) NOT NULL,
+            is_active BOOLEAN DEFAULT 1,
+            notes VARCHAR(300),
+            created_at DATETIME,
+            updated_at DATETIME
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS hdc_cash_flow_party (
+            id INTEGER PRIMARY KEY,
+            name VARCHAR(160) NOT NULL,
+            party_type VARCHAR(40),
+            phone VARCHAR(40),
+            note VARCHAR(300),
+            is_active BOOLEAN DEFAULT 1,
+            created_at DATETIME,
+            updated_at DATETIME
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS hdc_account_reconciliation (
+            id INTEGER PRIMARY KEY,
+            account_id INTEGER NOT NULL REFERENCES hdc_account(id),
+            previous_reconciliation_id INTEGER REFERENCES hdc_account_reconciliation(id),
+            adjustment_transaction_id INTEGER,
+            reconciliation_date DATE NOT NULL,
+            period_start_at DATETIME,
+            period_end_at DATETIME,
+            previous_balance FLOAT DEFAULT 0,
+            opening_balance FLOAT DEFAULT 0,
+            transaction_in FLOAT DEFAULT 0,
+            transaction_out FLOAT DEFAULT 0,
+            transaction_net FLOAT DEFAULT 0,
+            expected_balance FLOAT DEFAULT 0,
+            actual_balance FLOAT DEFAULT 0,
+            difference FLOAT DEFAULT 0,
+            final_reconciled_balance FLOAT DEFAULT 0,
+            previous_balance_minor BIGINT,
+            opening_balance_minor BIGINT,
+            transaction_in_minor BIGINT,
+            transaction_out_minor BIGINT,
+            transaction_net_minor BIGINT,
+            expected_balance_minor BIGINT,
+            actual_balance_minor BIGINT,
+            difference_minor BIGINT,
+            final_reconciled_balance_minor BIGINT,
+            difference_type VARCHAR(20),
+            status VARCHAR(20),
+            note VARCHAR(500),
+            created_by VARCHAR(80),
+            created_at DATETIME
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS hdc_cash_flow_entry (
+            id INTEGER PRIMARY KEY,
+            direction VARCHAR(10) NOT NULL,
+            amount FLOAT DEFAULT 0,
+            amount_minor BIGINT,
+            account_id INTEGER REFERENCES hdc_account(id),
+            destination_account_id INTEGER REFERENCES hdc_account(id),
+            category_id INTEGER REFERENCES hdc_cash_flow_category(id),
+            subcategory_id INTEGER REFERENCES hdc_cash_flow_subcategory(id),
+            party_id INTEGER REFERENCES hdc_cash_flow_party(id),
+            party_name VARCHAR(160),
+            party_type VARCHAR(40),
+            description VARCHAR(200),
+            note VARCHAR(500),
+            reference VARCHAR(80),
+            date_posted DATETIME,
+            project_id INTEGER REFERENCES hdc_project(id),
+            stage_id INTEGER REFERENCES hdc_stage(id),
+            created_by VARCHAR(80),
+            updated_by VARCHAR(80),
+            source_type VARCHAR(50),
+            source_id INTEGER,
+            account_tx_id INTEGER REFERENCES hdc_account_txn(id),
+            is_void BOOLEAN DEFAULT 0,
+            voided_at DATETIME,
+            voided_by VARCHAR(80),
+            void_reason VARCHAR(300),
+            amends_entry_id INTEGER REFERENCES hdc_cash_flow_entry(id),
+            superseded_by_entry_id INTEGER REFERENCES hdc_cash_flow_entry(id),
+            reconciliation_id INTEGER REFERENCES hdc_account_reconciliation(id),
+            idempotency_key VARCHAR(64),
+            revision INTEGER DEFAULT 1,
+            created_at DATETIME,
+            updated_at DATETIME
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS hdc_cash_flow_entry_audit (
+            id INTEGER PRIMARY KEY,
+            entry_id INTEGER NOT NULL REFERENCES hdc_cash_flow_entry(id),
+            action VARCHAR(20) NOT NULL,
+            before_json TEXT,
+            after_json TEXT,
+            reason VARCHAR(300),
+            changed_by VARCHAR(80),
+            changed_at DATETIME
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS hdc_cash_day_lock (
+            id INTEGER PRIMARY KEY,
+            lock_date DATE NOT NULL UNIQUE,
+            total_expected FLOAT DEFAULT 0,
+            total_counted FLOAT DEFAULT 0,
+            difference FLOAT DEFAULT 0,
+            note VARCHAR(500),
+            locked_by VARCHAR(80),
+            locked_at DATETIME,
+            updated_at DATETIME
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS hdc_cash_day_position (
+            id INTEGER PRIMARY KEY,
+            position_date DATE NOT NULL,
+            account_id INTEGER NOT NULL REFERENCES hdc_account(id),
+            account_name VARCHAR(120),
+            opening FLOAT DEFAULT 0,
+            opening_minor BIGINT,
+            amount_in FLOAT DEFAULT 0,
+            amount_in_minor BIGINT,
+            amount_out FLOAT DEFAULT 0,
+            amount_out_minor BIGINT,
+            transfer_in FLOAT DEFAULT 0,
+            transfer_in_minor BIGINT,
+            transfer_out FLOAT DEFAULT 0,
+            transfer_out_minor BIGINT,
+            expected_closing FLOAT DEFAULT 0,
+            expected_closing_minor BIGINT,
+            counted FLOAT,
+            counted_minor BIGINT,
+            difference FLOAT,
+            difference_minor BIGINT,
+            is_locked BOOLEAN DEFAULT 0,
+            locked_by VARCHAR(80),
+            locked_at DATETIME,
+            updated_by VARCHAR(80),
+            updated_at DATETIME,
+            UNIQUE(position_date, account_id)
+        )
+        """,
+    ]
+    with db.engine.connect() as conn:
+        for ddl in tables:
+            try:
+                conn.execute(text(ddl))
+                conn.commit()
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+        idx_sql = [
+            "CREATE INDEX IF NOT EXISTS idx_hdc_cfe_date ON hdc_cash_flow_entry(date_posted, id)",
+            "CREATE INDEX IF NOT EXISTS idx_hdc_cfe_account ON hdc_cash_flow_entry(account_id, date_posted)",
+            "CREATE INDEX IF NOT EXISTS idx_hdc_cfe_direction ON hdc_cash_flow_entry(direction, is_void)",
+            "CREATE INDEX IF NOT EXISTS idx_hdc_cfe_category ON hdc_cash_flow_entry(category_id)",
+            "CREATE INDEX IF NOT EXISTS idx_hdc_cfe_project ON hdc_cash_flow_entry(project_id)",
+            "CREATE INDEX IF NOT EXISTS idx_hdc_cfe_tx ON hdc_cash_flow_entry(account_tx_id)",
+            "CREATE INDEX IF NOT EXISTS idx_hdc_cfe_audit_entry ON hdc_cash_flow_entry_audit(entry_id, id)",
+            "CREATE INDEX IF NOT EXISTS idx_hdc_accrec_account_date ON hdc_account_reconciliation(account_id, reconciliation_date)",
+            "CREATE INDEX IF NOT EXISTS idx_hdc_cdp_account ON hdc_cash_day_position(account_id, position_date)",
+        ]
+        for sql in idx_sql:
+            try:
+                conn.execute(text(sql))
+                conn.commit()
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+
+    _ensure_table_columns_sqlite('hdc_cash_flow_entry', {
+        'project_id': "project_id INTEGER REFERENCES hdc_project(id)",
+        'stage_id': "stage_id INTEGER REFERENCES hdc_stage(id)",
+        'amount_minor': "amount_minor BIGINT",
+        'amends_entry_id': "amends_entry_id INTEGER REFERENCES hdc_cash_flow_entry(id)",
+        'superseded_by_entry_id': "superseded_by_entry_id INTEGER REFERENCES hdc_cash_flow_entry(id)",
+    })

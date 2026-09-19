@@ -13,6 +13,7 @@ from hdc.models.accounts import Account, AccountTransaction
 from hdc.services.accounts import _ACCOUNT_TYPES, _account_dashboard_kpis, _account_dashboard_subgroups, _account_group_mode_for_row, _account_pending_snapshot, _account_transaction_history, _account_txn_to_dict, _accounts_forensic_report, _accounts_reconciliation_snapshot, _create_account, _create_accounts_transaction_with_sync, _list_accounts_with_balances, _resolve_account_type
 from hdc.utils.format import _flt, _parse_date
 from hdc.utils.normalize import _normalize_account_group, _normalize_account_mode, _normalize_account_tx_direction, _normalize_name_ci
+from hdc.utils.money import sync_money_fields
 
 def register(app):
     """Register JSON API: /api/accounts/*."""
@@ -116,6 +117,7 @@ def register(app):
         row.name = nm
         row.type = tp
         row.opening_balance = float(opening or 0.0)
+        sync_money_fields(row, 'opening_balance', 'opening_balance_minor')
         row.bank_name = bank_name or None
         row.account_number = account_number or None
         row.iban = iban or None

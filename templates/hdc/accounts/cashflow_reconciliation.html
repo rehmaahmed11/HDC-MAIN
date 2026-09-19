@@ -1,0 +1,203 @@
+{% extends "shared/base.html" %}
+{% block title %}Daily Cash &amp; Bank Reconciliation{% endblock %}
+{% block page_heading %}Daily Cash &amp; Bank Reconciliation{% endblock %}
+
+{% macro money(minor) %}{{ '{:,.2f}'.format((minor or 0) / 100.0) }}{% endmacro %}
+
+{% block content %}
+
+{# ── Day selector + lock banner ────────────────────────────────────────────── #}
+<div class="card hdc-card mb-3">
+    <div class="card-body py-3">
+        <form method="GET" class="row g-2 align-items-end">
+            <div class="col-6 col-md-3">
+                <label class="form-label">Financial Day</label>
+                <input type="date" name="day" class="form-control" value="{{ day_iso }}" onchange="this.form.submit()">
+            </div>
+            <div class="col-6 col-md-3 d-flex gap-2">
+                <a href="{{ url_for('hdc_cashflow_reconciliation', day=prev_day) }}" class="btn btn-outline-secondary">
+                    <i class="fas fa-chevron-left"></i>
+                </a>
+                <a href="{{ url_for('hdc_cashflow_reconciliation', day=today) }}" class="btn btn-outline-secondary">Today</a>
+                <a href="{{ url_for('hdc_cashflow_reconciliation', day=next_day) }}" class="btn btn-outline-secondary">
+                    <i class="fas fa-chevron-right"></i>
+                </a>
+            </div>
+            <div class="col-12 col-md-6 text-md-end">
+                {% if locked %}
+                    <span class="badge bg-danger fs-6">
+                        <i class="fas fa-lock me-1"></i>Day locked
+                    </span>
+                    <div class="small text-muted mt-1">
+                        by {{ lock.locked_by or '—' }} · counted balances carry forward to the next day
+                    </div>
+                {% else %}
+                    <span class="badge bg-success fs-6">
+                        <i class="fas fa-lock-open me-1"></i>Day open
+                    </span>
+                    <div class="small text-muted mt-1">count and lock this day to carry balances forward</div>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+</div>
+
+{# ── Reconciliation grid ──────────────────────────────────────────────────── #}
+<div class="card hdc-card mb-3">
+    <div class="card-header hdc-card-header">
+        <span><i class="fas fa-scale-balanced me-2"></i>Counted vs Ledger — {{ day.strftime('%a %d %b %Y') }}</span>
+        <span class="small text-muted">Opening → movements → expected → what you actually counted</span>
+    </div>
+    <div class="card-body p-0">
+        {% if positions %}
+        <form method="POST">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="day" value="{{ day_iso }}">
+            <div class="table-responsive">
+                <table class="table table-sm table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Account</th>
+                            <th class="text-end">Opening</th>
+                            <th class="text-end">Money In</th>
+                            <th class="text-end">Money Out</th>
+                            <th class="text-end">Transfer In</th>
+                            <th class="text-end">Transfer Out</th>
+                            <th class="text-end">Expected Closing</th>
+                            <th class="text-end" style="min-width:150px;">Counted (actual)</th>
+                            <th class="text-end">Difference</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    {% for p in positions %}
+                        <tr>
+                            <td>
+                                <input type="hidden" name="account_id" value="{{ p.account_id }}">
+                                {{ p.account_name }}
+                                {% if p.is_locked %}<span class="badge bg-danger ms-1">locked</span>{% endif %}
+                            </td>
+                            <td class="text-end"><small>{{ money(p.opening_minor) }}</small></td>
+                            <td class="text-end text-success"><small>{{ money(p.amount_in_minor) }}</small></td>
+                            <td class="text-end text-danger"><small>{{ money(p.amount_out_minor) }}</small></td>
+                            <td class="text-end"><small>{{ money(p.transfer_in_minor) }}</small></td>
+                            <td class="text-end"><small>{{ money(p.transfer_out_minor) }}</small></td>
+                            <td class="text-end"><strong>{{ money(p.expected_closing_minor) }}</strong></td>
+                            <td class="text-end">
+                                <input type="text" inputmode="decimal" class="form-control form-control-sm text-end"
+                                       name="counted_{{ p.account_id }}"
+                                       value="{% if p.counted_minor is not none %}{{ money(p.counted_minor) }}{% endif %}"
+                                       placeholder="{{ money(p.expected_closing_minor) }}"
+                                       {% if locked %}disabled{% endif %}>
+                            </td>
+                            <td class="text-end">
+                                {% if p.difference_minor is none %}
+                                    <span class="text-muted">—</span>
+                                {% elif p.difference_minor == 0 %}
+                                    <span class="badge bg-success">Matched</span>
+                                {% elif p.difference_minor > 0 %}
+                                    <span class="badge bg-primary">+{{ money(p.difference_minor) }}</span>
+                                {% else %}
+                                    <span class="badge bg-warning text-dark">{{ money(p.difference_minor) }}</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                    <tfoot class="table-light">
+                        <tr>
+                            <th>Total</th>
+                            <th class="text-end">{{ money(totals.opening_minor) }}</th>
+                            <th class="text-end">{{ money(totals.amount_in_minor) }}</th>
+                            <th class="text-end">{{ money(totals.amount_out_minor) }}</th>
+                            <th class="text-end">{{ money(totals.transfer_in_minor) }}</th>
+                            <th class="text-end">{{ money(totals.transfer_out_minor) }}</th>
+                            <th class="text-end">{{ money(totals.expected_closing_minor) }}</th>
+                            <th class="text-end">{{ money(totals.counted_minor) }}</th>
+                            <th class="text-end">
+                                {% if totals.difference_minor == 0 %}
+                                    <span class="badge bg-success">Matched</span>
+                                {% else %}
+                                    <span class="badge bg-warning text-dark">{{ money(totals.difference_minor) }}</span>
+                                {% endif %}
+                            </th>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+            <div class="card-body py-3 border-top d-flex flex-wrap gap-2 align-items-end">
+                {% if not locked %}
+                    <button type="submit" name="action" value="save_counted" class="btn btn-primary">
+                        <i class="fas fa-floppy-disk me-1"></i>Save counted balances
+                    </button>
+                    <input type="text" name="note" class="form-control" style="max-width:280px;"
+                           placeholder="Note (optional, saved with the lock)">
+                    <button type="submit" name="action" value="lock_day" class="btn btn-success">
+                        <i class="fas fa-lock me-1"></i>Verify &amp; lock day
+                    </button>
+                {% else %}
+                    <button type="submit" name="action" value="unlock_day" class="btn btn-outline-danger">
+                        <i class="fas fa-lock-open me-1"></i>Unlock day
+                    </button>
+                    <span class="small text-muted">
+                        Locked {{ lock.locked_at.strftime('%d %b %Y %H:%M') if lock.locked_at else '' }} ·
+                        expected {{ money(lock.total_expected * 100) }} ·
+                        counted {{ money(lock.total_counted * 100) }}
+                    </span>
+                {% endif %}
+            </div>
+        </form>
+        {% else %}
+        <div class="alert alert-info m-3">
+            <i class="fas fa-info-circle me-2"></i>No active cash or bank accounts to reconcile.
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+{# ── The day's register rows (evidence behind the numbers) ─────────────────── #}
+<div class="card hdc-card">
+    <div class="card-header hdc-card-header">
+        <span><i class="fas fa-receipt me-2"></i>Cash flow entries on this day</span>
+        <a href="{{ url_for('hdc_cashflow_register', date_from=day_iso, date_to=day_iso) }}"
+           class="btn btn-sm btn-outline-secondary">Open in register</a>
+    </div>
+    <div class="card-body p-0">
+        {% if day_entries %}
+        <div class="table-responsive">
+            <table class="table table-sm table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Direction</th><th>Category</th><th>Party</th>
+                        <th>Account</th><th>Description</th><th>Ref</th>
+                        <th class="text-end">Amount (PKR)</th><th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for r in day_entries %}
+                    <tr {% if r.is_void %}class="table-secondary text-muted" style="opacity:.65"{% endif %}>
+                        <td>
+                            {% if r.direction == 'in' %}<span class="badge bg-success">In</span>
+                            {% elif r.direction == 'out' %}<span class="badge bg-danger">Out</span>
+                            {% else %}<span class="badge bg-secondary">Transfer</span>{% endif %}
+                        </td>
+                        <td>{{ r.category or '—' }}{% if r.subcategory %}<br><small class="text-muted">{{ r.subcategory }}</small>{% endif %}</td>
+                        <td>{{ r.party_name or '—' }}</td>
+                        <td>{{ r.account or '—' }}{% if r.destination_account %}<br><small class="text-muted">→ {{ r.destination_account }}</small>{% endif %}</td>
+                        <td>{{ r.description or '—' }}{% if r.note %}<br><small class="text-muted">{{ r.note }}</small>{% endif %}</td>
+                        <td><small>{{ r.reference or '—' }}</small></td>
+                        <td class="text-end">{{ '{:,.2f}'.format(r.amount) }}</td>
+                        <td>{% if r.is_void %}<span class="badge bg-secondary">Void</span>{% else %}<span class="badge bg-success">Active</span>{% endif %}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="alert alert-info m-3">
+            <i class="fas fa-info-circle me-2"></i>No cash flow entries recorded on this day.
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+{% endblock %}

@@ -23,6 +23,7 @@ from hdc.services.ledger import _office_staff_ledger_snapshot, _personal_expense
 from hdc.services.receipts import _account_receipt_recent_entries, _receipt_company_profile
 from hdc.utils.dates import _pkt_now_naive, _pkt_today
 from hdc.utils.format import _amount_to_words, _flt, _parse_date
+from hdc.utils.money import sync_money_fields
 from hdc.utils.normalize import _normalize_account_group, _normalize_account_mode, _normalize_account_tx_direction, _normalize_account_tx_type, _normalize_name_ci, _normalize_related_entity_type
 
 def register(app):
@@ -101,6 +102,7 @@ def register(app):
                 row.name = nm
                 row.type = tp
                 row.opening_balance = float(opening or 0.0)
+                sync_money_fields(row, 'opening_balance', 'opening_balance_minor')
                 row.bank_name = bank_name or None
                 row.account_number = account_number or None
                 row.iban = iban or None
