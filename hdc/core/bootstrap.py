@@ -12,12 +12,14 @@ from werkzeug.security import generate_password_hash
 
 from hdc.config import get_runtime_settings
 from hdc.core.flags import _runtime_flag_get, _runtime_flag_set
-from hdc.core.schema import _ensure_accounts_schema, _ensure_owner_payment_void_schema, _ensure_purchase_v2_schema, _ensure_runtime_flags_table, _ensure_timeentry_attendance_day_schema, _ensure_timeentry_unique_indexes, _run_migrations
+from hdc.core.schema import _ensure_accounts_schema, _ensure_cashflow_schema, _ensure_owner_payment_void_schema, _ensure_purchase_v2_schema, _ensure_runtime_flags_table, _ensure_timeentry_attendance_day_schema, _ensure_timeentry_unique_indexes, _run_migrations
 from hdc.extensions import db
 from hdc.models.accounts import ExpenseCategory
 from hdc.models.auth import HDCUser
 from hdc.models.workforce import WorkerTrade
+from hdc.services.account_classification import backfill_account_classification
 from hdc.services.accounts import _backfill_accounts_scope_from_references, _backfill_owner_payment_receiving_accounts, _bootstrap_accounts_backfill_once, _mark_auto_generated_person_accounts
+from hdc.services.cashflow_register import _ensure_cashflow_seed_data
 from hdc.services.subcontract import _ensure_subcontract_labour_attendance_schema, _ensure_subcontract_payment_void_schema
 from hdc.services.timekeeping import _migrate_attendance_to_time_entries, _reconcile_all_time_entries_once
 from hdc.utils.format import _is_strong_password
@@ -48,6 +50,7 @@ def _bootstrap_hdc():
     _ensure_owner_payment_void_schema()
     _ensure_subcontract_payment_void_schema()
     _ensure_accounts_schema()
+    _ensure_cashflow_schema()
     _ensure_runtime_flags_table()
     _migrate_legacy_done_markers_to_db()
     _migrate_attendance_to_time_entries()
@@ -98,6 +101,24 @@ def _bootstrap_hdc():
     _backfill_owner_payment_receiving_accounts()
     _backfill_accounts_scope_from_references()
     _mark_auto_generated_person_accounts()
+    # Cash Flow v2: seed the register's category / party vocabulary and
+    # classify legacy accounts.  Both are idempotent and purely additive, so a
+    # failure here is logged at debug level and never blocks startup.
+    #
+    # Note there is deliberately no boot-time backfill of
+    # ``hdc_account_txn.amount_minor``: new rows get their paisa mirror from a
+    # model listener, and every read falls back to the legacy float column via
+    # ``_tx_minor_expr()`` when the mirror is absent.  Historical data is
+    # therefore reconciled correctly without a migration pass.
+    try:
+        _ensure_cashflow_seed_data()
+    except Exception as ex:
+        current_app.logger.debug('Cash flow seed skipped: %s', ex)
+    try:
+        from hdc.models.accounts import Account
+        backfill_account_classification(Account, db, commit=False)
+    except Exception as ex:
+        current_app.logger.debug('Account classification backfill skipped: %s', ex)
 
 
 _HDC_BOOTSTRAP_DONE = False  # legacy compatibility flag; state is per app below

@@ -24,6 +24,7 @@ from hdc.services.subcontract import _log_subcontract_event, _subcontract_stage_
 from hdc.services.timekeeping import _has_recent_duplicate
 from hdc.utils.dates import _pkt_now_naive, _pkt_today
 from hdc.utils.format import _activity_at_for, _flt, _parse_date, _payload_int
+from hdc.utils.money import sync_money_fields
 from hdc.utils.normalize import _normalize_account_group, _normalize_account_mode, _normalize_account_tx_direction, _normalize_account_tx_type, _normalize_expense_category_name, _normalize_name_ci, _normalize_related_entity_type
 
 def _accounts_reconciliation_findings():
@@ -563,6 +564,8 @@ def _create_account(name, acc_type, opening_balance=0.0, bank_name='', account_n
         is_void=False,
         created_at=_pkt_now_naive()
     )
+    # Keep the integer paisa mirror in step with the legacy float column.
+    sync_money_fields(row, 'opening_balance', 'opening_balance_minor')
     db.session.add(row)
     db.session.flush()
     return row, ''

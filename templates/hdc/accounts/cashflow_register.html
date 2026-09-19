@@ -1,0 +1,447 @@
+{% extends "shared/base.html" %}
+{% block title %}Cash Flow Register{% endblock %}
+{% block page_heading %}Cash Flow Register{% endblock %}
+
+{% block content %}
+
+{# ── Summary ─────────────────────────────────────────────────────────────── #}
+<div class="row g-2 mb-3">
+    <div class="col-6 col-md-3">
+        <div class="card hdc-card h-100">
+            <div class="card-body py-2">
+                <div class="small text-muted">Money In</div>
+                <div class="h5 mb-0 text-success">{{ '{:,.2f}'.format(summary.total_in) }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card hdc-card h-100">
+            <div class="card-body py-2">
+                <div class="small text-muted">Money Out</div>
+                <div class="h5 mb-0 text-danger">{{ '{:,.2f}'.format(summary.total_out) }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card hdc-card h-100">
+            <div class="card-body py-2">
+                <div class="small text-muted">Internal Transfers</div>
+                <div class="h5 mb-0">{{ '{:,.2f}'.format(summary.total_transfer) }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card hdc-card h-100">
+            <div class="card-body py-2">
+                <div class="small text-muted">Net Movement</div>
+                <div class="h5 mb-0 {{ 'text-success' if summary.net >= 0 else 'text-danger' }}">{{ '{:,.2f}'.format(summary.net) }}</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# ── Record an entry ──────────────────────────────────────────────────────── #}
+<div class="card hdc-card mb-3">
+    <div class="card-header hdc-card-header">
+        <span><i class="fas fa-plus-circle me-2"></i>Record Cash Flow</span>
+        <span class="small text-muted">comma-formatted amounts accepted — e.g. 12,34,567.89</span>
+    </div>
+    <div class="card-body py-3">
+        <form method="POST" id="cfRegisterForm" class="row g-2 align-items-end">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="action" value="create_entry">
+            <input type="hidden" name="_idempotency_key" value="{{ form_token }}">
+
+            <div class="col-12 col-md-2">
+                <label class="form-label">Direction <span class="text-danger">*</span></label>
+                <select name="direction" id="cfDirection" class="form-select" required>
+                    <option value="in">Received (Money In)</option>
+                    <option value="out" selected>Spent (Money Out)</option>
+                    <option value="transfer">Internal Transfer</option>
+                </select>
+            </div>
+            <div class="col-12 col-md-2">
+                <label class="form-label">Date</label>
+                <input type="date" name="date" class="form-control" value="{{ today }}">
+            </div>
+            <div class="col-12 col-md-2">
+                <label class="form-label">Amount (PKR) <span class="text-danger">*</span></label>
+                <input type="text" inputmode="decimal" name="amount" class="form-control" placeholder="4,500.25" required>
+            </div>
+            <div class="col-12 col-md-2">
+                <label class="form-label">Account <span class="text-danger">*</span></label>
+                <select name="account_id" class="form-select" required>
+                    <option value="">— choose —</option>
+                    {% for a in accounts %}
+                    <option value="{{ a.id }}">{{ a.name }} ({{ 'Bank' if a.type == 'bank' else 'Cash' }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-12 col-md-2" id="cfDestWrap" style="display:none;">
+                <label class="form-label">Destination Account</label>
+                <select name="destination_account_id" class="form-select">
+                    <option value="">— choose —</option>
+                    {% for a in accounts %}
+                    <option value="{{ a.id }}">{{ a.name }} ({{ 'Bank' if a.type == 'bank' else 'Cash' }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-12 col-md-2" id="cfCategoryWrap">
+                <label class="form-label">Category <span class="text-danger">*</span></label>
+                <select name="category_id" id="cfCategory" class="form-select">
+                    <option value="">— choose —</option>
+                    {% for c in categories %}
+                    <option value="{{ c.id }}" data-direction="{{ c.direction or 'both' }}">{{ c.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-12 col-md-2" id="cfSubWrap">
+                <label class="form-label">Subcategory</label>
+                <select name="subcategory_id" id="cfSubcategory" class="form-select">
+                    <option value="">— none —</option>
+                    {% for c in categories %}
+                        {% for s in c.subcategories %}
+                        <option value="{{ s.id }}" data-category="{{ c.id }}" style="display:none;">{{ s.name }}</option>
+                        {% endfor %}
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-12 col-md-2" id="cfPartyWrap">
+                <label class="form-label">Party / Person</label>
+                <input type="text" name="party_name" id="cfParty" class="form-control" maxlength="160"
+                       list="cfPartyList" placeholder="e.g. Al-Kabir Store" autocomplete="off">
+                <datalist id="cfPartyList">
+                    {% for p in parties %}<option value="{{ p.name }}">{% endfor %}
+                </datalist>
+            </div>
+            <div class="col-12 col-md-2">
+                <label class="form-label">Reference</label>
+                <input type="text" name="reference" class="form-control" maxlength="80" placeholder="Cheque / slip no.">
+            </div>
+            <div class="col-12 col-md-2">
+                <label class="form-label">Project</label>
+                <select name="project_id" class="form-select">
+                    <option value="">— none —</option>
+                    {% for p in projects %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
+                </select>
+            </div>
+            <div class="col-12 col-md-3">
+                <label class="form-label">Description</label>
+                <input type="text" name="description" class="form-control" maxlength="200" placeholder="Auto-filled from category + party">
+            </div>
+            <div class="col-12 col-md-3">
+                <label class="form-label">Note</label>
+                <input type="text" name="note" class="form-control" maxlength="500" placeholder="Internal note (optional)">
+            </div>
+            <div class="col-12 col-md-2 d-grid">
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-check me-1"></i>Record
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{# ── Filters ──────────────────────────────────────────────────────────────── #}
+<div class="card hdc-card mb-3">
+    <div class="card-body py-3">
+        <form method="GET" class="row g-2 align-items-end">
+            <div class="col-6 col-md-2">
+                <label class="form-label small mb-1">Date From</label>
+                <input type="date" name="date_from" class="form-control form-control-sm" value="{{ filter_date_from }}">
+            </div>
+            <div class="col-6 col-md-2">
+                <label class="form-label small mb-1">Date To</label>
+                <input type="date" name="date_to" class="form-control form-control-sm" value="{{ filter_date_to }}">
+            </div>
+            <div class="col-6 col-md-2">
+                <label class="form-label small mb-1">Account</label>
+                <select name="account_id" class="form-select form-select-sm">
+                    <option value="">All</option>
+                    {% for a in accounts %}
+                    <option value="{{ a.id }}" {% if filter_account_id == a.id %}selected{% endif %}>{{ a.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-6 col-md-2">
+                <label class="form-label small mb-1">Direction</label>
+                <select name="direction" class="form-select form-select-sm">
+                    <option value="">All</option>
+                    {% for value, label in directions %}
+                    <option value="{{ value }}" {% if filter_direction == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-6 col-md-2">
+                <label class="form-label small mb-1">Category</label>
+                <select name="category_id" class="form-select form-select-sm">
+                    <option value="">All</option>
+                    {% for c in categories %}
+                    <option value="{{ c.id }}" {% if filter_category_id == c.id %}selected{% endif %}>{{ c.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-6 col-md-2">
+                <label class="form-label small mb-1">Search</label>
+                <input type="text" name="q" class="form-control form-control-sm" value="{{ filter_search }}" placeholder="party / note / ref">
+            </div>
+            <div class="col-12 col-md-4 d-flex gap-2">
+                <button type="submit" class="btn btn-sm btn-primary">Filter</button>
+                <a href="{{ url_for('hdc_cashflow_register') }}" class="btn btn-sm btn-outline-secondary">Clear</a>
+                <a href="{{ url_for('hdc_cashflow_register_export', **pg_query) }}" class="btn btn-sm btn-outline-success">
+                    <i class="fas fa-file-csv me-1"></i>CSV
+                </a>
+                {% if show_void %}
+                    <a href="{{ url_for('hdc_cashflow_register', **pg_query_no_void) }}" class="btn btn-sm btn-outline-secondary">Hide Voided</a>
+                {% else %}
+                    <a href="{{ url_for('hdc_cashflow_register', show_void='yes', **pg_query_no_void) }}" class="btn btn-sm btn-outline-secondary">Show Voided</a>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+</div>
+
+{# ── Register table ───────────────────────────────────────────────────────── #}
+<div class="card hdc-card">
+    <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+        <span><i class="fas fa-book me-2"></i>Entries</span>
+        <span class="small text-muted">{{ pg_total_items }} entries{% if summary.void_count %} · {{ summary.void_count }} voided{% endif %}</span>
+    </div>
+    <div class="card-body p-0">
+        {% if rows %}
+        <div class="table-responsive">
+            <table class="table table-sm table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Date</th>
+                        <th>Direction</th>
+                        <th>Category</th>
+                        <th>Party</th>
+                        <th>Account</th>
+                        <th>Description / Note</th>
+                        <th>Ref</th>
+                        <th class="text-end">Amount (PKR)</th>
+                        <th>Entered By</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% set actors = actor_map(rows) %}
+                {% for r in rows %}
+                    <tr {{ r|hdc_row_attrs }} {% if r.is_void %}class="table-secondary text-muted" style="opacity:.65"{% endif %}>
+                        <td><small>{{ r.date.strftime('%d %b %Y') if r.date else '—' }}</small></td>
+                        <td>
+                            {% if r.direction == 'in' %}
+                                <span class="badge bg-success">In</span>
+                            {% elif r.direction == 'out' %}
+                                <span class="badge bg-danger">Out</span>
+                            {% else %}
+                                <span class="badge bg-secondary">Transfer</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {{ r.category or '—' }}
+                            {% if r.subcategory %}<br><small class="text-muted">{{ r.subcategory }}</small>{% endif %}
+                        </td>
+                        <td>{{ r.party_name or '—' }}</td>
+                        <td>
+                            {{ r.account or '—' }}
+                            {% if r.destination_account %}<br><small class="text-muted">→ {{ r.destination_account }}</small>{% endif %}
+                        </td>
+                        <td>
+                            {{ r.description or '—' }}
+                            {% if r.note %}<br><small class="text-muted">{{ r.note }}</small>{% endif %}
+                            {% if r.is_void and r.void_reason %}
+                                <br><small class="text-danger">Void: {{ r.void_reason }}</small>
+                            {% endif %}
+                            {% if r.amends_entry_id %}
+                                <br><small class="text-muted"><i class="fas fa-code-branch me-1"></i>amends #{{ r.amends_entry_id }}</small>
+                            {% endif %}
+                            {% if r.superseded_by_entry_id %}
+                                <br><small class="text-warning"><i class="fas fa-forward me-1"></i>replaced by #{{ r.superseded_by_entry_id }}</small>
+                            {% endif %}
+                        </td>
+                        <td><small>{{ r.reference or '—' }}</small></td>
+                        <td class="text-end">{{ '{:,.2f}'.format(r.amount) }}</td>
+                        <td><small>{{ actors.get(r.id, {}).get('last_by') or r.created_by or '—' }}</small></td>
+                        <td class="text-nowrap">
+                            {% if r.is_void %}
+                                <form method="POST" class="d-inline">
+                                    <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+                                    <input type="hidden" name="action" value="restore_entry">
+                                    <input type="hidden" name="entry_id" value="{{ r.id }}">
+                                    <button type="submit" class="btn btn-sm btn-outline-success" title="Restore">
+                                        <i class="fas fa-rotate-left"></i>
+                                    </button>
+                                </form>
+                            {% else %}
+                                <button type="button" class="btn btn-sm btn-outline-primary"
+                                        data-bs-toggle="modal" data-bs-target="#amendModal{{ r.id }}" title="Amend">
+                                    <i class="fas fa-pen"></i>
+                                </button>
+                                <button type="button" class="btn btn-sm btn-outline-danger"
+                                        data-bs-toggle="modal" data-bs-target="#voidModal{{ r.id }}" title="Void">
+                                    <i class="fas fa-ban"></i>
+                                </button>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+                <tfoot class="table-light">
+                    <tr>
+                        <th colspan="7">Totals (active entries in current filter)</th>
+                        <th class="text-end">{{ '{:,.2f}'.format(summary.total_in - summary.total_out) }}</th>
+                        <th colspan="2" class="small fw-normal text-muted">net in − out</th>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+        {% include "shared/_pagination.html" %}
+        {% else %}
+        <div class="alert alert-info m-3">
+            <i class="fas fa-info-circle me-2"></i>No cash flow entries match the current filters.
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+{# ── Amend / void modals ──────────────────────────────────────────────────── #}
+{% for r in rows %}
+    <div class="modal fade" id="voidModal{{ r.id }}" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <form method="POST" class="modal-content">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="action" value="void_entry">
+                <input type="hidden" name="entry_id" value="{{ r.id }}">
+                <div class="modal-header">
+                    <h6 class="modal-title">Void entry #{{ r.id }} — {{ '{:,.2f}'.format(r.amount) }} PKR</h6>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="small text-muted mb-2">
+                        The entry and its ledger posting are <strong>kept</strong>, not deleted — the record
+                        stays in the audit trail with your reason.
+                    </p>
+                    <label class="form-label">Reason <span class="text-danger">*</span></label>
+                    <input type="text" name="reason" class="form-control" maxlength="300" required
+                           placeholder="e.g. entered twice, wrong slip">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-sm btn-danger">Void entry</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="modal fade" id="amendModal{{ r.id }}" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <form method="POST" class="modal-content">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="action" value="amend_entry">
+                <input type="hidden" name="entry_id" value="{{ r.id }}">
+                <div class="modal-header">
+                    <h6 class="modal-title">Amend entry #{{ r.id }}</h6>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body row g-2">
+                    <p class="small text-muted">
+                        Correcting an entry <strong>voids the original and posts a replacement</strong>.
+                        Nothing is overwritten, and both rows stay linked for audit.
+                    </p>
+                    <div class="col-6 col-md-3">
+                        <label class="form-label">Amount (PKR)</label>
+                        <input type="text" name="amount" class="form-control" value="{{ '{:,.2f}'.format(r.amount) }}">
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <label class="form-label">Date</label>
+                        <input type="date" name="date" class="form-control" value="{{ r.date.strftime('%Y-%m-%d') if r.date else today }}">
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <label class="form-label">Party</label>
+                        <input type="text" name="party_name" class="form-control" value="{{ r.party_name }}">
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <label class="form-label">Reference</label>
+                        <input type="text" name="reference" class="form-control" value="{{ r.reference }}">
+                    </div>
+                    <div class="col-12 col-md-6">
+                        <label class="form-label">Description</label>
+                        <input type="text" name="description" class="form-control" value="{{ r.description }}">
+                    </div>
+                    <div class="col-12 col-md-6">
+                        <label class="form-label">Note</label>
+                        <input type="text" name="note" class="form-control" value="{{ r.note }}">
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">Reason for change <span class="text-danger">*</span></label>
+                        <input type="text" name="reason" class="form-control" maxlength="300" required
+                               placeholder="e.g. wrong amount typed — actual was 5,000">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-sm btn-primary">Void &amp; post replacement</button>
+                </div>
+            </form>
+        </div>
+    </div>
+{% endfor %}
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    var dirSel = document.getElementById('cfDirection');
+    var destWrap = document.getElementById('cfDestWrap');
+    var catWrap = document.getElementById('cfCategoryWrap');
+    var subWrap = document.getElementById('cfSubWrap');
+    var partyWrap = document.getElementById('cfPartyWrap');
+    var catSel = document.getElementById('cfCategory');
+    var subSel = document.getElementById('cfSubcategory');
+    if (!dirSel) return;
+
+    function filterCategories() {
+        var dir = dirSel.value;
+        Array.prototype.forEach.call(catSel.options, function (o) {
+            if (!o.value) return;
+            var d = (o.getAttribute('data-direction') || 'both').toLowerCase();
+            o.hidden = !(d === 'both' || d === dir);
+        });
+        // keep a valid selection
+        if (catSel.selectedOptions.length && catSel.selectedOptions[0].hidden) {
+            catSel.value = '';
+        }
+        filterSubcategories();
+    }
+
+    function filterSubcategories() {
+        var catId = catSel.value;
+        Array.prototype.forEach.call(subSel.options, function (o) {
+            if (!o.value) return;
+            o.style.display = (o.getAttribute('data-category') === catId) ? '' : 'none';
+        });
+        if (subSel.selectedOptions.length && subSel.selectedOptions[0].style.display === 'none') {
+            subSel.value = '';
+        }
+    }
+
+    function applyDirection() {
+        var dir = dirSel.value;
+        destWrap.style.display = (dir === 'transfer') ? '' : 'none';
+        var showCat = (dir !== 'transfer');
+        catWrap.style.display = showCat ? '' : 'none';
+        subWrap.style.display = showCat ? '' : 'none';
+        catSel.required = showCat;
+        partyWrap.style.display = (dir === 'transfer') ? 'none' : '';
+        filterCategories();
+    }
+
+    dirSel.addEventListener('change', applyDirection);
+    catSel.addEventListener('change', filterSubcategories);
+    applyDirection();
+})();
+</script>
+{% endblock %}
