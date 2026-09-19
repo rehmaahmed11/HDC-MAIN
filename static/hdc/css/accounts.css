@@ -1,0 +1,384 @@
+/* ==========================================================================
+   Accounts section — shared styles
+   --------------------------------------------------------------------------
+   HDC port of the AMS accounts look (`templates/accounts/_acc_styles.html` /
+   `manage_accounts.html`), rebuilt on HDC's design tokens so it follows the
+   existing theme instead of importing a second colour system.
+
+   Used by:
+     accounts/accounts_hub.html
+     accounts/accounts_manage.html
+     accounts/account_edit.html
+
+   Every colour comes from a variable defined in hdc.css (:root / [data-theme]),
+   so light and dark mode both work without per-theme overrides here.
+   ========================================================================== */
+
+/* --- Page header --------------------------------------------------------- */
+.acc-page-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    padding: 20px 24px;
+    margin-bottom: 22px;
+    border: 1px solid var(--card-border);
+    border-radius: 16px;
+    background:
+        linear-gradient(135deg, var(--acc-grad-a, rgba(31, 162, 127, 0.18)),
+                                var(--acc-grad-b, rgba(14, 165, 233, 0.16))),
+        var(--card-bg);
+    box-shadow: var(--shadow-card);
+}
+
+.acc-page-header h2 {
+    margin: 0;
+    font-size: 1.35rem;
+    font-weight: 700;
+    letter-spacing: .3px;
+    color: var(--text);
+}
+
+.acc-page-header .acc-subtitle {
+    margin-top: 4px;
+    font-size: .9rem;
+    color: var(--text-muted);
+    max-width: 70ch;
+}
+
+.acc-page-header .acc-toolbar {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+/* --- KPI / stat cards ---------------------------------------------------- */
+.acc-stat {
+    position: relative;
+    display: block;
+    height: 100%;
+    min-height: 108px;
+    padding: 16px 18px;
+    border: 0;
+    border-radius: 14px;
+    overflow: hidden;
+    color: #fff;
+    text-decoration: none;
+    box-shadow: 0 8px 20px rgba(2, 6, 23, .22);
+    transition: transform .15s ease, box-shadow .15s ease;
+}
+
+.acc-stat:hover {
+    color: #fff;
+    transform: translateY(-2px);
+    box-shadow: 0 12px 26px rgba(2, 6, 23, .3);
+}
+
+.acc-stat .acc-stat-icon {
+    position: absolute;
+    right: -6px;
+    bottom: -12px;
+    font-size: 4.4rem;
+    line-height: 1;
+    opacity: .18;
+}
+
+.acc-stat .acc-stat-label {
+    position: relative;
+    z-index: 2;
+    font-size: .7rem;
+    font-weight: 700;
+    letter-spacing: .8px;
+    text-transform: uppercase;
+    opacity: .92;
+}
+
+.acc-stat .acc-stat-value {
+    position: relative;
+    z-index: 2;
+    margin-top: 4px;
+    font-size: 1.55rem;
+    font-weight: 800;
+    line-height: 1.15;
+}
+
+.acc-stat .acc-stat-value small {
+    font-size: .78rem;
+    font-weight: 600;
+    opacity: .85;
+}
+
+.acc-stat .acc-stat-sub {
+    position: relative;
+    z-index: 2;
+    margin-top: 3px;
+    font-size: .74rem;
+    opacity: .88;
+}
+
+/* Gradient palette — mirrors AMS's stat-card colours. */
+.acc-emerald { background: linear-gradient(135deg, #10b981, #047857); }
+.acc-blue    { background: linear-gradient(135deg, #3b82f6, #1d4ed8); }
+.acc-violet  { background: linear-gradient(135deg, #8b5cf6, #6d28d9); }
+.acc-amber   { background: linear-gradient(135deg, #f59e0b, #b45309); }
+.acc-rose    { background: linear-gradient(135deg, #f43f5e, #be123c); }
+.acc-cyan    { background: linear-gradient(135deg, #06b6d4, #0e7490); }
+.acc-slate   { background: linear-gradient(135deg, #64748b, #334155); }
+.acc-teal    { background: linear-gradient(135deg, #14b8a6, #0f766e); }
+
+/* --- Section cards ------------------------------------------------------- */
+.acc-section {
+    margin-bottom: 20px;
+    border: 1px solid var(--card-border);
+    border-radius: 14px;
+    background: var(--card-bg);
+    overflow: hidden;
+    box-shadow: var(--shadow-card);
+}
+
+.acc-section > .acc-section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 13px 18px;
+    border-bottom: 1px solid var(--card-border);
+    background: linear-gradient(180deg, var(--acc-grad-a, rgba(31, 162, 127, .08)), transparent),
+                var(--card-header-bg);
+}
+
+.acc-section > .acc-section-head h5 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--text);
+}
+
+.acc-section > .acc-section-body { padding: 16px 18px; }
+.acc-section > .acc-section-body.flush { padding: 0; }
+
+/* --- Group chips --------------------------------------------------------- */
+.acc-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 13px;
+    border: 1px solid var(--card-border);
+    border-radius: 999px;
+    background: linear-gradient(135deg, rgba(139, 92, 246, .14), rgba(56, 189, 248, .14));
+    color: var(--text);
+    font-size: .84rem;
+    font-weight: 600;
+    text-decoration: none;
+    transition: transform .12s ease, box-shadow .12s ease;
+}
+
+.acc-chip:hover {
+    color: var(--text);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 14px rgba(2, 6, 23, .16);
+}
+
+.acc-chip i { color: #8b5cf6; }
+
+.acc-chip .acc-chip-count {
+    padding: 1px 9px;
+    border-radius: 999px;
+    background: var(--text);
+    color: var(--card-bg);
+    font-size: .7rem;
+    font-weight: 700;
+}
+
+.acc-chip .acc-chip-amount {
+    font-size: .74rem;
+    font-weight: 700;
+    color: var(--text-muted);
+}
+
+/* --- Filter bar ---------------------------------------------------------- */
+.acc-filter-bar {
+    display: flex;
+    align-items: flex-end;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--card-border);
+    background: var(--card-header-bg);
+}
+
+.acc-filter-bar label {
+    display: block;
+    margin-bottom: 4px;
+    font-size: .68rem;
+    font-weight: 700;
+    letter-spacing: .6px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.acc-filter-bar .form-control,
+.acc-filter-bar .form-select { min-height: 38px; }
+.acc-filter-bar .btn { height: 38px; }
+.acc-filter-bar .acc-filter-count { font-size: .82rem; color: var(--text-muted); }
+
+/* --- Table --------------------------------------------------------------- */
+.acc-table thead th {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--card-border);
+    background: var(--table-head);
+    color: var(--text-muted);
+    font-size: .7rem;
+    font-weight: 700;
+    letter-spacing: .7px;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.acc-table tbody td {
+    padding: 10px 12px;
+    vertical-align: middle;
+    border-bottom: 1px solid var(--card-border);
+    color: var(--text);
+}
+
+.acc-table tbody tr:hover { background: var(--table-hover); }
+
+.acc-table .acc-name { font-weight: 700; }
+
+.acc-table .acc-meta {
+    font-size: .75rem;
+    color: var(--text-muted);
+    line-height: 1.35;
+}
+
+.acc-table .acc-amount { font-weight: 700; font-variant-numeric: tabular-nums; }
+.acc-table .acc-amount.neg { color: #ef4444; }
+.acc-table .acc-amount.pos { color: #10b981; }
+.acc-table .acc-muted-amount { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+
+.acc-table .acc-actions {
+    display: flex;
+    gap: 4px;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+}
+
+.acc-table .acc-actions .btn { padding: 2px 8px; font-size: .78rem; line-height: 1.5; }
+
+.acc-group-path { font-size: .76rem; color: var(--text-muted); }
+.acc-group-path .sep { opacity: .55; padding: 0 3px; }
+
+.acc-empty {
+    padding: 40px 16px;
+    text-align: center;
+    color: var(--text-muted);
+}
+
+.acc-empty i { font-size: 2.4rem; opacity: .45; }
+
+/* --- Soft badges --------------------------------------------------------- */
+.acc-badge {
+    display: inline-block;
+    padding: 3px 9px;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    font-size: .72rem;
+    font-weight: 700;
+    letter-spacing: .3px;
+    white-space: nowrap;
+}
+
+.acc-badge-emerald { background: rgba(16, 185, 129, .14); color: #059669; border-color: rgba(16, 185, 129, .3); }
+.acc-badge-rose    { background: rgba(244, 63, 94, .14);  color: #e11d48; border-color: rgba(244, 63, 94, .3); }
+.acc-badge-amber   { background: rgba(245, 158, 11, .14); color: #b45309; border-color: rgba(245, 158, 11, .3); }
+.acc-badge-cyan    { background: rgba(6, 182, 212, .14);  color: #0891b2; border-color: rgba(6, 182, 212, .3); }
+.acc-badge-violet  { background: rgba(139, 92, 246, .14); color: #7c3aed; border-color: rgba(139, 92, 246, .3); }
+.acc-badge-blue    { background: rgba(59, 130, 246, .14); color: #2563eb; border-color: rgba(59, 130, 246, .3); }
+.acc-badge-slate   { background: rgba(100, 116, 139, .14); color: #64748b; border-color: rgba(100, 116, 139, .3); }
+
+[data-theme="dark"] .acc-badge-emerald { color: #6ee7b7; }
+[data-theme="dark"] .acc-badge-rose    { color: #fda4af; }
+[data-theme="dark"] .acc-badge-amber   { color: #fcd34d; }
+[data-theme="dark"] .acc-badge-cyan    { color: #67e8f9; }
+[data-theme="dark"] .acc-badge-violet  { color: #c4b5fd; }
+[data-theme="dark"] .acc-badge-blue    { color: #93c5fd; }
+[data-theme="dark"] .acc-badge-slate   { color: #cbd5e1; }
+
+/* --- Hub: "what is this page for" cards ---------------------------------- */
+.acc-guide {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    height: 100%;
+    padding: 14px 16px;
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    background: var(--card-bg);
+    text-decoration: none;
+    color: var(--text);
+    transition: transform .14s ease, box-shadow .14s ease, border-color .14s ease;
+}
+
+.acc-guide:hover {
+    color: var(--text);
+    transform: translateY(-2px);
+    border-color: var(--accent);
+    box-shadow: 0 10px 22px rgba(2, 6, 23, .14);
+}
+
+.acc-guide .acc-guide-icon {
+    flex: 0 0 auto;
+    display: grid;
+    place-items: center;
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    background: var(--accent-soft);
+    color: var(--accent-strong);
+    font-size: 1.05rem;
+}
+
+.acc-guide .acc-guide-title { font-weight: 700; font-size: .95rem; }
+.acc-guide .acc-guide-text { margin-top: 3px; font-size: .8rem; color: var(--text-muted); line-height: 1.45; }
+.acc-guide .acc-guide-meta { margin-top: 7px; font-size: .74rem; font-weight: 700; color: var(--accent-strong); }
+
+[data-theme="dark"] .acc-guide .acc-guide-meta { color: var(--accent); }
+
+/* --- Edit page: cascading classification --------------------------------- */
+.acc-class-path {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 10px 14px;
+    border: 1px dashed var(--card-border);
+    border-radius: 10px;
+    background: var(--card-header-bg);
+    font-size: .84rem;
+    color: var(--text-muted);
+}
+
+.acc-class-path strong { color: var(--text); }
+.acc-class-path .sep { opacity: .5; }
+
+.acc-form-section-title {
+    margin: 4px 0 10px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--card-border);
+    font-size: .74rem;
+    font-weight: 800;
+    letter-spacing: .8px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+/* --- Responsive ---------------------------------------------------------- */
+@media (max-width: 768px) {
+    .acc-page-header { padding: 16px; }
+    .acc-page-header h2 { font-size: 1.15rem; }
+    .acc-stat .acc-stat-value { font-size: 1.3rem; }
+    .acc-table thead th, .acc-table tbody td { padding: 8px 9px; }
+}

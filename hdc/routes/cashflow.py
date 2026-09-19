@@ -229,9 +229,10 @@ def register(app):
         page = max(1, min(request.args.get('page', type=int) or 1, total_pages))
         page_day_groups = day_groups[(page - 1) * per_day: page * per_day]
 
+        # The page is the read side of cash flow now — the quick-entry form that
+        # needed the company/non-company split moved to the CF Register, so only
+        # the flat account list (for the filter dropdown) is passed down.
         accounts = _list_accounts_with_balances()
-        company_accounts = [a for a in accounts if a['type'] in _ACCOUNT_COMPANY_TYPES]
-        non_company_accounts = [a for a in accounts if a['type'] not in _ACCOUNT_COMPANY_TYPES]
         projects_list = Project.query.order_by(Project.name.asc()).all()
 
         pg_query = _cashflow_filter_query(flt)
@@ -242,8 +243,6 @@ def register(app):
             summary=summary,
             page_day_groups=page_day_groups,
             accounts=accounts,
-            company_accounts=company_accounts,
-            non_company_accounts=non_company_accounts,
             projects=projects_list,
             txn_categories=list(_ACCOUNT_TXN_CATEGORIES),
             direction_filters=CASHFLOW_DIRECTION_LABELS,

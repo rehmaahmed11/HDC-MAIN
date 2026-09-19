@@ -65,6 +65,9 @@ DOMAIN_OF = {
                  "accounts_entries.html", "accounts_transaction_edit.html",
                  "accounts_reconciliation.html",
                  "accounts_kpi_detail.html", "transaction_receipt.html",
+                 # AMS-style accounts master list + hub + full edit form
+                 "accounts_hub.html", "accounts_manage.html",
+                 "account_edit.html",
                  "cashflow.html", "cashflow_report.html",
                  "cashflow_register.html", "cashflow_reconciliation.html",
                  "personal_management.html", "personal_expenses.html",
@@ -112,7 +115,7 @@ def main():
         "mapping mismatch: "
         f"unmapped={sorted(all_files - set(FILE_TO_DOMAIN))} "
         f"missing={sorted(set(FILE_TO_DOMAIN) - all_files)}")
-    assert sum(len(v) for v in DOMAIN_OF.values()) == 86
+    assert sum(len(v) for v in DOMAIN_OF.values()) == 89
 
     # 1. move templates
     for fname in flat:

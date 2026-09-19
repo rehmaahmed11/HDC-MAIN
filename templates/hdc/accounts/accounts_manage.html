@@ -1,0 +1,513 @@
+{% extends "shared/base.html" %}
+{% block title %}Manage Accounts{% endblock %}
+{% block page_heading %}Manage Accounts{% endblock %}
+
+{% block content %}
+{#
+  Manage Accounts — every account in one list.
+
+  HDC port of the AMS `accounts/manage_accounts.html` view: a page header with
+  the toolbar, gradient stat cards, the classification "group" chips, a filter
+  bar, and one full-width table holding ALL accounts.
+
+  Differences from AMS, and why:
+    * AMS groups by a free-text `source_category`; HDC groups by the controlled
+      Category → Subcategory hierarchy already in `hdc_account`, so the chips
+      can never contain a typo'd group.
+    * AMS stores `Account.balance` and mutates it on every post.  HDC derives
+      balances from the ledger, so the "Current" column here is always in step
+      with the transactions page and can never drift.
+    * AMS's Archived bucket is `is_active = false`.  HDC has both `status` and
+      `is_void`, so archived = voided, and the delete button archives instead of
+      deleting whenever the account carries posted transactions.
+#}
+
+{# ── Page header ─────────────────────────────────────────────────────────── #}
+<div class="acc-page-header">
+    <div>
+        <h2><i class="fas fa-wallet me-2"></i>Manage Accounts</h2>
+        <div class="acc-subtitle">
+            Every cash, bank, wallet and party account in one place — create, classify,
+            suspend and review balances. Balances are derived live from the unified ledger.
+        </div>
+    </div>
+    <div class="acc-toolbar">
+        <a href="{{ url_for('hdc_accounts_hub') }}" class="btn btn-outline-secondary btn-sm">
+            <i class="fas fa-compass me-1"></i>Accounts Hub
+        </a>
+        <a href="{{ url_for('hdc_accounts') }}" class="btn btn-outline-secondary btn-sm">
+            <i class="fas fa-arrow-left me-1"></i>Transactions
+        </a>
+        <a href="{{ url_for('hdc_accounts_reconciliation') }}" class="btn btn-outline-info btn-sm">
+            <i class="fas fa-scale-balanced me-1"></i>Reconciliation
+        </a>
+        <a href="{{ url_for('hdc_accounts_manage_export', show=show_mode, show_auto_person=(1 if show_auto_person else 0)) }}"
+           class="btn btn-outline-dark btn-sm">
+            <i class="fas fa-file-csv me-1"></i>CSV
+        </a>
+        <a href="{{ url_for('hdc_account_new', return_to=url_for('hdc_accounts_manage', show=show_mode)) }}"
+           class="btn btn-mint btn-sm">
+            <i class="fas fa-plus-lg me-1"></i>Add New Account
+        </a>
+    </div>
+</div>
+
+{# ── Stat cards ──────────────────────────────────────────────────────────── #}
+{# Computed over ACTIVE accounts only, so archived history never inflates the
+   money totals. The `all` bucket still lists everything below. #}
+<div class="row g-3 mb-4">
+    <div class="col-6 col-xl-3">
+        <a class="acc-stat acc-violet" href="{{ url_for('hdc_accounts_manage', show='all') }}">
+            <div class="acc-stat-label"><i class="fas fa-layer-group me-1"></i>Total Accounts</div>
+            <div class="acc-stat-value">{{ summary.total_accounts }}</div>
+            <div class="acc-stat-sub">
+                {{ summary.active_count }} active · {{ summary.inactive_count }} suspended · {{ summary.archived_count }} archived
+            </div>
+            <i class="fas fa-layer-group acc-stat-icon"></i>
+        </a>
+    </div>
+    <div class="col-6 col-xl-3">
+        <a class="acc-stat acc-emerald" href="{{ url_for('hdc_accounts_kpi_detail', metric='company_total') }}">
+            <div class="acc-stat-label"><i class="fas fa-building-columns me-1"></i>Company-Owned Total</div>
+            <div class="acc-stat-value"><small>Rs.</small> {{ "{:,.0f}".format(summary.company_owned or 0) }}</div>
+            <div class="acc-stat-sub">All accounts combined: {{ "{:,.0f}".format(summary.total_balance or 0) }}</div>
+            <i class="fas fa-sack-dollar acc-stat-icon"></i>
+        </a>
+    </div>
+    <div class="col-6 col-xl-3">
+        <a class="acc-stat acc-blue" href="{{ url_for('hdc_accounts_kpi_detail', metric='bank') }}">
+            <div class="acc-stat-label"><i class="fas fa-building-columns me-1"></i>Bank Accounts</div>
+            <div class="acc-stat-value">{{ summary.bank_count }}</div>
+            <div class="acc-stat-sub">Balance: Rs. {{ "{:,.0f}".format(summary.bank_balance or 0) }}</div>
+            <i class="fas fa-landmark acc-stat-icon"></i>
+        </a>
+    </div>
+    <div class="col-6 col-xl-3">
+        <a class="acc-stat acc-amber" href="{{ url_for('hdc_accounts_kpi_detail', metric='cash') }}">
+            <div class="acc-stat-label"><i class="fas fa-money-bill-wave me-1"></i>Cash Accounts</div>
+            <div class="acc-stat-value">{{ summary.cash_count }}</div>
+            <div class="acc-stat-sub">Balance: Rs. {{ "{:,.0f}".format(summary.cash_balance or 0) }}</div>
+            <i class="fas fa-coins acc-stat-icon"></i>
+        </a>
+    </div>
+    <div class="col-6 col-xl-3">
+        <a class="acc-stat acc-cyan" href="{{ url_for('hdc_accounts_kpi_detail', metric='receivable') }}">
+            <div class="acc-stat-label"><i class="fas fa-arrow-trend-up me-1"></i>Total Receivable</div>
+            <div class="acc-stat-value"><small>Rs.</small> {{ "{:,.0f}".format(summary.receivable or 0) }}</div>
+            <div class="acc-stat-sub">
+                Client ledgers owed to us
+                {% if summary.party_credit_count %}· {{ summary.party_credit_count }} in credit (Rs. {{ "{:,.0f}".format(summary.party_credit_total or 0) }}){% endif %}
+            </div>
+            <i class="fas fa-hand-holding-dollar acc-stat-icon"></i>
+        </a>
+    </div>
+    <div class="col-6 col-xl-3">
+        <div class="acc-stat acc-teal">
+            <div class="acc-stat-label"><i class="fas fa-mobile-screen me-1"></i>Digital Wallets</div>
+            <div class="acc-stat-value">{{ summary.wallet_count }}</div>
+            <div class="acc-stat-sub">Balance: Rs. {{ "{:,.0f}".format(summary.wallet_balance or 0) }}</div>
+            <i class="fas fa-wallet acc-stat-icon"></i>
+        </div>
+    </div>
+    <div class="col-6 col-xl-3">
+        <a class="acc-stat {{ 'acc-rose' if summary.negative_count else 'acc-slate' }}"
+           href="{{ url_for('hdc_accounts_entries') }}"
+           title="Counts only cash / bank / wallet accounts. A client or supplier ledger running negative is normal double-entry (an advance or credit), not an overdraft.">
+            <div class="acc-stat-label"><i class="fas fa-triangle-exclamation me-1"></i>Overdrawn Money Pots</div>
+            <div class="acc-stat-value">{{ summary.negative_count }}</div>
+            <div class="acc-stat-sub">
+                {% if summary.negative_count %}
+                Needs review: {{ summary.negative_accounts|map(attribute='name')|join(', ')|truncate(46) }}
+                {% else %}No cash or bank account is overdrawn{% endif %}
+            </div>
+            <i class="fas fa-circle-exclamation acc-stat-icon"></i>
+        </a>
+    </div>
+    <div class="col-6 col-xl-3">
+        <div class="acc-stat acc-slate">
+            <div class="acc-stat-label"><i class="fas fa-robot me-1"></i>Auto-Generated</div>
+            <div class="acc-stat-value">{{ summary.auto_count }}</div>
+            <div class="acc-stat-sub">
+                Party / worker ledgers created by the system
+            </div>
+            <i class="fas fa-gears acc-stat-icon"></i>
+        </div>
+    </div>
+</div>
+
+{# ── Classification groups ───────────────────────────────────────────────── #}
+<div class="acc-section">
+    <div class="acc-section-head">
+        <h5><i class="fas fa-tags me-2" style="color:#8b5cf6;"></i>Account Groups</h5>
+        <span class="small text-muted">
+            Category &rarr; Subcategory, from the controlled classification hierarchy
+        </span>
+    </div>
+    <div class="acc-section-body">
+        <p class="small text-muted mb-3">
+            Each account belongs to exactly one <strong>Category &rarr; Subcategory &rarr; Account Type</strong>,
+            and the Account Type decides which <strong>channel</strong> it may use (cash, bank, digital wallet or
+            ledger-only). Click a chip to filter the list below to that group.
+        </p>
+        <div class="d-flex flex-wrap gap-2">
+            {% for g in groups %}
+            <button type="button" class="acc-chip acc-group-filter"
+                    data-group="{{ g.category }}|{{ g.subcategory }}"
+                    title="{{ g.category }} → {{ g.subcategory }} — {{ g.accounts|join(', ') }}">
+                <i class="fas fa-tag"></i>
+                <span>{{ g.category }} <span class="sep text-muted">/</span> {{ g.subcategory }}</span>
+                <span class="acc-chip-count">{{ g.count }}</span>
+                <span class="acc-chip-amount">{{ "{:,.0f}".format(g.balance or 0) }}</span>
+            </button>
+            {% else %}
+            <div class="acc-empty w-100">
+                <i class="fas fa-tags"></i>
+                <div class="mt-2">No accounts in this view yet.</div>
+            </div>
+            {% endfor %}
+        </div>
+        {% if groups %}
+        <div class="mt-2">
+            <button type="button" class="btn btn-sm btn-outline-secondary d-none" id="accClearGroup">
+                <i class="fas fa-xmark me-1"></i>Clear group filter
+            </button>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+{# ── All accounts ────────────────────────────────────────────────────────── #}
+<div class="acc-section">
+    <div class="acc-section-head">
+        <h5><i class="fas fa-list-columns me-2" style="color:#f59e0b;"></i>
+            {% if show_mode == 'all' %}All Accounts
+            {% elif show_mode == 'archived' %}Archived Accounts
+            {% elif show_mode == 'inactive' %}Suspended Accounts
+            {% else %}Active Accounts{% endif %}
+        </h5>
+        <a href="{{ url_for('hdc_account_new', return_to=url_for('hdc_accounts_manage', show=show_mode)) }}"
+           class="btn btn-sm btn-mint">
+            <i class="fas fa-plus me-1"></i>Add Account
+        </a>
+    </div>
+
+    {# Status is a server-side filter (it changes which rows are queried);
+       search / channel / group are client-side so typing is instant. #}
+    <div class="acc-filter-bar">
+        <div style="min-width:220px;flex:1 1 220px;max-width:320px;">
+            <label for="accSearch">Search</label>
+            <div class="input-group input-group-sm">
+                <span class="input-group-text"><i class="fas fa-search"></i></span>
+                <input type="text" id="accSearch" class="form-control" placeholder="Name, bank, account #, party…">
+            </div>
+        </div>
+        <div>
+            <label for="accChannel">Channel</label>
+            <select id="accChannel" class="form-select form-select-sm">
+                <option value="">All channels</option>
+                {% for key, label in channel_labels.items() %}
+                <option value="{{ key }}">{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label for="accEntity">Linked Entity</label>
+            <select id="accEntity" class="form-select form-select-sm">
+                <option value="">All entities</option>
+                {% for key, label in entity_labels.items() %}
+                <option value="{{ key }}">{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label for="accSort">Sort</label>
+            <select id="accSort" class="form-select form-select-sm">
+                <option value="name">Name (A–Z)</option>
+                <option value="balance_desc">Balance (high → low)</option>
+                <option value="balance_asc">Balance (low → high)</option>
+                <option value="created_desc">Newest first</option>
+            </select>
+        </div>
+        <div>
+            <label>Status</label>
+            <div class="btn-group btn-group-sm" role="group" aria-label="Account status">
+                {% for m in show_modes %}
+                <a class="btn {% if show_mode == m %}btn-success{% else %}btn-outline-success{% endif %}"
+                   href="{{ url_for('hdc_accounts_manage', show=m, show_auto_person=(1 if show_auto_person else 0)) }}">
+                    {{ m|title }}
+                </a>
+                {% endfor %}
+            </div>
+        </div>
+        <div>
+            <label>Auto Ledgers</label>
+            <a class="btn btn-sm {% if show_auto_person %}btn-info{% else %}btn-outline-info{% endif %}"
+               href="{{ url_for('hdc_accounts_manage', show=show_mode, show_auto_person=(0 if show_auto_person else 1)) }}">
+                <i class="fas fa-robot me-1"></i>{{ 'Shown' if show_auto_person else 'Hidden' }}
+            </a>
+        </div>
+        <div class="ms-auto acc-filter-count" id="accCount">{{ accounts|length }} accounts</div>
+    </div>
+
+    <div class="acc-section-body flush">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle acc-table mb-0" id="accTable">
+                <thead>
+                    <tr>
+                        <th>Account</th>
+                        <th>Group</th>
+                        <th>Account Type</th>
+                        <th>Channel</th>
+                        <th>Linked</th>
+                        <th class="text-end">Opening</th>
+                        <th class="text-end">Current Balance</th>
+                        <th class="text-center">Txns</th>
+                        <th>Status</th>
+                        <th>Created</th>
+                        <th class="text-end">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for a in accounts %}
+                    <tr {{ a|hdc_row_attrs }}
+                        data-name="{{ (a.name or '')|lower }} {{ (a.bank_name or '')|lower }} {{ (a.account_number or '')|lower }} {{ (a.linked_party_name or '')|lower }}"
+                        data-channel="{{ a.channel or '' }}"
+                        data-entity="{{ a.linked_entity_type or 'none' }}"
+                        data-group="{{ a.class_category }}|{{ a.class_subcategory }}"
+                        data-balance="{{ a.current_balance }}"
+                        data-created="{{ a.created_at }}">
+                        <td>
+                            <div class="acc-name">
+                                {{ a.name }}
+                                {% if a.auto_generated %}<span class="acc-badge acc-badge-slate ms-1">Auto</span>{% endif %}
+                            </div>
+                            {% if a.account_mode == 'bank' and a.bank_name %}
+                            <div class="acc-meta">
+                                <i class="fas fa-landmark me-1"></i>{{ a.bank_name }}{% if a.account_number %} · {{ a.account_number }}{% endif %}
+                                {% if a.iban %}<div>{{ a.iban }}</div>{% endif %}
+                            </div>
+                            {% elif a.channel == 'digital_wallet' and a.wallet_provider %}
+                            <div class="acc-meta">
+                                <i class="fas fa-mobile-screen me-1"></i>{{ a.wallet_provider }}{% if a.wallet_number %} · {{ a.wallet_number }}{% endif %}
+                            </div>
+                            {% elif a.channel == 'cash' and a.cash_location %}
+                            <div class="acc-meta">
+                                <i class="fas fa-location-dot me-1"></i>{{ a.cash_location }}{% if a.cash_responsible %} · {{ a.cash_responsible }}{% endif %}
+                            </div>
+                            {% elif a.auto_source %}
+                            <div class="acc-meta"><i class="fas fa-link me-1"></i>{{ a.auto_source }}</div>
+                            {% endif %}
+                            {% if a.note %}<div class="acc-meta" title="{{ a.note }}"><i class="fas fa-note-sticky me-1"></i>{{ a.note|truncate(48) }}</div>{% endif %}
+                        </td>
+                        <td>
+                            <div class="acc-group-path">
+                                {{ a.class_category }}<span class="sep">/</span>{{ a.class_subcategory }}
+                            </div>
+                        </td>
+                        <td><span class="acc-badge acc-badge-violet">{{ a.class_account_type }}</span></td>
+                        <td>
+                            {% set ch = a.channel %}
+                            <span class="acc-badge {% if ch == 'bank' %}acc-badge-blue{% elif ch == 'cash' %}acc-badge-amber{% elif ch == 'digital_wallet' %}acc-badge-cyan{% else %}acc-badge-slate{% endif %}">
+                                {{ a.channel_label }}
+                            </span>
+                        </td>
+                        <td>
+                            {% if a.linked_entity_type and a.linked_entity_type != 'none' %}
+                            <span class="acc-badge acc-badge-emerald">{{ a.linked_entity_label }}</span>
+                            {% if a.linked_party_name %}<div class="acc-meta">{{ a.linked_party_name }}</div>{% endif %}
+                            {% else %}
+                            <span class="acc-meta">—</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-end acc-muted-amount">{{ "{:,.2f}".format(a.opening_balance or 0) }}</td>
+                        <td class="text-end">
+                            <a class="text-decoration-none acc-amount {% if a.current_balance < 0 %}neg{% else %}pos{% endif %}"
+                               href="{{ url_for('hdc_account_ledger', account_id=a.id) }}"
+                               title="Open ledger for {{ a.name }}">
+                                {{ "{:,.2f}".format(a.current_balance or 0)
+                            }}</a>
+                        </td>
+                        <td class="text-center">
+                            {% if a.txn_count %}
+                            <a class="acc-badge acc-badge-slate text-decoration-none"
+                               href="{{ url_for('hdc_accounts_entries', account_id=a.id) }}">{{ a.txn_count }}</a>
+                            {% else %}
+                            <span class="acc-meta">0</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if a.status == 'active' %}
+                            <span class="acc-badge acc-badge-emerald"><i class="fas fa-circle-check me-1"></i>Active</span>
+                            {% elif a.status == 'inactive' %}
+                            <span class="acc-badge acc-badge-amber"><i class="fas fa-pause me-1"></i>Suspended</span>
+                            {% else %}
+                            <span class="acc-badge acc-badge-rose"><i class="fas fa-box-archive me-1"></i>Archived</span>
+                            {% endif %}
+                        </td>
+                        <td class="acc-meta">{{ a.created_at or '—' }}</td>
+                        <td>
+                            <div class="acc-actions">
+                                <a href="{{ url_for('hdc_account_ledger', account_id=a.id) }}"
+                                   class="btn btn-outline-dark" title="View ledger">
+                                    <i class="fas fa-book-open"></i>
+                                </a>
+                                {% if a.status != 'archived' %}
+                                <a href="{{ url_for('hdc_account_edit', account_id=a.id, return_to=url_for('hdc_accounts_manage', show=show_mode)) }}"
+                                   class="btn btn-outline-primary" title="Edit account">
+                                    <i class="fas fa-pen-to-square"></i>
+                                </a>
+                                <form method="POST" class="d-inline"
+                                      action="{{ url_for('hdc_accounts_manage', show=show_mode, show_auto_person=(1 if show_auto_person else 0)) }}">
+                                    <input type="hidden" name="action" value="{{ 'activate_account' if a.status != 'active' else 'suspend_account' }}">
+                                    <input type="hidden" name="account_id" value="{{ a.id }}">
+                                    <button type="submit"
+                                            class="btn {% if a.status == 'active' %}btn-outline-warning{% else %}btn-outline-success{% endif %}"
+                                            title="{{ 'Suspend' if a.status == 'active' else 'Reactivate' }}"
+                                            onclick="return confirm('{{ 'Suspend' if a.status == 'active' else 'Reactivate' }} “{{ a.name }}”?{% if a.status == 'active' %} Suspended accounts cannot be used for new transactions.{% endif %}');">
+                                        <i class="fas {% if a.status == 'active' %}fa-power-off{% else %}fa-rotate-left{% endif %}"></i>
+                                    </button>
+                                </form>
+                                <form method="POST" class="d-inline"
+                                      action="{{ url_for('hdc_accounts_manage', show=show_mode, show_auto_person=(1 if show_auto_person else 0)) }}">
+                                    <input type="hidden" name="action" value="delete_account">
+                                    <input type="hidden" name="account_id" value="{{ a.id }}">
+                                    <button type="submit" class="btn btn-outline-danger" title="Delete / archive"
+                                            onclick="return confirm('Delete “{{ a.name }}”?\n\n{% if a.txn_count %}This account has {{ a.txn_count }} posted transaction(s), so it will be ARCHIVED instead of deleted to preserve accounting history.{% else %}This account has no posted transactions and will be permanently deleted.{% endif %}');">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                </form>
+                                {% else %}
+                                {# Archived: read-only, but restorable. Restoring beats recreating —
+                                   a new account would start a second ledger and split the history. #}
+                                <a href="{{ url_for('hdc_account_ledger', account_id=a.id) }}"
+                                   class="btn btn-outline-dark" title="View preserved ledger ({{ a.txn_count }} transactions)">
+                                    <i class="fas fa-lock"></i>
+                                </a>
+                                <form method="POST" class="d-inline"
+                                      action="{{ url_for('hdc_accounts_manage', show=show_mode, show_auto_person=(1 if show_auto_person else 0)) }}">
+                                    <input type="hidden" name="action" value="restore_account">
+                                    <input type="hidden" name="account_id" value="{{ a.id }}">
+                                    <button type="submit" class="btn btn-outline-success" title="Restore this archived account"
+                                            onclick="return confirm('Restore “{{ a.name }}”?\n\nIt becomes active again and its {{ a.txn_count }} preserved transaction(s) stay intact.');">
+                                        <i class="fas fa-box-open"></i>
+                                    </button>
+                                </form>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="11">
+                            <div class="acc-empty">
+                                <i class="fas fa-inbox"></i>
+                                <div class="mt-2">
+                                    No accounts in this view.
+                                    <a href="{{ url_for('hdc_account_new') }}" class="fw-semibold">Add the first account</a>
+                                    or switch the status filter above.
+                                </div>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+                {% if accounts %}
+                <tfoot>
+                    <tr>
+                        <td colspan="5" class="fw-bold">Totals ({{ accounts|length }} shown)</td>
+                        <td class="text-end acc-amount">{{ "{:,.2f}".format(accounts|sum(attribute='opening_balance') or 0) }}</td>
+                        <td class="text-end acc-amount {{ 'neg' if (accounts|sum(attribute='current_balance') or 0) < 0 else 'pos' }}">
+                            {{ "{:,.2f}".format(accounts|sum(attribute='current_balance') or 0) }}
+                        </td>
+                        <td class="text-center acc-amount">{{ accounts|sum(attribute='txn_count') or 0 }}</td>
+                        <td colspan="3"></td>
+                    </tr>
+                </tfoot>
+                {% endif %}
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    // Client-side filter + sort.  Status stays server-side (it changes the
+    // query), everything else is instant so the list feels like a spreadsheet.
+    var search = document.getElementById('accSearch');
+    var channel = document.getElementById('accChannel');
+    var entity = document.getElementById('accEntity');
+    var sortSel = document.getElementById('accSort');
+    var countEl = document.getElementById('accCount');
+    var clearGroup = document.getElementById('accClearGroup');
+    var table = document.getElementById('accTable');
+    if (!table) return;
+    var tbody = table.querySelector('tbody');
+    var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr[data-name]'));
+    var totalLabel = countEl ? countEl.textContent : '';
+    var activeGroup = '';
+
+    function applyFilters() {
+        var term = (search && search.value || '').trim().toLowerCase();
+        var ch = channel && channel.value || '';
+        var en = entity && entity.value || '';
+        var shown = 0;
+
+        rows.forEach(function (row) {
+            var okTerm = !term || (row.dataset.name || '').indexOf(term) !== -1;
+            var okCh = !ch || row.dataset.channel === ch;
+            var okEn = !en || row.dataset.entity === en;
+            var okGr = !activeGroup || row.dataset.group === activeGroup;
+            var visible = okTerm && okCh && okEn && okGr;
+            row.style.display = visible ? '' : 'none';
+            if (visible) shown++;
+        });
+
+        if (countEl) {
+            countEl.textContent = shown === rows.length
+                ? totalLabel
+                : shown + ' of ' + rows.length + ' accounts';
+        }
+    }
+
+    function applySort() {
+        var mode = sortSel && sortSel.value || 'name';
+        var sorted = rows.slice();
+        sorted.sort(function (a, b) {
+            if (mode === 'balance_desc') return parseFloat(b.dataset.balance) - parseFloat(a.dataset.balance);
+            if (mode === 'balance_asc') return parseFloat(a.dataset.balance) - parseFloat(b.dataset.balance);
+            if (mode === 'created_desc') return (b.dataset.created || '').localeCompare(a.dataset.created || '');
+            return (a.dataset.name || '').localeCompare(b.dataset.name || '');
+        });
+        sorted.forEach(function (row) { tbody.appendChild(row); });
+    }
+
+    [search, channel, entity].forEach(function (el) {
+        if (!el) return;
+        el.addEventListener('input', applyFilters);
+        el.addEventListener('change', applyFilters);
+    });
+    if (sortSel) sortSel.addEventListener('change', applySort);
+
+    // Group chips act as a one-click filter.
+    Array.prototype.forEach.call(document.querySelectorAll('.acc-group-filter'), function (chip) {
+        chip.addEventListener('click', function () {
+            var g = chip.dataset.group || '';
+            activeGroup = (activeGroup === g) ? '' : g;   // click again to clear
+            document.querySelectorAll('.acc-group-filter').forEach(function (c) {
+                c.style.outline = (c.dataset.group === activeGroup) ? '2px solid var(--accent)' : '';
+            });
+            if (clearGroup) clearGroup.classList.toggle('d-none', !activeGroup);
+            applyFilters();
+        });
+    });
+    if (clearGroup) {
+        clearGroup.addEventListener('click', function () {
+            activeGroup = '';
+            document.querySelectorAll('.acc-group-filter').forEach(function (c) { c.style.outline = ''; });
+            clearGroup.classList.add('d-none');
+            applyFilters();
+        });
+    }
+})();
+</script>
+{% endblock %}

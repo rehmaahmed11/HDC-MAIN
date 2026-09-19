@@ -4,77 +4,48 @@
 
 {% block content %}
 
-{# ── Quick record ────────────────────────────────────────────────────────── #}
+{# ── Where to record ─────────────────────────────────────────────────────── #}
+{#
+  This page used to carry its own "Record Daily Flow" form, which duplicated the
+  CF Register's entry form.  Two ways to record the same money meant an entry
+  could be posted without a category, a party or an audit trail, and users had
+  no way to know which one was correct.
+
+  The Register is now the single place to record; this page is the read side —
+  the daily report over the whole unified ledger.  Its POST handler
+  (`record_flow`) is deliberately kept alive so bookmarks, scripts and the API
+  that post here keep working; only the duplicate form is gone.
+#}
 <div class="card hdc-card mb-3">
-    <div class="card-header hdc-card-header">
-        <span><i class="fas fa-plus-circle me-2"></i>Record Daily Flow</span>
-        <span class="small text-muted">Money In / Money Out / Cash→Bank Transfer</span>
-    </div>
     <div class="card-body py-3">
-        <form method="POST" id="cashflowQuickForm" class="row g-2 align-items-end">
-            <input type="hidden" name="action" value="record_flow">
-            <div class="col-12 col-md-3">
-                <label class="form-label">Flow Kind <span class="text-danger">*</span></label>
-                <select name="flow_kind" id="cfKind" class="form-select" required>
-                    <option value="">— choose —</option>
-                    <option value="in">Money In (receipt)</option>
-                    <option value="out">Money Out (payment)</option>
-                    <option value="transfer">Internal Transfer (cash ↔ bank)</option>
-                </select>
+        <div class="d-flex flex-wrap align-items-center gap-3">
+            <div class="flex-shrink-0 d-grid place-items-center rounded-3"
+                 style="width:46px;height:46px;background:var(--accent-soft);color:var(--accent-strong);">
+                <i class="fas fa-chart-column fa-lg"></i>
             </div>
-            <div class="col-12 col-md-2">
-                <label class="form-label">Date <span class="text-danger">*</span></label>
-                <input type="date" name="date" class="form-control" value="{{ today }}" required>
+            <div class="flex-grow-1" style="min-width:240px;">
+                <div class="fw-bold">
+                    This is the cash flow <span class="text-muted">report</span> — recording happens in the CF Register
+                </div>
+                <div class="small text-muted mt-1">
+                    The report below reads the whole unified ledger, so it already includes every register entry
+                    plus the flows posted automatically by payroll, purchases, expenses, subcontract and office.
+                    Record once in the Register and it shows up here, in the balances and in Day Close.
+                </div>
             </div>
-            <div class="col-12 col-md-2">
-                <label class="form-label">Amount (PKR) <span class="text-danger">*</span></label>
-                <input type="number" step="0.01" min="0.01" name="amount" class="form-control" value="" required>
+            <div class="d-flex gap-2 flex-wrap">
+                <a href="{{ url_for('hdc_cashflow_register') }}" class="btn btn-mint">
+                    <i class="fas fa-plus me-1"></i>Record in CF Register
+                </a>
+                <a href="{{ url_for('hdc_cashflow_report') }}" class="btn btn-outline-primary">
+                    <i class="fas fa-file-lines me-1"></i>Full Report
+                </a>
+                <a href="{{ url_for('hdc_cashflow_export', date_from=filter_date_from, date_to=filter_date_to) }}"
+                   class="btn btn-outline-dark">
+                    <i class="fas fa-file-csv me-1"></i>CSV
+                </a>
             </div>
-            <div class="col-12 col-md-3" id="cfFromWrap">
-                <label class="form-label">From / Received Into <span class="text-danger">*</span></label>
-                <select name="from_account_id" id="cfFrom" class="form-select">
-                    <option value="">— choose —</option>
-                </select>
-            </div>
-            <div class="col-12 col-md-3" id="cfToWrap">
-                <label class="form-label">To <span class="text-danger">*</span></label>
-                <select name="to_account_id" id="cfTo" class="form-select">
-                    <option value="">— choose —</option>
-                </select>
-            </div>
-            <div class="col-12 col-md-2" id="cfPartyWrap">
-                <label class="form-label">Party (name)</label>
-                <input type="text" name="party_name" id="cfParty" class="form-control" maxlength="120" placeholder="e.g. M. Akram / Cash">
-            </div>
-            <div class="col-12 col-md-2" id="cfProjectWrap">
-                <label class="form-label">Project (optional)</label>
-                <select name="project_id" id="cfProject" class="form-select">
-                    <option value="">— none —</option>
-                    {% for p in projects %}
-                    <option value="{{ p.id }}">{{ p.name }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="col-12 col-md-2" id="cfCategoryWrap">
-                <label class="form-label">Category</label>
-                <select name="category" id="cfCategory" class="form-select">
-                    {% for c in txn_categories %}
-                    <option value="{{ c }}">{{ c|title }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="col-12 col-md-3" id="cfNoteWrap">
-                <label class="form-label">Note</label>
-                <input type="text" name="note" class="form-control" maxlength="200" placeholder="Short description">
-            </div>
-            <div class="col-12 col-md-2" id="cfRefWrap">
-                <label class="form-label">Reference</label>
-                <input type="text" name="reference_id" class="form-control" maxlength="120" placeholder="e.g. cheque #">
-            </div>
-            <div class="col-12 col-md-2 d-flex">
-                <button type="submit" class="btn btn-success w-100"><i class="fas fa-save me-1"></i>Record Flow</button>
-            </div>
-        </form>
+        </div>
     </div>
 </div>
 
@@ -257,78 +228,11 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
-(function () {
-    var kindSel = document.getElementById('cfKind');
-    if (!kindSel) return;
-
-    var fromSel = document.getElementById('cfFrom');
-    var toSel = document.getElementById('cfTo');
-    var fromWrap = document.getElementById('cfFromWrap');
-    var toWrap = document.getElementById('cfToWrap');
-    var partyWrap = document.getElementById('cfPartyWrap');
-    var partyInput = document.getElementById('cfParty');
-    var projectWrap = document.getElementById('cfProjectWrap');
-    var categorySel = document.getElementById('cfCategory');
-    var fromLabel = fromWrap.querySelector('label');
-    var toLabel = toWrap.querySelector('label');
-
-    // Preload options (server renders them as empty; fill from data-* below).
-    var companyAccounts = {{ company_accounts | tojson }};
-    var allAccounts = {{ accounts | tojson }};
-    var nonCompanyAccounts = {{ non_company_accounts | tojson }};
-
-    function opt(list) {
-        var html = '<option value="">— choose —</option>';
-        list.forEach(function (a) {
-            var tag = (a.type === 'bank') ? ' · Bank' : ' · Cash';
-            html += '<option value="' + a.id + '">' + a.name + tag + '</option>';
-        });
-        return html;
-    }
-
-    function apply() {
-        var kind = kindSel.value;
-        if (kind === 'in') {
-            fromSel.innerHTML = opt(allAccounts);
-            toSel.innerHTML = opt(companyAccounts);
-            fromLabel.innerHTML = 'From (source) <span class="text-muted small">optional — party name works too</span>';
-            toLabel.innerHTML = 'Receive Into (company) <span class="text-danger">*</span>';
-            partyInput.placeholder = 'Who paid you? (optional)';
-            partyInput.required = false;
-            projectWrap.classList.remove('d-none');
-            categorySel.value = 'income';
-        } else if (kind === 'out') {
-            opt(companyAccounts, fromSel);
-            opt(nonCompanyAccounts, toSel);
-            fromLabel.innerHTML = 'Pay From (company) <span class="text-danger">*</span>';
-            toLabel.innerHTML = 'Pay To <span class="text-muted small">optional if party name given</span>';
-            partyInput.placeholder = 'Who receives? (required if no account)';
-            partyInput.required = false;
-            projectWrap.classList.remove('d-none');
-            categorySel.value = 'expense';
-        } else if (kind === 'transfer') {
-            opt(companyAccounts, fromSel);
-            opt(companyAccounts, toSel);
-            fromLabel.innerHTML = 'From (company) <span class="text-danger">*</span>';
-            toLabel.innerHTML = 'To (company) <span class="text-danger">*</span>';
-            partyInput.placeholder = '';
-            partyInput.required = false;
-            partyWrap.classList.add('d-none');
-            projectWrap.classList.add('d-none');
-            categorySel.value = 'transfer';
-        } else {
-            partyWrap.classList.add('d-none');
-            projectWrap.classList.add('d-none');
-        }
-    }
-
-    kindSel.addEventListener('change', apply);
-    // sensible default state
-    kindSel.value = 'in';
-    apply();
-})();
-</script>
+{#
+  The quick-entry form this block used to drive is gone (see the note at the top
+  of the page) — recording lives in the CF Register now.  What is left is the
+  day-header styling for the report table below.
+#}
 <style>
     .cf-day-header td {
         background: var(--hdc-soft, rgba(13, 110, 253, 0.06));

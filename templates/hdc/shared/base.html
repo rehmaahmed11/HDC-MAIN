@@ -8,6 +8,8 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="/hdc_static/css/hdc.css">
+    <!-- Accounts section (hub / manage / edit) — ported from the AMS accounts UI. -->
+    <link rel="stylesheet" href="/hdc_static/css/accounts.css">
     <script>
         (function(){
             var t = localStorage.getItem('hdc_theme') || 'light';
@@ -101,30 +103,51 @@
             </li>
         </ul>
         <div class="sidebar-divider"></div>
+        {# Admin-only area.  Split into labelled groups so the Accounts & Cash
+           section reads as one thing rather than five unrelated links — the hub
+           is the entry point and explains what each page is for. #}
+        {% if current_user.role == 'admin' %}
+        <div class="sidebar-group-label">Administration</div>
         <ul class="sidebar-nav">
-            {% if current_user.role == 'admin' %}
             <li class="nav-item {% if request.endpoint == 'hdc_users' %}active{% endif %}">
                 <a href="{{ url_for('hdc_users') }}"><i class="fas fa-user-shield"></i><span>Users</span></a>
             </li>
             <li class="nav-item {% if request.endpoint == 'hdc_event_recorder' %}active{% endif %}">
                 <a href="{{ url_for('hdc_event_recorder') }}"><i class="fas fa-clipboard-list"></i><span>Event Recorder</span></a>
             </li>
-            <li class="nav-item {% if request.endpoint in ['hdc_accounts', 'hdc_accounts_kpi_detail', 'hdc_accounts_entries'] %}active{% endif %}">
-                <a href="{{ url_for('hdc_accounts') }}"><i class="fas fa-wallet"></i><span>Accounts</span></a>
+            <li class="nav-item {% if request.endpoint == 'hdc_settings' %}active{% endif %}">
+                <a href="{{ url_for('hdc_settings') }}"><i class="fas fa-gear"></i><span>Settings</span></a>
             </li>
-            <li class="nav-item {% if request.endpoint in ['hdc_cashflow', 'hdc_cashflow_report', 'hdc_cashflow_export'] %}active{% endif %}">
-                <a href="{{ url_for('hdc_cashflow') }}"><i class="fas fa-money-bill-transfer"></i><span>Cash Flow</span></a>
+        </ul>
+
+        <div class="sidebar-divider"></div>
+        <div class="sidebar-group-label">Accounts &amp; Cash</div>
+        <ul class="sidebar-nav">
+            <li class="nav-item {% if request.endpoint == 'hdc_accounts_hub' %}active{% endif %}">
+                <a href="{{ url_for('hdc_accounts_hub') }}"><i class="fas fa-compass"></i><span>Accounts Hub</span></a>
+            </li>
+            <li class="nav-item {% if request.endpoint in ['hdc_accounts_manage', 'hdc_accounts_manage_export', 'hdc_account_new', 'hdc_account_edit', 'hdc_account_ledger'] %}active{% endif %}">
+                <a href="{{ url_for('hdc_accounts_manage') }}"><i class="fas fa-list"></i><span>Manage Accounts</span></a>
+            </li>
+            <li class="nav-item {% if request.endpoint in ['hdc_accounts', 'hdc_accounts_kpi_detail', 'hdc_accounts_reconciliation'] %}active{% endif %}">
+                <a href="{{ url_for('hdc_accounts') }}"><i class="fas fa-wallet"></i><span>Transactions</span></a>
+            </li>
+            <li class="nav-item {% if request.endpoint in ['hdc_accounts_entries', 'hdc_account_transaction_edit', 'hdc_account_transaction_receipt'] %}active{% endif %}">
+                <a href="{{ url_for('hdc_accounts_entries') }}"><i class="fas fa-receipt"></i><span>All Entries</span></a>
             </li>
             <li class="nav-item {% if request.endpoint in ['hdc_cashflow_register', 'hdc_cashflow_register_export'] %}active{% endif %}">
                 <a href="{{ url_for('hdc_cashflow_register') }}"><i class="fas fa-book"></i><span>CF Register</span></a>
             </li>
+            <li class="nav-item {% if request.endpoint in ['hdc_cashflow', 'hdc_cashflow_report', 'hdc_cashflow_export'] %}active{% endif %}">
+                <a href="{{ url_for('hdc_cashflow') }}"><i class="fas fa-money-bill-transfer"></i><span>Cash Flow</span></a>
+            </li>
             <li class="nav-item {% if request.endpoint == 'hdc_cashflow_reconciliation' %}active{% endif %}">
                 <a href="{{ url_for('hdc_cashflow_reconciliation') }}"><i class="fas fa-scale-balanced"></i><span>Day Close</span></a>
             </li>
-            <li class="nav-item {% if request.endpoint == 'hdc_settings' %}active{% endif %}">
-                <a href="{{ url_for('hdc_settings') }}"><i class="fas fa-gear"></i><span>Settings</span></a>
-            </li>
-            {% endif %}
+        </ul>
+        <div class="sidebar-divider"></div>
+        {% endif %}
+        <ul class="sidebar-nav">
             <li class="nav-item">
                 <form method="POST" action="{{ url_for('hdc_logout') }}" class="m-0">
                     <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
