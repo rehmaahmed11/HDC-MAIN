@@ -1,0 +1,420 @@
+{% extends "shared/base.html" %}
+{% block title %}Rental {{ rental.rental_code }}{% endblock %}
+{% block page_heading %}Rental Detail - {{ rental.rental_code }}{% endblock %}
+
+{% block content %}
+<style>
+.chain-bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:12px; background: var(--card-header-bg); border-radius:12px; border:1px solid var(--card-border); }
+.chain-bar .c-item { padding:6px 14px; border-radius:999px; font-weight:700; font-size:0.8rem; border:1px solid var(--card-border); background: var(--card-bg); }
+.chain-bar .c-item.active { background: linear-gradient(135deg,#16a34a,#22c55e); color:#fff; border-color:transparent; box-shadow:0 6px 16px rgba(34,197,94,0.4); }
+.chain-bar .c-arrow { font-weight:800; opacity:0.5; }
+.toggle-card { border:2px dashed #f59e0b; background: rgba(245,158,11,0.06); }
+.toggle-card.full-mode { border-color:#16a34a; background: rgba(22,163,74,0.06); }
+.pending-highlight { background: rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.2); border-radius:10px; padding:10px; }
+</style>
+
+<div class="row g-3 mt-1">
+    <div class="col-md-8">
+        <div class="card hdc-card">
+            <div class="card-header hdc-card-header d-flex justify-content-between">
+                <span><i class="fas fa-receipt me-2"></i>{{ rental.rental_code }} — {{ rental.renter_type|title }} | {{ rental.billing_type }}</span>
+                <div>
+                    <span class="badge {% if rental.status=='active' %}bg-primary{% elif rental.status=='partially_returned' %}bg-warning text-dark{% elif rental.status=='overdue' %}bg-danger{% elif rental.status=='closed' %}bg-success{% else %}bg-secondary{% endif %}">{{ rental.status }}</span>
+                    <span class="badge {% if rental.payment_status=='paid' %}bg-success{% elif rental.payment_status=='partial' %}bg-warning text-dark{% elif rental.payment_status=='credit' %}bg-danger{% else %}bg-secondary{% endif %}">{{ rental.payment_status }}</span>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="row g-2 mb-3">
+                    <div class="col-6 col-md-3"><strong>Rental Date:</strong><br>{{ rental.rental_date }}</div>
+                    <div class="col-6 col-md-3"><strong>Expected Return:</strong><br>{{ rental.expected_return_date or '-' }}</div>
+                    <div class="col-6 col-md-3"><strong>Site / Customer:</strong><br>
+                        {% if rental.renter_type=='internal' %}{{ rental.project.name if rental.project else '-' }}{% if rental.stage %} / {{ rental.stage.name }}{% endif %}{% else %}{{ rental.customer_name }}<br><small>{{ rental.customer_phone or '' }}</small>{% endif %}
+                    </div>
+                    <div class="col-6 col-md-3"><strong>Current Location:</strong><br><span class="badge bg-success">{{ rental.current_location_label }}</span></div>
+                </div>
+
+                <div class="chain-bar mb-3">
+                    <i class="fas fa-route me-1"></i> Tracking:
+                    {% for ch in tracking_chain %}
+                        <span class="c-item {% if ch.is_current %}active{% endif %}">{{ ch.label }}</span>
+                        {% if not loop.last %}<span class="c-arrow">›</span>{% endif %}
+                    {% endfor %}
+                    {% if tracking_chain|length==1 %}<small class="text-muted ms-2">Only at initial location — transfer to Site2 to see Site1 > Site2 chain</small>{% endif %}
+                </div>
+
+                <div class="row g-2 mb-3">
+                    <div class="col-6 col-md-3">
+                        <div class="pending-highlight text-center">
+                            <div class="small text-muted">Total Rented</div>
+                            <div class="fw-bold fs-5">{{ "%.0f"|format(rental.total_rented_qty or 0) }}</div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="pending-highlight text-center" style="background:rgba(22,163,74,0.08)">
+                            <div class="small text-muted">Returned</div>
+                            <div class="fw-bold fs-5 text-success">{{ "%.0f"|format(rental.total_returned_qty or 0) }}</div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="pending-highlight text-center" style="background:rgba(239,68,68,0.12)">
+                            <div class="small text-muted">Pending Tools</div>
+                            <div class="fw-bold fs-5 text-danger">{{ "%.0f"|format(pending_tools) }}</div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="pending-highlight text-center">
+                            <div class="small text-muted">Pending Amount</div>
+                            <div class="fw-bold fs-5 text-danger">{{ "{:,.0f}".format(pending_amount) }}</div>
+                            <small>Total: {{ "{:,.0f}".format(rental.total_amount or 0) }} | Paid: {{ "{:,.0f}".format(rental.total_paid or 0) }}</small>
+                        </div>
+                    </div>
+                </div>
+
+                <h6><i class="fas fa-tools me-2"></i>Tools in this Rental</h6>
+                <div class="table-responsive">
+                    <table class="table hdc-table table-sm">
+                        <thead><tr><th>Tool</th><th>Qty Rented</th><th>Returned</th><th>Pending</th><th>Rate</th><th>Amount</th></tr></thead>
+                        <tbody>
+                        {% for it in items %}
+                            <tr>
+                                <td>{{ it.tool.name if it.tool else '-' }}<br><small class="text-muted">{{ it.tool.tool_code if it.tool else '' }}</small></td>
+                                <td>{{ "%.0f"|format(it.qty_rented or 0) }}</td>
+                                <td><span class="badge bg-success">{{ "%.0f"|format(it.qty_returned or 0) }}</span></td>
+                                <td>{% if it.qty_pending>0 %}<span class="badge bg-warning text-dark">{{ "%.0f"|format(it.qty_pending) }}</span>{% else %}<span class="badge bg-success">0</span>{% endif %}</td>
+                                <td>{{ "{:,.0f}".format(it.rate or 0) }}</td>
+                                <td>{{ "{:,.0f}".format(it.amount or 0) }}</td>
+                            </tr>
+                        {% endfor %}
+                        </tbody>
+                        <tfoot><tr class="fw-bold"><td>Total</td><td>{{ "%.0f"|format(rental.total_rented_qty or 0) }}</td><td>{{ "%.0f"|format(rental.total_returned_qty or 0) }}</td><td>{{ "%.0f"|format(pending_tools) }}</td><td></td><td>{{ "{:,.0f}".format(rental.total_amount or 0) }}</td></tr></tfoot>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Movement Logs -->
+        <div class="card hdc-card mt-3">
+            <div class="card-header hdc-card-header"><i class="fas fa-timeline me-2"></i>Movement & Tracking Log — Site1 > Site2 > Site3 > Current (Green)</div>
+            <div class="table-responsive">
+                <table class="table hdc-table table-sm mb-0">
+                    <thead><tr><th>Time</th><th>Type</th><th>From</th><th>To</th><th>Qty</th><th>Notes</th></tr></thead>
+                    <tbody>
+                    {% for log in movement_logs %}
+                        <tr>
+                            <td>{{ log.timestamp.strftime('%Y-%m-%d %H:%M') if log.timestamp else '-' }}</td>
+                            <td><span class="badge {% if log.movement_type=='rental_out' %}bg-primary{% elif log.movement_type=='return_in' %}bg-success{% elif 'transfer' in log.movement_type %}bg-warning text-dark{% else %}bg-secondary{% endif %}">{{ log.movement_type }}</span></td>
+                            <td>{{ log.from_location_label }}</td>
+                            <td><strong class="{% if loop.last %}text-success{% endif %}">{{ log.to_location_label }}</strong> {% if loop.last %}<span class="badge bg-success">Current</span>{% endif %}</td>
+                            <td>{{ "%.0f"|format(log.qty or 0) }}</td>
+                            <td>{{ log.notes or '' }}</td>
+                        </tr>
+                    {% else %}
+                        <tr><td colspan="6" class="text-center text-muted">No movements yet</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Returns & Payments History -->
+        <div class="row g-3 mt-2">
+            <div class="col-md-6">
+                <div class="card hdc-card">
+                    <div class="card-header hdc-card-header"><i class="fas fa-undo me-2"></i>Return History (Full / Partial)</div>
+                    <div class="table-responsive">
+                        <table class="table hdc-table table-sm mb-0">
+                            <thead><tr><th>Date</th><th>Type</th><th>Tools</th><th>Paid</th><th>Pay Type</th></tr></thead>
+                            <tbody>
+                            {% for ret in returns %}
+                                <tr>
+                                    <td>{{ ret.return_date }}</td>
+                                    <td><span class="badge {% if ret.return_type=='full' %}bg-success{% else %}bg-warning text-dark{% endif %}">{{ ret.return_type }}</span></td>
+                                    <td>{{ "%.0f"|format(ret.total_tools_returned or 0) }}</td>
+                                    <td>{{ "{:,.0f}".format(ret.amount_paid or 0) }}</td>
+                                    <td><span class="badge {% if ret.payment_type=='full' %}bg-success{% elif ret.payment_type=='credit' %}bg-danger{% elif ret.payment_type=='partial' %}bg-warning text-dark{% else %}bg-secondary{% endif %}">{{ ret.payment_type }}</span></td>
+                                </tr>
+                                {% for ri in ret.items %}
+                                    <tr><td colspan="5" class="ps-4 small text-muted">↳ {{ ri.tool.name if ri.tool else '' }} — {{ "%.0f"|format(ri.qty_returned) }} — {{ ri.condition_notes or '' }}</td></tr>
+                                {% endfor %}
+                            {% else %}
+                                <tr><td colspan="5" class="text-center text-muted">No returns yet. Example: rented 50, returned 20 (partial) — pending 30 shows.</td></tr>
+                            {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card hdc-card">
+                    <div class="card-header hdc-card-header"><i class="fas fa-money-bill-wave me-2"></i>Payment History — Partial / Credit / Full</div>
+                    <div class="table-responsive">
+                        <table class="table hdc-table table-sm mb-0">
+                            <thead><tr><th>Date</th><th>Amount</th><th>Mode</th><th>Ref</th></tr></thead>
+                            <tbody>
+                            {% for p in payments %}
+                                <tr>
+                                    <td>{{ p.payment_date }}</td>
+                                    <td>{{ "{:,.0f}".format(p.amount or 0) }}</td>
+                                    <td>{{ p.payment_mode }}</td>
+                                    <td>{{ p.reference or '' }}<br><small>{{ p.notes or '' }}</small></td>
+                                </tr>
+                            {% else %}
+                                <tr><td colspan="4" class="text-center text-muted">No payments yet</td></tr>
+                            {% endfor %}
+                            </tbody>
+                            <tfoot><tr class="fw-bold"><td>Total Paid</td><td colspan="3">{{ "{:,.0f}".format(rental.total_paid or 0) }} | Pending {{ "{:,.0f}".format(pending_amount) }}</td></tr></tfoot>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="card hdc-card mt-3">
+                    <div class="card-header hdc-card-header"><i class="fas fa-exchange-alt me-2"></i>Site Transfers — Site1 > Site2 > Site3</div>
+                    <div class="table-responsive">
+                        <table class="table hdc-table table-sm mb-0">
+                            <thead><tr><th>Date</th><th>From</th><th>To</th><th>Qty</th></tr></thead>
+                            <tbody>
+                            {% for tr in transfers %}
+                                <tr><td>{{ tr.transfer_date }}</td><td>{{ tr.from_location_label }}</td><td><span class="badge bg-success">{{ tr.to_location_label }}</span></td><td>{{ "%.0f"|format(tr.qty_transferred or 0) }}</td></tr>
+                            {% else %}
+                                <tr><td colspan="4" class="text-center text-muted">No transfers yet. Use form to move tools Site1 → Site2</td></tr>
+                            {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-4">
+        <!-- RETURN FORM WITH TOGGLE FULL / PARTIAL -->
+        <div class="card hdc-card toggle-card" id="returnCard">
+            <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-undo me-2"></i>Submit Return — Toggle Full / Partial</span>
+                <small class="text-muted">Flexible: tools & money both</small>
+            </div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('hdc_tool_rental_return', rental_id=rental.id) }}" id="returnForm">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+                    <div class="row g-2">
+                        <div class="col-6">
+                            <label class="form-label">Return Date</label>
+                            <input type="date" name="return_date" value="{{ today }}" class="form-control" required>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Return Condition (Toggle)</label>
+                            <select name="return_condition" id="returnCondition" class="form-select" onchange="toggleReturnMode()">
+                                <option value="partial">Partial Tools</option>
+                                <option value="full">Full Tools (All Pending)</option>
+                            </select>
+                        </div>
+
+                        <div class="col-12" id="partialToolsSection">
+                            <label class="form-label fw-bold">Tools to Return — Enter Qty for each (Partial)</label>
+                            <div id="returnItems">
+                                {% for it in items %}
+                                    {% if it.qty_pending>0.001 %}
+                                    <div class="row g-1 mb-1">
+                                        <div class="col-5"><small>{{ it.tool.name if it.tool else '' }}<br>Pending: {{ "%.0f"|format(it.qty_pending) }}</small>
+                                            <input type="hidden" name="rental_item_id[]" value="{{ it.id }}">
+                                        </div>
+                                        <div class="col-3"><input type="number" name="qty_returned[]" class="form-control form-control-sm" min="0" max="{{ it.qty_pending }}" step="0.1" placeholder="Qty"></div>
+                                        <div class="col-4"><input type="text" name="condition_notes[]" class="form-control form-control-sm" placeholder="Condition"></div>
+                                    </div>
+                                    {% endif %}
+                                {% endfor %}
+                            </div>
+                            <small class="text-muted">Example: rented 50, return 20 now, pending 30 auto-calculated.</small>
+                        </div>
+
+                        <div class="col-12 mt-2 border-top pt-2">
+                            <label class="form-label fw-bold">Payment Condition (Toggle)</label>
+                            <select name="payment_condition" id="paymentCondition" class="form-select" onchange="togglePaymentMode()">
+                                <option value="partial">Partial Payment</option>
+                                <option value="full">Full Payment (All Pending Amount)</option>
+                                <option value="credit">Credit — No Pay Now</option>
+                                <option value="no_payment">No Payment (Contract Included)</option>
+                            </select>
+                        </div>
+
+                        <div class="col-6" id="amountPaidSection">
+                            <label class="form-label">Amount Paid Now</label>
+                            <input type="number" name="amount_paid" id="amountPaid" class="form-control" min="0" step="0.01" placeholder="{{ pending_amount }}">
+                            <small class="text-muted">Pending before: {{ "{:,.0f}".format(pending_amount) }}</small>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Payment Mode</label>
+                            <select name="payment_mode" class="form-select">
+                                <option value="cash">Cash</option>
+                                <option value="bank">Bank</option>
+                                <option value="jazzcash">JazzCash / Easypaisa</option>
+                                <option value="online">Online</option>
+                            </select>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Payment Ref</label>
+                            <input type="text" name="payment_reference" class="form-control" placeholder="Ref / Transaction ID">
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Notes</label>
+                            <textarea name="notes" class="form-control" rows="2" placeholder="Return condition, damage, credit reason..."></textarea>
+                        </div>
+                        <div class="col-12">
+                            <div class="alert alert-info py-2 small">
+                                <strong>How partial works:</strong><br>
+                                - Tools: Enter qty returned per tool. System calculates pending tools = rented - returned.<br>
+                                - Money: Enter amount paid. System calculates pending money = total - paid.<br>
+                                - Toggle Full: auto-fills all pending tools & full pending amount.<br>
+                                - Credit: no payment now, pending stays, status = credit.
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            <button type="submit" class="btn btn-mint w-100"><i class="fas fa-check me-1"></i>Submit Return & Calculate Pendings</button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Separate Payment -->
+        <div class="card hdc-card mt-3">
+            <div class="card-header hdc-card-header"><i class="fas fa-money-bill me-2"></i>Add Payment Only (Without Tools Return)</div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('hdc_tool_rental_payment', rental_id=rental.id) }}">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+                    <div class="row g-2">
+                        <div class="col-6"><label class="form-label">Date</label><input type="date" name="payment_date" value="{{ today }}" class="form-control" required></div>
+                        <div class="col-6"><label class="form-label">Amount *</label><input type="number" name="amount" class="form-control" min="0.01" step="0.01" required></div>
+                        <div class="col-6"><label class="form-label">Mode</label><select name="payment_mode" class="form-select"><option value="cash">Cash</option><option value="bank">Bank</option><option value="jazzcash">JazzCash</option><option value="online">Online</option></select></div>
+                        <div class="col-6"><label class="form-label">Ref</label><input type="text" name="reference" class="form-control"></div>
+                        <div class="col-12"><label class="form-label">Notes</label><input type="text" name="notes" class="form-control" placeholder="Partial payment, credit clear, etc"></div>
+                        <div class="col-12"><button class="btn btn-outline-success w-100" type="submit"><i class="fas fa-plus me-1"></i>Add Payment</button></div>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Transfer Form -->
+        <div class="card hdc-card mt-3">
+            <div class="card-header hdc-card-header"><i class="fas fa-route me-2"></i>Move Tools Site1 → Site2 → Site3 → Current Green</div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('hdc_tool_rental_transfer', rental_id=rental.id) }}">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+                    <div class="row g-2">
+                        <div class="col-12">
+                            <label class="form-label">Current Location</label>
+                            <input type="text" class="form-control" value="{{ rental.current_location_label }}" readonly>
+                            <small class="text-muted">Chain: {{ " > ".join(rental.tracking_chain) }}</small>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">To Type</label>
+                            <select name="to_type" id="toType" class="form-select" onchange="toggleToType()">
+                                <option value="site">Another Site / Project</option>
+                                <option value="customer">External Customer</option>
+                                <option value="warehouse">Back to Warehouse</option>
+                            </select>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Transfer Date</label>
+                            <input type="date" name="transfer_date" value="{{ today }}" class="form-control" required>
+                        </div>
+                        <div class="col-12" id="toSiteFields">
+                            <div class="row g-2">
+                                <div class="col-6">
+                                    <label class="form-label">To Project / Site</label>
+                                    <select name="to_project_id" class="form-select">
+                                        <option value="">Select Site</option>
+                                        {% for p in projects %}
+                                        <option value="{{ p.id }}">{{ p.name }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label">To Stage (Optional)</label>
+                                    <select name="to_stage_id" class="form-select">
+                                        <option value="">No Stage</option>
+                                        {% for s in stages %}
+                                        <option value="{{ s.id }}">{{ s.name }} - {{ s.project.name if s.project else '' }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-12 d-none" id="toCustomerFields">
+                            <label class="form-label">To Customer Name</label>
+                            <input type="text" name="to_customer_name" class="form-control" placeholder="Customer / Person name">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Qty Transferred (Optional, default all pending)</label>
+                            <input type="number" name="qty_transferred" class="form-control" min="0" step="0.1" placeholder="{{ pending_tools }}">
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Notes</label>
+                            <textarea name="notes" class="form-control" rows="2" placeholder="Moved from Site1 to Site2 due to..."></textarea>
+                        </div>
+                        <div class="col-12">
+                            <button type="submit" class="btn btn-warning w-100"><i class="fas fa-exchange-alt me-1"></i>Transfer & Update Chain (Site1 > Site2 > Site3)</button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div class="card hdc-card mt-3">
+            <div class="card-header hdc-card-header"><i class="fas fa-info-circle me-2"></i>Rental Info</div>
+            <div class="card-body small">
+                <p><strong>Code:</strong> {{ rental.rental_code }}</p>
+                <p><strong>Billing:</strong> {{ rental.billing_type }} {% if rental.billing_type=='no_charge' %}(Payment already in contract){% endif %}</p>
+                <p><strong>Notes:</strong> {{ rental.notes or '-' }}</p>
+                <p><strong>Created:</strong> {{ rental.created_at }}</p>
+                <a href="{{ url_for('hdc_tool_rental') }}" class="btn btn-outline-secondary btn-sm w-100 mt-2">Back to Rentals</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function toggleReturnMode(){
+    const mode = document.getElementById('returnCondition').value;
+    const card = document.getElementById('returnCard');
+    const partialSec = document.getElementById('partialToolsSection');
+    if(mode==='full'){
+        card.classList.add('full-mode');
+        partialSec.style.opacity='0.6';
+        // auto fill qty inputs with max
+        document.querySelectorAll('#returnItems input[name=\"qty_returned[]\"]').forEach(inp=>{
+            const max = inp.getAttribute('max');
+            if(max) inp.value = max;
+        });
+    } else {
+        card.classList.remove('full-mode');
+        partialSec.style.opacity='1';
+    }
+}
+function togglePaymentMode(){
+    const mode = document.getElementById('paymentCondition').value;
+    const amtSec = document.getElementById('amountPaidSection');
+    const amtInput = document.getElementById('amountPaid');
+    if(mode==='full'){
+        amtSec.style.display='';
+        // set to pending
+        amtInput.value = '{{ pending_amount }}';
+        amtInput.readOnly = true;
+    } else if(mode==='credit' || mode==='no_payment'){
+        amtSec.style.display='none';
+        amtInput.value = '0';
+    } else {
+        amtSec.style.display='';
+        amtInput.readOnly = false;
+        amtInput.value = '';
+    }
+}
+function toggleToType(){
+    const t = document.getElementById('toType').value;
+    document.getElementById('toSiteFields').classList.toggle('d-none', t!=='site');
+    document.getElementById('toCustomerFields').classList.toggle('d-none', t!=='customer');
+}
+</script>
+{% endblock %}

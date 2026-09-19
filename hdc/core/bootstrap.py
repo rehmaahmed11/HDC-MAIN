@@ -12,7 +12,7 @@ from werkzeug.security import generate_password_hash
 
 from hdc.config import get_runtime_settings
 from hdc.core.flags import _runtime_flag_get, _runtime_flag_set
-from hdc.core.schema import _ensure_accounts_schema, _ensure_cashflow_schema, _ensure_owner_payment_void_schema, _ensure_purchase_v2_schema, _ensure_runtime_flags_table, _ensure_timeentry_attendance_day_schema, _ensure_timeentry_unique_indexes, _run_migrations
+from hdc.core.schema import _ensure_accounts_schema, _ensure_cashflow_schema, _ensure_owner_payment_void_schema, _ensure_purchase_v2_schema, _ensure_runtime_flags_table, _ensure_timeentry_attendance_day_schema, _ensure_timeentry_unique_indexes, _ensure_tool_rental_schema, _run_migrations
 from hdc.extensions import db
 from hdc.models.accounts import ExpenseCategory
 from hdc.models.auth import HDCUser
@@ -51,6 +51,7 @@ def _bootstrap_hdc():
     _ensure_subcontract_payment_void_schema()
     _ensure_accounts_schema()
     _ensure_cashflow_schema()
+    _ensure_tool_rental_schema()
     _ensure_runtime_flags_table()
     _migrate_legacy_done_markers_to_db()
     _migrate_attendance_to_time_entries()

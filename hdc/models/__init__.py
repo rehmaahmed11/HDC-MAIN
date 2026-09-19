@@ -8,6 +8,7 @@ from hdc.models.projects import CustomFormula, Estimation, EstimationStage, Proj
 from hdc.models.subcontract import SubcontractAttendance, SubcontractEvent, SubcontractLabourAttendance, SubcontractLabourPayment, SubcontractLabourWorker, SubcontractPayment, Subcontractor
 from hdc.models.workforce import Attendance, AttendanceDay, AttendanceMark, LabourLedger, LabourRateHistory, PayrollItem, PayrollRun, TimeEntry, Worker, WorkerRate, WorkerTrade
 from hdc.models.cashflow import AccountReconciliation, CashDayAccountPosition, CashDayLock, CashFlowCategory, CashFlowEntry, CashFlowEntryAudit, CashFlowParty, CashFlowSubcategory
+from hdc.models.tool_rental import Tool, ToolCategory, ToolMovementLog, ToolRental, ToolRentalItem, ToolRentalPayment, ToolRentalReturn, ToolRentalReturnItem, ToolRentalTransfer
 
 __all__ = [
     "Account",
@@ -67,6 +68,15 @@ __all__ = [
     "Supplier",
     "SupplierLedger",
     "TimeEntry",
+    "Tool",
+    "ToolCategory",
+    "ToolMovementLog",
+    "ToolRental",
+    "ToolRentalItem",
+    "ToolRentalPayment",
+    "ToolRentalReturn",
+    "ToolRentalReturnItem",
+    "ToolRentalTransfer",
     "UsageLogV2",
     "UserActivity",
     "Worker",

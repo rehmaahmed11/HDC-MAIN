@@ -1,0 +1,151 @@
+{% extends "shared/base.html" %}
+{% block title %}Tool Tracking - Where Are My Tools{% endblock %}
+{% block page_heading %}Tool Tracking - Site1 > Site2 > Site3 > Current Green Active{% endblock %}
+
+{% block content %}
+<style>
+.chain { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+.chain .c { padding:4px 10px; border-radius:999px; font-size:0.72rem; font-weight:600; border:1px solid var(--card-border); background: var(--card-header-bg); }
+.chain .c.active { background: linear-gradient(135deg,#16a34a,#22c55e); color:#fff; border-color:transparent; box-shadow:0 4px 12px rgba(34,197,94,0.35); }
+.chain .arrow { opacity:0.4; font-weight:800; }
+.tool-row { border-left:4px solid transparent; }
+.tool-row.has-pending { border-left-color:#f59e0b; }
+</style>
+
+<div class="row g-3 mt-1">
+    <div class="col-6 col-md-3"><div class="kpi-card kpi-blue"><div class="kpi-icon"><i class="fas fa-tools"></i></div><div class="kpi-value">{{ "%.0f"|format(kpis.total_tools) }}</div><div class="kpi-label">Total Owned</div></div></div>
+    <div class="col-6 col-md-3"><div class="kpi-card kpi-green"><div class="kpi-icon"><i class="fas fa-warehouse"></i></div><div class="kpi-value">{{ "%.0f"|format(kpis.available) }}</div><div class="kpi-label">In Warehouse</div></div></div>
+    <div class="col-6 col-md-3"><div class="kpi-card kpi-orange"><div class="kpi-icon"><i class="fas fa-map-location-dot"></i></div><div class="kpi-value">{{ "%.0f"|format(kpis.rented_out) }}</div><div class="kpi-label">Out on Sites / Customers</div></div></div>
+    <div class="col-6 col-md-3"><div class="kpi-card kpi-purple"><div class="kpi-icon"><i class="fas fa-route"></i></div><div class="kpi-value">{{ locations|length }}</div><div class="kpi-label">Tools Tracked</div></div></div>
+</div>
+
+<div class="card hdc-card mt-3">
+    <div class="card-header hdc-card-header d-flex justify-content-between">
+        <span><i class="fas fa-search me-2"></i>Search Where Are All My Tools — by Site / Tool / Text</span>
+        <div class="d-flex gap-2">
+            <a href="{{ url_for('hdc_tool_rental') }}" class="btn btn-sm btn-outline-secondary">Rentals</a>
+            <a href="{{ url_for('hdc_tool_rental_reports') }}" class="btn btn-sm btn-outline-secondary">Reports</a>
+            <a href="{{ url_for('hdc_tool_rental_inventory') }}" class="btn btn-sm btn-mint">Inventory</a>
+        </div>
+    </div>
+    <div class="card-body">
+        <form method="GET" class="row g-2">
+            <div class="col-md-3">
+                <label class="form-label">Tool</label>
+                <select name="tool_id" class="form-select">
+                    <option value="">All Tools</option>
+                    {% for t in tools %}
+                    <option value="{{ t.id }}" {% if selected_tool==t.id %}selected{% endif %}>{{ t.name }} ({{ t.tool_code }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Site / Project</label>
+                <select name="project_id" class="form-select">
+                    <option value="">All Sites</option>
+                    {% for p in projects %}
+                    <option value="{{ p.id }}" {% if selected_project==p.id %}selected{% endif %}>{{ p.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Search Text</label>
+                <input type="text" name="q" value="{{ q or '' }}" class="form-control" placeholder="Tool name, code">
+            </div>
+            <div class="col-md-3 d-flex align-items-end gap-2">
+                <button type="submit" class="btn btn-mint"><i class="fas fa-search me-1"></i>Search Tracking</button>
+                <a href="{{ url_for('hdc_tool_rental_tracking') }}" class="btn btn-outline-secondary">Reset</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card hdc-card mt-3">
+    <div class="card-header hdc-card-header"><i class="fas fa-map me-2"></i>Global Tool Locations — Chain Shows Movement History, Current in Green</div>
+    <div class="table-responsive">
+        <table class="table hdc-table table-sm mb-0">
+            <thead><tr><th>Tool</th><th>Total / Avl / Out</th><th>Current Location (Green Active)</th><th>Full Chain — Site1 > Site2 > Site3 > Site4</th><th>Last Movement</th><th>Action</th></tr></thead>
+            <tbody>
+            {% for loc in locations %}
+                <tr class="tool-row {% if loc.rented_out_qty>0 %}has-pending{% endif %}">
+                    <td><strong>{{ loc.tool.name }}</strong><br><small class="badge bg-secondary">{{ loc.tool.tool_code }}</small> {{ loc.tool.unit }} | {{ loc.tool.category.name if loc.tool.category else 'No Cat' }}</td>
+                    <td>
+                        Total: {{ "%.0f"|format(loc.tool.total_quantity or 0) }}<br>
+                        Avl: <span class="badge bg-success">{{ "%.0f"|format(loc.available_qty) }}</span><br>
+                        Out: <span class="badge bg-warning text-dark">{{ "%.0f"|format(loc.rented_out_qty) }}</span>
+                    </td>
+                    <td><span class="badge bg-success" style="font-size:0.8rem; padding:6px 12px"><i class="fas fa-location-dot me-1"></i>{{ loc.current_label }}</span></td>
+                    <td style="max-width:380px">
+                        <div class="chain">
+                            {% if loc.chain|length==0 %}
+                                <span class="c">Warehouse / Store</span>
+                            {% else %}
+                                {% for m in loc.chain %}
+                                    <span class="c {% if loop.last %}active{% endif %}" title="{{ m.timestamp }} — {{ m.movement_type }} — {{ m.qty }} qty">
+                                        {{ m.to_location_label }}
+                                    </span>
+                                    {% if not loop.last %}<span class="arrow">›</span>{% endif %}
+                                {% endfor %}
+                            {% endif %}
+                        </div>
+                        <small class="text-muted">Example: Site1 > Site2 > Site3 > Site4 (current green)</small>
+                    </td>
+                    <td>
+                        {% if loc.last_log %}
+                            {{ loc.last_log.timestamp.strftime('%Y-%m-%d %H:%M') if loc.last_log.timestamp else '' }}<br>
+                            <span class="badge bg-secondary">{{ loc.last_log.movement_type }}</span><br>
+                            <small>{{ loc.last_log.from_location_label }} → {{ loc.last_log.to_location_label }}</small><br>
+                            <small>Qty: {{ "%.0f"|format(loc.last_log.qty or 0) }}</small>
+                        {% else %}
+                            <span class="text-muted">In Warehouse — never rented</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#detailModal{{ loc.tool.id }}"><i class="fas fa-eye"></i> History</button>
+                    </td>
+                </tr>
+
+                <!-- Detail Modal -->
+                <div class="modal fade" id="detailModal{{ loc.tool.id }}" tabindex="-1">
+                  <div class="modal-dialog modal-lg">
+                    <div class="modal-content hdc-modal">
+                      <div class="modal-header"><h6 class="modal-title">{{ loc.tool.name }} — Movement History</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                      <div class="modal-body">
+                        <div class="chain mb-3">
+                            {% for m in loc.chain %}
+                                <span class="c {% if loop.last %}active{% endif %}">{{ m.to_location_label }}</span>
+                                {% if not loop.last %}<span class="arrow">›</span>{% endif %}
+                            {% endfor %}
+                            {% if loc.chain|length==0 %}<span class="c">Warehouse / Store (No movement)</span>{% endif %}
+                        </div>
+                        <div class="table-responsive">
+                            <table class="table hdc-table table-sm">
+                                <thead><tr><th>Date</th><th>Type</th><th>From</th><th>To</th><th>Qty</th><th>Rental</th></tr></thead>
+                                <tbody>
+                                {% for m in loc.chain %}
+                                    <tr>
+                                        <td>{{ m.timestamp.strftime('%Y-%m-%d %H:%M') if m.timestamp else '' }}</td>
+                                        <td><span class="badge bg-secondary">{{ m.movement_type }}</span></td>
+                                        <td>{{ m.from_location_label }}</td>
+                                        <td><strong>{{ m.to_location_label }}</strong> {% if loop.last %}<span class="badge bg-success">Current</span>{% endif %}</td>
+                                        <td>{{ "%.0f"|format(m.qty or 0) }}</td>
+                                        <td>{% if m.rental_id %}<a href="{{ url_for('hdc_tool_rental_detail', rental_id=m.rental_id) }}">{{ m.rental.rental_code if m.rental else m.rental_id }}</a>{% else %}-{% endif %}</td>
+                                    </tr>
+                                {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                      </div>
+                      <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button></div>
+                    </div>
+                  </div>
+                </div>
+
+            {% else %}
+                <tr><td colspan="6" class="text-center text-muted py-4">No tools found. Add tools in Inventory first.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
