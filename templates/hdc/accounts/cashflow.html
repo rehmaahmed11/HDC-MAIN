@@ -1,0 +1,338 @@
+{% extends "shared/base.html" %}
+{% block title %}Cash Flow{% endblock %}
+{% block page_heading %}Cash Flow — Daily Money In &amp; Out{% endblock %}
+
+{% block content %}
+
+{# ── Quick record ────────────────────────────────────────────────────────── #}
+<div class="card hdc-card mb-3">
+    <div class="card-header hdc-card-header">
+        <span><i class="fas fa-plus-circle me-2"></i>Record Daily Flow</span>
+        <span class="small text-muted">Money In / Money Out / Cash→Bank Transfer</span>
+    </div>
+    <div class="card-body py-3">
+        <form method="POST" id="cashflowQuickForm" class="row g-2 align-items-end">
+            <input type="hidden" name="action" value="record_flow">
+            <div class="col-12 col-md-3">
+                <label class="form-label">Flow Kind <span class="text-danger">*</span></label>
+                <select name="flow_kind" id="cfKind" class="form-select" required>
+                    <option value="">— choose —</option>
+                    <option value="in">Money In (receipt)</option>
+                    <option value="out">Money Out (payment)</option>
+                    <option value="transfer">Internal Transfer (cash ↔ bank)</option>
+                </select>
+            </div>
+            <div class="col-12 col-md-2">
+                <label class="form-label">Date <span class="text-danger">*</span></label>
+                <input type="date" name="date" class="form-control" value="{{ today }}" required>
+            </div>
+            <div class="col-12 col-md-2">
+                <label class="form-label">Amount (PKR) <span class="text-danger">*</span></label>
+                <input type="number" step="0.01" min="0.01" name="amount" class="form-control" value="" required>
+            </div>
+            <div class="col-12 col-md-3" id="cfFromWrap">
+                <label class="form-label">From / Received Into <span class="text-danger">*</span></label>
+                <select name="from_account_id" id="cfFrom" class="form-select">
+                    <option value="">— choose —</option>
+                </select>
+            </div>
+            <div class="col-12 col-md-3" id="cfToWrap">
+                <label class="form-label">To <span class="text-danger">*</span></label>
+                <select name="to_account_id" id="cfTo" class="form-select">
+                    <option value="">— choose —</option>
+                </select>
+            </div>
+            <div class="col-12 col-md-2" id="cfPartyWrap">
+                <label class="form-label">Party (name)</label>
+                <input type="text" name="party_name" id="cfParty" class="form-control" maxlength="120" placeholder="e.g. M. Akram / Cash">
+            </div>
+            <div class="col-12 col-md-2" id="cfProjectWrap">
+                <label class="form-label">Project (optional)</label>
+                <select name="project_id" id="cfProject" class="form-select">
+                    <option value="">— none —</option>
+                    {% for p in projects %}
+                    <option value="{{ p.id }}">{{ p.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-12 col-md-2" id="cfCategoryWrap">
+                <label class="form-label">Category</label>
+                <select name="category" id="cfCategory" class="form-select">
+                    {% for c in txn_categories %}
+                    <option value="{{ c }}">{{ c|title }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-12 col-md-3" id="cfNoteWrap">
+                <label class="form-label">Note</label>
+                <input type="text" name="note" class="form-control" maxlength="200" placeholder="Short description">
+            </div>
+            <div class="col-12 col-md-2" id="cfRefWrap">
+                <label class="form-label">Reference</label>
+                <input type="text" name="reference_id" class="form-control" maxlength="120" placeholder="e.g. cheque #">
+            </div>
+            <div class="col-12 col-md-2 d-flex">
+                <button type="submit" class="btn btn-success w-100"><i class="fas fa-save me-1"></i>Record Flow</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{# ── Filters ─────────────────────────────────────────────────────────────── #}
+<div class="card hdc-card mb-3">
+    <div class="card-body py-3">
+        <form method="GET" class="row g-2 align-items-end">
+            <div class="col-6 col-md-2">
+                <label class="form-label">From Date</label>
+                <input type="date" class="form-control" name="date_from" value="{{ filter_date_from }}">
+            </div>
+            <div class="col-6 col-md-2">
+                <label class="form-label">To Date</label>
+                <input type="date" class="form-control" name="date_to" value="{{ filter_date_to }}">
+            </div>
+            <div class="col-6 col-md-2">
+                <label class="form-label">Account</label>
+                <select name="account_id" class="form-select">
+                    <option value="">All accounts</option>
+                    {% for a in accounts %}
+                    <option value="{{ a.id }}" {% if filter_account_id == a.id %}selected{% endif %}>{{ a.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-6 col-md-2">
+                <label class="form-label">Cash / Bank</label>
+                <select name="account_mode" class="form-select">
+                    <option value="">Both</option>
+                    <option value="cash" {% if filter_account_mode == 'cash' %}selected{% endif %}>Cash only</option>
+                    <option value="bank" {% if filter_account_mode == 'bank' %}selected{% endif %}>Bank only</option>
+                </select>
+            </div>
+            <div class="col-6 col-md-2">
+                <label class="form-label">Category</label>
+                <select name="category" class="form-select">
+                    <option value="">All categories</option>
+                    {% for c in txn_categories %}
+                    <option value="{{ c }}" {% if filter_category == c %}selected{% endif %}>{{ c|title }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-6 col-md-2">
+                <label class="form-label">Direction</label>
+                <select name="direction" class="form-select">
+                    <option value="">All</option>
+                    {% for k, lbl in direction_filters.items() %}
+                    <option value="{{ k }}" {% if filter_direction == k %}selected{% endif %}>{{ lbl }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-6 col-md-2">
+                <label class="form-label">Project</label>
+                <select name="project_id" class="form-select">
+                    <option value="">All projects</option>
+                    {% for p in projects %}
+                    <option value="{{ p.id }}" {% if filter_project_id == p.id %}selected{% endif %}>{{ p.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-6 col-md-2">
+                <label class="form-label">Party / Note</label>
+                <input type="text" class="form-control" name="party_name" value="{{ filter_party_name }}" placeholder="search…">
+            </div>
+            <div class="col-12 d-flex gap-2">
+                <button type="submit" class="btn btn-outline-primary"><i class="fas fa-magnifying-glass me-1"></i>Apply Filters</button>
+                <a href="{{ url_for('hdc_cashflow') }}" class="btn btn-outline-secondary">Reset</a>
+                <a href="{{ url_for('hdc_cashflow_report') }}" class="btn btn-outline-dark ms-auto"><i class="fas fa-chart-column me-1"></i>Cash Flow Report</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+{# ── KPI summary (whole filtered range) ──────────────────────────────────── #}
+<div class="row g-3 mb-3">
+    <div class="col-6 col-md">
+        <div class="kpi-card kpi-profit">
+            <div class="kpi-label">Money In</div>
+            <div class="kpi-value">{{ "{:,.0f}".format(summary.in_total or 0) }}</div>
+            <div class="kpi-sub">PKR · {{ summary.in_count }} receipt{{ '' if summary.in_count == 1 else 's' }}</div>
+        </div>
+    </div>
+    <div class="col-6 col-md">
+        <div class="kpi-card kpi-loss">
+            <div class="kpi-label">Money Out</div>
+            <div class="kpi-value">{{ "{:,.0f}".format(summary.out_total or 0) }}</div>
+            <div class="kpi-sub">PKR · {{ summary.out_count }} payment{{ '' if summary.out_count == 1 else 's' }}</div>
+        </div>
+    </div>
+    <div class="col-6 col-md">
+        <div class="kpi-card {% if summary.net_total >= 0 %}kpi-blue{% else %}kpi-orange{% endif %}">
+            <div class="kpi-label">Net Flow</div>
+            <div class="kpi-value">{{ "{:,.0f}".format(summary.net_total or 0) }}</div>
+            <div class="kpi-sub">In − Out (transfers excluded)</div>
+        </div>
+    </div>
+    <div class="col-6 col-md">
+        <div class="kpi-card kpi-teal">
+            <div class="kpi-label">Internal Transfers</div>
+            <div class="kpi-value">{{ "{:,.0f}".format(summary.internal_total or 0) }}</div>
+            <div class="kpi-sub">PKR · cash ↔ bank ({{ summary.internal_count }})</div>
+        </div>
+    </div>
+    <div class="col-6 col-md">
+        <div class="kpi-card kpi-blue">
+            <div class="kpi-label">Days</div>
+            <div class="kpi-value">{{ summary.day_count }}</div>
+            <div class="kpi-sub">{{ summary.row_count }} record{{ '' if summary.row_count == 1 else 's' }} in range</div>
+        </div>
+    </div>
+</div>
+
+{# ── Daily records ───────────────────────────────────────────────────────── #}
+<div class="card hdc-card">
+    <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+        <span><i class="fas fa-list me-2"></i>Daily Records</span>
+        <span class="small text-muted">grouped by day · newest first</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table hdc-table table-sm mb-0 align-middle">
+            <thead>
+                <tr>
+                    <th class="w-1">#</th>
+                    <th>Date</th>
+                    <th>Type</th>
+                    <th>Category</th>
+                    <th>From</th>
+                    <th>To / Party</th>
+                    <th>Project</th>
+                    <th class="text-end">In (PKR)</th>
+                    <th class="text-end">Out (PKR)</th>
+                    <th class="text-end">Xfer (PKR)</th>
+                    <th>Note</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for day in page_day_groups %}
+                <tr class="cf-day-header">
+                    <td colspan="11">
+                        <strong>{{ day.date.strftime('%a, %d %b %Y') }}</strong>
+                        <span class="text-success ms-2">In: {{ "{:,.0f}".format(day.in_total or 0) }}</span>
+                        <span class="text-danger ms-2">Out: {{ "{:,.0f}".format(day.out_total or 0) }}</span>
+                        {% if day.internal_total %}<span class="text-info ms-2">Xfer: {{ "{:,.0f}".format(day.internal_total or 0) }}</span>{% endif %}
+                        <span class="ms-2 {% if day.net >= 0 %}text-success{% else %}text-danger{% endif %}">Net: {{ "{:,.0f}".format(day.net or 0) }}</span>
+                        <span class="text-muted ms-2 small">{{ day.count }} entr{{ 'y' if day.count == 1 else 'ies' }}</span>
+                    </td>
+                </tr>
+                {% for r in day.rows %}
+                <tr {{ r|hdc_row_attrs }}>
+                    <td><a href="{{ url_for('hdc_account_transaction_receipt', txn_id=r.id) }}">#{{ r.id }}</a></td>
+                    <td class="text-nowrap">{{ r.date.strftime('%d %b %y') }}</td>
+                    <td>
+                        {% if r.direction == 'in' %}<span class="badge bg-success">In</span>
+                        {% elif r.direction == 'out' %}<span class="badge bg-danger">Out</span>
+                        {% else %}<span class="badge bg-secondary">Xfer</span>{% endif %}
+                        <span class="small">{{ r.type_label }}</span>
+                    </td>
+                    <td><span class="badge bg-light text-dark border">{{ r.category|title }}</span></td>
+                    <td>{{ r.from_account }}</td>
+                    <td>{{ r.to_party }}</td>
+                    <td class="small">{{ r.project or '—' }}</td>
+                    <td class="text-end text-success fw-semibold">{% if r.direction == 'in' %}{{ "{:,.0f}".format(r.amount) }}{% endif %}</td>
+                    <td class="text-end text-danger fw-semibold">{% if r.direction == 'out' %}{{ "{:,.0f}".format(r.amount) }}{% endif %}</td>
+                    <td class="text-end text-info">{% if r.direction == 'internal' %}{{ "{:,.0f}".format(r.amount) }}{% endif %}</td>
+                    <td class="small text-muted" title="{{ r.note }} {{ r.reference_id }}">{{ (r.note or r.reference_id or '—')[:60] }}</td>
+                </tr>
+                {% endfor %}
+                {% else %}
+                <tr>
+                    <td colspan="11" class="text-center text-muted py-4">
+                        No cash flow records for the selected filters.
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% include "shared/_pagination.html" %}
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    var kindSel = document.getElementById('cfKind');
+    if (!kindSel) return;
+
+    var fromSel = document.getElementById('cfFrom');
+    var toSel = document.getElementById('cfTo');
+    var fromWrap = document.getElementById('cfFromWrap');
+    var toWrap = document.getElementById('cfToWrap');
+    var partyWrap = document.getElementById('cfPartyWrap');
+    var partyInput = document.getElementById('cfParty');
+    var projectWrap = document.getElementById('cfProjectWrap');
+    var categorySel = document.getElementById('cfCategory');
+    var fromLabel = fromWrap.querySelector('label');
+    var toLabel = toWrap.querySelector('label');
+
+    // Preload options (server renders them as empty; fill from data-* below).
+    var companyAccounts = {{ company_accounts | tojson }};
+    var allAccounts = {{ accounts | tojson }};
+    var nonCompanyAccounts = {{ non_company_accounts | tojson }};
+
+    function opt(list) {
+        var html = '<option value="">— choose —</option>';
+        list.forEach(function (a) {
+            var tag = (a.type === 'bank') ? ' · Bank' : ' · Cash';
+            html += '<option value="' + a.id + '">' + a.name + tag + '</option>';
+        });
+        return html;
+    }
+
+    function apply() {
+        var kind = kindSel.value;
+        if (kind === 'in') {
+            fromSel.innerHTML = opt(allAccounts);
+            toSel.innerHTML = opt(companyAccounts);
+            fromLabel.innerHTML = 'From (source) <span class="text-muted small">optional — party name works too</span>';
+            toLabel.innerHTML = 'Receive Into (company) <span class="text-danger">*</span>';
+            partyInput.placeholder = 'Who paid you? (optional)';
+            partyInput.required = false;
+            projectWrap.classList.remove('d-none');
+            categorySel.value = 'income';
+        } else if (kind === 'out') {
+            opt(companyAccounts, fromSel);
+            opt(nonCompanyAccounts, toSel);
+            fromLabel.innerHTML = 'Pay From (company) <span class="text-danger">*</span>';
+            toLabel.innerHTML = 'Pay To <span class="text-muted small">optional if party name given</span>';
+            partyInput.placeholder = 'Who receives? (required if no account)';
+            partyInput.required = false;
+            projectWrap.classList.remove('d-none');
+            categorySel.value = 'expense';
+        } else if (kind === 'transfer') {
+            opt(companyAccounts, fromSel);
+            opt(companyAccounts, toSel);
+            fromLabel.innerHTML = 'From (company) <span class="text-danger">*</span>';
+            toLabel.innerHTML = 'To (company) <span class="text-danger">*</span>';
+            partyInput.placeholder = '';
+            partyInput.required = false;
+            partyWrap.classList.add('d-none');
+            projectWrap.classList.add('d-none');
+            categorySel.value = 'transfer';
+        } else {
+            partyWrap.classList.add('d-none');
+            projectWrap.classList.add('d-none');
+        }
+    }
+
+    kindSel.addEventListener('change', apply);
+    // sensible default state
+    kindSel.value = 'in';
+    apply();
+})();
+</script>
+<style>
+    .cf-day-header td {
+        background: var(--hdc-soft, rgba(13, 110, 253, 0.06));
+        font-size: 0.92rem;
+    }
+</style>
+{% endblock %}

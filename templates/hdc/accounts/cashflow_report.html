@@ -1,0 +1,256 @@
+{% extends "shared/base.html" %}
+{% block title %}Cash Flow Report{% endblock %}
+{% block page_heading %}Cash Flow Report{% endblock %}
+
+{% block content %}
+
+{# ── Filters ─────────────────────────────────────────────────────────────── #}
+<div class="card hdc-card mb-3">
+    <div class="card-header hdc-card-header">
+        <span><i class="fas fa-filter me-2"></i>Report Filters</span>
+        <span class="small text-muted">every filter below applies to all tables</span>
+    </div>
+    <div class="card-body py-3">
+        <form method="GET" class="row g-2 align-items-end">
+            <div class="col-6 col-md-2">
+                <label class="form-label">From Date</label>
+                <input type="date" class="form-control" name="date_from" value="{{ filter_date_from }}">
+            </div>
+            <div class="col-6 col-md-2">
+                <label class="form-label">To Date</label>
+                <input type="date" class="form-control" name="date_to" value="{{ filter_date_to }}">
+            </div>
+            <div class="col-6 col-md-2">
+                <label class="form-label">Account</label>
+                <select name="account_id" class="form-select">
+                    <option value="">All accounts</option>
+                    {% for a in accounts %}
+                    <option value="{{ a.id }}" {% if filter_account_id == a.id %}selected{% endif %}>{{ a.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-6 col-md-2">
+                <label class="form-label">Cash / Bank</label>
+                <select name="account_mode" class="form-select">
+                    <option value="">Both</option>
+                    <option value="cash" {% if filter_account_mode == 'cash' %}selected{% endif %}>Cash only</option>
+                    <option value="bank" {% if filter_account_mode == 'bank' %}selected{% endif %}>Bank only</option>
+                </select>
+            </div>
+            <div class="col-6 col-md-2">
+                <label class="form-label">Category</label>
+                <select name="category" class="form-select">
+                    <option value="">All categories</option>
+                    {% for c in txn_categories %}
+                    <option value="{{ c }}" {% if filter_category == c %}selected{% endif %}>{{ c|title }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-6 col-md-2">
+                <label class="form-label">Direction</label>
+                <select name="direction" class="form-select">
+                    <option value="">All</option>
+                    {% for k, lbl in direction_filters.items() %}
+                    <option value="{{ k }}" {% if filter_direction == k %}selected{% endif %}>{{ lbl }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-6 col-md-2">
+                <label class="form-label">Project</label>
+                <select name="project_id" class="form-select">
+                    <option value="">All projects</option>
+                    {% for p in projects %}
+                    <option value="{{ p.id }}" {% if filter_project_id == p.id %}selected{% endif %}>{{ p.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-6 col-md-2">
+                <label class="form-label">Party / Note</label>
+                <input type="text" class="form-control" name="party_name" value="{{ filter_party_name }}" placeholder="search…">
+            </div>
+            <div class="col-12 d-flex gap-2 flex-wrap">
+                <button type="submit" class="btn btn-outline-primary"><i class="fas fa-magnifying-glass me-1"></i>Apply</button>
+                <a href="{{ url_for('hdc_cashflow_report') }}" class="btn btn-outline-secondary">Reset</a>
+                <a href="{{ export_url }}" class="btn btn-outline-success"><i class="fas fa-file-csv me-1"></i>Export CSV</a>
+                <a href="{{ records_url }}" class="btn btn-outline-dark"><i class="fas fa-list me-1"></i>Daily Records</a>
+                <a href="{{ url_for('hdc_cashflow') }}" class="btn btn-outline-secondary ms-auto">Back To Cash Flow</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+{# ── Summary cards ───────────────────────────────────────────────────────── #}
+<div class="row g-3 mb-3">
+    <div class="col-6 col-md-3">
+        <div class="kpi-card kpi-profit">
+            <div class="kpi-label">Total Money In</div>
+            <div class="kpi-value">{{ "{:,.0f}".format(summary.in_total or 0) }}</div>
+            <div class="kpi-sub">PKR · {{ summary.in_count }} entries</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="kpi-card kpi-loss">
+            <div class="kpi-label">Total Money Out</div>
+            <div class="kpi-value">{{ "{:,.0f}".format(summary.out_total or 0) }}</div>
+            <div class="kpi-sub">PKR · {{ summary.out_count }} entries</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="kpi-card {% if summary.net_total >= 0 %}kpi-blue{% else %}kpi-orange{% endif %}">
+            <div class="kpi-label">Net Cash Flow</div>
+            <div class="kpi-value">{{ "{:,.0f}".format(summary.net_total or 0) }}</div>
+            <div class="kpi-sub">In minus Out</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="kpi-card kpi-teal">
+            <div class="kpi-label">Internal Transfers</div>
+            <div class="kpi-value">{{ "{:,.0f}".format(summary.internal_total or 0) }}</div>
+            <div class="kpi-sub">PKR · {{ summary.internal_count }} cash ↔ bank moves (not in net)</div>
+        </div>
+    </div>
+</div>
+
+{# ── Daily cash flow with running balance ────────────────────────────────── #}
+<div class="card hdc-card mb-3">
+    <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+        <span><i class="fas fa-calendar-days me-2"></i>Daily Cash Flow</span>
+        <span class="small text-muted">{{ summary.day_count }} day{{ '' if summary.day_count == 1 else 's' }} in range{% if daily_truncated %} · showing last {{ daily_cap }}{% endif %}</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table hdc-table table-sm mb-0 align-middle">
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th class="text-end">Money In (PKR)</th>
+                    <th class="text-end">Money Out (PKR)</th>
+                    <th class="text-end">Transfers (PKR)</th>
+                    <th class="text-end">Net (PKR)</th>
+                    <th class="text-end">Company Funds (closing)</th>
+                    <th class="text-end">Entries</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr class="table-light">
+                    <td colspan="6" class="small text-muted">Opening funds before
+                        {% if filter_date_from %}{{ filter_date_from }}{% else %}the first entry{% endif %}
+                    </td>
+                    <td class="text-end small text-muted">—</td>
+                    <td class="text-end small text-muted">{{ "{:,.0f}".format(opening or 0) }}</td>
+                </tr>
+                {% for d in daily %}
+                <tr>
+                    <td class="text-nowrap">{{ d.date.strftime('%a, %d %b %Y') }}</td>
+                    <td class="text-end text-success">{% if d.in_total %}{{ "{:,.0f}".format(d.in_total) }}{% else %}—{% endif %}</td>
+                    <td class="text-end text-danger">{% if d.out_total %}{{ "{:,.0f}".format(d.out_total) }}{% else %}—{% endif %}</td>
+                    <td class="text-end text-info">{% if d.internal_total %}{{ "{:,.0f}".format(d.internal_total) }}{% else %}—{% endif %}</td>
+                    <td class="text-end {% if d.net >= 0 %}text-success{% else %}text-danger{% endif %} fw-semibold">{{ "{:,.0f}".format(d.net or 0) }}</td>
+                    <td class="text-end fw-semibold">{{ "{:,.0f}".format(d.closing or 0) }}</td>
+                    <td class="text-end text-muted">{{ d.count }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="7" class="text-center text-muted py-4">No cash flow in the selected range.</td></tr>
+                {% endfor %}
+            </tbody>
+            {% if daily %}
+            <tfoot>
+                <tr class="table-light fw-semibold">
+                    <td>Total</td>
+                    <td class="text-end text-success">{{ "{:,.0f}".format(summary.in_total or 0) }}</td>
+                    <td class="text-end text-danger">{{ "{:,.0f}".format(summary.out_total or 0) }}</td>
+                    <td class="text-end text-info">{{ "{:,.0f}".format(summary.internal_total or 0) }}</td>
+                    <td class="text-end {% if summary.net_total >= 0 %}text-success{% else %}text-danger{% endif %}">{{ "{:,.0f}".format(summary.net_total or 0) }}</td>
+                    <td class="text-end">{{ "{:,.0f}".format((opening or 0) + (summary.net_total or 0)) }}</td>
+                    <td class="text-end text-muted">{{ summary.row_count }}</td>
+                </tr>
+            </tfoot>
+            {% endif %}
+        </table>
+    </div>
+</div>
+
+<div class="row g-3">
+    {# ── By category ─────────────────────────────────────────────────────── #}
+    <div class="col-12 col-lg-6">
+        <div class="card hdc-card h-100">
+            <div class="card-header hdc-card-header">
+                <span><i class="fas fa-tags me-2"></i>By Category</span>
+            </div>
+            <div class="table-responsive">
+                <table class="table hdc-table table-sm mb-0 align-middle">
+                    <thead>
+                        <tr>
+                            <th>Category</th>
+                            <th class="text-end">In (PKR)</th>
+                            <th class="text-end">Out (PKR)</th>
+                            <th class="text-end">Net (PKR)</th>
+                            <th class="w-25">Share</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for c in categories %}
+                        <tr>
+                            <td>
+                                <span class="badge bg-light text-dark border">{{ c.label }}</span>
+                                <span class="small text-muted ms-1">{{ c.count }} entries</span>
+                            </td>
+                            <td class="text-end text-success">{% if c.in_total %}{{ "{:,.0f}".format(c.in_total) }}{% else %}—{% endif %}</td>
+                            <td class="text-end text-danger">{% if c.out_total %}{{ "{:,.0f}".format(c.out_total) }}{% else %}—{% endif %}</td>
+                            <td class="text-end {% if c.net >= 0 %}text-success{% else %}text-danger{% endif %}">{{ "{:,.0f}".format(c.net or 0) }}</td>
+                            <td>
+                                <div class="progress" style="height: 14px;">
+                                    <div class="progress-bar bg-primary" style="width: {{ c.pct }}%"></div>
+                                </div>
+                                <div class="small text-muted text-end">{{ c.pct }}%</div>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="5" class="text-center text-muted py-3">No data.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    {# ── By account ──────────────────────────────────────────────────────── #}
+    <div class="col-12 col-lg-6">
+        <div class="card hdc-card h-100">
+            <div class="card-header hdc-card-header">
+                <span><i class="fas fa-building-columns me-2"></i>By Account (Cash / Bank)</span>
+            </div>
+            <div class="table-responsive">
+                <table class="table hdc-table table-sm mb-0 align-middle">
+                    <thead>
+                        <tr>
+                            <th>Account</th>
+                            <th>Class</th>
+                            <th class="text-end">In (PKR)</th>
+                            <th class="text-end">Out (PKR)</th>
+                            <th class="text-end">Xfer In</th>
+                            <th class="text-end">Xfer Out</th>
+                            <th class="text-end">Net (PKR)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for a in account_rows %}
+                        <tr>
+                            <td>{{ a.name }}</td>
+                            <td><span class="badge {% if a.mode == 'bank' %}bg-info text-dark{% else %}bg-warning text-dark{% endif %}">{{ a.mode|title }}</span></td>
+                            <td class="text-end text-success">{% if a.in_total %}{{ "{:,.0f}".format(a.in_total) }}{% else %}—{% endif %}</td>
+                            <td class="text-end text-danger">{% if a.out_total %}{{ "{:,.0f}".format(a.out_total) }}{% else %}—{% endif %}</td>
+                            <td class="text-end text-info small">{% if a.transfer_in %}{{ "{:,.0f}".format(a.transfer_in) }}{% else %}—{% endif %}</td>
+                            <td class="text-end text-info small">{% if a.transfer_out %}{{ "{:,.0f}".format(a.transfer_out) }}{% else %}—{% endif %}</td>
+                            <td class="text-end {% if a.net >= 0 %}text-success{% else %}text-danger{% endif %} fw-semibold">{{ "{:,.0f}".format(a.net or 0) }}</td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="7" class="text-center text-muted py-3">No data.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
