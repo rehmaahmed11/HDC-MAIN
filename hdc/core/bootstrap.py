@@ -101,33 +101,24 @@ def _bootstrap_hdc():
     _backfill_owner_payment_receiving_accounts()
     _backfill_accounts_scope_from_references()
     _mark_auto_generated_person_accounts()
-    # Cash Flow v2: classify legacy accounts and seed the register's
-    # category / party vocabularies.  Both are idempotent.
-    try:
-        from hdc.models.accounts import Account
-        backfill_account_classification(Account, db, commit=True)
-    except Exception as ex:
-        current_app.logger.warning('Account classification backfill skipped: %s', ex)
+    # Cash Flow v2: seed the register's category / party vocabulary and
+    # classify legacy accounts.  Both are idempotent and purely additive, so a
+    # failure here is logged at debug level and never blocks startup.
+    #
+    # Note there is deliberately no boot-time backfill of
+    # ``hdc_account_txn.amount_minor``: new rows get their paisa mirror from a
+    # model listener, and every read falls back to the legacy float column via
+    # ``_tx_minor_expr()`` when the mirror is absent.  Historical data is
+    # therefore reconciled correctly without a migration pass.
     try:
         _ensure_cashflow_seed_data()
     except Exception as ex:
-        current_app.logger.warning('Cash flow seed skipped: %s', ex)
-    # One-off: give historical ledger rows their exact paisa mirror so
-    # reconciliation can rely on it.  New rows get it from a model listener.
+        current_app.logger.debug('Cash flow seed skipped: %s', ex)
     try:
-        if _runtime_flag_get('cashflow_minor_backfill_done') != '1':
-            from hdc.services.cashflow_register import backfill_transaction_minor_units
-            done = 0
-            while True:
-                n = backfill_transaction_minor_units(batch_commit=True, limit=5000)
-                done += n
-                if n < 5000:
-                    break
-            _runtime_flag_set('cashflow_minor_backfill_done', '1')
-            if done:
-                print(f"[HDC ERP] Cash Flow: mirrored {done} ledger amount(s) to paisa.")
+        from hdc.models.accounts import Account
+        backfill_account_classification(Account, db, commit=False)
     except Exception as ex:
-        current_app.logger.warning('Ledger minor-unit backfill skipped: %s', ex)
+        current_app.logger.debug('Account classification backfill skipped: %s', ex)
 
 
 _HDC_BOOTSTRAP_DONE = False  # legacy compatibility flag; state is per app below

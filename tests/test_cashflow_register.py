@@ -402,6 +402,44 @@ class CashFlowRegisterTestCase(unittest.TestCase):
         self.assertEqual(pos.amount_out_minor, 75050)
         self.assertEqual(pos.expected_closing_minor, 10000000 + 250000 - 75050)
 
+    def test_reconciliation_is_correct_on_legacy_rows_without_the_mirror(self):
+        """A database upgraded in place has rows with a NULL amount_minor.
+
+        Reconciliation must still be exact for them, deriving paisa from the
+        legacy float column — no backfill pass required.
+        """
+        from sqlalchemy import text
+        d = date(2026, 9, 1)
+        cats = self._categories()
+        save_manual_cash_flow_entry(
+            direction='out', amount=1234.56, account_id=self.cash.id,
+            category_id=cats['Miscellaneous'].id,
+            date_posted=datetime.combine(d, datetime.min.time()), actor=self.actor)
+        db.session.commit()
+
+        # Strip the mirror with raw SQL: assigning None through the ORM would
+        # simply be re-synced by the model's before_update listener.
+        db.session.execute(text('UPDATE hdc_account_txn SET amount_minor = NULL'))
+        db.session.commit()
+        self.assertIsNone(AccountTransaction.query.first().amount_minor)
+
+        pos = self._position(d, self.cash)
+        self.assertEqual(pos.amount_out_minor, 123456,
+                         'paisa must be derived from the float column')
+        self.assertEqual(pos.expected_closing_minor, 10000000 - 123456)
+
+        # and the same day still reconciles + locks end to end
+        save_counted_position(d, self.cash.id, float(pos.expected_closing),
+                              actor=self.actor)
+        db.session.commit()
+        for acc in (self.bank,):
+            p = self._position(d, acc)
+            save_counted_position(d, acc.id, float(p.expected_closing), actor=self.actor)
+        db.session.commit()
+        lock_cash_day(d, actor=self.actor)
+        db.session.commit()
+        self.assertTrue(is_day_locked(d))
+
     def test_counted_difference_and_lock(self):
         d = date(2026, 9, 1)
         pos = self._position(d, self.cash)

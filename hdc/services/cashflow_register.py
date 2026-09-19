@@ -885,6 +885,23 @@ def _money_accounts():
             if _cf_is_money_account(a)]
 
 
+def _tx_minor_expr(column=None):
+    """SQL expression giving a transaction's amount in exact minor units.
+
+    Reads must tolerate a row whose ``amount_minor`` mirror is still NULL —
+    a database upgraded in place has historical rows written before the
+    mirror existed, and the mirror is an optimisation for exact arithmetic,
+    not a required field.  When it is absent the value is derived from the
+    legacy float column in SQL, so reconciliation is correct on old and new
+    data alike without needing a backfill pass.
+    """
+    from sqlalchemy import Integer, cast
+
+    model = AccountTransaction
+    col = column or model.amount_minor
+    return func.coalesce(col, cast(func.round(model.amount * 100), Integer))
+
+
 def _minor_opening_for(account, day):
     """Opening minor balance for ``account`` on ``day``.
 
@@ -906,17 +923,16 @@ def _minor_opening_for(account, day):
             return int(prev_pos.expected_closing_minor)
 
     opening_minor = int(getattr(account, 'opening_balance_minor', None) or to_minor(account.opening_balance or 0))
-    in_sum = db.session.query(func.coalesce(func.sum(AccountTransaction.amount_minor), 0)).filter(
+    minor_expr = _tx_minor_expr()
+    in_sum = db.session.query(func.coalesce(func.sum(minor_expr), 0)).filter(
         AccountTransaction.to_account_id == int(account.id),
         AccountTransaction.is_void == False,  # noqa: E712
         AccountTransaction.date < day,
-        AccountTransaction.amount_minor.isnot(None),
     ).scalar() or 0
-    out_sum = db.session.query(func.coalesce(func.sum(AccountTransaction.amount_minor), 0)).filter(
+    out_sum = db.session.query(func.coalesce(func.sum(minor_expr), 0)).filter(
         AccountTransaction.from_account_id == int(account.id),
         AccountTransaction.is_void == False,  # noqa: E712
         AccountTransaction.date < day,
-        AccountTransaction.amount_minor.isnot(None),
     ).scalar() or 0
     return opening_minor + int(in_sum) - int(out_sum)
 
@@ -926,11 +942,10 @@ def _day_movement(account, day):
     money_ids = {int(a.id) for a in _money_accounts()}
 
     def _sum(field, extra=None):
-        q = db.session.query(func.coalesce(func.sum(AccountTransaction.amount_minor), 0)).filter(
+        q = db.session.query(func.coalesce(func.sum(_tx_minor_expr()), 0)).filter(
             field == int(account.id),
             AccountTransaction.is_void == False,  # noqa: E712
             AccountTransaction.date == day,
-            AccountTransaction.amount_minor.isnot(None),
         )
         if extra is not None:
             q = q.filter(extra)

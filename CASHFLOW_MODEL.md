@@ -73,8 +73,15 @@ from_minor(12500056)       ->  Decimal('125000.56')
 In HDC this is enforced by a `before_insert` / `before_update` listener on
 `AccountTransaction`, so **every** module that posts to the unified ledger —
 payroll, expenses, purchases, subcontract, office — gets the exact mirror for
-free without knowing the cash flow layer exists. A one-off bootstrap backfill
-(gated by the `cashflow_minor_backfill_done` runtime flag) fills historical rows.
+free without knowing the cash flow layer exists.
+
+Reads never assume the mirror is present. A database upgraded in place has
+rows written before the mirror existed, so every read goes through
+`_tx_minor_expr()` — `COALESCE(amount_minor, CAST(ROUND(amount*100) AS
+INTEGER))` — which derives paisa from the legacy float column when the mirror
+is NULL. Historical data reconciles exactly with **no backfill pass and no
+runtime flag**; `backfill_transaction_minor_units()` is kept only as an
+explicit ops lever if you want the column physically populated.
 
 ### 2.2 Balance: derived, not stored — **AMS's approach NOT taken**
 
@@ -227,7 +234,7 @@ hdc/services/cashflow_register.py        the engine (post / amend / void /
                                          restore / reconcile / lock)
 hdc/routes/cashflow_register.py          register, day close, CSV export
 hdc/core/schema.py                       _ensure_cashflow_schema() migration
-hdc/core/bootstrap.py                    wire-up + one-off backfill + seed
+hdc/core/bootstrap.py                    wire-up + classification + seed
 templates/hdc/accounts/
     cashflow_register.html               register + amend/void modals
     cashflow_reconciliation.html         daily cash & bank reconciliation
@@ -258,8 +265,11 @@ HDC_DB_PATH=/tmp/cf_demo.db HDC_INSTANCE_DIR=/tmp/cf_demo_inst \
 * Purely additive: `CREATE TABLE IF NOT EXISTS` + `ALTER TABLE ADD COLUMN`,
   driven by the existing `_ensure_table_columns_sqlite()` helper. No data
   rewrite, no downtime, no rebuild.
-* On first boot after the upgrade: legacy accounts are auto-classified from
-  their existing `type` (idempotent), historical ledger rows get their paisa
-  mirror (one-off, flag-gated), and the category vocabulary is seeded.
+* On first boot after the upgrade: the category vocabulary is seeded and
+  legacy accounts are auto-classified from their existing `type` — both
+  idempotent, both optional, neither able to block startup.
+* **No data backfill is required.** Rows written before the upgrade keep a
+  NULL `amount_minor` and are reconciled correctly through the SQL fallback
+  described in §2.1.
 * Verified against a synthetic pre-upgrade database: tables recreated, columns
   added, balances and history preserved.
