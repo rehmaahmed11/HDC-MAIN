@@ -218,10 +218,25 @@ class ToolRentalPayment(db.Model):
     payment_date = db.Column(db.Date, default=_pkt_today)
     amount = db.Column(db.Float, default=0.0)
     payment_mode = db.Column(db.String(30), default='cash')  # cash / bank / online / credit
+    received_to_account_id = db.Column(db.Integer, db.ForeignKey('hdc_account.id'), nullable=True)  # which cash/bank account received
     reference = db.Column(db.String(120))
     notes = db.Column(db.String(300))
+    is_void = db.Column(db.Boolean, default=False)
+    void_reason = db.Column(db.String(250))
+    voided_at = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, default=_pkt_now_naive)
     created_by = db.Column(db.Integer, db.ForeignKey('hdc_user.id'), nullable=True)
+
+    received_to_account = db.relationship('Account', foreign_keys=[received_to_account_id])
+
+
+class ToolRentalAccountTxn(db.Model):
+    """Link between tool rental payment and unified ledger transaction for reconciliation."""
+    __tablename__ = 'hdc_tool_rental_account_txn'
+    id = db.Column(db.Integer, primary_key=True)
+    payment_id = db.Column(db.Integer, db.ForeignKey('hdc_tool_rental_payment.id'), nullable=False, index=True)
+    account_txn_id = db.Column(db.Integer, db.ForeignKey('hdc_account_txn.id'), nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=_pkt_now_naive)
 
 
 class ToolRentalTransfer(db.Model):

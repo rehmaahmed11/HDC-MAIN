@@ -1540,10 +1540,22 @@ def _ensure_tool_rental_schema():
             payment_date DATE,
             amount FLOAT DEFAULT 0,
             payment_mode VARCHAR(30) DEFAULT 'cash',
+            received_to_account_id INTEGER REFERENCES hdc_account(id),
             reference VARCHAR(120),
             notes VARCHAR(300),
+            is_void BOOLEAN DEFAULT 0,
+            void_reason VARCHAR(250),
+            voided_at DATETIME,
             created_at DATETIME,
             created_by INTEGER REFERENCES hdc_user(id)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS hdc_tool_rental_account_txn (
+            id INTEGER PRIMARY KEY,
+            payment_id INTEGER NOT NULL REFERENCES hdc_tool_rental_payment(id),
+            account_txn_id INTEGER NOT NULL REFERENCES hdc_account_txn(id),
+            created_at DATETIME
         )
         """,
         """
@@ -1627,4 +1639,10 @@ def _ensure_tool_rental_schema():
         'total_returned_qty': "total_returned_qty FLOAT DEFAULT 0",
         'payment_status': "payment_status VARCHAR(30) DEFAULT 'unpaid'",
         'is_void': "is_void BOOLEAN DEFAULT 0",
+    })
+    _ensure_table_columns_sqlite('hdc_tool_rental_payment', {
+        'received_to_account_id': "received_to_account_id INTEGER REFERENCES hdc_account(id)",
+        'is_void': "is_void BOOLEAN DEFAULT 0",
+        'void_reason': "void_reason VARCHAR(250)",
+        'voided_at': "voided_at DATETIME",
     })

@@ -1,4 +1,6 @@
-"""HDC Tool Rental routes - main hub, inventory, rentals, returns, transfers, tracking, reports."""
+"""HDC Tool Rental routes - main hub, inventory, rentals, returns, transfers, tracking, reports.
+Now includes Accounts integration: payment receiving in Cash/Bank accounts.
+"""
 
 from datetime import datetime
 from flask import flash, jsonify, redirect, render_template, request, url_for
@@ -6,6 +8,7 @@ from flask_login import current_user, login_required
 from sqlalchemy import func
 
 from hdc.extensions import db
+from hdc.models.accounts import Account
 from hdc.models.projects import Project, Stage
 from hdc.models.tool_rental import (
     Tool, ToolCategory, ToolMovementLog, ToolRental, ToolRentalItem,
@@ -13,11 +16,15 @@ from hdc.models.tool_rental import (
 )
 from hdc.services.tool_rental import (
     _ensure_tool_category, _next_rental_code, _next_tool_code,
-    create_movement_log, get_rental_tracking_chain, get_tool_tracking_chain,
-    global_tool_locations, recalc_rental_totals, search_rentals, tool_kpis
+    create_movement_log, get_rental_tracking_chain,
+    get_receiving_accounts, global_tool_locations,
+    post_tool_rental_payment_to_accounts, recalc_rental_totals,
+    search_rentals, tool_kpis, void_tool_rental_payment_in_accounts
 )
 from hdc.utils.dates import _pkt_now_naive, _pkt_today
-from hdc.utils.format import _flt
+from hdc.utils.format import _flt, _amount_to_words
+from hdc.services.receipts import _receipt_company_profile
+from hdc.services.timekeeping import _has_recent_duplicate
 
 
 def register(app):
@@ -27,8 +34,6 @@ def register(app):
     @login_required
     def hdc_tool_rental():
         kpis = tool_kpis()
-
-        # filters
         filters = {
             'project_id': request.args.get('project_id', type=int),
             'tool_id': request.args.get('tool_id', type=int),
@@ -41,13 +46,11 @@ def register(app):
             'search_text': (request.args.get('q') or '').strip() or None,
         }
         rentals = search_rentals(filters)
-
         projects = Project.query.order_by(Project.name.asc()).all()
         tools = Tool.query.filter(Tool.is_void==False).order_by(Tool.name.asc()).all()
         categories = ToolCategory.query.order_by(ToolCategory.name.asc()).all()
-
-        # quick stats for filters dropdown
         stages = Stage.query.order_by(Stage.name.asc()).all()
+        receiving_accounts = get_receiving_accounts()
 
         return render_template('tool_rental/tool_rental.html',
             kpis=kpis,
@@ -56,6 +59,7 @@ def register(app):
             stages=stages,
             tools=tools,
             categories=categories,
+            receiving_accounts=receiving_accounts,
             filters=filters,
             today=_pkt_today().isoformat()
         )
@@ -76,7 +80,6 @@ def register(app):
                     flash(f'Category {name} saved.', 'success')
                 return redirect(url_for('hdc_tool_rental_inventory'))
 
-            # add tool
             name = (request.form.get('name') or '').strip()
             if not name:
                 flash('Tool name required.', 'danger')
@@ -107,7 +110,6 @@ def register(app):
             )
             db.session.add(tool)
             db.session.flush()
-            # log purchase_in movement
             create_movement_log(
                 tool_id=tool.id,
                 rental_id=None,
@@ -149,7 +151,6 @@ def register(app):
         if not name:
             flash('Tool name required.', 'danger')
             return redirect(url_for('hdc_tool_rental_inventory'))
-        # check code uniqueness
         exists = Tool.query.filter(Tool.id!=tool.id, func.lower(Tool.tool_code)==code.lower()).first()
         if exists:
             flash('Another tool already uses this code.', 'danger')
@@ -171,7 +172,6 @@ def register(app):
         tool.updated_at = _pkt_now_naive()
 
         if abs(diff) > 0.001:
-            # log adjustment
             create_movement_log(
                 tool_id=tool.id,
                 rental_id=None,
@@ -181,7 +181,6 @@ def register(app):
                 qty=diff,
                 notes=f'Stock adjusted from {old_qty} to {new_qty}'
             )
-
         db.session.commit()
         flash(f'Tool {tool.name} updated.', 'success')
         return redirect(url_for('hdc_tool_rental_inventory'))
@@ -190,7 +189,6 @@ def register(app):
     @login_required
     def hdc_tool_rental_tool_delete(tool_id):
         tool = Tool.query.get_or_404(tool_id)
-        # check if has active rentals
         pending = db.session.query(func.coalesce(func.sum(ToolRentalItem.qty_pending),0.0)).filter(ToolRentalItem.tool_id==tool.id).scalar() or 0.0
         if float(pending) > 0.001:
             flash(f'Cannot delete {tool.name}: {pending} qty still rented out.', 'danger')
@@ -236,7 +234,6 @@ def register(app):
         except:
             expected_date = None
 
-        # parse items: tool_id[], qty[], rate[]
         tool_ids = request.form.getlist('tool_id[]') or request.form.getlist('tool_id')
         qtys = request.form.getlist('qty[]') or request.form.getlist('qty')
         rates = request.form.getlist('rate[]') or request.form.getlist('rate')
@@ -246,7 +243,6 @@ def register(app):
             flash('Add at least one tool item.', 'danger')
             return redirect(url_for('hdc_tool_rental'))
 
-        # validate all before creating
         parsed_items = []
         total_rented_qty = 0.0
         total_amount = 0.0
@@ -264,7 +260,6 @@ def register(app):
             if qty <= 0:
                 flash(f'Quantity must be >0 at row {idx+1}.', 'danger')
                 return redirect(url_for('hdc_tool_rental'))
-            # check availability
             if qty > tool.available_qty + 0.001:
                 flash(f'Not enough stock for {tool.name}: available {tool.available_qty}, requested {qty}.', 'danger')
                 return redirect(url_for('hdc_tool_rental'))
@@ -273,8 +268,6 @@ def register(app):
             if billing_type == 'no_charge':
                 rate = 0.0
             amount = qty * rate
-            # per_day handling: if per_day, amount is rate * qty * 1 day initial? We'll keep qty*rate for now, but store rate
-            # For per_day, total amount will be calculated on return based on days
             note = (notes_list[idx] if idx < len(notes_list) else '').strip()
             parsed_items.append((tool, qty, rate, amount, note))
             total_rented_qty += qty
@@ -305,7 +298,6 @@ def register(app):
         db.session.add(rental)
         db.session.flush()
 
-        # create items
         for tool, qty, rate, amount, note in parsed_items:
             item = ToolRentalItem(
                 rental_id=rental.id,
@@ -319,7 +311,6 @@ def register(app):
             )
             db.session.add(item)
             db.session.flush()
-            # movement log: rental_out
             from_label = 'Warehouse / Store'
             if renter_type == 'internal' and project_id:
                 proj = db.session.get(Project, project_id)
@@ -330,7 +321,6 @@ def register(app):
                         to_label += f" > {st.name}"
             else:
                 to_label = customer_name or 'External Customer'
-
             create_movement_log(
                 tool_id=tool.id,
                 rental_id=rental.id,
@@ -340,7 +330,6 @@ def register(app):
                 qty=qty,
                 notes=f'Rental {rental_code} out'
             )
-
         db.session.commit()
         flash(f'Rental {rental_code} created: {total_rented_qty} tools.', 'success')
         return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
@@ -350,11 +339,9 @@ def register(app):
     @login_required
     def hdc_tool_rental_detail(rental_id):
         rental = ToolRental.query.get_or_404(rental_id)
-        # ensure totals fresh
         recalc_rental_totals(rental.id)
         db.session.commit()
 
-        # items with tool details
         items = ToolRentalItem.query.filter_by(rental_id=rental.id).all()
         returns = (ToolRentalReturn.query
                    .filter_by(rental_id=rental.id)
@@ -368,22 +355,30 @@ def register(app):
                      .filter_by(rental_id=rental.id)
                      .order_by(ToolRentalTransfer.transfer_date.desc(), ToolRentalTransfer.id.desc())
                      .all())
-
         tracking_chain = get_rental_tracking_chain(rental.id)
-
-        # movement logs for this rental
         movement_logs = (ToolMovementLog.query
                          .filter_by(rental_id=rental.id)
                          .order_by(ToolMovementLog.timestamp.asc(), ToolMovementLog.id.asc())
                          .all())
-
         projects = Project.query.order_by(Project.name.asc()).all()
         stages = Stage.query.order_by(Stage.name.asc()).all()
         tools = Tool.query.filter(Tool.is_void==False).order_by(Tool.name.asc()).all()
+        receiving_accounts = get_receiving_accounts()
 
-        # pending tools calc
         pending_tools = float(rental.total_rented_qty or 0) - float(rental.total_returned_qty or 0)
         pending_amount = float(rental.total_amount or 0) - float(rental.total_paid or 0) if rental.billing_type!='no_charge' else 0.0
+
+        # account txns for this rental payments
+        from hdc.models.accounts import AccountTransaction
+        from hdc.models.tool_rental import ToolRentalAccountTxn
+        payment_ids = [p.id for p in payments]
+        acct_links = {}
+        if payment_ids:
+            links = (ToolRentalAccountTxn.query
+                     .filter(ToolRentalAccountTxn.payment_id.in_(payment_ids))
+                     .all())
+            for link in links:
+                acct_links.setdefault(link.payment_id, []).append(link.account_txn_id)
 
         return render_template('tool_rental/tool_rental_detail.html',
             rental=rental,
@@ -396,12 +391,14 @@ def register(app):
             projects=projects,
             stages=stages,
             tools=tools,
+            receiving_accounts=receiving_accounts,
             pending_tools=pending_tools,
             pending_amount=pending_amount,
+            acct_links=acct_links,
             today=_pkt_today().isoformat()
         )
 
-    # ------------------ RETURN (FULL/PARTIAL) ------------------
+    # ------------------ RETURN (FULL/PARTIAL) WITH ACCOUNTS ------------------
     @app.route('/hdc/tool-rental/<int:rental_id>/return', methods=['POST'])
     @login_required
     def hdc_tool_rental_return(rental_id):
@@ -424,16 +421,14 @@ def register(app):
         if payment_type not in ('full','partial','credit','no_payment'):
             payment_type = 'partial'
 
-        # tools returned: rental_item_id[], qty_returned[]
         rental_item_ids = request.form.getlist('rental_item_id[]') or request.form.getlist('rental_item_id')
         qty_returned_list = request.form.getlist('qty_returned[]') or request.form.getlist('qty_returned')
         condition_notes_list = request.form.getlist('condition_notes[]') or request.form.getlist('condition_notes')
 
         if return_type == 'full':
-            # auto fill all pending
             rental_items = ToolRentalItem.query.filter_by(rental_id=rental.id).all()
-            rental_item_ids = [str(i.id) for i in rental_items]
-            qty_returned_list = [str(float(i.qty_pending or 0)) for i in rental_items]
+            rental_item_ids = [str(i.id) for i in rental_items if float(i.qty_pending or 0) > 0.001]
+            qty_returned_list = [str(float(ToolRentalItem.query.get(int(ri)).qty_pending or 0)) for ri in rental_item_ids]
         else:
             if not rental_item_ids or len(rental_item_ids)!=len(qty_returned_list):
                 flash('For partial return, specify qty for each tool.', 'danger')
@@ -464,24 +459,32 @@ def register(app):
             flash('No tools marked for return.', 'warning')
             return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
 
-        # money handling
         amount_paid_raw = (request.form.get('amount_paid') or '0').strip()
         amount_paid = max(0.0, _flt(amount_paid_raw))
 
         if payment_type == 'full':
-            # pay all pending
             pending_amt = float(rental.total_amount or 0) - float(rental.total_paid or 0)
             amount_paid = max(0.0, pending_amt) if rental.billing_type!='no_charge' else 0.0
         elif payment_type == 'no_payment' or rental.billing_type=='no_charge':
             amount_paid = 0.0
         elif payment_type == 'credit':
             amount_paid = max(0.0, _flt(request.form.get('amount_paid') or 0))
-            # credit means pending remains
-        else: # partial
-            # amount_paid as entered
-            pass
 
-        # create return record
+        # receiving account for this return's payment
+        received_to_account_id = request.form.get('received_to_account_id', type=int)
+        recv_acc = None
+        if amount_paid > 0:
+            if received_to_account_id:
+                recv_acc = Account.query.get(int(received_to_account_id))
+            if (not recv_acc) or recv_acc.is_void or str(recv_acc.status or 'active').lower() != 'active' or str(recv_acc.type or '').lower() not in ('company','cash','bank'):
+                flash('Select a valid Cash/Bank receiving account for payment.', 'danger')
+                return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+
+        # duplicate guard
+        if _has_recent_duplicate(ToolRentalReturn, rental_id=rental.id, total_tools_returned=total_tools_returned, amount_paid=amount_paid, return_date=return_date):
+            flash('Duplicate return prevented (same values submitted too quickly).', 'warning')
+            return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+
         ret_rec = ToolRentalReturn(
             rental_id=rental.id,
             return_date=return_date,
@@ -495,7 +498,6 @@ def register(app):
         db.session.add(ret_rec)
         db.session.flush()
 
-        # create return items and update rental items
         for r_item, qty_ret, cond_note in parsed_returns:
             ret_item = ToolRentalReturnItem(
                 return_id=ret_rec.id,
@@ -505,11 +507,8 @@ def register(app):
                 condition_notes=cond_note
             )
             db.session.add(ret_item)
-            # update rental item
             r_item.qty_returned = float(r_item.qty_returned or 0) + qty_ret
             r_item.qty_pending = max(0.0, float(r_item.qty_rented or 0) - float(r_item.qty_returned or 0))
-
-            # movement log: return_in
             from_label = rental.current_location_label or 'Site'
             to_label = 'Warehouse / Store'
             create_movement_log(
@@ -523,34 +522,40 @@ def register(app):
                 notes=f'Return {ret_rec.id}: {qty_ret} pcs'
             )
 
-        # payment record if amount >0
+        pay_record = None
         if amount_paid > 0 and rental.billing_type!='no_charge':
-            pay = ToolRentalPayment(
+            pay_record = ToolRentalPayment(
                 rental_id=rental.id,
                 return_id=ret_rec.id,
                 payment_date=return_date,
                 amount=amount_paid,
                 payment_mode=(request.form.get('payment_mode') or 'cash').strip().lower(),
+                received_to_account_id=int(recv_acc.id) if recv_acc else None,
                 reference=(request.form.get('payment_reference') or '').strip(),
                 notes=f'Payment on return {ret_rec.id}',
                 created_by=current_user.id if hasattr(current_user,'id') else None
             )
-            db.session.add(pay)
+            db.session.add(pay_record)
+            db.session.flush()
+            # post to accounts
+            ok_acc, msg_acc, _ = post_tool_rental_payment_to_accounts(pay_record, rental=rental, commit=False)
+            if not ok_acc:
+                db.session.rollback()
+                flash(msg_acc or 'Unable to post rental payment in accounts.', 'danger')
+                return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
         elif payment_type=='credit' and rental.billing_type!='no_charge':
-            # mark rental as credit if not fully paid
             rental.payment_status = 'credit'
 
-        # recalc totals
         recalc_rental_totals(rental.id)
-        # if credit and pending >0, ensure status stays credit
         if payment_type=='credit' and float(rental.total_pending_amount or 0) > 0:
             rental.payment_status = 'credit'
 
         db.session.commit()
-        flash(f'Return recorded: {total_tools_returned} tools, {amount_paid:.2f} PKR paid. Pending tools: {rental.total_pending_tools:.0f}, Pending amount: {rental.total_pending_amount:.2f}', 'success')
+        recv_name = recv_acc.name if recv_acc else '-'
+        flash(f'Return recorded: {total_tools_returned} tools, {amount_paid:.2f} PKR paid to {recv_name}. Pending tools: {rental.total_pending_tools:.0f}, Pending amount: {rental.total_pending_amount:.2f}', 'success')
         return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
 
-    # ------------------ ADD PAYMENT (separate from return) ------------------
+    # ------------------ ADD PAYMENT WITH ACCOUNTS ------------------
     @app.route('/hdc/tool-rental/<int:rental_id>/payment', methods=['POST'])
     @login_required
     def hdc_tool_rental_payment(rental_id):
@@ -562,11 +567,25 @@ def register(app):
         if amount <=0:
             flash('Payment amount must be >0.', 'danger')
             return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+
+        received_to_account_id = request.form.get('received_to_account_id', type=int)
+        recv_acc = None
+        if received_to_account_id:
+            recv_acc = Account.query.get(int(received_to_account_id))
+        if (not recv_acc) or recv_acc.is_void or str(recv_acc.status or 'active').lower() != 'active' or str(recv_acc.type or '').lower() not in ('company','cash','bank'):
+            flash('Select a valid Cash/Bank receiving account (Company/Cash/Bank).', 'danger')
+            return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+
         pay_date_raw = (request.form.get('payment_date') or '').strip()
         try:
             pay_date = datetime.strptime(pay_date_raw, '%Y-%m-%d').date() if pay_date_raw else _pkt_today()
         except:
             pay_date = _pkt_today()
+
+        if _has_recent_duplicate(ToolRentalPayment, rental_id=rental.id, amount=amount, payment_date=pay_date, received_to_account_id=recv_acc.id):
+            flash('Duplicate payment prevented.', 'warning')
+            return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+
         payment_mode = (request.form.get('payment_mode') or 'cash').strip().lower()
         reference = (request.form.get('reference') or '').strip()
         notes = (request.form.get('notes') or '').strip()
@@ -576,16 +595,66 @@ def register(app):
             payment_date=pay_date,
             amount=amount,
             payment_mode=payment_mode,
+            received_to_account_id=int(recv_acc.id),
             reference=reference,
             notes=notes,
             created_by=current_user.id if hasattr(current_user,'id') else None
         )
         db.session.add(pay)
         db.session.flush()
+
+        ok_acc, msg_acc, _ = post_tool_rental_payment_to_accounts(pay, rental=rental, commit=False)
+        if not ok_acc:
+            db.session.rollback()
+            flash(msg_acc or 'Unable to post payment in accounts.', 'danger')
+            return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+
         recalc_rental_totals(rental.id)
         db.session.commit()
-        flash(f'Payment {amount:.2f} recorded. Pending: {rental.total_pending_amount:.2f}', 'success')
+        flash(f'Payment {amount:.2f} PKR received in {recv_acc.name} (Cash/Bank). Pending: {rental.total_pending_amount:.2f}', 'success')
         return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+
+    @app.route('/hdc/tool-rental/payment/<int:payment_id>/void', methods=['POST'])
+    @login_required
+    def hdc_tool_rental_payment_void(payment_id):
+        pay = ToolRentalPayment.query.get_or_404(payment_id)
+        if pay.is_void:
+            flash('Payment already voided.', 'info')
+            return redirect(url_for('hdc_tool_rental_detail', rental_id=pay.rental_id))
+        pay.is_void = True
+        pay.void_reason = (request.form.get('void_reason') or '').strip() or 'Voided by user'
+        pay.voided_at = _pkt_now_naive()
+        void_tool_rental_payment_in_accounts(pay.id)
+        recalc_rental_totals(pay.rental_id)
+        db.session.commit()
+        flash('Payment voided and removed from accounts.', 'warning')
+        return redirect(url_for('hdc_tool_rental_detail', rental_id=pay.rental_id))
+
+    @app.route('/hdc/tool-rental/payment/<int:payment_id>/receipt')
+    @login_required
+    def hdc_tool_rental_payment_receipt(payment_id):
+        pay = ToolRentalPayment.query.get_or_404(payment_id)
+        rental = pay.rental
+        receipt_id = f"RCPT-TR-{pay.id:08d}"
+        party_name = rental.customer_name if rental.renter_type=='external' else (rental.project.name if rental.project else 'Internal Site')
+        return render_template('accounts/transaction_receipt.html',
+            company_profile=_receipt_company_profile(),
+            receipt_id=receipt_id,
+            created_at=(pay.created_at or _pkt_now_naive()),
+            tx_type='Tool Rental Payment Receipt',
+            party_name=party_name,
+            project_name=(rental.project.name if rental.project else '-'),
+            stage_name=(rental.stage.name if rental.stage else '-'),
+            account_used=(pay.received_to_account.name if pay.received_to_account else 'Company Cash'),
+            amount=float(pay.amount or 0.0),
+            amount_words=_amount_to_words(pay.amount or 0.0),
+            note=(pay.notes or f'Rental {rental.rental_code}'),
+            reference_id=f'tool_rental_payment#{pay.id}',
+            recent_entries=[],
+            recent_entries_title='',
+            back_url=url_for('hdc_tool_rental_detail', rental_id=rental.id),
+            print_label='Print / Save PDF'
+        )
 
     # ------------------ TRANSFER SITE TO SITE ------------------
     @app.route('/hdc/tool-rental/<int:rental_id>/transfer', methods=['POST'])
@@ -596,9 +665,7 @@ def register(app):
             flash('Rental already closed, cannot transfer.', 'warning')
             return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
 
-        # from - current location
         from_label = rental.current_location_label or 'Unknown'
-
         to_type = (request.form.get('to_type') or 'site').strip().lower()
         if to_type not in ('site','customer','warehouse'):
             to_type = 'site'
@@ -614,7 +681,6 @@ def register(app):
             flash('Enter destination customer name.', 'danger')
             return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
 
-        # build to_label
         if to_type=='site' and to_project_id:
             proj = db.session.get(Project, to_project_id)
             to_label = proj.name if proj else f'Project #{to_project_id}'
@@ -637,10 +703,8 @@ def register(app):
         except:
             transfer_date = _pkt_today()
 
-        # determine from project
         from_project_id = None
         from_stage_id = None
-        # try to infer from last transfer or rental
         last_transfer = (ToolRentalTransfer.query
                          .filter_by(rental_id=rental.id)
                          .order_by(ToolRentalTransfer.transfer_date.desc(), ToolRentalTransfer.id.desc())
@@ -672,10 +736,8 @@ def register(app):
         db.session.add(transfer)
         db.session.flush()
 
-        # movement logs for each tool in rental (proportional? For simplicity log same transfer for each tool type)
         rental_items = ToolRentalItem.query.filter_by(rental_id=rental.id).filter(ToolRentalItem.qty_pending>0).all()
         for ri in rental_items:
-            # if qty_transferred less than total pending, we distribute? For now log full pending of each tool as transferred, but note qty
             create_movement_log(
                 tool_id=ri.tool_id,
                 rental_id=rental.id,
@@ -686,7 +748,6 @@ def register(app):
                 transfer_id=transfer.id,
                 notes=f'Transfer {from_label} > {to_label}'
             )
-
         db.session.commit()
         chain_str = " > ".join(rental.tracking_chain)
         flash(f'Tools transferred: {from_label} to {to_label} ({qty_transferred} qty). Chain: {chain_str}', 'success')
@@ -699,14 +760,10 @@ def register(app):
         tool_id = request.args.get('tool_id', type=int)
         project_id = request.args.get('project_id', type=int)
         q = (request.args.get('q') or '').strip() or None
-
         locations = global_tool_locations(search_tool_id=tool_id, search_project_id=project_id, search_text=q)
-
         projects = Project.query.order_by(Project.name.asc()).all()
         tools = Tool.query.filter(Tool.is_void==False).order_by(Tool.name.asc()).all()
-
         kpis = tool_kpis()
-
         return render_template('tool_rental/tool_tracking.html',
             locations=locations,
             projects=projects,
@@ -721,7 +778,6 @@ def register(app):
     @app.route('/hdc/tool-rental/reports')
     @login_required
     def hdc_tool_rental_reports():
-        # filters similar to main but more detailed
         filters = {
             'project_id': request.args.get('project_id', type=int),
             'tool_id': request.args.get('tool_id', type=int),
@@ -734,8 +790,6 @@ def register(app):
             'search_text': (request.args.get('q') or '').strip() or None,
         }
         rentals = search_rentals(filters)
-
-        # aggregates for report
         total_rented = sum(float(r.total_rented_qty or 0) for r in rentals)
         total_returned = sum(float(r.total_returned_qty or 0) for r in rentals)
         total_pending_tools = sum(float(r.total_pending_tools or 0) for r in rentals)
@@ -743,7 +797,6 @@ def register(app):
         total_paid = sum(float(r.total_paid or 0) for r in rentals)
         total_pending_amount = sum(float(r.total_pending_amount or 0) for r in rentals)
 
-        # per tool breakdown
         tool_breakdown = {}
         for r in rentals:
             for item in r.items:
@@ -755,7 +808,6 @@ def register(app):
                 tool_breakdown[tid]['pending'] += float(item.qty_pending or 0)
                 tool_breakdown[tid]['amount'] += float(item.amount or 0)
 
-        # per site breakdown
         site_breakdown = {}
         for r in rentals:
             key = r.project_id or 0
@@ -772,6 +824,7 @@ def register(app):
         projects = Project.query.order_by(Project.name.asc()).all()
         tools = Tool.query.filter(Tool.is_void==False).order_by(Tool.name.asc()).all()
         kpis = tool_kpis()
+        receiving_accounts = get_receiving_accounts()
 
         return render_template('tool_rental/tool_reports.html',
             rentals=rentals,
@@ -786,10 +839,11 @@ def register(app):
             site_breakdown=site_breakdown,
             projects=projects,
             tools=tools,
+            receiving_accounts=receiving_accounts,
             kpis=kpis
         )
 
-    # ------------------ API: tools available, project stages ------------------
+    # ------------------ API ------------------
     @app.route('/hdc/api/tool-rental/tools-available')
     @login_required
     def hdc_api_tools_available():
@@ -826,3 +880,9 @@ def register(app):
                     'rate': float(it.rate or 0)
                 })
         return jsonify(items)
+
+    @app.route('/hdc/api/tool-rental/receiving-accounts')
+    @login_required
+    def hdc_api_receiving_accounts():
+        accs = get_receiving_accounts()
+        return jsonify([{'id': a.id, 'name': a.name, 'type': a.type, 'balance': float(a.opening_balance or 0)} for a in accs])

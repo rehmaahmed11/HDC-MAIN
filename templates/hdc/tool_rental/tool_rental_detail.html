@@ -92,7 +92,6 @@
             </div>
         </div>
 
-        <!-- Movement Logs -->
         <div class="card hdc-card mt-3">
             <div class="card-header hdc-card-header"><i class="fas fa-timeline me-2"></i>Movement & Tracking Log — Site1 > Site2 > Site3 > Current (Green)</div>
             <div class="table-responsive">
@@ -116,7 +115,6 @@
             </div>
         </div>
 
-        <!-- Returns & Payments History -->
         <div class="row g-3 mt-2">
             <div class="col-md-6">
                 <div class="card hdc-card">
@@ -146,23 +144,52 @@
             </div>
             <div class="col-md-6">
                 <div class="card hdc-card">
-                    <div class="card-header hdc-card-header"><i class="fas fa-money-bill-wave me-2"></i>Payment History — Partial / Credit / Full</div>
+                    <div class="card-header hdc-card-header d-flex justify-content-between"><span><i class="fas fa-money-bill-wave me-2"></i>Payment History — Cash/Bank Receiving</span><small class="text-muted">Linked to Accounts</small></div>
                     <div class="table-responsive">
                         <table class="table hdc-table table-sm mb-0">
-                            <thead><tr><th>Date</th><th>Amount</th><th>Mode</th><th>Ref</th></tr></thead>
+                            <thead><tr><th>Date</th><th>Amount</th><th>Receiving Account (Cash/Bank)</th><th>Mode</th><th>Ref / Action</th></tr></thead>
                             <tbody>
                             {% for p in payments %}
-                                <tr>
+                                <tr {% if p.is_void %}style="text-decoration:line-through; opacity:0.6"{% endif %}>
                                     <td>{{ p.payment_date }}</td>
                                     <td>{{ "{:,.0f}".format(p.amount or 0) }}</td>
+                                    <td>
+                                        {% if p.received_to_account %}
+                                            <span class="badge bg-primary"><i class="fas fa-building-columns me-1"></i>{{ p.received_to_account.name }} ({{ p.received_to_account.type }})</span>
+                                        {% else %}
+                                            <span class="text-muted">-</span>
+                                        {% endif %}
+                                    </td>
                                     <td>{{ p.payment_mode }}</td>
-                                    <td>{{ p.reference or '' }}<br><small>{{ p.notes or '' }}</small></td>
+                                    <td>
+                                        {{ p.reference or '' }}<br><small>{{ p.notes or '' }}</small><br>
+                                        <div class="d-flex gap-1 mt-1">
+                                            <a href="{{ url_for('hdc_tool_rental_payment_receipt', payment_id=p.id) }}" class="btn btn-sm btn-outline-secondary" title="Receipt"><i class="fas fa-receipt"></i></a>
+                                            {% if not p.is_void %}
+                                            <button class="btn btn-sm btn-outline-danger" data-bs-toggle="modal" data-bs-target="#voidPay{{ p.id }}"><i class="fas fa-ban"></i></button>
+                                            {% endif %}
+                                        </div>
+                                    </td>
                                 </tr>
+                                {% if not p.is_void %}
+                                <div class="modal fade" id="voidPay{{ p.id }}" tabindex="-1">
+                                  <div class="modal-dialog modal-sm">
+                                    <div class="modal-content hdc-modal">
+                                      <form method="POST" action="{{ url_for('hdc_tool_rental_payment_void', payment_id=p.id) }}">
+                                        <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+                                        <div class="modal-header"><h6 class="modal-title">Void Payment?</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                                        <div class="modal-body">Void {{ "{:,.0f}".format(p.amount) }} PKR payment? This will also void in Accounts (Cash/Bank ledger).<br><br><label class="form-label">Reason</label><input type="text" name="void_reason" class="form-control" placeholder="Reason"></div>
+                                        <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button type="submit" class="btn btn-danger">Void</button></div>
+                                      </form>
+                                    </div>
+                                  </div>
+                                </div>
+                                {% endif %}
                             {% else %}
-                                <tr><td colspan="4" class="text-center text-muted">No payments yet</td></tr>
+                                <tr><td colspan="5" class="text-center text-muted">No payments yet — will post to Cash/Bank accounts when paid</td></tr>
                             {% endfor %}
                             </tbody>
-                            <tfoot><tr class="fw-bold"><td>Total Paid</td><td colspan="3">{{ "{:,.0f}".format(rental.total_paid or 0) }} | Pending {{ "{:,.0f}".format(pending_amount) }}</td></tr></tfoot>
+                            <tfoot><tr class="fw-bold"><td>Total Paid</td><td colspan="4">{{ "{:,.0f}".format(rental.total_paid or 0) }} | Pending {{ "{:,.0f}".format(pending_amount) }} | Receiving Accounts: Cash/Bank/Company only</td></tr></tfoot>
                         </table>
                     </div>
                 </div>
@@ -187,11 +214,11 @@
     </div>
 
     <div class="col-md-4">
-        <!-- RETURN FORM WITH TOGGLE FULL / PARTIAL -->
+        <!-- RETURN FORM WITH ACCOUNTS -->
         <div class="card hdc-card toggle-card" id="returnCard">
             <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
-                <span><i class="fas fa-undo me-2"></i>Submit Return — Toggle Full / Partial</span>
-                <small class="text-muted">Flexible: tools & money both</small>
+                <span><i class="fas fa-undo me-2"></i>Submit Return — Full / Partial + Cash/Bank</span>
+                <small class="text-muted">Accounts Posting</small>
             </div>
             <div class="card-body">
                 <form method="POST" action="{{ url_for('hdc_tool_rental_return', rental_id=rental.id) }}" id="returnForm">
@@ -202,7 +229,7 @@
                             <input type="date" name="return_date" value="{{ today }}" class="form-control" required>
                         </div>
                         <div class="col-6">
-                            <label class="form-label">Return Condition (Toggle)</label>
+                            <label class="form-label">Return Toggle</label>
                             <select name="return_condition" id="returnCondition" class="form-select" onchange="toggleReturnMode()">
                                 <option value="partial">Partial Tools</option>
                                 <option value="full">Full Tools (All Pending)</option>
@@ -210,7 +237,7 @@
                         </div>
 
                         <div class="col-12" id="partialToolsSection">
-                            <label class="form-label fw-bold">Tools to Return — Enter Qty for each (Partial)</label>
+                            <label class="form-label fw-bold">Tools to Return — Qty per Tool</label>
                             <div id="returnItems">
                                 {% for it in items %}
                                     {% if it.qty_pending>0.001 %}
@@ -224,14 +251,13 @@
                                     {% endif %}
                                 {% endfor %}
                             </div>
-                            <small class="text-muted">Example: rented 50, return 20 now, pending 30 auto-calculated.</small>
                         </div>
 
                         <div class="col-12 mt-2 border-top pt-2">
-                            <label class="form-label fw-bold">Payment Condition (Toggle)</label>
+                            <label class="form-label fw-bold">Payment Toggle</label>
                             <select name="payment_condition" id="paymentCondition" class="form-select" onchange="togglePaymentMode()">
                                 <option value="partial">Partial Payment</option>
-                                <option value="full">Full Payment (All Pending Amount)</option>
+                                <option value="full">Full Payment (All Pending)</option>
                                 <option value="credit">Credit — No Pay Now</option>
                                 <option value="no_payment">No Payment (Contract Included)</option>
                             </select>
@@ -240,7 +266,7 @@
                         <div class="col-6" id="amountPaidSection">
                             <label class="form-label">Amount Paid Now</label>
                             <input type="number" name="amount_paid" id="amountPaid" class="form-control" min="0" step="0.01" placeholder="{{ pending_amount }}">
-                            <small class="text-muted">Pending before: {{ "{:,.0f}".format(pending_amount) }}</small>
+                            <small class="text-muted">Pending: {{ "{:,.0f}".format(pending_amount) }}</small>
                         </div>
                         <div class="col-6">
                             <label class="form-label">Payment Mode</label>
@@ -248,55 +274,72 @@
                                 <option value="cash">Cash</option>
                                 <option value="bank">Bank</option>
                                 <option value="jazzcash">JazzCash / Easypaisa</option>
-                                <option value="online">Online</option>
+                                <option value="online">Online Transfer</option>
                             </select>
                         </div>
+
+                        <div class="col-12" id="receivingAccSection">
+                            <label class="form-label fw-bold"><i class="fas fa-building-columns me-1"></i>Receiving Account — Cash / Bank *</label>
+                            <select name="received_to_account_id" id="recvAccReturn" class="form-select" required>
+                                <option value="">Select Cash/Bank Account</option>
+                                {% for acc in receiving_accounts %}
+                                <option value="{{ acc.id }}">{{ acc.name }} ({{ acc.type }}) - Bal: {{ "{:,.0f}".format(acc.opening_balance or 0) }}</option>
+                                {% endfor %}
+                            </select>
+                            <small class="text-muted">Where money is received: e.g., Company Cash, HBL Bank, JazzCash Wallet — posts to Accounts ledger automatically</small>
+                        </div>
+
                         <div class="col-12">
                             <label class="form-label">Payment Ref</label>
                             <input type="text" name="payment_reference" class="form-control" placeholder="Ref / Transaction ID">
                         </div>
                         <div class="col-12">
                             <label class="form-label">Notes</label>
-                            <textarea name="notes" class="form-control" rows="2" placeholder="Return condition, damage, credit reason..."></textarea>
+                            <textarea name="notes" class="form-control" rows="2" placeholder="Damage, credit reason..."></textarea>
                         </div>
                         <div class="col-12">
                             <div class="alert alert-info py-2 small">
-                                <strong>How partial works:</strong><br>
-                                - Tools: Enter qty returned per tool. System calculates pending tools = rented - returned.<br>
-                                - Money: Enter amount paid. System calculates pending money = total - paid.<br>
-                                - Toggle Full: auto-fills all pending tools & full pending amount.<br>
-                                - Credit: no payment now, pending stays, status = credit.
+                                <strong>Accounts Posting:</strong> When payment >0, system creates <code>Customer → Cash/Bank</code> income transaction in Accounts (party_receipt) automatically. No Charge rentals skip posting.<br>
+                                <strong>Partial:</strong> Tools qty + money both partial → pending auto-calculated.
                             </div>
                         </div>
                         <div class="col-12">
-                            <button type="submit" class="btn btn-mint w-100"><i class="fas fa-check me-1"></i>Submit Return & Calculate Pendings</button>
+                            <button type="submit" class="btn btn-mint w-100"><i class="fas fa-check me-1"></i>Submit Return + Post to Cash/Bank</button>
                         </div>
                     </div>
                 </form>
             </div>
         </div>
 
-        <!-- Separate Payment -->
         <div class="card hdc-card mt-3">
-            <div class="card-header hdc-card-header"><i class="fas fa-money-bill me-2"></i>Add Payment Only (Without Tools Return)</div>
+            <div class="card-header hdc-card-header"><i class="fas fa-money-bill me-2"></i>Add Payment Only — Cash/Bank Receiving</div>
             <div class="card-body">
                 <form method="POST" action="{{ url_for('hdc_tool_rental_payment', rental_id=rental.id) }}">
                     <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
                     <div class="row g-2">
                         <div class="col-6"><label class="form-label">Date</label><input type="date" name="payment_date" value="{{ today }}" class="form-control" required></div>
                         <div class="col-6"><label class="form-label">Amount *</label><input type="number" name="amount" class="form-control" min="0.01" step="0.01" required></div>
-                        <div class="col-6"><label class="form-label">Mode</label><select name="payment_mode" class="form-select"><option value="cash">Cash</option><option value="bank">Bank</option><option value="jazzcash">JazzCash</option><option value="online">Online</option></select></div>
-                        <div class="col-6"><label class="form-label">Ref</label><input type="text" name="reference" class="form-control"></div>
-                        <div class="col-12"><label class="form-label">Notes</label><input type="text" name="notes" class="form-control" placeholder="Partial payment, credit clear, etc"></div>
-                        <div class="col-12"><button class="btn btn-outline-success w-100" type="submit"><i class="fas fa-plus me-1"></i>Add Payment</button></div>
+                        <div class="col-12">
+                            <label class="form-label fw-bold"><i class="fas fa-building-columns me-1"></i>Receiving Account — Cash / Bank *</label>
+                            <select name="received_to_account_id" class="form-select" required>
+                                <option value="">Select Cash/Bank</option>
+                                {% for acc in receiving_accounts %}
+                                <option value="{{ acc.id }}">{{ acc.name }} ({{ acc.type }})</option>
+                                {% endfor %}
+                            </select>
+                            <small class="text-muted">e.g., Company Cash, Meezan Bank, JazzCash — will show in Accounts ledger & Day Close</small>
+                        </div>
+                        <div class="col-6"><label class="form-label">Mode</label><select name="payment_mode" class="form-select"><option value="cash">Cash</option><option value="bank">Bank Transfer</option><option value="jazzcash">JazzCash/Easypaisa</option><option value="online">Online</option></select></div>
+                        <div class="col-6"><label class="form-label">Ref</label><input type="text" name="reference" class="form-control" placeholder="Txn ID"></div>
+                        <div class="col-12"><label class="form-label">Notes</label><input type="text" name="notes" class="form-control" placeholder="Partial payment, credit clear..."></div>
+                        <div class="col-12"><button class="btn btn-outline-success w-100" type="submit"><i class="fas fa-plus me-1"></i>Add Payment to Cash/Bank + Accounts</button></div>
                     </div>
                 </form>
             </div>
         </div>
 
-        <!-- Transfer Form -->
         <div class="card hdc-card mt-3">
-            <div class="card-header hdc-card-header"><i class="fas fa-route me-2"></i>Move Tools Site1 → Site2 → Site3 → Current Green</div>
+            <div class="card-header hdc-card-header"><i class="fas fa-route me-2"></i>Move Tools Site1 → Site2 → Site3</div>
             <div class="card-body">
                 <form method="POST" action="{{ url_for('hdc_tool_rental_transfer', rental_id=rental.id) }}">
                     <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
@@ -345,7 +388,7 @@
                             <input type="text" name="to_customer_name" class="form-control" placeholder="Customer / Person name">
                         </div>
                         <div class="col-6">
-                            <label class="form-label">Qty Transferred (Optional, default all pending)</label>
+                            <label class="form-label">Qty Transferred</label>
                             <input type="number" name="qty_transferred" class="form-control" min="0" step="0.1" placeholder="{{ pending_tools }}">
                         </div>
                         <div class="col-12">
@@ -353,7 +396,7 @@
                             <textarea name="notes" class="form-control" rows="2" placeholder="Moved from Site1 to Site2 due to..."></textarea>
                         </div>
                         <div class="col-12">
-                            <button type="submit" class="btn btn-warning w-100"><i class="fas fa-exchange-alt me-1"></i>Transfer & Update Chain (Site1 > Site2 > Site3)</button>
+                            <button type="submit" class="btn btn-warning w-100"><i class="fas fa-exchange-alt me-1"></i>Transfer & Update Chain</button>
                         </div>
                     </div>
                 </form>
@@ -361,13 +404,14 @@
         </div>
 
         <div class="card hdc-card mt-3">
-            <div class="card-header hdc-card-header"><i class="fas fa-info-circle me-2"></i>Rental Info</div>
+            <div class="card-header hdc-card-header"><i class="fas fa-info-circle me-2"></i>Rental Info + Accounts</div>
             <div class="card-body small">
                 <p><strong>Code:</strong> {{ rental.rental_code }}</p>
-                <p><strong>Billing:</strong> {{ rental.billing_type }} {% if rental.billing_type=='no_charge' %}(Payment already in contract){% endif %}</p>
+                <p><strong>Billing:</strong> {{ rental.billing_type }} {% if rental.billing_type=='no_charge' %}(No Accounts Posting){% else %}(Posts to Cash/Bank){% endif %}</p>
                 <p><strong>Notes:</strong> {{ rental.notes or '-' }}</p>
-                <p><strong>Created:</strong> {{ rental.created_at }}</p>
+                <p><strong>Receiving Accounts:</strong> Only Company/Cash/Bank active accounts allowed. Selected account gets credited in Accounts ledger, customer account debited.</p>
                 <a href="{{ url_for('hdc_tool_rental') }}" class="btn btn-outline-secondary btn-sm w-100 mt-2">Back to Rentals</a>
+                <a href="{{ url_for('hdc_accounts') }}" class="btn btn-outline-primary btn-sm w-100 mt-1"><i class="fas fa-wallet me-1"></i>View Accounts Transactions</a>
             </div>
         </div>
     </div>
@@ -383,7 +427,6 @@ function toggleReturnMode(){
     if(mode==='full'){
         card.classList.add('full-mode');
         partialSec.style.opacity='0.6';
-        // auto fill qty inputs with max
         document.querySelectorAll('#returnItems input[name=\"qty_returned[]\"]').forEach(inp=>{
             const max = inp.getAttribute('max');
             if(max) inp.value = max;
@@ -396,19 +439,26 @@ function toggleReturnMode(){
 function togglePaymentMode(){
     const mode = document.getElementById('paymentCondition').value;
     const amtSec = document.getElementById('amountPaidSection');
+    const recvSec = document.getElementById('receivingAccSection');
     const amtInput = document.getElementById('amountPaid');
+    const recvSelect = document.getElementById('recvAccReturn');
     if(mode==='full'){
         amtSec.style.display='';
-        // set to pending
+        recvSec.style.display='';
         amtInput.value = '{{ pending_amount }}';
         amtInput.readOnly = true;
+        recvSelect.required = true;
     } else if(mode==='credit' || mode==='no_payment'){
         amtSec.style.display='none';
+        recvSec.style.display='none';
         amtInput.value = '0';
+        recvSelect.required = false;
     } else {
         amtSec.style.display='';
+        recvSec.style.display='';
         amtInput.readOnly = false;
         amtInput.value = '';
+        recvSelect.required = true;
     }
 }
 function toggleToType(){

@@ -4,11 +4,15 @@ from datetime import date, datetime
 from sqlalchemy import func, or_
 
 from hdc.extensions import db
+from hdc.models.accounts import Account
 from hdc.models.tool_rental import (
-    Tool, ToolCategory, ToolMovementLog, ToolRental, ToolRentalItem,
+    Tool, ToolCategory, ToolMovementLog, ToolRental, ToolRentalAccountTxn, ToolRentalItem,
     ToolRentalPayment, ToolRentalReturn, ToolRentalReturnItem, ToolRentalTransfer
 )
 from hdc.utils.dates import _pkt_now_naive, _pkt_today
+from hdc.utils.normalize import _normalize_name_ci
+
+_ACCOUNT_COMPANY_TYPES = ('company', 'cash', 'bank')
 
 
 def _next_tool_code():
@@ -43,9 +47,9 @@ def recalc_rental_totals(rental_id):
     total_pending = max(0.0, total_rented - total_returned)
     total_amount = sum(float(i.amount or 0) for i in items)
 
-    # payments sum
     total_paid = db.session.query(func.coalesce(func.sum(ToolRentalPayment.amount), 0.0)).filter(
-        ToolRentalPayment.rental_id == rental.id
+        ToolRentalPayment.rental_id == rental.id,
+        ToolRentalPayment.is_void == False
     ).scalar() or 0.0
 
     rental.total_rented_qty = total_rented
@@ -53,7 +57,6 @@ def recalc_rental_totals(rental_id):
     rental.total_amount = total_amount if total_amount>0 else float(rental.total_amount or 0)
     rental.total_paid = float(total_paid)
 
-    # status logic
     if rental.is_void:
         rental.status = 'closed'
     elif total_pending <= 0.001:
@@ -61,13 +64,11 @@ def recalc_rental_totals(rental_id):
     elif total_returned > 0:
         rental.status = 'partially_returned'
     else:
-        # overdue check
         if rental.expected_return_date and rental.expected_return_date < _pkt_today():
             rental.status = 'overdue'
         else:
             rental.status = 'active'
 
-    # payment status
     if (rental.billing_type or '').lower() == 'no_charge':
         rental.payment_status = 'no_charge'
     else:
@@ -77,7 +78,6 @@ def recalc_rental_totals(rental_id):
         elif float(total_paid) > 0 and pending_amt > 0:
             rental.payment_status = 'partial'
         elif (rental.payment_status or '') == 'credit':
-            # keep credit if explicitly set, unless paid
             if pending_amt <= 0.001:
                 rental.payment_status = 'paid'
             else:
@@ -85,7 +85,6 @@ def recalc_rental_totals(rental_id):
         else:
             rental.payment_status = 'unpaid' if float(rental.total_amount or 0) > 0 else 'unpaid'
 
-    # if pending tools zero and pending money zero -> closed
     if total_pending <= 0.001 and rental.payment_status in ('paid','no_charge'):
         rental.status = 'closed'
 
@@ -109,7 +108,6 @@ def create_movement_log(tool_id, rental_id, movement_type, from_label, to_label,
     return log
 
 def get_tool_tracking_chain(tool_id):
-    """Return ordered movement logs for a tool: site1 > site2 > site3 etc, with current green."""
     logs = (ToolMovementLog.query
             .filter_by(tool_id=tool_id)
             .order_by(ToolMovementLog.timestamp.asc(), ToolMovementLog.id.asc())
@@ -121,7 +119,6 @@ def get_rental_tracking_chain(rental_id):
     if not rental:
         return []
     chain = []
-    # initial
     if rental.renter_type == 'internal' and rental.project:
         initial = rental.project.name
         if rental.stage:
@@ -149,31 +146,18 @@ def get_rental_tracking_chain(rental_id):
 def tool_kpis():
     total_tools = db.session.query(func.coalesce(func.sum(Tool.total_quantity), 0.0)).filter(Tool.is_void==False).scalar() or 0.0
     total_tool_types = db.session.query(func.count(Tool.id)).filter(Tool.is_void==False).scalar() or 0
-
-    # rented out qty
     rented_out = db.session.query(func.coalesce(func.sum(ToolRentalItem.qty_pending), 0.0)).scalar() or 0.0
     available = max(0.0, float(total_tools) - float(rented_out))
-
-    # rentals counts
     active_rentals = db.session.query(func.count(ToolRental.id)).filter(ToolRental.status.in_(['active','partially_returned','overdue']), ToolRental.is_void==False).scalar() or 0
     overdue_rentals = db.session.query(func.count(ToolRental.id)).filter(ToolRental.status=='overdue', ToolRental.is_void==False).scalar() or 0
-
-    # money
     total_amount = db.session.query(func.coalesce(func.sum(ToolRental.total_amount), 0.0)).filter(ToolRental.is_void==False, ToolRental.billing_type!='no_charge').scalar() or 0.0
     total_paid = db.session.query(func.coalesce(func.sum(ToolRental.total_paid), 0.0)).filter(ToolRental.is_void==False).scalar() or 0.0
     pending_amount = max(0.0, float(total_amount) - float(total_paid))
-
-    # pending tools
     pending_tools = db.session.query(func.coalesce(func.sum(ToolRentalItem.qty_pending), 0.0)).scalar() or 0.0
-
-    # internal vs external
     internal_rentals = db.session.query(func.count(ToolRental.id)).filter(ToolRental.renter_type=='internal', ToolRental.is_void==False).scalar() or 0
     external_rentals = db.session.query(func.count(ToolRental.id)).filter(ToolRental.renter_type=='external', ToolRental.is_void==False).scalar() or 0
-
-    # credit
     credit_rentals = db.session.query(func.count(ToolRental.id)).filter(ToolRental.payment_status=='credit', ToolRental.is_void==False).scalar() or 0
     credit_amount = db.session.query(func.coalesce(func.sum(ToolRental.total_amount - ToolRental.total_paid), 0.0)).filter(ToolRental.payment_status=='credit', ToolRental.is_void==False).scalar() or 0.0
-
     return {
         'total_tools': float(total_tools),
         'total_tool_types': int(total_tool_types),
@@ -192,9 +176,7 @@ def tool_kpis():
     }
 
 def search_rentals(filters):
-    """filters dict: project_id, tool_id, renter_type, status, payment_status, date_from, date_to, search_text"""
     q = ToolRental.query.filter(ToolRental.is_void==False)
-
     if filters.get('project_id'):
         q = q.filter(ToolRental.project_id == filters['project_id'])
     if filters.get('renter_type'):
@@ -205,7 +187,6 @@ def search_rentals(filters):
         q = q.filter(ToolRental.payment_status == filters['payment_status'])
     if filters.get('billing_type'):
         q = q.filter(ToolRental.billing_type == filters['billing_type'])
-
     if filters.get('date_from'):
         try:
             df = datetime.strptime(filters['date_from'], '%Y-%m-%d').date()
@@ -218,7 +199,6 @@ def search_rentals(filters):
             q = q.filter(ToolRental.rental_date <= dt)
         except:
             pass
-
     if filters.get('search_text'):
         txt = f"%{filters['search_text'].lower()}%"
         q = q.filter(or_(
@@ -226,17 +206,12 @@ def search_rentals(filters):
             func.lower(func.coalesce(ToolRental.customer_name,'')).like(txt),
             func.lower(func.coalesce(ToolRental.customer_phone,'')).like(txt),
         ))
-
     if filters.get('tool_id'):
-        # rentals that contain this tool
         q = q.join(ToolRentalItem, ToolRentalItem.rental_id == ToolRental.id).filter(ToolRentalItem.tool_id == filters['tool_id'])
-
     q = q.order_by(ToolRental.rental_date.desc(), ToolRental.id.desc())
     return q.all()
 
 def global_tool_locations(search_tool_id=None, search_project_id=None, search_text=None):
-    """For 'where are all our tools' view."""
-    # Get all tools
     tq = Tool.query.filter(Tool.is_void==False)
     if search_tool_id:
         tq = tq.filter(Tool.id == search_tool_id)
@@ -247,32 +222,23 @@ def global_tool_locations(search_tool_id=None, search_project_id=None, search_te
             func.lower(Tool.tool_code).like(txt),
         ))
     tools = tq.order_by(Tool.name.asc()).all()
-
     result = []
     for tool in tools:
-        # latest movement per tool
         last_log = (ToolMovementLog.query
                     .filter_by(tool_id=tool.id)
                     .order_by(ToolMovementLog.timestamp.desc(), ToolMovementLog.id.desc())
                     .first())
-        # chain
         chain_logs = (ToolMovementLog.query
                       .filter_by(tool_id=tool.id)
                       .order_by(ToolMovementLog.timestamp.asc(), ToolMovementLog.id.asc())
                       .all())
-        # filter by project if needed? Check if current location matches project
         if search_project_id:
-            # need to see if current location is that project or chain contains
-            # Simplistic: check if last_log to_location contains project name or rental project_id matches
-            # For precise, we query rentals for this tool that have project_id
             has_match = False
             if last_log and last_log.rental_id:
                 rental = db.session.get(ToolRental, last_log.rental_id)
                 if rental and int(rental.project_id or 0) == int(search_project_id):
                     has_match = True
-            # also check chain logs rental project
             if not has_match:
-                # look for any rental item for this tool with matching project
                 exists = (db.session.query(ToolRentalItem.id)
                           .join(ToolRental, ToolRental.id == ToolRentalItem.rental_id)
                           .filter(ToolRentalItem.tool_id == tool.id,
@@ -283,7 +249,6 @@ def global_tool_locations(search_tool_id=None, search_project_id=None, search_te
                     has_match = True
             if not has_match:
                 continue
-
         current_label = last_log.to_location_label if last_log else "Warehouse / Store"
         result.append({
             'tool': tool,
@@ -294,3 +259,107 @@ def global_tool_locations(search_tool_id=None, search_project_id=None, search_te
             'available_qty': tool.available_qty,
         })
     return result
+
+def get_receiving_accounts():
+    return (Account.query
+            .filter(
+                Account.is_void == False,
+                func.lower(func.coalesce(Account.status, 'active')) == 'active',
+                func.lower(func.coalesce(Account.type, '')).in_(_ACCOUNT_COMPANY_TYPES)
+            )
+            .order_by(Account.name.asc(), Account.id.asc())
+            .all())
+
+def _get_or_create_customer_account(rental):
+    from hdc.services.accounts import _account_get_or_create
+    if rental.renter_type == 'internal' and rental.project:
+        name = _normalize_name_ci(rental.project.client or rental.project.name or f'Project#{rental.project_id}')
+        acc_type = 'client'
+        auto_source = 'client'
+    else:
+        name = _normalize_name_ci(rental.customer_name or f'Customer Rental#{rental.id}')
+        acc_type = 'client'
+        auto_source = 'client'
+    if not name:
+        name = f'ToolRental#{rental.rental_code}'
+    acc = _account_get_or_create(name, acc_type, auto_generated=True, auto_source=auto_source)
+    return acc
+
+def post_tool_rental_payment_to_accounts(payment, rental=None, commit=False):
+    from hdc.services.accounts import _create_account_transaction, _accounts_default_company_cash
+    if not payment or float(payment.amount or 0) <= 0:
+        return False, 'Payment amount must be >0', []
+    if payment.is_void:
+        return False, 'Payment is voided', []
+    rental = rental or db.session.get(ToolRental, int(payment.rental_id or 0))
+    if not rental:
+        return False, 'Rental not found', []
+
+    recv_acc = None
+    if payment.received_to_account_id:
+        recv_acc = Account.query.get(int(payment.received_to_account_id))
+    if not recv_acc:
+        recv_acc = _accounts_default_company_cash()
+    if not recv_acc or recv_acc.is_void or str(recv_acc.status or 'active').lower() != 'active' or str(recv_acc.type or '').lower() not in _ACCOUNT_COMPANY_TYPES:
+        return False, 'Select valid receiving account (Cash/Bank/Company)', []
+
+    cust_acc = _get_or_create_customer_account(rental)
+    if not cust_acc:
+        return False, 'Unable to resolve customer account', []
+
+    from hdc.models.accounts import AccountTransaction
+    existing = (AccountTransaction.query
+                .filter(
+                    func.lower(func.coalesce(AccountTransaction.source_type,'')).like('tool_rental_payment%'),
+                    AccountTransaction.source_id == int(payment.id),
+                    AccountTransaction.is_void == False
+                )
+                .first())
+    if existing:
+        return True, 'Already posted', [existing]
+
+    pay_date = payment.payment_date or _pkt_today()
+    date_str = pay_date.isoformat() if hasattr(pay_date, 'isoformat') else str(pay_date)
+
+    note_raw = payment.notes or ''
+    mode_raw = payment.payment_mode or ''
+    note_txt = (f'Tool Rental Receipt {rental.rental_code} - {note_raw} [{mode_raw}]').strip()[:400]
+
+    party_name = rental.customer_name if rental.renter_type == 'external' else (rental.project.name if rental.project else 'Internal Site')
+
+    payload = {
+        'date': date_str,
+        'amount': float(payment.amount or 0),
+        'type': 'party_receipt',
+        'from_account_id': cust_acc.id,
+        'to_account_id': recv_acc.id,
+        'executed_by_account_id': cust_acc.id,
+        'project_id': rental.project_id,
+        'stage_id': rental.stage_id,
+        'related_entity_type': 'tool_rental',
+        'related_entity_id': rental.id,
+        'party_name': party_name,
+        'category': 'income',
+        'note': note_txt,
+        'reference_id': f'tool_rental_payment#{payment.id}',
+        'source_type': 'tool_rental_payment',
+        'source_id': payment.id,
+        'group_id': f'tool-rent-{rental.id}-pay-{payment.id}'
+    }
+
+    ok, msg, txns = _create_account_transaction(payload, commit=False)
+    if not ok:
+        return False, msg, []
+
+    for txn in txns:
+        link = ToolRentalAccountTxn(payment_id=payment.id, account_txn_id=txn.id)
+        db.session.add(link)
+    db.session.flush()
+    if commit:
+        db.session.commit()
+    return True, '', txns
+
+def void_tool_rental_payment_in_accounts(payment_id):
+    from hdc.services.accounts import _accounts_set_void_by_source
+    _accounts_set_void_by_source('tool_rental_payment', int(payment_id), True)
+    return True
