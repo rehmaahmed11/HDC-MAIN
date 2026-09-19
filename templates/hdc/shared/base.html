@@ -112,6 +112,9 @@
             <li class="nav-item {% if request.endpoint in ['hdc_accounts', 'hdc_accounts_kpi_detail', 'hdc_accounts_entries'] %}active{% endif %}">
                 <a href="{{ url_for('hdc_accounts') }}"><i class="fas fa-wallet"></i><span>Accounts</span></a>
             </li>
+            <li class="nav-item {% if request.endpoint in ['hdc_cashflow', 'hdc_cashflow_report', 'hdc_cashflow_export'] %}active{% endif %}">
+                <a href="{{ url_for('hdc_cashflow') }}"><i class="fas fa-money-bill-transfer"></i><span>Cash Flow</span></a>
+            </li>
             <li class="nav-item {% if request.endpoint == 'hdc_settings' %}active{% endif %}">
                 <a href="{{ url_for('hdc_settings') }}"><i class="fas fa-gear"></i><span>Settings</span></a>
             </li>

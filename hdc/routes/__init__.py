@@ -5,6 +5,7 @@ from hdc.routes.api_accounts import register as _register_api_accounts
 from hdc.routes.api_actors import register as _register_api_actors
 from hdc.routes.api_purchase import register as _register_api_purchase
 from hdc.routes.auth import register as _register_auth
+from hdc.routes.cashflow import register as _register_cashflow
 from hdc.routes.dashboard import register as _register_dashboard
 from hdc.routes.estimation import register as _register_estimation
 from hdc.routes.expenses import register as _register_expenses
@@ -28,6 +29,7 @@ def register_all(app):
     _register_api_actors(app)
     _register_api_purchase(app)
     _register_auth(app)
+    _register_cashflow(app)
     _register_dashboard(app)
     _register_estimation(app)
     _register_expenses(app)
