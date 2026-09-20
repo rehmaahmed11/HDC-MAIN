@@ -218,6 +218,11 @@ def register(app):
         if renter_type=='external' and not customer_name:
             flash('Customer name required for external rental.', 'danger')
             return redirect(url_for('hdc_tool_rental'))
+        if renter_type == 'internal' and stage_id:
+            stage = db.session.get(Stage, stage_id)
+            if not stage or stage.project_id != project_id:
+                flash('Selected stage does not belong to the selected project/site.', 'danger')
+                return redirect(url_for('hdc_tool_rental'))
 
         billing_type = (request.form.get('billing_type') or 'fixed_fee').strip().lower()
         if billing_type not in ('no_charge','fixed_fee','per_day','per_hour'):
@@ -680,6 +685,11 @@ def register(app):
         if to_type=='customer' and not to_customer_name:
             flash('Enter destination customer name.', 'danger')
             return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+        if to_type == 'site' and to_stage_id:
+            stage = db.session.get(Stage, to_stage_id)
+            if not stage or stage.project_id != to_project_id:
+                flash('Selected stage does not belong to the destination project/site.', 'danger')
+                return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
 
         if to_type=='site' and to_project_id:
             proj = db.session.get(Project, to_project_id)
