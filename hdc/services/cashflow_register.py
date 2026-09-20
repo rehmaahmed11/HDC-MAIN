@@ -522,6 +522,11 @@ def save_manual_cash_flow_entry(*, direction, amount, account_id, destination_ac
     db.session.add(entry)
     db.session.flush()
     entry.account_tx_id = int(tx.id)
+    # Back-link the ledger row to this document so Accounts-side voids and the
+    # forensic scan can find each other (was missing → register/ledger drift).
+    tx.source_type = f'cash_flow_entry_{entry.direction}'
+    tx.source_id = int(entry.id)
+    db.session.flush()
 
     _cf_write_audit(entry, 'Created', after=_cf_snapshot(entry), actor=actor)
     db.session.flush()

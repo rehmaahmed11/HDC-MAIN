@@ -532,7 +532,9 @@ select entry_type, amount from hdc_supplier_ledger where supplier_id = 1;   -- d
 select count(*) from hdc_account_txn where source_type like 'supplier_credit_%' and is_void = 0;  -- ≥ 1
 ```
 
-### Step 3 — Keep the Cash Flow register in sync with the ledger (fix 5.2)
+### Step 3 — Keep the Cash Flow register in sync with the ledger (fix 5.2) — ✅ COMPLETED (2026-09-20)
+
+> **Done.** `save_manual_cash_flow_entry` now back-links the ledger row (`tx.source_type = 'cash_flow_entry_<direction>'`, `tx.source_id = entry.id`); `_sync_source_row_void_state` gained a `cash_flow_entry_in|out|transfer` branch that mirrors `is_void`/`void_reason`/`voided_by`/`voided_at` onto the `CashFlowEntry` (keeping `account_tx_id` intact); `SOURCE_MAP` now covers all three CF families. Verified E2E: voiding/restoring the ledger row from *All Entries* now voids/restores the CF document (reason/user/timestamp persisted), a forced mismatch is caught by the forensic scan as `void_mismatch` ("Cash Flow entry (out)"), the register→ledger direction still works, all four cash-flow/entries/reconciliation pages render 200, and the audit SQL (`t.is_void == e.is_void`) holds. Full suite: 257 tests, only the pre-existing 8.1 failure remains.
 
 **File:** `hdc/services/cashflow_register.py` (`save_manual_cash_flow_entry`, after `entry.account_tx_id = int(tx.id)`):
 
@@ -786,7 +788,7 @@ Apply `or ''` to `bank_name`, `account_number`, `iban` as well, then re-download
 
 - [x] `GET /hdc/accounts/money-center` returns 200; all 22 flow links resolve (Step 1) ✅ 2026-09-20
 - [x] Recording a supplier payment succeeds and reduces the payable (Step 2) ✅ 2026-09-20
-- [ ] Voiding from either side keeps ledger + CF document in the same void state (Step 3)
+- [x] Voiding from either side keeps ledger + CF document in the same void state (Step 3) ✅ 2026-09-20
 - [ ] Void reason/user/time persisted and visible (Step 4)
 - [ ] `/hdc/accounts/reconciliation` shows 0 findings on a clean dataset (Step 5)
 - [ ] No 404s in the browser console on any Accounts page (Step 6)

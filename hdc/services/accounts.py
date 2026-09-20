@@ -12,6 +12,7 @@ from sqlalchemy import and_, case, func, or_, text
 from hdc.core.flags import _runtime_flag_get, _runtime_flag_set
 from hdc.extensions import db
 from hdc.models.accounts import Account, AccountTransaction, Expense, OwnerPayment, PersonalExpense
+from hdc.models.cashflow import CashFlowEntry
 from hdc.models.materials import PurchaseV2, Supplier, SupplierLedger
 from hdc.models.office import OfficeExpense, OfficeStaff, OfficeStaffLedger
 from hdc.models.projects import Project, Stage
@@ -52,6 +53,9 @@ def _accounts_reconciliation_findings():
         'expense':                     (Expense, 'Expense'),
         'purchase_v2_paid':            (PurchaseV2, 'Purchase (paid)'),
         'owner_payment':               (OwnerPayment, 'Owner payment'),
+        'cash_flow_entry_in':          (CashFlowEntry, 'Cash Flow entry (in)'),
+        'cash_flow_entry_out':         (CashFlowEntry, 'Cash Flow entry (out)'),
+        'cash_flow_entry_transfer':    (CashFlowEntry, 'Cash Flow transfer'),
     }
 
     def _base_source_type(s):
@@ -1120,6 +1124,18 @@ def _set_void_state_row(row, make_void=True, reason=''):
     return True, ''
 
 
+def _void_sync_actor_name():
+    """Username of the request's user, or ``'system'`` outside a session."""
+    try:
+        from flask import has_request_context
+        from flask_login import current_user
+        if has_request_context() and getattr(current_user, 'is_authenticated', False):
+            return (getattr(current_user, 'username', None) or 'system')[:80]
+    except Exception:
+        pass
+    return 'system'
+
+
 def _sync_source_row_void_state(source_type, source_id, make_void=True, reason=''):
     st = (source_type or '').strip().lower()
     sid = int(source_id or 0)
@@ -1129,6 +1145,10 @@ def _sync_source_row_void_state(source_type, source_id, make_void=True, reason='
     handled = True
     if st == 'owner_payment':
         row = OwnerPayment.query.get(sid)
+    elif st in ('cash_flow_entry_in', 'cash_flow_entry_out', 'cash_flow_entry_transfer'):
+        # Register documents mirror their posting's void state.  account_tx_id
+        # stays intact so the forward link survives the round trip.
+        row = CashFlowEntry.query.get(sid)
     elif st in ('labour_ledger_advance', 'labour_ledger_payment', 'labour_ledger_tip', 'worker_payment'):
         row = LabourLedger.query.get(sid)
     elif st in ('supplier_credit_payment', 'supplier_credit_tip', 'supplier_credit_settlement'):
@@ -1160,6 +1180,13 @@ def _sync_source_row_void_state(source_type, source_id, make_void=True, reason='
     ok, msg = _set_void_state_row(row, make_void=make_void, reason=reason)
     if (not ok):
         return ok, msg
+    if st in ('cash_flow_entry_in', 'cash_flow_entry_out', 'cash_flow_entry_transfer') and row is not None:
+        # The register model also tracks who voided/restored; keep it in step
+        # with the register's own void path so the audit trail stays complete.
+        actor_name = _void_sync_actor_name()
+        row.voided_by = (actor_name if make_void else None)
+        row.updated_by = actor_name
+        row.updated_at = _pkt_now_naive()
     if st in ('office_staff_ledger_advance', 'office_staff_ledger_payment', 'office_staff_ledger_tip'):
         staff_row = OfficeStaff.query.get(int(getattr(row, 'staff_id', 0) or 0))
         if make_void:
