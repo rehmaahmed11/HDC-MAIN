@@ -174,7 +174,7 @@
             <tbody>
                 {% for r in history_rows %}
                 {% set dir = account_tx_direction_for_type(r.type) %}
-                <tr {{ r|hdc_row_attrs }} {% if latest_print_txn and (latest_print_txn.id == r.id) %}class="table-warning"{% endif %}>
+                <tr {{ r|hdc_row_attrs }} {% if latest_print_txn and (latest_print_txn.id == r.id) %}class="table-warning"{% elif r.is_void %}class="table-secondary"{% endif %}>
                     <td>
                         <div class="fw-semibold">{{ (r.type or '')|replace('_', ' ')|title }}</div>
                         <div class="small text-muted">
@@ -211,6 +211,11 @@
                         <div class="small">{{ (r.category or '')|title }}</div>
                         <div class="small text-muted text-truncate-cell" title="Ref: {{ r.reference_id or '-' }}">Ref: {{ r.reference_id or '-' }}</div>
                         <div class="small text-muted text-truncate-cell" title="Grp: {{ r.group_id or '-' }}">Grp: {{ r.group_id or '-' }}</div>
+                        {% if r.is_void %}
+                        <div class="small text-danger text-truncate-cell" title="Voided: {{ r.void_reason or 'Voided from Accounts' }} — by {{ r.voided_by or 'system' }} on {{ r.voided_at.strftime('%Y-%m-%d %H:%M') if r.voided_at else '-' }}">
+                            <i class="fas fa-ban me-1"></i>Voided: {{ r.void_reason or 'Voided from Accounts' }} · {{ r.voided_by or 'system' }} · {{ r.voided_at.strftime('%Y-%m-%d %H:%M') if r.voided_at else '-' }}
+                        </div>
+                        {% endif %}
                     </td>
                     <td class="action-cell">
                         {% set src = (r.source_type or '') %}
@@ -221,11 +226,21 @@
                         {% endif %}
                         <a href="{{ url_for('hdc_account_transaction_receipt', txn_id=r.id) }}" target="_blank" rel="noopener" class="btn btn-outline-primary btn-mini">Receipt</a>
                         <a href="{{ url_for('hdc_accounts_entries', edit_txn_id=r.id) }}" class="btn btn-outline-secondary btn-mini">Edit</a>
+                        {% if r.is_void %}
+                        <form method="POST" action="{{ url_for('hdc_accounts') }}" class="d-inline">
+                            <input type="hidden" name="action" value="restore_transaction">
+                            <input type="hidden" name="transaction_id" value="{{ r.id }}">
+                            <button type="submit" class="btn btn-outline-success btn-mini" onclick="return confirm('Restore this transaction/group and sync source record state?')">Restore</button>
+                        </form>
+                        {% else %}
                         <form method="POST" action="{{ url_for('hdc_accounts') }}" class="d-inline">
                             <input type="hidden" name="action" value="void_transaction">
                             <input type="hidden" name="transaction_id" value="{{ r.id }}">
+                            <input type="text" name="void_reason" class="form-control form-control-sm d-inline-block w-auto me-1"
+                                   placeholder="Reason (required)" required style="max-width:150px;">
                             <button type="submit" class="btn btn-outline-danger btn-mini" onclick="return confirm('Void this transaction/group and sync source record state?')">Void</button>
                         </form>
+                        {% endif %}
                     </td>
                 </tr>
                 {% else %}

@@ -975,8 +975,10 @@ def _create_account_transaction(payload, commit=True):
         return False, f'Transaction save failed: {ex}', []
 
 
-def _account_transaction_history(account_id=None, account_group=None, date_from=None, date_to=None, category=None, group_id=None, reference_id=None, limit=500, project_id=None, stage_id=None, tx_type=None, tx_direction=None, party_name=None, worker_id=None, return_query=False):
-    q = AccountTransaction.query.filter(AccountTransaction.is_void == False)
+def _account_transaction_history(account_id=None, account_group=None, date_from=None, date_to=None, category=None, group_id=None, reference_id=None, limit=500, project_id=None, stage_id=None, tx_type=None, tx_direction=None, party_name=None, worker_id=None, return_query=False, include_void=False):
+    q = AccountTransaction.query
+    if not include_void:
+        q = q.filter(AccountTransaction.is_void == False)
     if account_id:
         q = q.filter(or_(AccountTransaction.from_account_id == account_id, AccountTransaction.to_account_id == account_id))
     if account_group:
@@ -1318,7 +1320,7 @@ def _sync_account_transaction_source_update(txn_row):
         ledger_row.worker_id = int(txn_row.related_entity_id)
 
 
-def _accounts_toggle_transaction_void_state(txn_id, make_void=True, reason=''):
+def _accounts_toggle_transaction_void_state(txn_id, make_void=True, reason='', actor=None):
     row = AccountTransaction.query.get(int(txn_id or 0))
     if not row:
         return False, 'Transaction not found.', 0
@@ -1334,8 +1336,20 @@ def _accounts_toggle_transaction_void_state(txn_id, make_void=True, reason=''):
         if not ok:
             db.session.rollback()
             return False, (msg or 'Unable to sync source row state.'), 0
+    actor_name = ((getattr(actor, 'username', None) or 'system')[:80]
+                  if actor is not None else _void_sync_actor_name())
     for r in rows:
         r.is_void = bool(make_void)
+        if make_void:
+            # Persist the audit trail promised by ROW_TRACEABILITY: why the
+            # row was voided, by whom and when (previously never written).
+            r.void_reason = ((reason or '').strip() or 'Voided from Accounts')[:300]
+            r.voided_by = actor_name
+            r.voided_at = _pkt_now_naive()
+        else:
+            r.void_reason = None
+            r.voided_by = None
+            r.voided_at = None
     db.session.commit()
     return True, '', len(rows)
 

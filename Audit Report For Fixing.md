@@ -568,7 +568,9 @@ from hdc_account_txn t join hdc_cash_flow_entry e on e.account_tx_id = t.id;
 -- txn_void and entry_void must now match
 ```
 
-### Step 4 — Persist the void audit trail (fix 5.3)
+### Step 4 — Persist the void audit trail (fix 5.3) — ✅ COMPLETED (2026-09-20)
+
+> **Done.** `_accounts_toggle_transaction_void_state` now accepts `actor` and writes `void_reason`/`voided_by`/`voided_at` on void (clears them on restore); both Accounts route handlers pass `actor=current_user`. The All-Entries void form now has a required *Reason* input, voided rows stay visible on `/hdc/accounts/entries` (grey `table-secondary` row with the trail "Voided: reason · user · time" in the Meta column) via a new opt-in `include_void=True` on `_account_transaction_history` (dashboard/API behaviour unchanged), and a Restore button replaces Void on voided rows. Verified E2E: reason/actor/timestamp persisted and shown after void, cleared after restore, CF-register sync from Step 3 still holds, default-reason fallback works. Suite: 257 tests, only the pre-existing 8.1 failure.
 
 1. `hdc/services/accounts.py:1294` — accept and store the reason/actor:
 
@@ -789,7 +791,7 @@ Apply `or ''` to `bank_name`, `account_number`, `iban` as well, then re-download
 - [x] `GET /hdc/accounts/money-center` returns 200; all 22 flow links resolve (Step 1) ✅ 2026-09-20
 - [x] Recording a supplier payment succeeds and reduces the payable (Step 2) ✅ 2026-09-20
 - [x] Voiding from either side keeps ledger + CF document in the same void state (Step 3) ✅ 2026-09-20
-- [ ] Void reason/user/time persisted and visible (Step 4)
+- [x] Void reason/user/time persisted and visible (Step 4) ✅ 2026-09-20
 - [ ] `/hdc/accounts/reconciliation` shows 0 findings on a clean dataset (Step 5)
 - [ ] No 404s in the browser console on any Accounts page (Step 6)
 - [ ] `staff`/`accountant` cannot post money outside Accounts; decision written down (Step 7)
