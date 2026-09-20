@@ -1,4 +1,4 @@
-﻿{% extends "shared/base.html" %}
+{% extends "shared/base.html" %}
 {% block title %}Accounts{% endblock %}
 {% block page_heading %}Accounts{% endblock %}
 
@@ -128,10 +128,17 @@
 <div class="row g-3">
     <div class="{% if edit_txn %}col-12 col-xl-8 mx-auto{% else %}col-xl-4{% endif %}">
         {% if not edit_txn %}
+        <div class="alert alert-success d-flex justify-content-between align-items-center py-2 mb-3" style="border:2px solid #10b981; background: linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 100%);">
+            <div class="small"><i class="fas fa-sack-dollar me-2" style="color:#059669;"></i><strong>New: Money Center</strong> — smooth unified handling of all money IN/OUT/TRANSFER from Accounts. Direction → Type → Details with pending & balance hints, overdraft block, duplicate guard, void sync.</div>
+            <a href="{{ url_for('hdc_money_center') }}" class="btn btn-success btn-sm ms-2 text-nowrap"><i class="fas fa-arrow-right me-1"></i>Open Money Center</a>
+        </div>
         <div class="card hdc-card mb-3">
             <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
                 <span><i class="fas fa-bolt me-2"></i>Quick Actions</span>
                 <div class="d-flex gap-2">
+                    <a href="{{ url_for('hdc_money_center') }}" class="btn btn-sm btn-success" title="Money Center — smooth entry for all money types">
+                        <i class="fas fa-sack-dollar me-1"></i>Money Center
+                    </a>
                     <a href="{{ url_for('hdc_accounts_reconciliation') }}" class="btn btn-sm btn-outline-primary" title="Forensic check for double posts, duplicates and orphan records">
                         <i class="fas fa-shield-halved me-1"></i>Reconciliation
                     </a>

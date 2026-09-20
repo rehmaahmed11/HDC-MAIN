@@ -1,36 +1,74 @@
 {% extends "shared/base.html" %}
-{% block title %}Accounts Hub{% endblock %}
-{% block page_heading %}Accounts &amp; Cash — Hub{% endblock %}
+{% block title %}Accounts Hub — Only Place for Money{% endblock %}
+{% block page_heading %}Accounts Hub — Only Place for Money Transactions{% endblock %}
 
 {% block content %}
-{#
-  Accounts hub — the landing page for the whole Accounts & Cash section.
-
-  The section grew five separate sidebar entries (Accounts, Cash Flow,
-  CF Register, Day Close, Reconciliation) with nothing explaining how they
-  relate or which one to open.  This page is that map: one line per page saying
-  what it is for, plus the live numbers that tell you whether anything needs
-  attention today.
-
-  It is read-only by design — every action links through to the page that owns
-  it, so there is exactly one place where each kind of change can happen.
+{# Accounts Hub — redesigned as the ONLY place where money transactions happen.
+   Sidebar is cleaned: only Hub, Manage Accounts, All Entries remain.
+   All money IN/OUT/TRANSFER (Money Center, CF Register, Cash Flow, Day Close,
+   Transactions) are accessed via this Hub's action buttons — single entry point.
 #}
+
+<style>
+.hub-clean-note {
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+  color: #e2e8f0;
+  border-radius: 14px;
+  padding: 16px 20px;
+  border: 1px solid #334155;
+}
+.hub-action-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px,1fr)); gap: 12px; }
+.hub-action-card {
+  border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px;
+  background: #fff; transition: all 0.18s; position: relative; overflow: hidden;
+  text-decoration: none; color: inherit; display: block;
+}
+.hub-action-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.08); border-color: #10b981; }
+.hub-action-card.primary { border: 2px solid #10b981; background: linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 100%); }
+.hub-action-card.primary::before { content:''; position:absolute; top:0; left:0; right:0; height:3px; background:#10b981; }
+.hub-action-icon { width:40px; height:40px; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:1.1rem; }
+.hub-action-icon.emerald { background:#d1fae5; color:#065f46; }
+.hub-action-icon.blue { background:#dbeafe; color:#1e40af; }
+.hub-action-icon.rose { background:#ffe4e6; color:#881337; }
+.hub-action-icon.amber { background:#fef3c7; color:#92400e; }
+.hub-action-icon.slate { background:#f1f5f9; color:#334155; }
+.hub-action-icon.cyan { background:#cffafe; color:#155e75; }
+</style>
 
 <div class="acc-page-header">
     <div>
-        <h2><i class="fas fa-compass me-2"></i>Accounts &amp; Cash</h2>
+        <h2><i class="fas fa-compass me-2"></i>Accounts Hub <span class="badge bg-success ms-2" style="font-size:0.7rem;">Only Money Entry</span></h2>
         <div class="acc-subtitle">
-            One map of the money side of the business: what each page is for, where to record a
-            transaction, and what needs attention today.
+            <strong>Sidebar cleaned</strong> — only Hub, Manage Accounts, All Entries remain. All money <strong style="color:#10b981;">IN</strong>/<strong style="color:#f43f5e;">OUT</strong>/<strong style="color:#3b82f6;">TRANSFER</strong> (Money Center, CF Register, Cash Flow, Day Close, Transactions) happens from here.
+            One ledger <code>hdc_account_txn</code>, overdraft blocked (minor units exact), duplicate guarded, void synced.
         </div>
     </div>
-    <div class="acc-toolbar">
+    <div class="acc-toolbar d-flex gap-2 flex-wrap">
+        <a href="{{ url_for('hdc_money_center') }}" class="btn btn-success btn-sm">
+            <i class="fas fa-sack-dollar me-1"></i>Money Center — Smooth IN/OUT/TRANSFER
+        </a>
         <a href="{{ url_for('hdc_accounts_manage') }}" class="btn btn-outline-info btn-sm">
             <i class="fas fa-list me-1"></i>Manage Accounts
         </a>
-        <a href="{{ url_for('hdc_cashflow_register') }}" class="btn btn-mint btn-sm">
-            <i class="fas fa-plus me-1"></i>Record Cash Flow
+        <a href="{{ url_for('hdc_accounts_entries') }}" class="btn btn-outline-secondary btn-sm">
+            <i class="fas fa-receipt me-1"></i>All Entries
         </a>
+    </div>
+</div>
+
+{# Clean sidebar note #}
+<div class="hub-clean-note mb-4 d-flex justify-content-between align-items-center flex-wrap gap-3">
+    <div>
+        <div class="fw-bold"><i class="fas fa-broom me-2" style="color:#34d399;"></i>Sidebar Cleaned — Hub is Single Entry for Money</div>
+        <div class="small" style="color:#94a3b8; margin-top:4px;">
+            Previously 8 items: Money Center, Hub, Manage, Transactions, All Entries, CF Register, Cash Flow, Day Close.
+            Now only 3: <strong>Hub (this page)</strong>, Manage Accounts, All Entries. CF Register, Cash Flow, Day Close moved into Hub actions below.
+        </div>
+    </div>
+    <div class="d-flex gap-2">
+        <span class="badge bg-dark border" style="color:#94a3b8;"><i class="fas fa-check me-1" style="color:#10b981;"></i>CF Register → Hub</span>
+        <span class="badge bg-dark border" style="color:#94a3b8;"><i class="fas fa-check me-1" style="color:#10b981;"></i>Cash Flow → Hub</span>
+        <span class="badge bg-dark border" style="color:#94a3b8;"><i class="fas fa-check me-1" style="color:#10b981;"></i>Day Close → Hub</span>
     </div>
 </div>
 
@@ -111,138 +149,154 @@
 </div>
 {% endif %}
 
-{# ── What each page is for ───────────────────────────────────────────────── #}
-<div class="acc-section">
-    <div class="acc-section-head">
-        <h5><i class="fas fa-map me-2" style="color:#3b82f6;"></i>What Each Page Is For</h5>
-        <span class="small text-muted">Five pages, one ledger — each has a single job</span>
+{# ── PRIMARY: Money Handling — Only from Hub ──────────────────────────────── #}
+<div class="acc-section" style="border: 2px solid #10b981;">
+    <div class="acc-section-head" style="background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%); border-bottom: 1px solid #a7f3d0;">
+        <h5><i class="fas fa-sack-dollar me-2" style="color:#059669;"></i>All Money Transactions — Only From This Hub <span class="badge bg-success ms-2">Smooth</span></h5>
+        <span class="small text-muted">Sidebar cleaned, all money handling centralized here</span>
     </div>
     <div class="acc-section-body">
-        <div class="row g-3">
-            <div class="col-12 col-md-6 col-xl-4">
-                <a class="acc-guide" href="{{ url_for('hdc_accounts_manage') }}">
-                    <div class="acc-guide-icon"><i class="fas fa-list"></i></div>
-                    <div>
-                        <div class="acc-guide-title">Manage Accounts</div>
-                        <div class="acc-guide-text">
-                            The account master list. Create, classify, suspend, archive and review
-                            <strong>every</strong> account and its live balance.
+        <div class="hub-action-grid">
+            {# Money Center — PRIMARY #}
+            <a class="hub-action-card primary" href="{{ url_for('hdc_money_center') }}">
+                <div class="d-flex gap-3 align-items-start">
+                    <div class="hub-action-icon emerald"><i class="fas fa-sack-dollar"></i></div>
+                    <div class="flex-fill">
+                        <div class="fw-bold">Money Center <span class="badge bg-success ms-1" style="font-size:0.6rem;">Primary</span></div>
+                        <div class="small text-muted" style="line-height:1.5;">
+                            <strong>Smooth entry for ALL money IN/OUT/TRANSFER</strong> — Direction → Type → Details stepper, pending payable, balance hints, excess split tip/advance, overdraft blocked, duplicate guarded, single source of truth.
                         </div>
-                        <div class="acc-guide-meta">
-                            {{ summary.total_accounts }} account{{ '' if summary.total_accounts == 1 else 's' }} ·
-                            {{ summary.active_count }} active · {{ summary.archived_count }} archived
+                        <div class="mt-2 d-flex flex-wrap gap-1">
+                            <span class="badge bg-success" style="font-size:0.6rem;"><i class="fas fa-arrow-down me-1"></i>IN: receipts, rental</span>
+                            <span class="badge bg-danger" style="font-size:0.6rem;"><i class="fas fa-arrow-up me-1"></i>OUT: wages, suppliers</span>
+                            <span class="badge bg-primary" style="font-size:0.6rem;"><i class="fas fa-right-left me-1"></i>TRANSFER: cash↔bank</span>
                         </div>
                     </div>
-                </a>
-            </div>
+                </div>
+            </a>
 
-            <div class="col-12 col-md-6 col-xl-4">
-                <a class="acc-guide" href="{{ url_for('hdc_cashflow_register') }}">
-                    <div class="acc-guide-icon"><i class="fas fa-book"></i></div>
+            {# CF Register — moved from sidebar to Hub #}
+            <a class="hub-action-card" href="{{ url_for('hdc_cashflow_register') }}">
+                <div class="d-flex gap-3 align-items-start">
+                    <div class="hub-action-icon cyan"><i class="fas fa-book"></i></div>
                     <div>
-                        <div class="acc-guide-title">CF Register <span class="acc-badge acc-badge-emerald ms-1">Record here</span></div>
-                        <div class="acc-guide-text">
-                            <strong>The place to record money in / out / transfer.</strong>
-                            Categorised, party-tagged, project-scoped documents with an audit trail.
-                            Entries are immutable — a mistake is voided and replaced, never edited.
-                        </div>
-                        <div class="acc-guide-meta">{{ "{:,.0f}".format(entry_total or 0) }} register entries</div>
+                        <div class="fw-bold">CF Register <span class="badge bg-info ms-1" style="font-size:0.55rem;">Moved from sidebar → Hub</span></div>
+                        <div class="small text-muted">Record money in/out/transfer as immutable documents with audit trail. Party, project, category scoped. Void-only, no edit.</div>
+                        <div class="small text-muted mt-1"><strong>{{ "{:,.0f}".format(entry_total or 0) }}</strong> register entries · Today {{ today_summary.count or 0 }}</div>
                     </div>
-                </a>
-            </div>
+                </div>
+            </a>
 
-            <div class="col-12 col-md-6 col-xl-4">
-                <a class="acc-guide" href="{{ url_for('hdc_accounts') }}">
-                    <div class="acc-guide-icon"><i class="fas fa-wallet"></i></div>
+            {# Cash Flow — moved from sidebar to Hub #}
+            <a class="hub-action-card" href="{{ url_for('hdc_cashflow') }}">
+                <div class="d-flex gap-3 align-items-start">
+                    <div class="hub-action-icon blue"><i class="fas fa-money-bill-transfer"></i></div>
                     <div>
-                        <div class="acc-guide-title">Accounts (Transactions)</div>
-                        <div class="acc-guide-text">
-                            The transaction workspace: KPI tiles with drilldown, project receivables and
-                            the full double-entry form for ledger postings that are not simple cash flow
-                            (owner receipts, party payments, advances, transfers).
+                        <div class="fw-bold">Cash Flow Report <span class="badge bg-primary ms-1" style="font-size:0.55rem;">Moved → Hub</span></div>
+                        <div class="small text-muted">Daily money-in/out report grouped by day, built off unified ledger — includes payroll, purchases, subcontract, office too.</div>
+                        <div class="small mt-1">
+                            <span class="badge bg-light border">Full report</span>
+                            <span class="badge bg-light border">CSV</span>
                         </div>
-                        <div class="acc-guide-meta">Company total Rs. {{ "{:,.0f}".format(kpis.company_owned_total or 0) }}</div>
                     </div>
-                </a>
-            </div>
+                </div>
+            </a>
 
-            <div class="col-12 col-md-6 col-xl-4">
-                <a class="acc-guide" href="{{ url_for('hdc_cashflow') }}">
-                    <div class="acc-guide-icon"><i class="fas fa-money-bill-transfer"></i></div>
+            {# Day Close — moved from sidebar to Hub, prominent #}
+            <a class="hub-action-card" href="{{ url_for('hdc_cashflow_reconciliation') }}" style="border-color:#f59e0b; background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);">
+                <div class="d-flex gap-3 align-items-start">
+                    <div class="hub-action-icon amber"><i class="fas fa-scale-balanced"></i></div>
                     <div>
-                        <div class="acc-guide-title">Cash Flow <span class="acc-badge acc-badge-blue ms-1">Report</span></div>
-                        <div class="acc-guide-text">
-                            The daily money-in / money-out <strong>report</strong> grouped by day, built straight
-                            off the unified ledger — so it includes flows posted from payroll, purchases,
-                            subcontract and office too, not only register entries.
-                        </div>
-                        <div class="acc-guide-meta">
-                            <a href="{{ url_for('hdc_cashflow_report') }}" class="me-2" onclick="event.stopPropagation();">Full report</a>
-                            <a href="{{ url_for('hdc_cashflow_export') }}" onclick="event.stopPropagation();">CSV</a>
+                        <div class="fw-bold">Day Close <span class="badge bg-warning text-dark ms-1" style="font-size:0.55rem;">Moved → Hub Action</span></div>
+                        <div class="small text-muted">End-of-day: enter physically counted cash/bank, see difference vs ledger, lock day. Locked day rejects back-dated entries, rolls closing forward.</div>
+                        <div class="small mt-1">
+                            {% if lock_today %}<span class="badge bg-success"><i class="fas fa-lock me-1"></i>{{ today }} locked</span>
+                            {% else %}<span class="badge bg-warning text-dark"><i class="fas fa-lock-open me-1"></i>{{ today }} open — needs close</span>{% endif %}
+                            {% if not lock_yesterday %}<span class="badge bg-danger ms-1">Yesterday not closed</span>{% endif %}
                         </div>
                     </div>
-                </a>
-            </div>
+                </div>
+            </a>
 
-            <div class="col-12 col-md-6 col-xl-4">
-                <a class="acc-guide" href="{{ url_for('hdc_cashflow_reconciliation') }}">
-                    <div class="acc-guide-icon"><i class="fas fa-scale-balanced"></i></div>
+            {# Transactions workspace #}
+            <a class="hub-action-card" href="{{ url_for('hdc_accounts') }}">
+                <div class="d-flex gap-3 align-items-start">
+                    <div class="hub-action-icon slate"><i class="fas fa-wallet"></i></div>
                     <div>
-                        <div class="acc-guide-title">Day Close</div>
-                        <div class="acc-guide-text">
-                            End-of-day verification: enter the <strong>physically counted</strong> cash and bank
-                            for each account, see the difference against the ledger, then lock the day.
-                            A locked day carries its counted closing forward as tomorrow's opening.
-                        </div>
-                        <div class="acc-guide-meta">
-                            {% if lock_today %}<i class="fas fa-lock me-1"></i>{{ today }} locked
-                            {% else %}<i class="fas fa-lock-open me-1"></i>{{ today }} open{% endif %}
-                        </div>
+                        <div class="fw-bold">Transactions Workspace</div>
+                        <div class="small text-muted">KPI drilldown, project receivables, full double-entry form for owner receipts, party payments, advances, transfers with intent matrix, excess split.</div>
+                        <div class="small text-muted mt-1">Company total Rs. {{ "{:,.0f}".format(kpis.company_owned_total or 0) }}</div>
                     </div>
-                </a>
-            </div>
+                </div>
+            </a>
 
-            <div class="col-12 col-md-6 col-xl-4">
-                <a class="acc-guide" href="{{ url_for('hdc_accounts_entries') }}">
-                    <div class="acc-guide-icon"><i class="fas fa-receipt"></i></div>
+            {# All Entries — audit #}
+            <a class="hub-action-card" href="{{ url_for('hdc_accounts_entries') }}">
+                <div class="d-flex gap-3 align-items-start">
+                    <div class="hub-action-icon slate"><i class="fas fa-receipt"></i></div>
                     <div>
-                        <div class="acc-guide-title">All Entries</div>
-                        <div class="acc-guide-text">
-                            Every ledger row across all modules with filters, receipts, void / restore and
-                            reversals. This is the audit view — the source of truth behind every balance.
-                        </div>
-                        <div class="acc-guide-meta">{{ "{:,.0f}".format(txn_total or 0) }} posted transactions</div>
+                        <div class="fw-bold">All Entries <span class="badge bg-secondary ms-1" style="font-size:0.55rem;">Audit</span></div>
+                        <div class="small text-muted">Every ledger row with filters, receipts, void/restore, reversals, group_id splits. Source of truth behind every balance.</div>
+                        <div class="small text-muted mt-1"><strong>{{ "{:,.0f}".format(txn_total or 0) }}</strong> posted transactions</div>
                     </div>
-                </a>
-            </div>
+                </div>
+            </a>
 
-            <div class="col-12 col-md-6 col-xl-4">
-                <a class="acc-guide" href="{{ url_for('hdc_accounts_reconciliation') }}">
-                    <div class="acc-guide-icon"><i class="fas fa-stethoscope"></i></div>
+            {# Manage Accounts #}
+            <a class="hub-action-card" href="{{ url_for('hdc_accounts_manage') }}">
+                <div class="d-flex gap-3 align-items-start">
+                    <div class="hub-action-icon slate"><i class="fas fa-list"></i></div>
                     <div>
-                        <div class="acc-guide-title">Reconciliation Check</div>
-                        <div class="acc-guide-text">
-                            Forensic scan of the link between ledger rows and the source records that created
-                            them (payroll, purchases, expenses, owner payments). Use it after an import or when
-                            a total looks wrong.
-                        </div>
-                        <div class="acc-guide-meta">Data health</div>
+                        <div class="fw-bold">Manage Accounts</div>
+                        <div class="small text-muted">Master list: create, classify, suspend, archive, review every account + live balance derived from ledger.</div>
+                        <div class="small text-muted mt-1">{{ summary.total_accounts }} accounts · {{ summary.active_count }} active · {{ summary.archived_count }} archived</div>
                     </div>
-                </a>
-            </div>
+                </div>
+            </a>
 
-            <div class="col-12 col-md-6 col-xl-4">
-                <a class="acc-guide" href="{{ url_for('hdc_personal_management') }}">
-                    <div class="acc-guide-icon"><i class="fas fa-handshake"></i></div>
+            {# Reconciliation Check #}
+            <a class="hub-action-card" href="{{ url_for('hdc_accounts_reconciliation') }}">
+                <div class="d-flex gap-3 align-items-start">
+                    <div class="hub-action-icon rose"><i class="fas fa-stethoscope"></i></div>
                     <div>
-                        <div class="acc-guide-title">Personal Management</div>
-                        <div class="acc-guide-text">
-                            Owner / personal expenses kept separate from business cost, with their own
-                            categories and void trail.
-                        </div>
-                        <div class="acc-guide-meta">Personal spend</div>
+                        <div class="fw-bold">Reconciliation Check <span class="badge bg-danger ms-1" style="font-size:0.55rem;">Data health</span></div>
+                        <div class="small text-muted">Forensic scan: orphan_txns, void_mismatch, duplicate_active, group_inconsistent, orphan_sources. Use after import or when total looks wrong.</div>
                     </div>
-                </a>
+                </div>
+            </a>
+
+            {# Personal Management #}
+            <a class="hub-action-card" href="{{ url_for('hdc_personal_management') }}">
+                <div class="d-flex gap-3 align-items-start">
+                    <div class="hub-action-icon slate"><i class="fas fa-handshake"></i></div>
+                    <div>
+                        <div class="fw-bold">Personal Management</div>
+                        <div class="small text-muted">Owner/personal expenses separate from business cost, own categories, void trail, posts via personal_management_payment.</div>
+                    </div>
+                </div>
+            </a>
+
+            {# Money Flows Inventory #}
+            <div class="hub-action-card" style="background:#f8fafc; border-style:dashed;">
+                <div class="d-flex gap-3 align-items-start">
+                    <div class="hub-action-icon blue"><i class="fas fa-diagram-project"></i></div>
+                    <div>
+                        <div class="fw-bold">Money Flows Inventory <span class="badge bg-dark ms-1" style="font-size:0.55rem;">{{ money_flows_count }} flows</span></div>
+                        <div class="small text-muted">
+                            {% if money_grouped %}
+                            <span class="badge bg-success">IN: {{ money_grouped.in|length if money_grouped.in else 0 }}</span>
+                            <span class="badge bg-danger">OUT: {{ money_grouped.out|length if money_grouped.out else 0 }}</span>
+                            <span class="badge bg-primary">TRANSFER: {{ money_grouped.transfer|length if money_grouped.transfer else 0 }}</span>
+                            {% endif %}
+                            <span class="badge bg-warning text-dark">Payable: Rs. {{ "{:,.0f}".format(money_pending.total_payable or 0) }}</span>
+                            <span class="badge bg-success">Receivable: Rs. {{ "{:,.0f}".format(money_pending.total_receivable or 0) }}</span>
+                        </div>
+                        <div class="small text-muted mt-1" style="line-height:1.4;">
+                            All money points across modules handled from Hub via unified ledger with overdraft block (minor units exact), duplicate guard, void sync.
+                        </div>
+                        <div class="mt-2"><a href="{{ url_for('hdc_money_center') }}" class="btn btn-sm btn-success">Open Money Center for full inventory</a></div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -253,48 +307,37 @@
     <div class="col-12 col-xl-7">
         <div class="acc-section h-100">
             <div class="acc-section-head">
-                <h5><i class="fas fa-diagram-project me-2" style="color:#8b5cf6;"></i>How It Fits Together</h5>
-                <span class="small text-muted">One ledger, no duplicate entry</span>
+                <h5><i class="fas fa-diagram-project me-2" style="color:#8b5cf6;"></i>How It Fits Together — One Ledger, No Duplicates</h5>
+                <span class="small text-muted">Hub is only entry, sidebar cleaned</span>
             </div>
             <div class="acc-section-body">
                 <p class="small text-muted">
                     Every page reads and writes the <strong>same</strong> unified ledger
-                    (<code>hdc_account_txn</code>). Nothing is stored twice, so balances can never
-                    disagree between screens.
+                    (<code>hdc_account_txn</code>). Nothing stored twice, balances never disagree.
+                    <strong>Sidebar cleaned</strong> — only Hub, Manage, All Entries remain. All money handling via Hub.
                 </p>
                 <ol class="small mb-3" style="line-height:1.9;">
                     <li>
-                        <strong>Record</strong> — post money in / out / transfer in the
-                        <a href="{{ url_for('hdc_cashflow_register') }}">CF Register</a>.
-                        Each entry writes one document row <em>and</em> its double-entry ledger posting.
+                        <strong>Record</strong> — smooth entry via <a href="{{ url_for('hdc_money_center') }}"><strong>Money Center</strong></a> (Direction → Type → Details) or <a href="{{ url_for('hdc_cashflow_register') }}">CF Register</a>.
+                        Each entry writes one document + its double-entry posting with overdraft block (minor units exact), duplicate guard, void sync.
                     </li>
                     <li>
-                        <strong>Other modules post too</strong> — payroll, purchases, expenses, subcontract,
-                        office and owner payments all write to the same ledger automatically.
+                        <strong>Other modules post too</strong> — payroll, purchases, expenses, subcontract, office, owner payments, tool rentals all write to same ledger automatically via <code>_create_accounts_transaction_with_sync</code>.
                     </li>
                     <li>
-                        <strong>Balances</strong> —
-                        <a href="{{ url_for('hdc_accounts_manage') }}">Manage Accounts</a> derives every
-                        balance from the ledger (opening + in − out). It is never stored, so it cannot drift.
+                        <strong>Balances</strong> — <a href="{{ url_for('hdc_accounts_manage') }}">Manage Accounts</a> derives every balance from ledger (opening + in − out). Never stored, cannot drift.
                     </li>
                     <li>
-                        <strong>Review</strong> — <a href="{{ url_for('hdc_cashflow') }}">Cash Flow</a> shows the
-                        day-by-day report; <a href="{{ url_for('hdc_accounts_entries') }}">All Entries</a> shows
-                        every row with receipts.
+                        <strong>Review</strong> — <a href="{{ url_for('hdc_cashflow') }}">Cash Flow</a> daily report; <a href="{{ url_for('hdc_accounts_entries') }}">All Entries</a> audit view with receipts, void/restore, group_id splits.
                     </li>
                     <li>
-                        <strong>Close</strong> — <a href="{{ url_for('hdc_cashflow_reconciliation') }}">Day Close</a>
-                        compares the counted cash against the ledger and locks the day. A locked day rejects
-                        back-dated entries and rolls its counted closing forward as the next opening.
+                        <strong>Close</strong> — <a href="{{ url_for('hdc_cashflow_reconciliation') }}"><strong>Day Close (now in Hub)</strong></a> compares counted cash vs ledger, locks day. Locked day rejects back-dated entries, rolls counted closing forward.
                     </li>
                 </ol>
                 <div class="alert alert-light border small mb-0" style="background:var(--card-header-bg);">
                     <i class="fas fa-circle-info me-1"></i>
-                    <strong>Cash Flow vs CF Register?</strong>
-                    The <strong>Register</strong> is where you <em>record</em> (it is the document: category,
-                    party, project, who and why, plus the audit trail).
-                    <strong>Cash Flow</strong> is where you <em>read</em> — the daily report over the whole
-                    ledger, including flows other modules posted. Record once, see it everywhere.
+                    <strong>Sidebar cleaned:</strong> Previously 8 items (Money Center, Hub, Manage, Transactions, All Entries, CF Register, Cash Flow, Day Close). Now only 3: <strong>Hub</strong> (this page, only money entry), <strong>Manage Accounts</strong>, <strong>All Entries</strong>.
+                    CF Register, Cash Flow, Day Close moved into Hub actions above — single entry point, no confusion.
                 </div>
             </div>
         </div>
@@ -328,8 +371,8 @@
 
         <div class="acc-section mb-0">
             <div class="acc-section-head">
-                <h5><i class="fas fa-calendar-check me-2" style="color:#10b981;"></i>Recent Day Closes</h5>
-                <a href="{{ url_for('hdc_cashflow_reconciliation') }}" class="btn btn-sm btn-outline-secondary">Day Close</a>
+                <h5><i class="fas fa-calendar-check me-2" style="color:#10b981;"></i>Recent Day Closes <span class="badge bg-warning text-dark ms-1" style="font-size:0.6rem;">Now in Hub</span></h5>
+                <a href="{{ url_for('hdc_cashflow_reconciliation') }}" class="btn btn-sm btn-warning"><i class="fas fa-scale-balanced me-1"></i>Open Day Close</a>
             </div>
             <div class="acc-section-body flush">
                 <table class="table acc-table mb-0">
@@ -360,7 +403,7 @@
                                     <i class="fas fa-calendar-day"></i>
                                     <div class="mt-2">
                                         No day has been closed yet.
-                                        <a href="{{ url_for('hdc_cashflow_reconciliation') }}">Open Day Close</a>
+                                        <a href="{{ url_for('hdc_cashflow_reconciliation') }}">Open Day Close (now in Hub)</a>
                                     </div>
                                 </div>
                             </td>
@@ -368,6 +411,9 @@
                         {% endfor %}
                     </tbody>
                 </table>
+                <div class="p-2 small text-muted border-top">
+                    <i class="fas fa-info-circle me-1"></i>Day Close moved from sidebar to Hub action — now part of Accounts Hub single entry. Click "Open Day Close" above to close today.
+                </div>
             </div>
         </div>
     </div>

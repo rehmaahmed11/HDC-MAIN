@@ -55,6 +55,7 @@ from hdc.services.cashflow_register import (
     register_rows,
     register_summary,
 )
+from hdc.services.money_hub import get_money_flows_grouped, get_pending_payables_detailed
 from hdc.utils.dates import _pkt_today
 from hdc.utils.money import from_minor
 
@@ -141,6 +142,18 @@ def _hub_context():
     except Exception:
         entry_total = txn_total = 0
 
+    # Money flows for hub
+    money_grouped = {}
+    money_pending = {}
+    try:
+        money_grouped = get_money_flows_grouped()
+    except Exception:
+        money_grouped = {'in': [], 'out': [], 'transfer': []}
+    try:
+        money_pending = get_pending_payables_detailed().get('totals', {})
+    except Exception:
+        money_pending = {}
+
     return {
         'today': today.isoformat(),
         'yesterday': yesterday.isoformat(),
@@ -155,6 +168,9 @@ def _hub_context():
         'entry_total': entry_total,
         'txn_total': txn_total,
         'accounts': accounts,
+        'money_grouped': money_grouped,
+        'money_pending': money_pending,
+        'money_flows_count': len(money_grouped.get('in', [])) + len(money_grouped.get('out', [])) + len(money_grouped.get('transfer', [])),
     }
 
 

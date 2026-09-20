@@ -126,26 +126,17 @@
         <div class="sidebar-divider"></div>
         <div class="sidebar-group-label">Accounts &amp; Cash</div>
         <ul class="sidebar-nav">
-            <li class="nav-item {% if request.endpoint == 'hdc_accounts_hub' %}active{% endif %}">
-                <a href="{{ url_for('hdc_accounts_hub') }}"><i class="fas fa-compass"></i><span>Accounts Hub</span></a>
+            {# Clean sidebar: Hub is the ONLY place where money transactions happen.
+               All money IN/OUT/TRANSFER (Money Center, CF Register, Cash Flow, Day Close,
+               Transactions, All Entries) are accessed via Hub actions — sidebar stays minimal. #}
+            <li class="nav-item {% if request.endpoint in ['hdc_accounts_hub', 'hdc_money_center', 'hdc_accounts', 'hdc_accounts_kpi_detail', 'hdc_accounts_reconciliation', 'hdc_cashflow_register', 'hdc_cashflow', 'hdc_cashflow_reconciliation', 'hdc_cashflow_report'] %}active{% endif %}">
+                <a href="{{ url_for('hdc_accounts_hub') }}"><i class="fas fa-compass"></i><span>Accounts Hub</span><span class="badge bg-success ms-1" style="font-size:0.55rem;">Money</span></a>
             </li>
             <li class="nav-item {% if request.endpoint in ['hdc_accounts_manage', 'hdc_accounts_manage_export', 'hdc_account_new', 'hdc_account_edit', 'hdc_account_ledger'] %}active{% endif %}">
                 <a href="{{ url_for('hdc_accounts_manage') }}"><i class="fas fa-list"></i><span>Manage Accounts</span></a>
             </li>
-            <li class="nav-item {% if request.endpoint in ['hdc_accounts', 'hdc_accounts_kpi_detail', 'hdc_accounts_reconciliation'] %}active{% endif %}">
-                <a href="{{ url_for('hdc_accounts') }}"><i class="fas fa-wallet"></i><span>Transactions</span></a>
-            </li>
             <li class="nav-item {% if request.endpoint in ['hdc_accounts_entries', 'hdc_account_transaction_edit', 'hdc_account_transaction_receipt'] %}active{% endif %}">
-                <a href="{{ url_for('hdc_accounts_entries') }}"><i class="fas fa-receipt"></i><span>All Entries</span></a>
-            </li>
-            <li class="nav-item {% if request.endpoint in ['hdc_cashflow_register', 'hdc_cashflow_register_export'] %}active{% endif %}">
-                <a href="{{ url_for('hdc_cashflow_register') }}"><i class="fas fa-book"></i><span>CF Register</span></a>
-            </li>
-            <li class="nav-item {% if request.endpoint in ['hdc_cashflow', 'hdc_cashflow_report', 'hdc_cashflow_export'] %}active{% endif %}">
-                <a href="{{ url_for('hdc_cashflow') }}"><i class="fas fa-money-bill-transfer"></i><span>Cash Flow</span></a>
-            </li>
-            <li class="nav-item {% if request.endpoint == 'hdc_cashflow_reconciliation' %}active{% endif %}">
-                <a href="{{ url_for('hdc_cashflow_reconciliation') }}"><i class="fas fa-scale-balanced"></i><span>Day Close</span></a>
+                <a href="{{ url_for('hdc_accounts_entries') }}"><i class="fas fa-receipt"></i><span>All Entries</span><span class="small text-muted ms-1" style="font-size:0.6rem;">audit</span></a>
             </li>
         </ul>
         <div class="sidebar-divider"></div>
