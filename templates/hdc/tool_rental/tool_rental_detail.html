@@ -374,10 +374,10 @@
                                 </div>
                                 <div class="col-6">
                                     <label class="form-label">To Stage (Optional)</label>
-                                    <select name="to_stage_id" class="form-select">
+                                    <select name="to_stage_id" id="transferStageSelect" class="form-select">
                                         <option value="">No Stage</option>
                                         {% for s in stages %}
-                                        <option value="{{ s.id }}">{{ s.name }} - {{ s.project.name if s.project else '' }}</option>
+                                        <option value="{{ s.id }}" data-project-id="{{ s.project_id }}">{{ s.name }} - {{ s.project.name if s.project else '' }}</option>
                                         {% endfor %}
                                     </select>
                                 </div>
@@ -461,10 +461,22 @@ function togglePaymentMode(){
         recvSelect.required = true;
     }
 }
+function syncTransferStages(){
+    const project = document.getElementById('transferProjectSelect');
+    const stage = document.getElementById('transferStageSelect');
+    if(!project || !stage) return;
+    Array.from(stage.options).forEach(function(option){
+        const visible = !option.value || !project.value || option.dataset.projectId === project.value;
+        option.hidden = !visible;
+        if(!visible && option.selected) stage.value = '';
+    });
+}
 function toggleToType(){
     const t = document.getElementById('toType').value;
     document.getElementById('toSiteFields').classList.toggle('d-none', t!=='site');
     document.getElementById('toCustomerFields').classList.toggle('d-none', t!=='customer');
 }
+document.getElementById('transferProjectSelect')?.addEventListener('change', syncTransferStages);
+syncTransferStages();
 </script>
 {% endblock %}
