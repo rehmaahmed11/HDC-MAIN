@@ -5,7 +5,8 @@ the legacy single-file app: same URLs, same endpoint names, same database.
 """
 import os
 
-from flask import Flask
+from flask import Flask, url_for
+from werkzeug.routing import BuildError
 
 from hdc.config import BASE_DIR, ensure_dirs, get_flask_config, settings_for_app
 from hdc.extensions import (db, login_manager, _csrf_protect,
@@ -15,6 +16,19 @@ from hdc.routes import register_all
 from hdc.services.audit import register_audit_events
 from hdc.core.bootstrap import _ensure_bootstrap_once
 from hdc.utils.dates import _fmt_pkt
+
+
+def _safe_url_for(endpoint, **values):
+    """``url_for`` that degrades to ``'#'`` instead of raising BuildError.
+
+    Data-driven pages (e.g. the Money Center flow inventory) render route
+    names stored in Python data; a typo there must never take the whole
+    page down with a 500.
+    """
+    try:
+        return url_for(endpoint, **values)
+    except BuildError:
+        return "#"
 
 
 def create_app(config_overrides=None):
@@ -63,6 +77,8 @@ def create_app(config_overrides=None):
     # Template formatter, available unconditionally (as before).
     app.jinja_env.globals["fmt_pkt"] = _fmt_pkt
     app.jinja_env.filters["fmt_pkt"] = _fmt_pkt
+    # Defensive URL builder for data-driven links (Money Center flow cards).
+    app.jinja_env.globals["safe_url_for"] = _safe_url_for
 
     # Row traceability: every list row carries the id of the user who entered
     # it (``{{ row|hdc_row_attrs }}``) so the audit column on the page can be

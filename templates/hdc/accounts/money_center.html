@@ -587,7 +587,7 @@
               </div>
               <div class="flow-actions mt-2">
                 <button class="btn btn-outline-success btn-sm" onclick="mcQuickSelectType('{{ flow.accounts_entry_intent }}')"><i class="fas fa-plus me-1"></i>{{ flow.quick_action }}</button>
-                {% if flow.route %}<a href="{{ url_for(flow.route) if flow.route.startswith('hdc_') else '#' }}" class="btn btn-outline-secondary btn-sm">Open Module</a>{% endif %}
+                {% if flow.route %}<a href="{{ safe_url_for(flow.route) if flow.route.startswith('hdc_') else '#' }}" class="btn btn-outline-secondary btn-sm">Open Module</a>{% endif %}
               </div>
             </div>
           </div>
@@ -624,7 +624,7 @@
               </div>
               <div class="flow-actions mt-2">
                 <button class="btn btn-outline-danger btn-sm" onclick="mcQuickSelectType('{{ flow.accounts_entry_intent }}')"><i class="fas fa-plus me-1"></i>{{ flow.quick_action }}</button>
-                {% if flow.route %}<a href="{{ url_for(flow.route) if flow.route.startswith('hdc_') else '#' }}" class="btn btn-outline-secondary btn-sm">Open Module</a>{% endif %}
+                {% if flow.route %}<a href="{{ safe_url_for(flow.route) if flow.route.startswith('hdc_') else '#' }}" class="btn btn-outline-secondary btn-sm">Open Module</a>{% endif %}
               </div>
             </div>
           </div>

@@ -12,6 +12,7 @@ from sqlalchemy import and_, case, func, or_, text
 from hdc.core.flags import _runtime_flag_get, _runtime_flag_set
 from hdc.extensions import db
 from hdc.models.accounts import Account, AccountTransaction, Expense, OwnerPayment, PersonalExpense
+from hdc.models.cashflow import CashFlowEntry
 from hdc.models.materials import PurchaseV2, Supplier, SupplierLedger
 from hdc.models.office import OfficeExpense, OfficeStaff, OfficeStaffLedger
 from hdc.models.projects import Project, Stage
@@ -52,6 +53,9 @@ def _accounts_reconciliation_findings():
         'expense':                     (Expense, 'Expense'),
         'purchase_v2_paid':            (PurchaseV2, 'Purchase (paid)'),
         'owner_payment':               (OwnerPayment, 'Owner payment'),
+        'cash_flow_entry_in':          (CashFlowEntry, 'Cash Flow entry (in)'),
+        'cash_flow_entry_out':         (CashFlowEntry, 'Cash Flow entry (out)'),
+        'cash_flow_entry_transfer':    (CashFlowEntry, 'Cash Flow transfer'),
     }
 
     def _base_source_type(s):
@@ -971,8 +975,10 @@ def _create_account_transaction(payload, commit=True):
         return False, f'Transaction save failed: {ex}', []
 
 
-def _account_transaction_history(account_id=None, account_group=None, date_from=None, date_to=None, category=None, group_id=None, reference_id=None, limit=500, project_id=None, stage_id=None, tx_type=None, tx_direction=None, party_name=None, worker_id=None, return_query=False):
-    q = AccountTransaction.query.filter(AccountTransaction.is_void == False)
+def _account_transaction_history(account_id=None, account_group=None, date_from=None, date_to=None, category=None, group_id=None, reference_id=None, limit=500, project_id=None, stage_id=None, tx_type=None, tx_direction=None, party_name=None, worker_id=None, return_query=False, include_void=False):
+    q = AccountTransaction.query
+    if not include_void:
+        q = q.filter(AccountTransaction.is_void == False)
     if account_id:
         q = q.filter(or_(AccountTransaction.from_account_id == account_id, AccountTransaction.to_account_id == account_id))
     if account_group:
@@ -1120,6 +1126,18 @@ def _set_void_state_row(row, make_void=True, reason=''):
     return True, ''
 
 
+def _void_sync_actor_name():
+    """Username of the request's user, or ``'system'`` outside a session."""
+    try:
+        from flask import has_request_context
+        from flask_login import current_user
+        if has_request_context() and getattr(current_user, 'is_authenticated', False):
+            return (getattr(current_user, 'username', None) or 'system')[:80]
+    except Exception:
+        pass
+    return 'system'
+
+
 def _sync_source_row_void_state(source_type, source_id, make_void=True, reason=''):
     st = (source_type or '').strip().lower()
     sid = int(source_id or 0)
@@ -1129,6 +1147,10 @@ def _sync_source_row_void_state(source_type, source_id, make_void=True, reason='
     handled = True
     if st == 'owner_payment':
         row = OwnerPayment.query.get(sid)
+    elif st in ('cash_flow_entry_in', 'cash_flow_entry_out', 'cash_flow_entry_transfer'):
+        # Register documents mirror their posting's void state.  account_tx_id
+        # stays intact so the forward link survives the round trip.
+        row = CashFlowEntry.query.get(sid)
     elif st in ('labour_ledger_advance', 'labour_ledger_payment', 'labour_ledger_tip', 'worker_payment'):
         row = LabourLedger.query.get(sid)
     elif st in ('supplier_credit_payment', 'supplier_credit_tip', 'supplier_credit_settlement'):
@@ -1160,6 +1182,13 @@ def _sync_source_row_void_state(source_type, source_id, make_void=True, reason='
     ok, msg = _set_void_state_row(row, make_void=make_void, reason=reason)
     if (not ok):
         return ok, msg
+    if st in ('cash_flow_entry_in', 'cash_flow_entry_out', 'cash_flow_entry_transfer') and row is not None:
+        # The register model also tracks who voided/restored; keep it in step
+        # with the register's own void path so the audit trail stays complete.
+        actor_name = _void_sync_actor_name()
+        row.voided_by = (actor_name if make_void else None)
+        row.updated_by = actor_name
+        row.updated_at = _pkt_now_naive()
     if st in ('office_staff_ledger_advance', 'office_staff_ledger_payment', 'office_staff_ledger_tip'):
         staff_row = OfficeStaff.query.get(int(getattr(row, 'staff_id', 0) or 0))
         if make_void:
@@ -1291,7 +1320,7 @@ def _sync_account_transaction_source_update(txn_row):
         ledger_row.worker_id = int(txn_row.related_entity_id)
 
 
-def _accounts_toggle_transaction_void_state(txn_id, make_void=True, reason=''):
+def _accounts_toggle_transaction_void_state(txn_id, make_void=True, reason='', actor=None):
     row = AccountTransaction.query.get(int(txn_id or 0))
     if not row:
         return False, 'Transaction not found.', 0
@@ -1307,8 +1336,20 @@ def _accounts_toggle_transaction_void_state(txn_id, make_void=True, reason=''):
         if not ok:
             db.session.rollback()
             return False, (msg or 'Unable to sync source row state.'), 0
+    actor_name = ((getattr(actor, 'username', None) or 'system')[:80]
+                  if actor is not None else _void_sync_actor_name())
     for r in rows:
         r.is_void = bool(make_void)
+        if make_void:
+            # Persist the audit trail promised by ROW_TRACEABILITY: why the
+            # row was voided, by whom and when (previously never written).
+            r.void_reason = ((reason or '').strip() or 'Voided from Accounts')[:300]
+            r.voided_by = actor_name
+            r.voided_at = _pkt_now_naive()
+        else:
+            r.void_reason = None
+            r.voided_by = None
+            r.voided_at = None
     db.session.commit()
     return True, '', len(rows)
 

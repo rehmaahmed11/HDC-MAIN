@@ -7,7 +7,7 @@ original @app.route decorator and endpoint name.
 from datetime import datetime
 
 from flask import abort, flash, redirect, render_template, request, url_for
-from flask_login import login_required
+from flask_login import current_user, login_required
 from sqlalchemy import func, or_
 
 from hdc.extensions import _admin_only, db
@@ -156,7 +156,7 @@ def register(app):
             if action == 'void_transaction':
                 txn_id = request.form.get('transaction_id', type=int)
                 reason = (request.form.get('void_reason') or '').strip() or 'Voided from Accounts'
-                ok, msg, cnt = _accounts_toggle_transaction_void_state(txn_id, make_void=True, reason=reason)
+                ok, msg, cnt = _accounts_toggle_transaction_void_state(txn_id, make_void=True, reason=reason, actor=current_user)
                 if not ok:
                     flash(msg or 'Unable to void transaction.', 'danger')
                 else:
@@ -165,7 +165,7 @@ def register(app):
 
             if action == 'restore_transaction':
                 txn_id = request.form.get('transaction_id', type=int)
-                ok, msg, cnt = _accounts_toggle_transaction_void_state(txn_id, make_void=False, reason='')
+                ok, msg, cnt = _accounts_toggle_transaction_void_state(txn_id, make_void=False, reason='', actor=current_user)
                 if not ok:
                     flash(msg or 'Unable to restore transaction.', 'danger')
                 else:
@@ -738,7 +738,8 @@ def register(app):
             reference_id=(reference_id or None),
             party_name=(party_name or None),
             worker_id=(worker_id_f or None),
-            return_query=True
+            return_query=True,
+            include_void=True,
         )
         pg_total_items = base_query.count()
         pg_total_pages = max(1, (pg_total_items + per_page - 1) // per_page) if pg_total_items else 1
