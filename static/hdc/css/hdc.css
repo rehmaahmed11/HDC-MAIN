@@ -934,3 +934,171 @@ tr[data-hdc-void="1"] > td .text-warning {
     color: var(--text-muted);
     opacity: 0.65;
 }
+
+/* ------------------------------------------------------------------ */
+/* HDC Tools section — dashboard, sub-nav, position bars, chains.      */
+/* ------------------------------------------------------------------ */
+.tools-subnav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px;
+    border: 1px solid var(--card-border);
+    border-radius: 14px;
+    background: var(--card-header-bg);
+}
+
+.tools-subnav-link {
+    display: inline-flex;
+    align-items: center;
+    padding: 7px 14px;
+    border-radius: 10px;
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-decoration: none;
+    border: 1px solid transparent;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.tools-subnav-link:hover {
+    background: var(--accent-soft);
+    color: var(--accent-strong);
+}
+
+.tools-subnav-link.active {
+    background: var(--accent);
+    color: #fff;
+    box-shadow: 0 6px 16px rgba(31, 162, 127, 0.3);
+}
+
+/* Stacked "where are the tools" split bar: store / own sites / customers. */
+.tools-split-bar {
+    display: flex;
+    width: 100%;
+    height: 30px;
+    border-radius: 999px;
+    overflow: hidden;
+    border: 1px solid var(--card-border);
+    background: var(--table-head);
+}
+
+.tools-split-seg {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-size: 0.72rem;
+    font-weight: 800;
+    white-space: nowrap;
+    overflow: hidden;
+    min-width: 2px;
+    transition: filter 0.15s ease;
+}
+
+.tools-split-seg:hover { filter: brightness(1.08); }
+
+.tools-split-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    margin-top: 10px;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    font-weight: 600;
+}
+
+.tools-split-dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+    margin-right: 6px;
+    vertical-align: middle;
+}
+
+/* Per-tool mini bar showing owned vs out at a glance. */
+.tools-mini-bar {
+    display: flex;
+    height: 8px;
+    width: 110px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: var(--table-head);
+    border: 1px solid var(--card-border);
+}
+
+.tools-mini-seg { height: 100%; }
+
+.tools-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    border: 1px solid var(--card-border);
+    background: var(--card-header-bg);
+    color: var(--text);
+}
+
+.tools-chip.chip-store { border-color: rgba(22, 163, 74, 0.45); color: #15803d; }
+.tools-chip.chip-own { border-color: rgba(245, 158, 11, 0.5); color: #b45309; }
+.tools-chip.chip-customer { border-color: rgba(124, 58, 237, 0.45); color: #6d28d9; }
+[data-theme="dark"] .tools-chip.chip-store { color: #4ade80; }
+[data-theme="dark"] .tools-chip.chip-own { color: #fbbf24; }
+[data-theme="dark"] .tools-chip.chip-customer { color: #c4b5fd; }
+
+.tools-chain { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+
+.tools-chain-step {
+    padding: 3px 9px;
+    border-radius: 999px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    border: 1px solid var(--card-border);
+    background: var(--card-header-bg);
+    color: var(--text-muted);
+}
+
+.tools-chain-step.current {
+    background: linear-gradient(135deg, #16a34a, #22c55e);
+    color: #fff;
+    border-color: transparent;
+    box-shadow: 0 4px 12px rgba(34, 197, 94, 0.32);
+}
+
+.tools-chain-arrow { opacity: 0.45; font-weight: 800; }
+
+.tools-issue {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    padding: 9px 11px;
+    border-radius: 10px;
+    border: 1px solid var(--card-border);
+    border-left-width: 4px;
+    background: var(--card-header-bg);
+}
+
+.tools-issue.sev-danger { border-left-color: #dc2626; }
+.tools-issue.sev-warning { border-left-color: #f59e0b; }
+.tools-issue.sev-info { border-left-color: #2563eb; }
+
+.tools-issue-icon { font-size: 0.95rem; margin-top: 2px; }
+.tools-issue-title { font-weight: 700; font-size: 0.83rem; }
+.tools-issue-detail { font-size: 0.75rem; color: var(--text-muted); }
+
+.tools-recon-total {
+    font-size: 1.05rem;
+    font-weight: 800;
+    letter-spacing: 0.2px;
+}
+
+.tools-search-hit {
+    border: 1px solid var(--card-border);
+    border-radius: 10px;
+    padding: 8px 10px;
+    background: var(--card-header-bg);
+}

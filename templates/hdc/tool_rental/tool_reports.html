@@ -3,6 +3,9 @@
 {% block page_heading %}Tool Rental Reports — Search by Site / Tool / Date Range / All Possible{% endblock %}
 
 {% block content %}
+{% set tools_active = 'reports' %}
+{% include "tool_rental/_tools_nav.html" %}
+
 <div class="row g-3 mt-1">
     <div class="col-6 col-md-2"><div class="kpi-card kpi-blue"><div class="kpi-icon"><i class="fas fa-tools"></i></div><div class="kpi-value">{{ "%.0f"|format(kpis.total_tools) }}</div><div class="kpi-label">Total Tools</div></div></div>
     <div class="col-6 col-md-2"><div class="kpi-card kpi-orange"><div class="kpi-icon"><i class="fas fa-dolly"></i></div><div class="kpi-value">{{ "%.0f"|format(kpis.rented_out) }}</div><div class="kpi-label">Rented Out</div></div></div>

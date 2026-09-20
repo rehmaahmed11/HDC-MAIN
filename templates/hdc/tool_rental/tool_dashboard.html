@@ -1,0 +1,425 @@
+{% extends "shared/base.html" %}
+{% block title %}Tools Dashboard — Where Is Every Tool{% endblock %}
+{% block page_heading %}HDC Tools — Total Sent, Own Sites vs Customers vs Inventory{% endblock %}
+
+{% block content %}
+{% set t = summary.totals %}
+{% include "tool_rental/_tools_nav.html" %}
+
+<!-- ============ HEADLINE: OWNED vs WHERE THEY ARE ============ -->
+<div class="row g-3 mt-1">
+    <div class="col-6 col-md-4 col-lg-2">
+        <div class="kpi-card kpi-blue h-100">
+            <div class="kpi-icon"><i class="fas fa-tools"></i></div>
+            <div class="kpi-value">{{ "%g"|format(t.owned_qty) }}</div>
+            <div class="kpi-label">Total Owned (Inventory)</div>
+            <div class="kpi-sub">{{ t.tool_types }} tool types</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-4 col-lg-2">
+        <div class="kpi-card kpi-green h-100">
+            <div class="kpi-icon"><i class="fas fa-warehouse"></i></div>
+            <div class="kpi-value">{{ "%g"|format(t.in_store_qty) }}</div>
+            <div class="kpi-label">In Store (Available)</div>
+            <div class="kpi-sub">{{ "%.0f"|format(100 - t.utilization_pct) }}% of owned</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-4 col-lg-2">
+        <div class="kpi-card kpi-orange h-100">
+            <div class="kpi-icon"><i class="fas fa-helmet-safety"></i></div>
+            <div class="kpi-value">{{ "%g"|format(t.own_project_qty) }}</div>
+            <div class="kpi-label">Sent to Own Projects</div>
+            <div class="kpi-sub">{{ t.own_project_count }} site(s) holding</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-4 col-lg-2">
+        <div class="kpi-card kpi-purple h-100">
+            <div class="kpi-icon"><i class="fas fa-user-tag"></i></div>
+            <div class="kpi-value">{{ "%g"|format(t.customer_qty) }}</div>
+            <div class="kpi-label">Sent to Other Customers</div>
+            <div class="kpi-sub">{{ t.customer_count }} customer(s)</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-4 col-lg-2">
+        <div class="kpi-card kpi-red h-100">
+            <div class="kpi-icon"><i class="fas fa-dolly"></i></div>
+            <div class="kpi-value">{{ "%g"|format(recon.total_sent) }}</div>
+            <div class="kpi-label">Total Sent Out</div>
+            <div class="kpi-sub">Utilization {{ "%.1f"|format(t.utilization_pct) }}%</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-4 col-lg-2">
+        <div class="kpi-card kpi-teal h-100">
+            <div class="kpi-icon"><i class="fas fa-hand-holding-dollar"></i></div>
+            <div class="kpi-value small">{{ "{:,.0f}".format(t.pending_amount) }}</div>
+            <div class="kpi-label">Rent Pending</div>
+            <div class="kpi-sub">{{ t.overdue_rentals }} overdue rental(s)</div>
+        </div>
+    </div>
+</div>
+
+<!-- ============ RECONCILIATION STRIP ============ -->
+<div class="card hdc-card mt-3 {% if not recon.balanced %}border-danger{% endif %}">
+    <div class="card-header hdc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span>
+            <i class="fas fa-scale-balanced me-2"></i>Does every tool add up?
+            <span class="badge {% if recon.balanced %}bg-success{% else %}bg-danger{% endif %} ms-2">
+                {% if recon.balanced %}<i class="fas fa-check me-1"></i>Balanced{% else %}<i class="fas fa-triangle-exclamation me-1"></i>{{ recon.unaccounted_rows|length }} tool(s) off{% endif %}
+            </span>
+        </span>
+        <small class="text-muted">In Store + Own Projects + Customers must equal Total Owned</small>
+    </div>
+    <div class="card-body">
+        <div class="d-flex flex-wrap align-items-center justify-content-center gap-2 mb-3 tools-recon-total">
+            <span class="tools-chip chip-store"><i class="fas fa-warehouse"></i>{{ "%g"|format(recon.in_store) }} store</span>
+            <span class="text-muted">+</span>
+            <span class="tools-chip chip-own"><i class="fas fa-helmet-safety"></i>{{ "%g"|format(recon.own_project) }} own sites</span>
+            <span class="text-muted">+</span>
+            <span class="tools-chip chip-customer"><i class="fas fa-user-tag"></i>{{ "%g"|format(recon.customer) }} customers</span>
+            <span class="text-muted">=</span>
+            <span class="tools-chip"><i class="fas fa-equals"></i>{{ "%g"|format(recon.accounted) }} accounted</span>
+            <span class="text-muted">of</span>
+            <span class="tools-chip"><i class="fas fa-tools"></i>{{ "%g"|format(recon.owned) }} owned</span>
+            {% if not recon.balanced %}
+            <span class="badge bg-danger ms-1">{{ "%+g"|format(recon.variance) }} unaccounted</span>
+            {% endif %}
+        </div>
+
+        <!-- stacked split bar -->
+        <div class="tools-split-bar" title="Where all owned tools are right now">
+            {% for seg in summary.split %}
+                {% if seg.qty > 0 %}
+                <div class="tools-split-seg" style="width: {{ seg.pct }}%; background: {{ seg.color }};"
+                     title="{{ seg.label }}: {{ "%g"|format(seg.qty) }} ({{ "%.1f"|format(seg.pct) }}%)">
+                    {% if seg.pct >= 8 %}{{ "%.0f"|format(seg.pct) }}%{% endif %}
+                </div>
+                {% endif %}
+            {% endfor %}
+        </div>
+        <div class="tools-split-legend">
+            {% for seg in summary.split %}
+            <span><i class="tools-split-dot" style="background: {{ seg.color }};"></i>{{ seg.label }} — <strong>{{ "%g"|format(seg.qty) }}</strong> ({{ "%.1f"|format(seg.pct) }}%)</span>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mt-1">
+    <!-- ============ SEARCH + FILTERS ============ -->
+    <div class="col-lg-8">
+        <div class="card hdc-card h-100">
+            <div class="card-header hdc-card-header"><i class="fas fa-magnifying-glass me-2"></i>Find any tool — name, code, customer, site or rental code</div>
+            <div class="card-body">
+                <form method="GET" class="row g-2 align-items-end">
+                    <div class="col-md-5">
+                        <label class="form-label">Search everything</label>
+                        <input type="text" name="q" value="{{ filters.q or '' }}" class="form-control"
+                               placeholder="e.g. TOOL-0004, Vibrator, Site B, RENT-00012, Ali Traders">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Where</label>
+                        <select name="location_type" class="form-select">
+                            <option value="">Anywhere</option>
+                            <option value="{{ loc_store }}" {% if filters.location_type==loc_store %}selected{% endif %}>In Store</option>
+                            <option value="{{ loc_own }}" {% if filters.location_type==loc_own %}selected{% endif %}>Own Projects</option>
+                            <option value="{{ loc_customer }}" {% if filters.location_type==loc_customer %}selected{% endif %}>Customers</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Show</label>
+                        <select name="view" class="form-select">
+                            <option value="all" {% if filters.view=='all' %}selected{% endif %}>All tools</option>
+                            <option value="out" {% if filters.view=='out' %}selected{% endif %}>Only tools that are out</option>
+                            <option value="store" {% if filters.view=='store' %}selected{% endif %}>Only tools in store</option>
+                            <option value="own" {% if filters.view=='own' %}selected{% endif %}>On own projects</option>
+                            <option value="customer" {% if filters.view=='customer' %}selected{% endif %}>With customers</option>
+                            <option value="attention" {% if filters.view=='attention' %}selected{% endif %}>Needs attention</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Tool</label>
+                        <select name="tool_id" class="form-select">
+                            <option value="">All tools</option>
+                            {% for r in tools %}
+                            <option value="{{ r.tool_id }}" {% if filters.tool_id==r.tool_id %}selected{% endif %}>{{ r.name }} ({{ r.code }})</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Category</label>
+                        <select name="category_id" class="form-select">
+                            <option value="">All categories</option>
+                            {% for c in categories %}
+                            <option value="{{ c.id }}" {% if filters.category_id==c.id %}selected{% endif %}>{{ c.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Own site</label>
+                        <select name="project_id" class="form-select">
+                            <option value="">All sites</option>
+                            {% for p in projects %}
+                            <option value="{{ p.id }}" {% if filters.project_id==p.id %}selected{% endif %}>{{ p.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-3 d-flex gap-2 align-items-end">
+                        <div class="form-check mb-2">
+                            <input class="form-check-input" type="checkbox" name="issues" value="1" id="onlyIssues"
+                                   {% if filters.issues %}checked{% endif %}>
+                            <label class="form-check-label small" for="onlyIssues">Issues only</label>
+                        </div>
+                    </div>
+                    <div class="col-md-12 d-flex gap-2">
+                        <button type="submit" class="btn btn-mint"><i class="fas fa-search me-1"></i>Apply</button>
+                        <a href="{{ url_for('hdc_tool_rental_dashboard') }}" class="btn btn-outline-secondary">Reset</a>
+                        <a href="{{ url_for('hdc_api_tool_dashboard') }}" class="btn btn-outline-secondary ms-auto" target="_blank"
+                           title="Open the JSON position feed"><i class="fas fa-code me-1"></i>JSON</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ ATTENTION PANEL ============ -->
+    <div class="col-lg-4">
+        <div class="card hdc-card h-100">
+            <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-bell me-2"></i>Needs Attention</span>
+                <span class="badge bg-secondary">{{ summary.attention|length }}</span>
+            </div>
+            <div class="card-body" style="max-height: 320px; overflow-y: auto;">
+                <div class="d-flex flex-column gap-2">
+                    {% for issue in summary.attention[:12] %}
+                    <div class="tools-issue sev-{{ issue.severity }}">
+                        <div class="tools-issue-icon">
+                            <i class="fas {{ issue.icon }} {% if issue.severity=='danger' %}text-danger{% elif issue.severity=='warning' %}text-warning{% else %}text-primary{% endif %}"></i>
+                        </div>
+                        <div class="flex-grow-1">
+                            <div class="tools-issue-title">{{ issue.title }}</div>
+                            <div class="tools-issue-detail">{{ issue.detail }}</div>
+                            {% if issue.url_endpoint %}
+                            <a href="{{ url_for(issue.url_endpoint, **issue.url_args) }}" class="small">Open <i class="fas fa-arrow-right"></i></a>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% else %}
+                    <div class="text-center text-muted py-4">
+                        <i class="fas fa-circle-check fa-2x text-success mb-2 d-block"></i>
+                        All tools accounted for. Nothing overdue.
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============ SEARCH RESULTS ============ -->
+{% if found and found.total > 0 %}
+<div class="card hdc-card mt-3">
+    <div class="card-header hdc-card-header">
+        <i class="fas fa-search me-2"></i>Results for “{{ found.term }}” — {{ found.total }} hit(s)
+    </div>
+    <div class="card-body">
+        <div class="row g-3">
+            {% if found.tools %}
+            <div class="col-md-6">
+                <h6 class="text-muted small text-uppercase fw-bold mb-2">Tools ({{ found.tools|length }})</h6>
+                <div class="d-flex flex-column gap-2">
+                    {% for r in found.tools %}
+                    <a href="{{ url_for('hdc_tool_rental_tool_position', tool_id=r.tool_id) }}" class="tools-search-hit text-decoration-none">
+                        <div class="d-flex justify-content-between">
+                            <strong>{{ r.name }}</strong>
+                            <span class="badge bg-secondary">{{ r.code }}</span>
+                        </div>
+                        <small class="text-muted">
+                            {{ "%g"|format(r.in_store_qty) }} in store · {{ "%g"|format(r.own_project_qty) }} own sites · {{ "%g"|format(r.customer_qty) }} customers
+                        </small>
+                    </a>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+            {% if found.rentals %}
+            <div class="col-md-6">
+                <h6 class="text-muted small text-uppercase fw-bold mb-2">Rentals ({{ found.rentals|length }})</h6>
+                <div class="d-flex flex-column gap-2">
+                    {% for hit in found.rentals %}
+                    <a href="{{ url_for('hdc_tool_rental_detail', rental_id=hit.rental.id) }}" class="tools-search-hit text-decoration-none">
+                        <div class="d-flex justify-content-between">
+                            <strong>{{ hit.rental.rental_code }}</strong>
+                            <span class="badge {% if hit.rental.renter_type=='internal' %}bg-primary{% else %}bg-info{% endif %}">{{ hit.rental.renter_type }}</span>
+                        </div>
+                        <small class="text-muted">
+                            {{ hit.rental.customer_name or (hit.rental.project.name if hit.rental.project else '-') }} ·
+                            {{ "%g"|format(hit.pending_qty) }} still out
+                        </small>
+                        {% for pt in hit.pending_tools[:3] %}
+                        <div><small>{{ pt.name }} × {{ "%g"|format(pt.qty) }} — <span class="fw-bold">{{ pt.location }}</span></small></div>
+                        {% endfor %}
+                    </a>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+            {% if found.locations %}
+            <div class="col-md-6">
+                <h6 class="text-muted small text-uppercase fw-bold mb-2">Sites / Customers ({{ found.locations|length }})</h6>
+                <div class="d-flex flex-column gap-2">
+                    {% for loc in found.locations %}
+                    <div class="tools-search-hit">
+                        <div class="d-flex justify-content-between">
+                            <strong>{{ loc.label }}</strong>
+                            <span class="tools-chip {% if loc.loc_type==loc_own %}chip-own{% elif loc.loc_type==loc_customer %}chip-customer{% else %}chip-store{% endif %}">{{ "%g"|format(loc.qty) }}</span>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- ============ PER-TOOL POSITION TABLE ============ -->
+<div class="card hdc-card mt-3">
+    <div class="card-header hdc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span><i class="fas fa-list-check me-2"></i>Tool-by-tool position — {{ rows|length }} of {{ tools|length }} tools</span>
+        <small class="text-muted">Click a tool to see every piece and its movement chain</small>
+    </div>
+    <div class="table-responsive">
+        <table class="table hdc-table table-sm mb-0 align-middle">
+            <thead>
+                <tr>
+                    <th>Tool</th>
+                    <th class="text-center">Owned</th>
+                    <th class="text-center">In Store</th>
+                    <th class="text-center">Own Sites</th>
+                    <th class="text-center">Customers</th>
+                    <th style="min-width:130px">Split</th>
+                    <th>Where it is now</th>
+                    <th class="text-center">Status</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for r in rows %}
+                {% set owned = r.owned_qty or 0.0001 %}
+                <tr>
+                    <td>
+                        <strong>{{ r.name }}</strong>
+                        <div><span class="badge bg-secondary">{{ r.code }}</span> <small class="text-muted">{{ r.category }} · {{ r.unit }}</small></div>
+                    </td>
+                    <td class="text-center fw-bold">{{ "%g"|format(r.owned_qty) }}</td>
+                    <td class="text-center"><span class="badge bg-success-subtle text-success border border-success-subtle">{{ "%g"|format(r.in_store_qty) }}</span></td>
+                    <td class="text-center">{% if r.own_project_qty > 0 %}<span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle">{{ "%g"|format(r.own_project_qty) }}</span>{% else %}<span class="text-muted">–</span>{% endif %}</td>
+                    <td class="text-center">{% if r.customer_qty > 0 %}<span class="badge" style="background:#7c3aed;">{{ "%g"|format(r.customer_qty) }}</span>{% else %}<span class="text-muted">–</span>{% endif %}</td>
+                    <td>
+                        <div class="tools-mini-bar" title="Store {{ "%g"|format(r.in_store_qty) }} · Own {{ "%g"|format(r.own_project_qty) }} · Customers {{ "%g"|format(r.customer_qty) }}">
+                            <div class="tools-mini-seg" style="width: {{ (r.in_store_qty/owned*100)|round(1) }}%; background:#16a34a;"></div>
+                            <div class="tools-mini-seg" style="width: {{ (r.own_project_qty/owned*100)|round(1) }}%; background:#f59e0b;"></div>
+                            <div class="tools-mini-seg" style="width: {{ (r.customer_qty/owned*100)|round(1) }}%; background:#7c3aed;"></div>
+                        </div>
+                        <small class="text-muted">{{ "%.0f"|format(r.utilization_pct) }}% out</small>
+                    </td>
+                    <td>
+                        {% if r.holdings %}
+                            {% for h in r.holdings[:2] %}
+                            <div>
+                                <span class="tools-chip {% if h.loc_type==loc_own %}chip-own{% elif h.loc_type==loc_customer %}chip-customer{% else %}chip-store{% endif %}">
+                                    <i class="fas fa-location-dot"></i>{{ h.label }} × {{ "%g"|format(h.qty) }}
+                                </span>
+                                {% if h.overdue %}<span class="badge bg-danger">overdue</span>{% endif %}
+                            </div>
+                            {% endfor %}
+                            {% if r.holdings|length > 2 %}<small class="text-muted">+{{ r.holdings|length - 2 }} more location(s)</small>{% endif %}
+                            {% if r.in_store_qty > 0 %}<div><span class="tools-chip chip-store"><i class="fas fa-warehouse"></i>Store × {{ "%g"|format(r.in_store_qty) }}</span></div>{% endif %}
+                        {% else %}
+                            <span class="tools-chip chip-store"><i class="fas fa-warehouse"></i>All in store</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-center">
+                        {% if r.unaccounted %}
+                            <span class="badge bg-danger" title="Owned {{ "%g"|format(r.owned_qty) }} ≠ store+out"><i class="fas fa-scale-unbalanced me-1"></i>off {{ "%+g"|format(r.variance) }}</span>
+                        {% elif r.overdue_qty > 0 %}
+                            <span class="badge bg-danger">overdue</span>
+                        {% elif r.long_out %}
+                            <span class="badge bg-warning text-dark">{{ r.oldest_days_out }}d out</span>
+                        {% elif r.out_qty > 0 %}
+                            <span class="badge bg-primary">out</span>
+                        {% elif r.condition in ('damaged','lost') %}
+                            <span class="badge bg-secondary">{{ r.condition }}</span>
+                        {% elif r.idle %}
+                            <span class="badge bg-secondary">idle</span>
+                        {% else %}
+                            <span class="badge bg-success">in store</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <a href="{{ url_for('hdc_tool_rental_tool_position', tool_id=r.tool_id) }}" class="btn btn-sm btn-outline-primary"
+                           title="Full position + movement history"><i class="fas fa-eye"></i></a>
+                    </td>
+                </tr>
+            {% else %}
+                <tr><td colspan="9" class="text-center text-muted py-4">
+                    No tools match this filter.
+                    <a href="{{ url_for('hdc_tool_rental_dashboard') }}">Reset filters</a> or
+                    <a href="{{ url_for('hdc_tool_rental_inventory') }}">add tools in Inventory</a>.
+                </td></tr>
+            {% endfor %}
+            </tbody>
+            <tfoot>
+                <tr class="hdc-empty-row">
+                    <td class="fw-bold">Totals ({{ rows|length }} shown)</td>
+                    <td class="text-center fw-bold">{{ "%g"|format(rows|sum(attribute='owned_qty')) }}</td>
+                    <td class="text-center fw-bold">{{ "%g"|format(rows|sum(attribute='in_store_qty')) }}</td>
+                    <td class="text-center fw-bold">{{ "%g"|format(rows|sum(attribute='own_project_qty')) }}</td>
+                    <td class="text-center fw-bold">{{ "%g"|format(rows|sum(attribute='customer_qty')) }}</td>
+                    <td colspan="4"></td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+</div>
+
+<!-- ============ LOCATIONS ROLL-UP ============ -->
+<div class="card hdc-card mt-3">
+    <div class="card-header hdc-card-header">
+        <i class="fas fa-map-location-dot me-2"></i>By location — who is holding what right now
+    </div>
+    <div class="table-responsive">
+        <table class="table hdc-table table-sm mb-0 align-middle">
+            <thead><tr><th>Location</th><th>Type</th><th class="text-center">Qty Held</th><th class="text-center">Tool Types</th><th class="text-center">Rentals</th><th class="text-center">Overdue</th><th class="text-center">Oldest (days)</th><th class="text-end">Rent Pending</th></tr></thead>
+            <tbody>
+            {% for loc in locations %}
+                <tr>
+                    <td>
+                        <strong>{{ loc.label }}</strong>
+                        {% if loc.loc_type==loc_own and loc.project_id %}
+                            <a class="small ms-1" href="{{ url_for('hdc_project_detail', pid=loc.project_id) }}"><i class="fas fa-up-right-from-square"></i></a>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <span class="tools-chip {% if loc.loc_type==loc_own %}chip-own{% elif loc.loc_type==loc_customer %}chip-customer{% else %}chip-store{% endif %}">
+                            {% if loc.loc_type==loc_own %}<i class="fas fa-helmet-safety"></i>Own site
+                            {% elif loc.loc_type==loc_customer %}<i class="fas fa-user-tag"></i>Customer
+                            {% else %}<i class="fas fa-warehouse"></i>Store{% endif %}
+                        </span>
+                    </td>
+                    <td class="text-center fw-bold">{{ "%g"|format(loc.qty) }}</td>
+                    <td class="text-center">{{ loc.tool_types }}</td>
+                    <td class="text-center">{{ loc.rentals }}</td>
+                    <td class="text-center">{% if loc.overdue_qty > 0 %}<span class="badge bg-danger">{{ "%g"|format(loc.overdue_qty) }}</span>{% else %}<span class="text-muted">–</span>{% endif %}</td>
+                    <td class="text-center">{% if loc.oldest_days > 0 %}{{ loc.oldest_days }}{% else %}<span class="text-muted">–</span>{% endif %}</td>
+                    <td class="text-end">{% if loc.pending_amount > 0 %}<span class="text-danger fw-bold">{{ "{:,.0f}".format(loc.pending_amount) }}</span>{% else %}<span class="text-muted">–</span>{% endif %}</td>
+                </tr>
+            {% else %}
+                <tr><td colspan="8" class="text-center text-muted py-4">Nothing is out — every tool is in the store.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

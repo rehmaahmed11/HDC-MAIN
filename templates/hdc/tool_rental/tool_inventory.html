@@ -3,6 +3,9 @@
 {% block page_heading %}Tool Inventory - Own Tools Stock{% endblock %}
 
 {% block content %}
+{% set tools_active = 'inventory' %}
+{% include "tool_rental/_tools_nav.html" %}
+
 <div class="row g-3 mt-1">
     <div class="col-6 col-md-3">
         <div class="kpi-card kpi-blue"><div class="kpi-icon"><i class="fas fa-tools"></i></div><div class="kpi-value">{{ "%.0f"|format(kpis.total_tools) }}</div><div class="kpi-label">Total Qty Owned</div></div>

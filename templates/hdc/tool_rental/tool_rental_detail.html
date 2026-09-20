@@ -3,6 +3,9 @@
 {% block page_heading %}Rental Detail - {{ rental.rental_code }}{% endblock %}
 
 {% block content %}
+{% set tools_active = 'rentals' %}
+{% include "tool_rental/_tools_nav.html" %}
+
 <style>
 .chain-bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:12px; background: var(--card-header-bg); border-radius:12px; border:1px solid var(--card-border); }
 .chain-bar .c-item { padding:6px 14px; border-radius:999px; font-weight:700; font-size:0.8rem; border:1px solid var(--card-border); background: var(--card-bg); }
@@ -387,9 +390,44 @@
                             <label class="form-label">To Customer Name</label>
                             <input type="text" name="to_customer_name" class="form-control" placeholder="Customer / Person name">
                         </div>
+                        <div class="col-12">
+                            <label class="form-label fw-bold">Which tools move? — qty per tool</label>
+                            <small class="text-muted d-block mb-1">
+                                Leave blank to move everything pending. Enter a qty to split the load, so the
+                                <a href="{{ url_for('hdc_tool_rental_dashboard') }}">Tools dashboard</a> knows exactly which tool is on which site.
+                            </small>
+                            <div id="transferItems">
+                                {% for it in items %}
+                                    {% if it.qty_pending > 0.001 %}
+                                    <div class="row g-1 mb-1 align-items-center">
+                                        <div class="col-6">
+                                            <small>{{ it.tool.name if it.tool else '' }} <span class="badge bg-secondary">{{ it.tool.tool_code if it.tool else '' }}</span></small>
+                                            <input type="hidden" name="rental_item_id[]" value="{{ it.id }}">
+                                            <div><small class="text-muted">pending here: {{ "%g"|format(it.qty_pending) }}</small></div>
+                                        </div>
+                                        <div class="col-4">
+                                            <input type="number" name="qty_transfer[]" class="form-control form-control-sm transfer-qty"
+                                                   min="0" max="{{ it.qty_pending }}" step="0.1"
+                                                   data-pending="{{ it.qty_pending }}" placeholder="all {{ "%g"|format(it.qty_pending) }}">
+                                        </div>
+                                        <div class="col-2">
+                                            <button type="button" class="btn btn-sm btn-outline-secondary w-100"
+                                                    onclick="fillMaxTransfer(this)" title="Move all pending">All</button>
+                                        </div>
+                                    </div>
+                                    {% endif %}
+                                {% endfor %}
+                            </div>
+                        </div>
                         <div class="col-6">
-                            <label class="form-label">Qty Transferred</label>
-                            <input type="number" name="qty_transferred" class="form-control" min="0" step="0.1" placeholder="{{ pending_tools }}">
+                            <label class="form-label">Qty Transferred (total)</label>
+                            <input type="number" name="qty_transferred" id="qtyTransferred" class="form-control" min="0" step="0.1" placeholder="{{ pending_tools }}">
+                            <small class="text-muted">Used only if the per-tool boxes are empty. Pending: {{ "%g"|format(pending_tools) }}</small>
+                        </div>
+                        <div class="col-6 d-flex align-items-end">
+                            <button type="button" class="btn btn-sm btn-outline-warning w-100" onclick="fillAllTransfer()">
+                                <i class="fas fa-angles-down me-1"></i>Move everything pending
+                            </button>
                         </div>
                         <div class="col-12">
                             <label class="form-label">Notes</label>
@@ -478,5 +516,33 @@ function toggleToType(){
 }
 document.getElementById('transferProjectSelect')?.addEventListener('change', syncTransferStages);
 syncTransferStages();
+
+/* Per-tool transfer split: "All" fills one line, "Move everything" fills all,
+   and the total box mirrors what the per-tool boxes add up to so the two can
+   never disagree. */
+function transferQtyInputs(){
+    return Array.from(document.querySelectorAll('#transferItems input.transfer-qty'));
+}
+function syncTransferTotal(){
+    const total = document.getElementById('qtyTransferred');
+    if(!total) return;
+    const inputs = transferQtyInputs();
+    const filled = inputs.filter(i => i.value !== '');
+    if(!filled.length){ total.value = ''; return; }
+    const sum = filled.reduce((acc, i) => acc + (parseFloat(i.value) || 0), 0);
+    total.value = String(Math.round(sum * 100) / 100);
+}
+function fillMaxTransfer(btn){
+    const row = btn.closest('.row');
+    const input = row && row.querySelector('input.transfer-qty');
+    if(input) input.value = input.getAttribute('data-pending') || input.getAttribute('max') || '';
+    syncTransferTotal();
+}
+function fillAllTransfer(){
+    transferQtyInputs().forEach(i => { i.value = i.getAttribute('data-pending') || i.getAttribute('max') || ''; });
+    syncTransferTotal();
+}
+transferQtyInputs().forEach(i => i.addEventListener('input', syncTransferTotal));
+syncTransferTotal();
 </script>
 {% endblock %}

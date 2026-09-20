@@ -3,6 +3,9 @@
 {% block page_heading %}Tool Tracking - Site1 > Site2 > Site3 > Current Green Active{% endblock %}
 
 {% block content %}
+{% set tools_active = 'tracking' %}
+{% include "tool_rental/_tools_nav.html" %}
+
 <style>
 .chain { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
 .chain .c { padding:4px 10px; border-radius:999px; font-size:0.72rem; font-weight:600; border:1px solid var(--card-border); background: var(--card-header-bg); }

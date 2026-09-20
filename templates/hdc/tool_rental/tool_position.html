@@ -1,0 +1,143 @@
+{% extends "shared/base.html" %}
+{% block title %}{{ row.name }} — Where Is It{% endblock %}
+{% block page_heading %}{{ row.name }} — complete position{% endblock %}
+
+{% block content %}
+{% set tools_active = 'dashboard' %}
+{% include "tool_rental/_tools_nav.html" %}
+
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+    <div>
+        <h5 class="mb-0"><i class="fas fa-screwdriver-wrench me-2"></i>{{ row.name }}
+            <span class="badge bg-secondary ms-1">{{ row.code }}</span>
+            <span class="badge bg-light text-dark border ms-1">{{ row.category }}</span>
+        </h5>
+        <small class="text-muted">Rate {{ "{:,.0f}".format(row.rate_per_day) }}/day · unit cost {{ "{:,.0f}".format(row.purchase_value / row.owned_qty if row.owned_qty else 0) }} · condition {{ row.condition }}</small>
+    </div>
+    <div class="d-flex gap-2">
+        <a href="{{ url_for('hdc_tool_rental_dashboard') }}" class="btn btn-sm btn-outline-secondary"><i class="fas fa-arrow-left me-1"></i>Dashboard</a>
+        <a href="{{ url_for('hdc_tool_rental_inventory') }}" class="btn btn-sm btn-mint"><i class="fas fa-warehouse me-1"></i>Inventory</a>
+    </div>
+</div>
+
+<!-- balance strip for this one tool -->
+<div class="card hdc-card mb-3 {% if not recon.balanced %}border-danger{% endif %}">
+    <div class="card-body">
+        <div class="d-flex flex-wrap align-items-center justify-content-center gap-2 tools-recon-total">
+            <span class="tools-chip chip-store"><i class="fas fa-warehouse"></i>{{ "%g"|format(recon.in_store) }} in store</span>
+            <span class="text-muted">+</span>
+            <span class="tools-chip chip-own"><i class="fas fa-helmet-safety"></i>{{ "%g"|format(recon.own_project) }} own sites</span>
+            <span class="text-muted">+</span>
+            <span class="tools-chip chip-customer"><i class="fas fa-user-tag"></i>{{ "%g"|format(recon.customer) }} customers</span>
+            <span class="text-muted">=</span>
+            <span class="tools-chip"><i class="fas fa-equals"></i>{{ "%g"|format(recon.accounted) }}</span>
+            <span class="text-muted">of</span>
+            <span class="tools-chip"><i class="fas fa-tools"></i>{{ "%g"|format(recon.owned) }} owned</span>
+            {% if recon.balanced %}
+                <span class="badge bg-success ms-1"><i class="fas fa-check me-1"></i>Balanced</span>
+            {% else %}
+                <span class="badge bg-danger ms-1">{{ "%+g"|format(recon.variance) }} unaccounted — fix stock in Inventory</span>
+            {% endif %}
+        </div>
+        <div class="tools-split-bar mt-3">
+            {% set owned = row.owned_qty or 0.0001 %}
+            <div class="tools-split-seg" style="width: {{ (row.in_store_qty/owned*100)|round(1) }}%; background:#16a34a;">{% if row.in_store_qty/owned > 0.1 %}{{ "%g"|format(row.in_store_qty) }}{% endif %}</div>
+            <div class="tools-split-seg" style="width: {{ (row.own_project_qty/owned*100)|round(1) }}%; background:#f59e0b;">{% if row.own_project_qty/owned > 0.1 %}{{ "%g"|format(row.own_project_qty) }}{% endif %}</div>
+            <div class="tools-split-seg" style="width: {{ (row.customer_qty/owned*100)|round(1) }}%; background:#7c3aed;">{% if row.customer_qty/owned > 0.1 %}{{ "%g"|format(row.customer_qty) }}{% endif %}</div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3">
+    <!-- where each piece is -->
+    <div class="col-lg-7">
+        <div class="card hdc-card">
+            <div class="card-header hdc-card-header"><i class="fas fa-map-location-dot me-2"></i>Where every piece is right now</div>
+            <div class="table-responsive">
+                <table class="table hdc-table table-sm mb-0 align-middle">
+                    <thead><tr><th>Location</th><th class="text-center">Qty</th><th>How it got there</th><th class="text-center">Days out</th><th>Rental</th></tr></thead>
+                    <tbody>
+                    {% if row.in_store_qty > 0 %}
+                    <tr>
+                        <td><span class="tools-chip chip-store"><i class="fas fa-warehouse"></i>{{ warehouse_label }}</span></td>
+                        <td class="text-center fw-bold">{{ "%g"|format(row.in_store_qty) }}</td>
+                        <td><small class="text-muted">Available to rent</small></td>
+                        <td class="text-center text-muted">–</td>
+                        <td class="text-muted">–</td>
+                    </tr>
+                    {% endif %}
+                    {% for h in row.holdings %}
+                    <tr>
+                        <td>
+                            <span class="tools-chip {% if h.loc_type==loc_own %}chip-own{% elif h.loc_type==loc_customer %}chip-customer{% else %}chip-store{% endif %}">
+                                <i class="fas fa-location-dot"></i>{{ h.label }}
+                            </span>
+                            {% if h.overdue %}<span class="badge bg-danger ms-1">overdue</span>{% endif %}
+                        </td>
+                        <td class="text-center fw-bold">{{ "%g"|format(h.qty) }}</td>
+                        <td style="max-width:280px">
+                            <div class="tools-chain">
+                                {% for step in h.chain %}
+                                    <span class="tools-chain-step {% if step.is_current %}current{% endif %}"
+                                          title="{{ step.date or '' }}">{{ step.label }}</span>
+                                    {% if not loop.last %}<span class="tools-chain-arrow">›</span>{% endif %}
+                                {% endfor %}
+                            </div>
+                        </td>
+                        <td class="text-center">
+                            {% if h.overdue %}<span class="badge bg-danger">{{ h.days_out }}</span>
+                            {% elif h.days_out >= 30 %}<span class="badge bg-warning text-dark">{{ h.days_out }}</span>
+                            {% else %}{{ h.days_out }}{% endif %}
+                        </td>
+                        <td>
+                            <a href="{{ url_for('hdc_tool_rental_detail', rental_id=h.rental.id) }}" class="badge bg-secondary text-decoration-none">
+                                {{ h.rental.rental_code }}
+                            </a>
+                            {% if h.billing_type == 'no_charge' %}<br><small class="text-muted">no charge</small>
+                            {% elif h.pending_amount > 0 %}<br><small class="text-danger">pending {{ "{:,.0f}".format(h.pending_amount) }}</small>{% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    {% if not row.holdings and row.in_store_qty <= 0 %}
+                    <tr><td colspan="5" class="text-center text-muted py-4">No stock recorded for this tool.</td></tr>
+                    {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- movement history -->
+    <div class="col-lg-5">
+        <div class="card hdc-card">
+            <div class="card-header hdc-card-header d-flex justify-content-between">
+                <span><i class="fas fa-clock-rotate-left me-2"></i>Movement history</span>
+                <span class="badge bg-secondary">{{ movements|length }}</span>
+            </div>
+            <div class="table-responsive" style="max-height: 520px; overflow-y: auto;">
+                <table class="table hdc-table table-sm mb-0">
+                    <thead><tr><th>When</th><th>What</th><th>From → To</th><th class="text-center">Qty</th></tr></thead>
+                    <tbody>
+                    {% for m in movements %}
+                    <tr>
+                        <td><small>{{ m.timestamp.strftime('%Y-%m-%d %H:%M') if m.timestamp else '' }}</small></td>
+                        <td>
+                            <span class="badge {% if m.movement_type=='rental_out' %}bg-primary{% elif m.movement_type=='return_in' %}bg-success{% elif 'transfer' in (m.movement_type or '') %}bg-warning text-dark{% else %}bg-secondary{% endif %}">
+                                {{ m.movement_type }}
+                            </span>
+                        </td>
+                        <td><small>{{ m.from_location_label or '–' }} → <strong>{{ m.to_location_label or '–' }}</strong></small>
+                            {% if m.rental_id %}<br><a class="small" href="{{ url_for('hdc_tool_rental_detail', rental_id=m.rental_id) }}">{{ m.rental.rental_code if m.rental else m.rental_id }}</a>{% endif %}
+                        </td>
+                        <td class="text-center">{{ "%g"|format(m.qty or 0) }}</td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="4" class="text-center text-muted py-4">No movements recorded yet.</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
