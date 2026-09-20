@@ -74,6 +74,12 @@ DOMAIN_OF = {
                  "personal_expense_categories.html",
                  "personal_expense_void.html"],
     "settings": ["settings.html"],
+    # HDC Tools section — position dashboard, rentals hub, inventory,
+    # site-to-site tracking, reports and the shared section sub-nav.
+    "tool_rental": ["tool_dashboard.html", "tool_position.html",
+                    "tool_rental.html", "tool_rental_detail.html",
+                    "tool_inventory.html", "tool_tracking.html",
+                    "tool_reports.html", "_tools_nav.html"],
 }
 
 FILE_TO_DOMAIN = {f: d for d, fs in DOMAIN_OF.items() for f in fs}
@@ -115,7 +121,7 @@ def main():
         "mapping mismatch: "
         f"unmapped={sorted(all_files - set(FILE_TO_DOMAIN))} "
         f"missing={sorted(set(FILE_TO_DOMAIN) - all_files)}")
-    assert sum(len(v) for v in DOMAIN_OF.values()) == 89
+    assert sum(len(v) for v in DOMAIN_OF.values()) == 97
 
     # 1. move templates
     for fname in flat:

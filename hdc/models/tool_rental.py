@@ -268,6 +268,27 @@ class ToolRentalTransfer(db.Model):
     from_stage = db.relationship('Stage', foreign_keys=[from_stage_id])
     to_stage = db.relationship('Stage', foreign_keys=[to_stage_id])
 
+    # Per-tool split of this transfer.  Without it a transfer can only say
+    # "20 pcs moved" and the dashboard cannot tell *which* tool is now on
+    # which site.  Legacy transfers have no rows: the tracker then falls back
+    # to "the whole pending line moved" (see hdc/services/tool_tracking.py).
+    items = db.relationship('ToolRentalTransferItem', backref='transfer',
+                            lazy=True, cascade='all, delete-orphan')
+
+
+class ToolRentalTransferItem(db.Model):
+    """One tool line inside a site-to-site transfer (qty precision per tool)."""
+    __tablename__ = 'hdc_tool_rental_transfer_item'
+    id = db.Column(db.Integer, primary_key=True)
+    transfer_id = db.Column(db.Integer, db.ForeignKey('hdc_tool_rental_transfer.id'), nullable=False, index=True)
+    rental_item_id = db.Column(db.Integer, db.ForeignKey('hdc_tool_rental_item.id'), nullable=False, index=True)
+    tool_id = db.Column(db.Integer, db.ForeignKey('hdc_tool.id'), nullable=False, index=True)
+    qty_transferred = db.Column(db.Float, default=0.0)
+    created_at = db.Column(db.DateTime, default=_pkt_now_naive)
+
+    tool = db.relationship('Tool', foreign_keys=[tool_id])
+    rental_item = db.relationship('ToolRentalItem', foreign_keys=[rental_item_id])
+
 
 class ToolMovementLog(db.Model):
     """Global tool tracking: every rental, return, transfer logs here for 'where are all tools' view."""

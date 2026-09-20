@@ -1,4 +1,4 @@
-"""HDC Tool Rental routes - main hub, inventory, rentals, returns, transfers, tracking, reports.
+"""HDC Tool Rental routes - dashboard, hub, inventory, rentals, returns, transfers, tracking, reports.
 Now includes Accounts integration: payment receiving in Cash/Bank accounts.
 """
 
@@ -12,7 +12,8 @@ from hdc.models.accounts import Account
 from hdc.models.projects import Project, Stage
 from hdc.models.tool_rental import (
     Tool, ToolCategory, ToolMovementLog, ToolRental, ToolRentalItem,
-    ToolRentalPayment, ToolRentalReturn, ToolRentalReturnItem, ToolRentalTransfer
+    ToolRentalPayment, ToolRentalReturn, ToolRentalReturnItem, ToolRentalTransfer,
+    ToolRentalTransferItem
 )
 from hdc.services.tool_rental import (
     _ensure_tool_category, _next_rental_code, _next_tool_code,
@@ -20,6 +21,11 @@ from hdc.services.tool_rental import (
     get_receiving_accounts, global_tool_locations,
     post_tool_rental_payment_to_accounts, recalc_rental_totals,
     search_rentals, tool_kpis, void_tool_rental_payment_in_accounts
+)
+from hdc.services.tool_tracking import (
+    LOC_CUSTOMER, LOC_OWN_PROJECT, LOC_STORE, WAREHOUSE_LABEL,
+    allocate_transfer_qty, dashboard_summary, location_summary, record_transfer_items,
+    tool_ledger, tool_position, tools_reconciliation, tools_universal_search
 )
 from hdc.utils.dates import _pkt_now_naive, _pkt_today
 from hdc.utils.format import _flt, _amount_to_words
@@ -29,7 +35,119 @@ from hdc.services.timekeeping import _has_recent_duplicate
 
 def register(app):
 
-    # ------------------ MAIN DASHBOARD ------------------
+    # ------------------ TOOLS DASHBOARD (total sent / own sites / customers vs inventory) ------------------
+    @app.route('/hdc/tool-rental/dashboard')
+    @login_required
+    def hdc_tool_rental_dashboard():
+        """One screen: how many tools we own, how many went out, to whom, and
+        whether every single piece can be located right now."""
+        ledger = tool_ledger()
+        summary = dashboard_summary(ledger)
+        recon = tools_reconciliation(ledger)
+
+        # ---- view filters (all optional, all keep the same reconciliation) ----
+        view = (request.args.get('view') or 'all').strip().lower()
+        if view not in ('all', 'out', 'store', 'own', 'customer', 'attention'):
+            view = 'all'
+        location_type = (request.args.get('location_type') or '').strip().lower()
+        if location_type not in ('', LOC_STORE, LOC_OWN_PROJECT, LOC_CUSTOMER):
+            location_type = ''
+        tool_id = request.args.get('tool_id', type=int)
+        category_id = request.args.get('category_id', type=int)
+        project_id = request.args.get('project_id', type=int)
+        only_issues = (request.args.get('issues') or '').strip().lower() in ('1', 'yes', 'true')
+        q = (request.args.get('q') or '').strip()
+
+        rows = ledger['tools']
+        if tool_id:
+            rows = [r for r in rows if int(r['tool_id']) == int(tool_id)]
+        if category_id:
+            rows = [r for r in rows if int(r['tool'].category_id or 0) == int(category_id)]
+        if view == 'out':
+            rows = [r for r in rows if r['out_qty'] > 0]
+        elif view == 'store':
+            rows = [r for r in rows if r['in_store_qty'] > 0]
+        elif view == 'own':
+            rows = [r for r in rows if r['own_project_qty'] > 0]
+        elif view == 'customer':
+            rows = [r for r in rows if r['customer_qty'] > 0]
+        elif view == 'attention':
+            rows = [r for r in rows if r['unaccounted'] or r['overdue_qty'] > 0 or r['long_out']]
+        if only_issues:
+            rows = [r for r in rows if r['unaccounted'] or r['overdue_qty'] > 0 or r['long_out'] or r['idle']]
+        if location_type:
+            rows = [r for r in rows
+                    if any(h['loc_type'] == location_type for h in r['holdings']) or
+                    (location_type == LOC_STORE and r['in_store_qty'] > 0)]
+        if project_id:
+            rows = [r for r in rows
+                    if any(h['loc_type'] == LOC_OWN_PROJECT and int(h['project_id'] or 0) == int(project_id)
+                           for h in r['holdings'])]
+        if q:
+            ql = q.lower()
+            rows = [r for r in rows if ql in ' '.join([
+                str(r['name'] or '').lower(), str(r['code'] or '').lower(),
+                str(r['category'] or '').lower(),
+                ' '.join(str(h['label'] or '').lower() for h in r['holdings']),
+            ])]
+
+        locations = location_summary(ledger)
+        if location_type:
+            locations = [loc for loc in locations if loc['loc_type'] == location_type]
+        if project_id:
+            locations = [loc for loc in locations
+                         if loc['loc_type'] != LOC_OWN_PROJECT or int(loc['project_id'] or 0) == int(project_id)]
+        if q:
+            locations = [loc for loc in locations if q.lower() in (loc['label'] or '').lower()]
+
+        # ---- one search box that finds a tool / rental / customer / site ----
+        found = tools_universal_search(q) if q else None
+
+        return render_template('tool_rental/tool_dashboard.html',
+            summary=summary,
+            recon=recon,
+            ledger=ledger,
+            rows=rows,
+            locations=locations,
+            found=found,
+            tools=ledger['tools'],
+            categories=ToolCategory.query.order_by(ToolCategory.name.asc()).all(),
+            projects=Project.query.order_by(Project.name.asc()).all(),
+            filters={
+                'view': view, 'location_type': location_type, 'tool_id': tool_id,
+                'category_id': category_id, 'project_id': project_id,
+                'issues': '1' if only_issues else '', 'q': q,
+            },
+            loc_store=LOC_STORE, loc_own=LOC_OWN_PROJECT, loc_customer=LOC_CUSTOMER,
+            warehouse_label=WAREHOUSE_LABEL,
+            today=_pkt_today().isoformat(),
+        )
+
+    # ------------------ ONE TOOL: WHERE IS EVERY PIECE ------------------
+    @app.route('/hdc/tool-rental/tool/<int:tool_id>')
+    @login_required
+    def hdc_tool_rental_tool_position(tool_id):
+        position = tool_position(tool_id)
+        if not position:
+            flash('Tool not found.', 'danger')
+            return redirect(url_for('hdc_tool_rental_dashboard'))
+        row = position['row']
+        return render_template('tool_rental/tool_position.html',
+            row=row,
+            movements=position['movements'],
+            recon={
+                'owned': row['owned_qty'], 'in_store': row['in_store_qty'],
+                'own_project': row['own_project_qty'], 'customer': row['customer_qty'],
+                'total_sent': row['own_project_qty'] + row['customer_qty'],
+                'accounted': row['in_store_qty'] + row['out_qty'],
+                'variance': row['variance'], 'balanced': not row['unaccounted'],
+            },
+            loc_store=LOC_STORE, loc_own=LOC_OWN_PROJECT, loc_customer=LOC_CUSTOMER,
+            warehouse_label=WAREHOUSE_LABEL,
+            today=_pkt_today().isoformat(),
+        )
+
+    # ------------------ MAIN RENTALS HUB ------------------
     @app.route('/hdc/tool-rental')
     @login_required
     def hdc_tool_rental():
@@ -51,9 +169,13 @@ def register(app):
         categories = ToolCategory.query.order_by(ToolCategory.name.asc()).all()
         stages = Stage.query.order_by(Stage.name.asc()).all()
         receiving_accounts = get_receiving_accounts()
+        # Same reconciliation the Tools dashboard shows, so the hub KPI strip
+        # and the dashboard never disagree about where the tools are.
+        recon = tools_reconciliation()
 
         return render_template('tool_rental/tool_rental.html',
             kpis=kpis,
+            recon=recon,
             rentals=rentals,
             projects=projects,
             stages=stages,
@@ -747,20 +869,53 @@ def register(app):
         db.session.flush()
 
         rental_items = ToolRentalItem.query.filter_by(rental_id=rental.id).filter(ToolRentalItem.qty_pending>0).all()
-        for ri in rental_items:
+        # Split the transferred quantity across tools so the dashboard can say
+        # *which* tool moved where (not just "20 pcs left Site1").  Per-tool
+        # qty_transfer[] fields win; otherwise allocate_transfer_qty fills the
+        # pending lines up to the requested total.
+        per_item_raw = request.form.getlist('qty_transfer[]') or request.form.getlist('qty_transfer')
+        item_id_raw = request.form.getlist('rental_item_id[]') or request.form.getlist('rental_item_id')
+        allocations = []
+        if per_item_raw and len(per_item_raw) == len(item_id_raw):
+            by_id = {int(ri.id): ri for ri in rental_items}
+            for ri_id_raw, qty_raw in zip(item_id_raw, per_item_raw):
+                try:
+                    ri = by_id.get(int(ri_id_raw))
+                except (TypeError, ValueError):
+                    ri = None
+                take = max(0.0, _flt(qty_raw))
+                if not ri or take <= 0:
+                    continue
+                take = min(take, float(ri.qty_pending or 0))
+                if take > 0:
+                    allocations.append((ri, take))
+        if not allocations:
+            allocations = allocate_transfer_qty(
+                [(ri, float(ri.qty_pending or 0)) for ri in rental_items], qty_transferred)
+
+        moved_qty = 0.0
+        moved_tools = []
+        for ri, take in allocations:
+            moved_qty += float(take)
+            moved_tools.append(f'{ri.tool.name if ri.tool else ri.tool_id} x{take:g}')
             create_movement_log(
                 tool_id=ri.tool_id,
                 rental_id=rental.id,
                 movement_type='site_transfer' if to_type=='site' else 'external_transfer',
                 from_label=from_label,
                 to_label=to_label,
-                qty=float(ri.qty_pending or 0),
+                qty=float(take),
                 transfer_id=transfer.id,
                 notes=f'Transfer {from_label} > {to_label}'
             )
+        record_transfer_items(transfer, allocations)
+        transfer.qty_transferred = moved_qty or float(qty_transferred or 0)
         db.session.commit()
         chain_str = " > ".join(rental.tracking_chain)
-        flash(f'Tools transferred: {from_label} to {to_label} ({qty_transferred} qty). Chain: {chain_str}', 'success')
+        moved_desc = f'{moved_qty:g} qty' if allocations else f'{qty_transferred:g} qty'
+        detail = f' — {", ".join(moved_tools)}' if moved_tools else ''
+        flash(f'Tools transferred: {from_label} to {to_label} ({moved_desc}{detail}). '
+              f'Chain: {chain_str}', 'success')
         return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
 
     # ------------------ GLOBAL TRACKING ------------------
@@ -896,3 +1051,38 @@ def register(app):
     def hdc_api_receiving_accounts():
         accs = get_receiving_accounts()
         return jsonify([{'id': a.id, 'name': a.name, 'type': a.type, 'balance': float(a.opening_balance or 0)} for a in accs])
+
+    @app.route('/hdc/api/tool-rental/dashboard')
+    @login_required
+    def hdc_api_tool_dashboard():
+        """Machine-readable position: totals, split, per-tool rows, locations.
+
+        Feeds the Tools dashboard charts and any external analysis without
+        re-implementing the reconciliation rules.
+        """
+        ledger = tool_ledger()
+        summary = dashboard_summary(ledger)
+        recon = summary['recon']
+        return jsonify({
+            'as_of': _pkt_today().isoformat(),
+            'totals': ledger['totals'],
+            'reconciliation': {
+                'owned': recon['owned'], 'in_store': recon['in_store'],
+                'own_project': recon['own_project'], 'customer': recon['customer'],
+                'total_sent': recon['total_sent'], 'accounted': recon['accounted'],
+                'variance': recon['variance'], 'balanced': recon['balanced'],
+            },
+            'split': summary['split'],
+            # every location, not just the top few — an analyst reconciling
+            # "where are all 533 pieces" needs the full list to add up
+            'locations': list(location_summary(ledger)),
+            'tools': [{
+                'tool_id': r['tool_id'], 'code': r['code'], 'name': r['name'],
+                'category': r['category'], 'unit': r['unit'],
+                'owned': r['owned_qty'], 'in_store': r['in_store_qty'],
+                'own_project': r['own_project_qty'], 'customer': r['customer_qty'],
+                'out': r['out_qty'], 'utilization_pct': r['utilization_pct'],
+                'overdue': r['overdue_qty'], 'days_out': r['oldest_days_out'],
+                'unaccounted': r['unaccounted'], 'current_label': r['current_label'],
+            } for r in ledger['tools']],
+        })

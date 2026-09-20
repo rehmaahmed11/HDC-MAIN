@@ -1,0 +1,27 @@
+{# Section navigation for the HDC Tools area — included at the top of every
+   tool page so the user can jump between the position dashboard, rentals,
+   inventory, tracking and reports without hunting through the sidebar.
+   `tools_active` (string) marks the current tab. #}
+{% set tools_active = tools_active|default('') %}
+<div class="tools-subnav mb-3">
+    <a href="{{ url_for('hdc_tool_rental_dashboard') }}"
+       class="tools-subnav-link {% if tools_active == 'dashboard' %}active{% endif %}">
+        <i class="fas fa-gauge-high me-1"></i>Dashboard
+    </a>
+    <a href="{{ url_for('hdc_tool_rental') }}"
+       class="tools-subnav-link {% if tools_active == 'rentals' %}active{% endif %}">
+        <i class="fas fa-file-contract me-1"></i>Rentals
+    </a>
+    <a href="{{ url_for('hdc_tool_rental_inventory') }}"
+       class="tools-subnav-link {% if tools_active == 'inventory' %}active{% endif %}">
+        <i class="fas fa-warehouse me-1"></i>Inventory
+    </a>
+    <a href="{{ url_for('hdc_tool_rental_tracking') }}"
+       class="tools-subnav-link {% if tools_active == 'tracking' %}active{% endif %}">
+        <i class="fas fa-map-location-dot me-1"></i>Tracking
+    </a>
+    <a href="{{ url_for('hdc_tool_rental_reports') }}"
+       class="tools-subnav-link {% if tools_active == 'reports' %}active{% endif %}">
+        <i class="fas fa-chart-bar me-1"></i>Reports
+    </a>
+</div>

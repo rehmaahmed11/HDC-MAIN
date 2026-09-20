@@ -3,6 +3,9 @@
 {% block page_heading %}HDC Tool Rental{% endblock %}
 
 {% block content %}
+{% set tools_active = 'rentals' %}
+{% include "tool_rental/_tools_nav.html" %}
+
 <style>
 .tool-chain { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
 .tool-chain .chain-item { padding:4px 10px; border-radius:999px; font-size:0.75rem; font-weight:600; background: var(--card-header-bg); border:1px solid var(--card-border); }
@@ -67,6 +70,27 @@
             <div class="kpi-sub2">Utilization: {{ "%.1f"|format((kpis.rented_out/kpis.total_tools*100) if kpis.total_tools>0 else 0) }}%</div>
         </div>
     </div>
+</div>
+
+{# Same reconciliation the Tools dashboard shows, so this page can never
+   disagree with it about where the tools are. #}
+<div class="d-flex flex-wrap align-items-center gap-2 mt-3 p-2 rounded-3"
+     style="border:1px solid var(--card-border); background: var(--card-header-bg);">
+    <span class="small fw-bold text-muted me-1"><i class="fas fa-location-dot me-1"></i>Where are they now?</span>
+    <span class="tools-chip"><i class="fas fa-tools"></i>{{ "%g"|format(recon.owned) }} owned</span>
+    <span class="text-muted">=</span>
+    <span class="tools-chip chip-store"><i class="fas fa-warehouse"></i>{{ "%g"|format(recon.in_store) }} in store</span>
+    <span class="text-muted">+</span>
+    <span class="tools-chip chip-own"><i class="fas fa-helmet-safety"></i>{{ "%g"|format(recon.own_project) }} own sites</span>
+    <span class="text-muted">+</span>
+    <span class="tools-chip chip-customer"><i class="fas fa-user-tag"></i>{{ "%g"|format(recon.customer) }} customers</span>
+    <span class="badge {% if recon.balanced %}bg-success{% else %}bg-danger{% endif %} ms-1">
+        {% if recon.balanced %}<i class="fas fa-check me-1"></i>Balanced
+        {% else %}<i class="fas fa-triangle-exclamation me-1"></i>{{ "%+g"|format(recon.variance) }} off{% endif %}
+    </span>
+    <a href="{{ url_for('hdc_tool_rental_dashboard') }}" class="btn btn-sm btn-outline-primary ms-auto">
+        <i class="fas fa-gauge-high me-1"></i>Open Tools Dashboard
+    </a>
 </div>
 
 <div class="row g-3 mt-3">

@@ -1580,6 +1580,16 @@ def _ensure_tool_rental_schema():
         )
         """,
         """
+        CREATE TABLE IF NOT EXISTS hdc_tool_rental_transfer_item (
+            id INTEGER PRIMARY KEY,
+            transfer_id INTEGER NOT NULL REFERENCES hdc_tool_rental_transfer(id),
+            rental_item_id INTEGER NOT NULL REFERENCES hdc_tool_rental_item(id),
+            tool_id INTEGER NOT NULL REFERENCES hdc_tool(id),
+            qty_transferred FLOAT DEFAULT 0,
+            created_at DATETIME
+        )
+        """,
+        """
         CREATE TABLE IF NOT EXISTS hdc_tool_movement_log (
             id INTEGER PRIMARY KEY,
             tool_id INTEGER NOT NULL REFERENCES hdc_tool(id),
@@ -1615,6 +1625,9 @@ def _ensure_tool_rental_schema():
             "CREATE INDEX IF NOT EXISTS idx_tool_movement_tool_time ON hdc_tool_movement_log(tool_id, timestamp, id)",
             "CREATE INDEX IF NOT EXISTS idx_tool_movement_rental ON hdc_tool_movement_log(rental_id)",
             "CREATE INDEX IF NOT EXISTS idx_tool_transfer_rental ON hdc_tool_rental_transfer(rental_id, transfer_date)",
+            "CREATE INDEX IF NOT EXISTS idx_tool_transfer_item_transfer ON hdc_tool_rental_transfer_item(transfer_id)",
+            "CREATE INDEX IF NOT EXISTS idx_tool_transfer_item_rental_item ON hdc_tool_rental_transfer_item(rental_item_id)",
+            "CREATE INDEX IF NOT EXISTS idx_tool_transfer_item_tool ON hdc_tool_rental_transfer_item(tool_id)",
         ]
         for sql in idx_sql:
             try:

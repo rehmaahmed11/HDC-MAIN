@@ -84,7 +84,7 @@
                 <a href="{{ url_for('hdc_purchase_v2_page') }}"><i class="fas fa-cart-flatbed"></i><span>Purchases</span></a>
             </li>
             <li class="nav-item {% if 'tool_rental' in (request.endpoint or '') %}active{% endif %}">
-                <a href="{{ url_for('hdc_tool_rental') }}"><i class="fas fa-screwdriver-wrench"></i><span>HDC Tool Rental</span></a>
+                <a href="{{ url_for('hdc_tool_rental_dashboard') }}"><i class="fas fa-screwdriver-wrench"></i><span>HDC Tools</span></a>
             </li>
             <li class="nav-item {% if 'estimation' in (request.endpoint or '') or 'formula' in (request.endpoint or '') %}active{% endif %}">
                 <a href="{{ url_for('hdc_estimation') }}"><i class="fas fa-calculator"></i><span>Estimation</span></a>
