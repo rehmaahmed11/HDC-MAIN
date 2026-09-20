@@ -444,7 +444,9 @@ All Python code correctly uses the PKT helpers (`_pkt_now_naive`, `_pkt_today`);
 
 > Do one step at a time and run the "Verify" command. Steps 1–6 restore correct money behaviour; 7–8 are security; 9–10 restore CI/tests; 11–15 are hygiene and product decisions. After each step, `git commit -m "fix: …"` so a step can be reverted alone.
 
-### Step 1 — Make the Money Center render (fix 4.1)
+### Step 1 — Make the Money Center render (fix 4.1) — ✅ COMPLETED (2026-09-20)
+
+> **Done.** All 14 unbuildable `MONEY_FLOWS` routes replaced with argument-free list endpoints, `safe_url_for` Jinja global added in `hdc/app.py`, and the `money_center.html` flow cards now use it. Verified: `GET /hdc/accounts/money-center` → **200**, all 22 flow routes build, 19 "Open Module" links resolve, `check_layers.py` OK.
 
 **Files:** `hdc/services/money_hub.py`, `templates/hdc/accounts/money_center.html`, and a small helper in `hdc/app.py`.
 
@@ -780,7 +782,7 @@ Apply `or ''` to `bank_name`, `account_number`, `iban` as well, then re-download
 
 ## 12. Definition of done (tick these before closing the audit)
 
-- [ ] `GET /hdc/accounts/money-center` returns 200; all 22 flow links resolve (Step 1)
+- [x] `GET /hdc/accounts/money-center` returns 200; all 22 flow links resolve (Step 1) ✅ 2026-09-20
 - [ ] Recording a supplier payment succeeds and reduces the payable (Step 2)
 - [ ] Voiding from either side keeps ledger + CF document in the same void state (Step 3)
 - [ ] Void reason/user/time persisted and visible (Step 4)
