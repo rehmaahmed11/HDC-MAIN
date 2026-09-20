@@ -213,17 +213,16 @@
 <div class="money-center-header">
   <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
     <div>
-      <h2><i class="fas fa-sack-dollar me-2" style="color:#34d399;"></i>Money Center</h2>
+      <h2><i class="fas fa-sack-dollar me-2" style="color:#34d399;"></i>Money Center <span class="badge bg-light text-success ms-2" style="font-size:0.65rem;">via Hub</span></h2>
       <div class="subtitle">
-        Single source of truth for all money <strong style="color:#34d399;">In</strong> / <strong style="color:#fb7185;">Out</strong> / <strong style="color:#60a5fa;">Transfer</strong> across every module.<br>
-        Every flow posts to <code style="background:rgba(255,255,255,0.12); padding:2px 6px; border-radius:6px; color:#e2e8f0;">hdc_account_txn</code> unified ledger with overdraft block, duplicate guard, and void sync.
+        Single source of truth for all money <strong style="color:#34d399;">In</strong> / <strong style="color:#fb7185;">Out</strong> / <strong style="color:#60a5fa;">Transfer</strong> across every module — accessed via <strong>Accounts Hub</strong> (sidebar cleaned).<br>
+        Every flow posts to <code style="background:rgba(255,255,255,0.12); padding:2px 6px; border-radius:6px; color:#e2e8f0;">hdc_account_txn</code> unified ledger with overdraft block (minor units exact), duplicate guard, void sync. Day Close also in Hub.
       </div>
     </div>
     <div class="d-flex gap-2 flex-wrap">
+      <a href="{{ url_for('hdc_accounts_hub') }}" class="btn btn-light btn-sm"><i class="fas fa-compass me-1"></i>← Back to Hub (Only Money Entry)</a>
       <a href="{{ url_for('hdc_accounts') }}" class="btn btn-outline-light btn-sm"><i class="fas fa-wallet me-1"></i>Transactions</a>
-      <a href="{{ url_for('hdc_cashflow_register') }}" class="btn btn-outline-light btn-sm"><i class="fas fa-book me-1"></i>CF Register</a>
       <a href="{{ url_for('hdc_accounts_manage') }}" class="btn btn-outline-light btn-sm"><i class="fas fa-list me-1"></i>Manage Accounts</a>
-      <a href="{{ url_for('hdc_accounts_hub') }}" class="btn btn-light btn-sm"><i class="fas fa-compass me-1"></i>Hub</a>
     </div>
   </div>
 
