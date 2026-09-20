@@ -740,53 +740,113 @@ def _validate_account_transaction_payload(norm):
 
 
 def _check_overdraft_block(pending_rows):
+    """Overdraft protection using exact minor units (paisa) for smooth, accurate blocking.
+
+    Enhanced for Money Center: uses to_minor/from_minor for exact paisa math,
+    so Rs. 100.00 - Rs. 100.00 = 0 exactly, not 1e-10 floating error.
+    Treasury accounts (company/cash/bank) cannot go negative; other types can.
+    """
     if not pending_rows:
         return True, ''
-    bal = _account_balance_map()
+    # Build exact minor-unit balance map
+    try:
+        from hdc.utils.money import to_minor as _to_minor
+        bal_float = _account_balance_map()
+        bal_minor = {}
+        for aid, bval in bal_float.items():
+            try:
+                bal_minor[int(aid)] = _to_minor(bval)
+            except Exception:
+                bal_minor[int(aid)] = int(round(float(bval or 0.0) * 100))
+    except Exception:
+        bal_float = _account_balance_map()
+        bal_minor = {int(k): int(round(float(v or 0.0) * 100)) for k, v in bal_float.items()}
+
     for r in pending_rows:
         from_id = int(r.get('from_account_id') or 0)
-        amount = float(r.get('amount') or 0.0)
-        if from_id:
-            bal[from_id] = float(bal.get(from_id, 0.0) or 0.0) - amount
         to_id = int(r.get('to_account_id') or 0)
+        amt = r.get('amount') or 0.0
+        try:
+            from hdc.utils.money import to_minor as _to_minor
+            amt_minor = _to_minor(amt)
+        except Exception:
+            amt_minor = int(round(float(amt or 0.0) * 100))
+
+        if from_id:
+            bal_minor[from_id] = int(bal_minor.get(from_id, 0) or 0) - amt_minor
         if to_id:
-            bal[to_id] = float(bal.get(to_id, 0.0) or 0.0) + amount
-        if from_id and float(bal.get(from_id, 0.0) or 0.0) < -1e-9:
+            bal_minor[to_id] = int(bal_minor.get(to_id, 0) or 0) + amt_minor
+
+        if from_id and int(bal_minor.get(from_id, 0) or 0) < 0:
             acc = Account.query.get(from_id)
             tp = (acc.type or '').strip().lower() if acc else ''
-            # Strict overdraft prevention is enforced on treasury accounts.
             if tp in ('company', 'cash', 'bank'):
                 nm = acc.name if acc else f'#{from_id}'
-                return False, f'Insufficient balance in account: {nm}.'
+                # Convert minor back to readable
+                try:
+                    from hdc.utils.money import from_minor as _from_minor
+                    bal_readable = float(_from_minor(bal_minor.get(from_id, 0)))
+                except Exception:
+                    bal_readable = float(bal_minor.get(from_id, 0) or 0) / 100.0
+                return False, f'Insufficient balance in account: {nm}. Would be {bal_readable:,.2f} PKR after this transaction. Overdraft blocked for treasury accounts.'
     return True, ''
 
 
 def _check_overdraft_block_replace(existing_rows, replacement_rows):
-    bal = _account_balance_map()
+    """Overdraft check for edit flow using exact minor units."""
+    try:
+        from hdc.utils.money import to_minor as _to_minor, from_minor as _from_minor
+        bal_float = _account_balance_map()
+        bal_minor = {}
+        for aid, bval in bal_float.items():
+            try:
+                bal_minor[int(aid)] = _to_minor(bval)
+            except Exception:
+                bal_minor[int(aid)] = int(round(float(bval or 0.0) * 100))
+    except Exception:
+        bal_float = _account_balance_map()
+        bal_minor = {int(k): int(round(float(v or 0.0) * 100)) for k, v in bal_float.items()}
+
     for r in (existing_rows or []):
         if bool(getattr(r, 'is_void', False)):
             continue
         from_id = int(getattr(r, 'from_account_id', 0) or 0)
         to_id = int(getattr(r, 'to_account_id', 0) or 0)
         amt = float(getattr(r, 'amount', 0.0) or 0.0)
+        try:
+            from hdc.utils.money import to_minor as _to_minor
+            amt_minor = _to_minor(amt)
+        except Exception:
+            amt_minor = int(round(float(amt or 0.0) * 100))
         if from_id:
-            bal[from_id] = float(bal.get(from_id, 0.0) or 0.0) + amt
+            bal_minor[from_id] = int(bal_minor.get(from_id, 0) or 0) + amt_minor
         if to_id:
-            bal[to_id] = float(bal.get(to_id, 0.0) or 0.0) - amt
+            bal_minor[to_id] = int(bal_minor.get(to_id, 0) or 0) - amt_minor
+
     for r in (replacement_rows or []):
         from_id = int((r.get('from_account_id') if isinstance(r, dict) else 0) or 0)
         to_id = int((r.get('to_account_id') if isinstance(r, dict) else 0) or 0)
-        amt = float((r.get('amount') if isinstance(r, dict) else 0.0) or 0.0)
+        amt_raw = (r.get('amount') if isinstance(r, dict) else 0.0) or 0.0
+        try:
+            from hdc.utils.money import to_minor as _to_minor
+            amt_minor = _to_minor(amt_raw)
+        except Exception:
+            amt_minor = int(round(float(amt_raw or 0.0) * 100))
         if from_id:
-            bal[from_id] = float(bal.get(from_id, 0.0) or 0.0) - amt
+            bal_minor[from_id] = int(bal_minor.get(from_id, 0) or 0) - amt_minor
         if to_id:
-            bal[to_id] = float(bal.get(to_id, 0.0) or 0.0) + amt
-        if from_id and float(bal.get(from_id, 0.0) or 0.0) < -1e-9:
+            bal_minor[to_id] = int(bal_minor.get(to_id, 0) or 0) + amt_minor
+        if from_id and int(bal_minor.get(from_id, 0) or 0) < 0:
             acc = Account.query.get(from_id)
             tp = (acc.type or '').strip().lower() if acc else ''
             if tp in ('company', 'cash', 'bank'):
                 nm = acc.name if acc else f'#{from_id}'
-                return False, f'Insufficient balance in account: {nm}.'
+                try:
+                    from hdc.utils.money import from_minor as _from_minor
+                    bal_readable = float(_from_minor(bal_minor.get(from_id, 0)))
+                except Exception:
+                    bal_readable = float(bal_minor.get(from_id, 0) or 0) / 100.0
+                return False, f'Insufficient balance in account: {nm}. Would be {bal_readable:,.2f} PKR after edit. Overdraft blocked.'
     return True, ''
 
 

@@ -23,6 +23,7 @@ from hdc.routes.timekeeping import register as _register_timekeeping
 from hdc.routes.users import register as _register_users
 from hdc.routes.workers import register as _register_workers
 from hdc.routes.tool_rental import register as _register_tool_rental
+from hdc.routes.money_center import register as _register_money_center
 
 
 def register_all(app):
@@ -50,3 +51,4 @@ def register_all(app):
     _register_users(app)
     _register_workers(app)
     _register_tool_rental(app)
+    _register_money_center(app)

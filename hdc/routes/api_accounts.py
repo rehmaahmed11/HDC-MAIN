@@ -11,6 +11,7 @@ from sqlalchemy import func, or_
 from hdc.extensions import _admin_only, db
 from hdc.models.accounts import Account, AccountTransaction
 from hdc.services.accounts import _ACCOUNT_TYPES, _account_dashboard_kpis, _account_dashboard_subgroups, _account_group_mode_for_row, _account_pending_snapshot, _account_transaction_history, _account_txn_to_dict, _accounts_forensic_report, _accounts_reconciliation_snapshot, _create_account, _create_accounts_transaction_with_sync, _list_accounts_with_balances, _resolve_account_type
+from hdc.services.money_hub import get_all_money_flows, get_money_accounts, get_money_flows_grouped, get_money_kpis, get_pending_payables_detailed, get_smooth_entry_config
 from hdc.utils.format import _flt, _parse_date
 from hdc.utils.normalize import _normalize_account_group, _normalize_account_mode, _normalize_account_tx_direction, _normalize_name_ci
 from hdc.utils.money import sync_money_fields
@@ -247,3 +248,43 @@ def register(app):
         total_orphans = int(sum(int(i.get('count') or 0) for i in report.get('orphans', [])))
         total_recon = int(sum(int(i.get('count') or 0) for i in report.get('reconciliation', [])))
         return jsonify(ok=True, total_issues=(total_orphans + total_recon), report=report)
+
+    # ── Money Hub APIs — unified money handling from Accounts ────────────────
+    @app.route('/api/accounts/money_flows', methods=['GET'])
+    @login_required
+    def api_accounts_money_flows():
+        if _admin_only():
+            return jsonify(ok=False, message='Admin access required.'), 403
+        direction = (request.args.get('direction') or '').strip().lower()
+        if direction in ('in', 'out', 'transfer'):
+            grouped = get_money_flows_grouped()
+            return jsonify(ok=True, direction=direction, flows=grouped.get(direction, []), count=len(grouped.get(direction, [])))
+        return jsonify(ok=True, grouped=get_money_flows_grouped(), all=get_all_money_flows(), count=len(get_all_money_flows()))
+
+    @app.route('/api/accounts/money_pending', methods=['GET'])
+    @login_required
+    def api_accounts_money_pending():
+        if _admin_only():
+            return jsonify(ok=False, message='Admin access required.'), 403
+        return jsonify(ok=True, **get_pending_payables_detailed())
+
+    @app.route('/api/accounts/money_kpis', methods=['GET'])
+    @login_required
+    def api_accounts_money_kpis():
+        if _admin_only():
+            return jsonify(ok=False, message='Admin access required.'), 403
+        return jsonify(ok=True, kpis=get_money_kpis())
+
+    @app.route('/api/accounts/money_accounts', methods=['GET'])
+    @login_required
+    def api_accounts_money_accounts():
+        if _admin_only():
+            return jsonify(ok=False, message='Admin access required.'), 403
+        return jsonify(ok=True, **get_money_accounts())
+
+    @app.route('/api/accounts/money_entry_config', methods=['GET'])
+    @login_required
+    def api_accounts_money_entry_config():
+        if _admin_only():
+            return jsonify(ok=False, message='Admin access required.'), 403
+        return jsonify(ok=True, config=get_smooth_entry_config())

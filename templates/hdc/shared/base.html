@@ -126,6 +126,9 @@
         <div class="sidebar-divider"></div>
         <div class="sidebar-group-label">Accounts &amp; Cash</div>
         <ul class="sidebar-nav">
+            <li class="nav-item {% if request.endpoint == 'hdc_money_center' %}active{% endif %}">
+                <a href="{{ url_for('hdc_money_center') }}"><i class="fas fa-sack-dollar"></i><span>Money Center</span><span class="badge bg-success ms-1" style="font-size:0.6rem;">New</span></a>
+            </li>
             <li class="nav-item {% if request.endpoint == 'hdc_accounts_hub' %}active{% endif %}">
                 <a href="{{ url_for('hdc_accounts_hub') }}"><i class="fas fa-compass"></i><span>Accounts Hub</span></a>
             </li>

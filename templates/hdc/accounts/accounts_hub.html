@@ -21,16 +21,52 @@
         <h2><i class="fas fa-compass me-2"></i>Accounts &amp; Cash</h2>
         <div class="acc-subtitle">
             One map of the money side of the business: what each page is for, where to record a
-            transaction, and what needs attention today.
+            transaction, and what needs attention today. New: <a href="{{ url_for('hdc_money_center') }}"><strong>Money Center</strong></a> — unified smooth handling of all money IN/OUT/TRANSFER from Accounts section.
         </div>
     </div>
     <div class="acc-toolbar">
+        <a href="{{ url_for('hdc_money_center') }}" class="btn btn-success btn-sm">
+            <i class="fas fa-sack-dollar me-1"></i>Money Center — Smooth Entry
+        </a>
         <a href="{{ url_for('hdc_accounts_manage') }}" class="btn btn-outline-info btn-sm">
             <i class="fas fa-list me-1"></i>Manage Accounts
         </a>
         <a href="{{ url_for('hdc_cashflow_register') }}" class="btn btn-mint btn-sm">
             <i class="fas fa-plus me-1"></i>Record Cash Flow
         </a>
+    </div>
+</div>
+
+{# ── Money Center highlight ──────────────────────────────────────────────── #}
+<div class="acc-section" style="border: 2px solid #10b981; background: linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 100%);">
+    <div class="acc-section-head" style="background: transparent; border-bottom: 1px solid #a7f3d0;">
+        <h5><i class="fas fa-sack-dollar me-2" style="color:#059669;"></i>Money Center — Unified Smooth Handling <span class="badge bg-success ms-2">New</span></h5>
+        <a href="{{ url_for('hdc_money_center') }}" class="btn btn-success btn-sm"><i class="fas fa-arrow-right me-1"></i>Open Money Center</a>
+    </div>
+    <div class="acc-section-body">
+        <div class="row g-3">
+            <div class="col-12 col-md-8">
+                <p class="small mb-2" style="line-height:1.7;">
+                    <strong>All money IN/OUT/TRANSFER</strong> across every module — workers, suppliers, subcontractors, office staff, projects, tool rentals, expenses, purchases, personal — now handled smoothly from <strong>Accounts section</strong>.
+                    Every flow posts to <code>hdc_account_txn</code> unified ledger with overdraft block (minor units exact), duplicate guard (<code>source_type:source_id</code> + time-window), void sync, and receipt consistency.
+                </p>
+                <div class="d-flex flex-wrap gap-2">
+                    <span class="badge bg-success"><i class="fas fa-arrow-down me-1"></i>IN: Owner receipts, rental income, party receipts, refunds</span>
+                    <span class="badge bg-danger"><i class="fas fa-arrow-up me-1"></i>OUT: Worker wages, supplier, subcontractor, office, expenses</span>
+                    <span class="badge bg-primary"><i class="fas fa-right-left me-1"></i>TRANSFER: Cash↔Bank internal</span>
+                </div>
+                <div class="mt-2 small text-muted">
+                    <i class="fas fa-bolt me-1" style="color:#10b981;"></i>Smooth UX: Direction → Type → Details stepper, real-time pending payable, balance hints, excess split (tip/advance), settle_shortfall, receiving account validation, single source of truth.
+                </div>
+            </div>
+            <div class="col-12 col-md-4">
+                <div class="row g-2">
+                    <div class="col-6"><a class="acc-stat acc-emerald" href="{{ url_for('hdc_money_center') }}"><div class="acc-stat-label">Money IN</div><div class="acc-stat-value" style="font-size:1.1rem;"><i class="fas fa-arrow-down me-1"></i>Receive</div><div class="acc-stat-sub">Project, party, rental</div></a></div>
+                    <div class="col-6"><a class="acc-stat acc-rose" href="{{ url_for('hdc_money_center') }}"><div class="acc-stat-label">Money OUT</div><div class="acc-stat-value" style="font-size:1.1rem;"><i class="fas fa-arrow-up me-1"></i>Pay</div><div class="acc-stat-sub">Workers, suppliers, etc</div></a></div>
+                    <div class="col-12"><a class="acc-stat acc-blue" href="{{ url_for('hdc_money_center') }}"><div class="acc-stat-label">Transfer + Pending</div><div class="acc-stat-value" style="font-size:1rem;"><i class="fas fa-right-left me-1"></i>Internal + Payables</div><div class="acc-stat-sub">Cash↔Bank + all pending payables/receivables</div></a></div>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 

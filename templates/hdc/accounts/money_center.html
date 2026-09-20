@@ -1,0 +1,1290 @@
+{% extends "shared/base.html" %}
+{% block title %}Money Center — Accounts{% endblock %}
+{% block page_heading %}Money Center — Unified Money Handling from Accounts{% endblock %}
+
+{% block content %}
+{# ── Styles for Money Center ── #}
+<style>
+.money-center-header {
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%);
+  color: #f8fafc;
+  border-radius: 16px;
+  padding: 24px;
+  margin-bottom: 20px;
+  position: relative;
+  overflow: hidden;
+}
+.money-center-header::after {
+  content: '';
+  position: absolute;
+  top: -40px; right: -40px;
+  width: 180px; height: 180px;
+  background: radial-gradient(circle, rgba(16,185,129,0.15) 0%, transparent 70%);
+  border-radius: 50%;
+}
+.money-center-header h2 { font-weight: 800; letter-spacing: -0.02em; margin-bottom: 6px; }
+.money-center-header .subtitle { color: #94a3b8; font-size: 0.95rem; line-height: 1.5; }
+.mc-kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px,1fr)); gap: 12px; margin-top: 16px; }
+.mc-kpi {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 12px;
+  padding: 12px 14px;
+  backdrop-filter: blur(8px);
+}
+.mc-kpi-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: #94a3b8; }
+.mc-kpi-value { font-size: 1.35rem; font-weight: 800; margin-top: 2px; }
+.mc-kpi-sub { font-size: 0.75rem; color: #94a3b8; margin-top: 2px; }
+.mc-kpi.pos .mc-kpi-value { color: #34d399; }
+.mc-kpi.neg .mc-kpi-value { color: #fb7185; }
+.mc-kpi.warn .mc-kpi-value { color: #fbbf24; }
+.mc-kpi.info .mc-kpi-value { color: #60a5fa; }
+
+.flow-card {
+  border: 1px solid var(--card-border, #e2e8f0);
+  border-radius: 12px;
+  padding: 14px;
+  background: var(--card-bg, #fff);
+  transition: all 0.18s ease;
+  height: 100%;
+  position: relative;
+  overflow: hidden;
+}
+.flow-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.08); border-color: var(--flow-color, #3b82f6); }
+.flow-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: var(--flow-color, #3b82f6);
+}
+.flow-card-header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.flow-icon {
+  width: 36px; height: 36px;
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+.flow-icon.emerald { background: #d1fae5; color: #065f46; }
+.flow-icon.cyan { background: #cffafe; color: #155e75; }
+.flow-icon.rose { background: #ffe4e6; color: #881337; }
+.flow-icon.amber { background: #fef3c7; color: #92400e; }
+.flow-icon.blue { background: #dbeafe; color: #1e40af; }
+.flow-icon.slate { background: #f1f5f9; color: #334155; }
+.flow-title { font-weight: 700; font-size: 0.92rem; line-height: 1.2; }
+.flow-module { font-size: 0.7rem; color: #64748b; background: #f1f5f9; padding: 2px 6px; border-radius: 20px; }
+.flow-desc { font-size: 0.78rem; color: #64748b; line-height: 1.5; margin-bottom: 8px; }
+.flow-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.flow-badge {
+  font-size: 0.68rem; padding: 2px 7px; border-radius: 20px;
+  background: #f8fafc; border: 1px solid #e2e8f0; color: #475569;
+}
+.flow-badge.in { background: #ecfdf5; border-color: #a7f3d0; color: #065f46; }
+.flow-badge.out { background: #fff1f2; border-color: #fecdd3; color: #881337; }
+.flow-badge.transfer { background: #eff6ff; border-color: #bfdbfe; color: #1e40af; }
+.flow-posting { font-size: 0.72rem; color: #475569; background: #f8fafc; border-radius: 8px; padding: 8px; margin-bottom: 8px; border: 1px dashed #e2e8f0; }
+.flow-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.flow-actions .btn { font-size: 0.75rem; padding: 3px 10px; border-radius: 20px; }
+
+.pending-card {
+  border: 1px solid var(--card-border, #e2e8f0);
+  border-radius: 12px;
+  padding: 12px;
+  background: var(--card-bg, #fff);
+  margin-bottom: 10px;
+}
+.pending-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.pending-title { font-weight: 700; font-size: 0.88rem; }
+.pending-total { font-weight: 800; font-size: 0.92rem; }
+.pending-item {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 6px 8px; border-radius: 8px;
+  font-size: 0.8rem;
+}
+.pending-item:hover { background: #f8fafc; }
+.pending-item .name { font-weight: 600; }
+.pending-item .code { font-size: 0.7rem; color: #94a3b8; }
+.pending-item .amt { font-weight: 700; }
+.pending-item .amt.pos { color: #059669; }
+.pending-item .amt.neg { color: #e11d48; }
+
+.acc-balance-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px; border-radius: 20px;
+  font-size: 0.78rem; font-weight: 600;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  margin: 2px;
+}
+.acc-balance-chip.pos { background: #ecfdf5; border-color: #a7f3d0; color: #065f46; }
+.acc-balance-chip.neg { background: #fff1f2; border-color: #fecdd3; color: #881337; }
+.acc-balance-chip.zero { background: #f1f5f9; border-color: #e2e8f0; color: #64748b; }
+
+.quick-entry-card {
+  border: 2px solid #10b981;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 4px 24px rgba(16,185,129,0.12);
+}
+.quick-entry-header {
+  background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+  border-bottom: 1px solid #a7f3d0;
+  padding: 14px 18px;
+  border-radius: 16px 16px 0 0;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.step-indicator { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; }
+.step-dot {
+  width: 28px; height: 28px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 800; font-size: 0.8rem;
+  background: #e2e8f0; color: #64748b;
+}
+.step-dot.active { background: #10b981; color: #fff; }
+.step-dot.done { background: #065f46; color: #fff; }
+.step-line { width: 24px; height: 2px; background: #e2e8f0; }
+.step-line.done { background: #10b981; }
+.step-label { font-size: 0.75rem; color: #64748b; margin-left: 2px; }
+.step-label.active { color: #065f46; font-weight: 700; }
+
+.direction-selector { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-bottom: 12px; }
+.dir-btn {
+  border: 2px solid #e2e8f0; border-radius: 12px; padding: 12px 8px;
+  text-align: center; cursor: pointer; transition: all 0.15s;
+  background: #fff;
+}
+.dir-btn:hover { border-color: #94a3b8; transform: translateY(-1px); }
+.dir-btn.active.in { border-color: #10b981; background: #ecfdf5; }
+.dir-btn.active.out { border-color: #f43f5e; background: #fff1f2; }
+.dir-btn.active.transfer { border-color: #3b82f6; background: #eff6ff; }
+.dir-btn i { font-size: 1.3rem; display: block; margin-bottom: 4px; }
+.dir-btn .lbl { font-weight: 700; font-size: 0.85rem; }
+.dir-btn .desc { font-size: 0.68rem; color: #64748b; }
+
+.type-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px,1fr)); gap: 8px; }
+.type-btn {
+  border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px 12px;
+  text-align: left; cursor: pointer; transition: all 0.15s;
+  background: #fff; display: flex; gap: 10px; align-items: flex-start;
+}
+.type-btn:hover { border-color: #94a3b8; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+.type-btn.active { border-color: var(--flow-color, #10b981); background: var(--flow-bg, #ecfdf5); box-shadow: 0 2px 12px rgba(16,185,129,0.15); }
+.type-btn i { margin-top: 2px; }
+.type-btn .t-title { font-weight: 700; font-size: 0.82rem; }
+.type-btn .t-desc { font-size: 0.7rem; color: #64748b; line-height: 1.3; }
+
+.balance-hint { font-size: 0.78rem; padding: 6px 10px; border-radius: 8px; margin-top: 6px; }
+.balance-hint.pos { background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
+.balance-hint.neg { background: #fff1f2; color: #881337; border: 1px solid #fecdd3; }
+.balance-hint.warn { background: #fffbeb; color: #92400e; border: 1px solid #fde68a; }
+
+.pending-hint {
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  border: 1px solid #e2e8f0; border-radius: 10px;
+  padding: 10px 12px; font-size: 0.82rem;
+}
+.pending-hint .ph-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; }
+.pending-hint .ph-value { font-weight: 800; font-size: 1.1rem; margin-top: 2px; }
+.pending-hint .ph-breakdown { font-size: 0.75rem; color: #64748b; margin-top: 4px; }
+
+.recon-alert { border-radius: 12px; padding: 12px 16px; display: flex; gap: 12px; align-items: flex-start; }
+.recon-alert.ok { background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; }
+.recon-alert.warn { background: #fffbeb; border: 1px solid #fde68a; color: #92400e; }
+.recon-alert.danger { background: #fff1f2; border: 1px solid #fecdd3; color: #881337; }
+
+.txn-timeline-item {
+  display: flex; gap: 12px; padding: 10px 0; border-bottom: 1px solid #f1f5f9;
+  font-size: 0.82rem;
+}
+.txn-timeline-item:last-child { border-bottom: none; }
+.txn-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; flex-shrink: 0; }
+.txn-dot.in { background: #10b981; }
+.txn-dot.out { background: #f43f5e; }
+.txn-dot.transfer { background: #3b82f6; }
+
+@media (max-width: 768px) {
+  .direction-selector { grid-template-columns: 1fr; }
+  .type-grid { grid-template-columns: 1fr; }
+}
+</style>
+
+{# ── Header ── #}
+<div class="money-center-header">
+  <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
+    <div>
+      <h2><i class="fas fa-sack-dollar me-2" style="color:#34d399;"></i>Money Center</h2>
+      <div class="subtitle">
+        Single source of truth for all money <strong style="color:#34d399;">In</strong> / <strong style="color:#fb7185;">Out</strong> / <strong style="color:#60a5fa;">Transfer</strong> across every module.<br>
+        Every flow posts to <code style="background:rgba(255,255,255,0.12); padding:2px 6px; border-radius:6px; color:#e2e8f0;">hdc_account_txn</code> unified ledger with overdraft block, duplicate guard, and void sync.
+      </div>
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+      <a href="{{ url_for('hdc_accounts') }}" class="btn btn-outline-light btn-sm"><i class="fas fa-wallet me-1"></i>Transactions</a>
+      <a href="{{ url_for('hdc_cashflow_register') }}" class="btn btn-outline-light btn-sm"><i class="fas fa-book me-1"></i>CF Register</a>
+      <a href="{{ url_for('hdc_accounts_manage') }}" class="btn btn-outline-light btn-sm"><i class="fas fa-list me-1"></i>Manage Accounts</a>
+      <a href="{{ url_for('hdc_accounts_hub') }}" class="btn btn-light btn-sm"><i class="fas fa-compass me-1"></i>Hub</a>
+    </div>
+  </div>
+
+  <div class="mc-kpi-grid">
+    <div class="mc-kpi pos">
+      <div class="mc-kpi-label"><i class="fas fa-building-columns me-1"></i>Company Total</div>
+      <div class="mc-kpi-value">Rs. {{ "{:,.0f}".format(kpis.company_owned_total or 0) }}</div>
+      <div class="mc-kpi-sub">Cash {{ "{:,.0f}".format(kpis.cash_total or 0) }} · Bank {{ "{:,.0f}".format(kpis.bank_total or 0) }}</div>
+    </div>
+    <div class="mc-kpi info">
+      <div class="mc-kpi-label"><i class="fas fa-arrow-down me-1"></i>Today In</div>
+      <div class="mc-kpi-value">Rs. {{ "{:,.0f}".format(kpis.today_in or 0) }}</div>
+      <div class="mc-kpi-sub">{{ kpis.today_count or 0 }} entries today</div>
+    </div>
+    <div class="mc-kpi neg">
+      <div class="mc-kpi-label"><i class="fas fa-arrow-up me-1"></i>Today Out</div>
+      <div class="mc-kpi-value">Rs. {{ "{:,.0f}".format(kpis.today_out or 0) }}</div>
+      <div class="mc-kpi-sub">Transfers {{ "{:,.0f}".format(kpis.today_transfer or 0) }}</div>
+    </div>
+    <div class="mc-kpi warn">
+      <div class="mc-kpi-label"><i class="fas fa-hand-holding-dollar me-1"></i>Total Payable</div>
+      <div class="mc-kpi-value">Rs. {{ "{:,.0f}".format(kpis.pending.total_payable or 0) }}</div>
+      <div class="mc-kpi-sub">{{ kpis.pending.workers_count + kpis.pending.subcontractors_count + kpis.pending.suppliers_count + kpis.pending.office_staff_count }} parties pending</div>
+    </div>
+    <div class="mc-kpi pos">
+      <div class="mc-kpi-label"><i class="fas fa-arrow-trend-up me-1"></i>Total Receivable</div>
+      <div class="mc-kpi-value">Rs. {{ "{:,.0f}".format(kpis.pending.total_receivable or 0) }}</div>
+      <div class="mc-kpi-sub">{{ kpis.pending.projects_count }} projects · {{ kpis.pending.tool_rentals_count }} rentals</div>
+    </div>
+    <div class="mc-kpi {{ 'neg' if kpis.has_overdraft else 'pos' }}">
+      <div class="mc-kpi-label"><i class="fas fa-shield-halved me-1"></i>Health</div>
+      <div class="mc-kpi-value">
+        {% if kpis.has_overdraft %}<i class="fas fa-triangle-exclamation me-1"></i>Overdraft{% else %}<i class="fas fa-circle-check me-1"></i>Healthy{% endif %}
+      </div>
+      <div class="mc-kpi-sub">
+        {% if kpis.recon_issues > 0 %}{{ kpis.recon_issues }} recon issues{% else %}No recon issues{% endif %}
+        · {{ kpis.company_accounts_count }} treasury accounts
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ── Overdraft / Attention ── #}
+{% if kpis.has_overdraft or kpis.recon_issues > 0 %}
+<div class="row g-2 mb-3">
+  {% if kpis.has_overdraft %}
+  <div class="col-12 col-md-6">
+    <div class="recon-alert danger">
+      <i class="fas fa-triangle-exclamation mt-1"></i>
+      <div>
+        <div class="fw-bold">Overdrawn Treasury Account(s)</div>
+        <div class="small">
+          {% for acc in kpis.company_accounts %}{% if acc.current_balance < -0.01 %}{{ acc.name }} ({{ "{:,.0f}".format(acc.current_balance) }}) {% endif %}{% endfor %}
+          — further outflows will be blocked by overdraft protection.
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+  {% if kpis.recon_issues > 0 %}
+  <div class="col-12 col-md-6">
+    <div class="recon-alert warn">
+      <i class="fas fa-stethoscope mt-1"></i>
+      <div>
+        <div class="fw-bold">{{ kpis.recon_issues }} Reconciliation Issue(s)</div>
+        <div class="small">Source rows missing ledger postings or stale active postings. <a href="{{ url_for('hdc_accounts_reconciliation') }}">Open Reconciliation Check</a></div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="row g-3">
+  {# ── LEFT: Quick Entry (smooth) ── #}
+  <div class="col-12 col-xl-5">
+    <div class="quick-entry-card">
+      <div class="quick-entry-header">
+        <div><i class="fas fa-bolt me-2" style="color:#065f46;"></i><strong>Smooth Money Entry</strong><br><small class="text-muted">Record any money in/out/transfer from Accounts — posts to unified ledger</small></div>
+        <span class="badge bg-success"><i class="fas fa-shield-halved me-1"></i>Protected</span>
+      </div>
+      <div class="p-3">
+        {# Step indicator #}
+        <div class="step-indicator">
+          <div class="d-flex align-items-center gap-1"><div class="step-dot active" id="step1-dot">1</div><span class="step-label active" id="step1-label">Direction</span></div>
+          <div class="step-line" id="step1-2-line"></div>
+          <div class="d-flex align-items-center gap-1"><div class="step-dot" id="step2-dot">2</div><span class="step-label" id="step2-label">Type</span></div>
+          <div class="step-line" id="step2-3-line"></div>
+          <div class="d-flex align-items-center gap-1"><div class="step-dot" id="step3-dot">3</div><span class="step-label" id="step3-label">Details</span></div>
+        </div>
+
+        <form method="POST" id="moneyCenterForm">
+          <input type="hidden" name="action" value="quick_transaction">
+          <input type="hidden" name="type" id="mc_type">
+          <input type="hidden" name="related_entity_type" id="mc_related_type">
+
+          {# Step 1: Direction #}
+          <div id="mc-step1">
+            <label class="form-label fw-bold">Step 1 — What kind of money movement?</label>
+            <div class="direction-selector">
+              <div class="dir-btn in" data-direction="receive" onclick="mcSelectDirection('receive')">
+                <i class="fas fa-arrow-down" style="color:#10b981;"></i>
+                <div class="lbl">Money IN</div>
+                <div class="desc">Owner receipt, rental income, refund, party receipt</div>
+              </div>
+              <div class="dir-btn out" data-direction="pay" onclick="mcSelectDirection('pay')">
+                <i class="fas fa-arrow-up" style="color:#f43f5e;"></i>
+                <div class="lbl">Money OUT</div>
+                <div class="desc">Worker, supplier, subcontractor, office, expense</div>
+              </div>
+              <div class="dir-btn transfer" data-direction="transfer" onclick="mcSelectDirection('transfer')">
+                <i class="fas fa-right-left" style="color:#3b82f6;"></i>
+                <div class="lbl">Transfer</div>
+                <div class="desc">Cash ↔ Bank, internal treasury movement</div>
+              </div>
+            </div>
+          </div>
+
+          {# Step 2: Type #}
+          <div id="mc-step2" class="d-none">
+            <label class="form-label fw-bold">Step 2 — Select transaction type</label>
+            <div class="type-grid" id="mc-type-grid"></div>
+            <button type="button" class="btn btn-sm btn-outline-secondary mt-2" onclick="mcBackToStep(1)"><i class="fas fa-arrow-left me-1"></i>Back to Direction</button>
+          </div>
+
+          {# Step 3: Details #}
+          <div id="mc-step3" class="d-none">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <label class="form-label fw-bold mb-0">Step 3 — Enter details</label>
+              <button type="button" class="btn btn-sm btn-outline-secondary" onclick="mcBackToStep(2)"><i class="fas fa-arrow-left me-1"></i>Back</button>
+            </div>
+
+            <div id="mc-selected-type-info" class="alert alert-light border small py-2 mb-2"></div>
+
+            <div class="row g-2">
+              <div class="col-6">
+                <label class="form-label">Date *</label>
+                <input type="date" name="date" class="form-control" value="{{ today }}" required>
+              </div>
+              <div class="col-6">
+                <label class="form-label">Amount (PKR) *</label>
+                <input type="number" step="0.01" min="0.01" name="amount" id="mc_amount" class="form-control" placeholder="0.00" required onwheel="this.blur()">
+              </div>
+            </div>
+
+            {# Pending snapshot #}
+            <div id="mc_pending_wrap" class="mt-2 d-none">
+              <div class="pending-hint">
+                <div class="ph-label" id="mc_pending_label">Pending Payable</div>
+                <div class="ph-value" id="mc_pending_value">Rs. 0</div>
+                <div class="ph-breakdown" id="mc_pending_breakdown"></div>
+                <div class="mt-2 small" id="mc_excess_info"></div>
+              </div>
+            </div>
+
+            {# Excess split (tip/advance) #}
+            <div id="mc_excess_wrap" class="mt-2 d-none">
+              <label class="form-label small fw-bold">Excess Split (when amount > pending)</label>
+              <div class="row g-2">
+                <div class="col-6">
+                  <label class="form-label small">Tip / Bonus</label>
+                  <input type="number" step="0.01" min="0" name="excess_tip_amount" id="mc_tip" class="form-control form-control-sm" value="0">
+                </div>
+                <div class="col-6">
+                  <label class="form-label small">Advance</label>
+                  <input type="number" step="0.01" min="0" name="excess_advance_amount" id="mc_advance" class="form-control form-control-sm" value="0">
+                </div>
+              </div>
+              <div class="small text-muted mt-1">If Tip=0, all excess auto-posted as Advance. Tip requires Project+Stage.</div>
+            </div>
+
+            <div class="mt-2" id="mc_from_wrap">
+              <label class="form-label" id="mc_from_label">From Account *</label>
+              <select name="from_account_id" id="mc_from_account" class="form-select" required>
+                <option value="">Select</option>
+                {% for a in all_accounts %}
+                <option value="{{ a.id }}" data-type="{{ a.type }}" data-group="{{ a.class_category or '' }}" data-balance="{{ a.current_balance }}" data-label="{{ a.name }}">{{ a.name }} ({{ a.class_category or a.type }}) | Bal: {{ "{:,.0f}".format(a.current_balance or 0) }}</option>
+                {% endfor %}
+              </select>
+              <div id="mc_from_balance" class="balance-hint d-none"></div>
+            </div>
+
+            <div class="mt-2" id="mc_to_wrap">
+              <label class="form-label" id="mc_to_label">To Account</label>
+              <select name="to_account_id" id="mc_to_account" class="form-select">
+                <option value="">Select (or off-ledger party below)</option>
+                {% for a in all_accounts %}
+                <option value="{{ a.id }}" data-type="{{ a.type }}" data-group="{{ a.class_category or '' }}" data-balance="{{ a.current_balance }}" data-label="{{ a.name }}">{{ a.name }} ({{ a.class_category or a.type }}) | Bal: {{ "{:,.0f}".format(a.current_balance or 0) }}</option>
+                {% endfor %}
+              </select>
+            </div>
+
+            <div class="mt-2" id="mc_project_wrap">
+              <label class="form-label">Project</label>
+              <select name="project_id" id="mc_project" class="form-select">
+                <option value="">None</option>
+                {% for p in projects %}
+                <option value="{{ p.id }}">{{ p.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+
+            <div class="mt-2 d-none" id="mc_stage_wrap">
+              <label class="form-label">Stage</label>
+              <select name="stage_id" id="mc_stage" class="form-select">
+                <option value="">Select stage</option>
+              </select>
+            </div>
+
+            <div class="mt-2" id="mc_related_wrap">
+              <label class="form-label" id="mc_related_label">Related Entity</label>
+              <select name="related_entity_id" id="mc_related_id" class="form-select">
+                <option value="">Select</option>
+              </select>
+              <div class="small text-muted mt-1" id="mc_related_help"></div>
+            </div>
+
+            <div class="mt-2 d-none" id="mc_office_target_wrap">
+              <label class="form-label">Office Target</label>
+              <select name="office_target" id="mc_office_target" class="form-select">
+                <option value="staff">Office Staff</option>
+                <option value="expense">Office Expense</option>
+              </select>
+            </div>
+
+            <div class="mt-2 d-none" id="mc_office_cat_wrap">
+              <label class="form-label">Office Expense Category</label>
+              <input type="text" name="office_expense_category" id="mc_office_cat" class="form-control" placeholder="e.g. Office Rent, Stationery" list="mcOfficeCatList">
+              <datalist id="mcOfficeCatList"></datalist>
+            </div>
+
+            <div class="mt-2 d-none" id="mc_exp_cat_wrap">
+              <label class="form-label">Expense Category *</label>
+              <select name="expense_category_id" id="mc_exp_cat" class="form-select">
+                <option value="">Select category</option>
+              </select>
+            </div>
+
+            <div class="mt-2">
+              <label class="form-label">Party / Purpose (off-ledger)</label>
+              <input type="text" name="party_name" id="mc_party_name" class="form-control" placeholder="Self, Food, Petrol, etc. — used when no To Account">
+            </div>
+
+            <div class="mt-2">
+              <label class="form-label">Reference ID</label>
+              <input type="text" name="reference_id" class="form-control" placeholder="Optional reference">
+            </div>
+
+            <div class="mt-2">
+              <label class="form-label">Note</label>
+              <textarea name="note" class="form-control" rows="2" placeholder="Why, what for, any detail..."></textarea>
+            </div>
+
+            <div class="mt-2 d-none" id="mc_settle_wrap">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="settle_shortfall" id="mc_settle">
+                <label class="form-check-label small" for="mc_settle">Settle shortfall to zero (posts remaining as settlement)</label>
+              </div>
+            </div>
+
+            <div class="mt-3 d-flex gap-2">
+              <button type="button" class="btn btn-outline-secondary" onclick="mcBackToStep(2)"><i class="fas fa-arrow-left me-1"></i>Back</button>
+              <button type="submit" class="btn btn-success flex-fill"><i class="fas fa-check me-1"></i>Post to Unified Ledger</button>
+            </div>
+
+            <div class="small text-muted mt-2 text-center">
+              <i class="fas fa-shield-halved me-1"></i>Overdraft blocked · Duplicate guarded · Void synced · Single source of truth
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    {# Treasury Accounts quick view #}
+    <div class="card hdc-card mt-3">
+      <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+        <span><i class="fas fa-building-columns me-2"></i>Treasury Accounts (Company)</span>
+        <a href="{{ url_for('hdc_accounts_manage') }}" class="btn btn-sm btn-outline-secondary">Manage</a>
+      </div>
+      <div class="card-body">
+        <div class="d-flex flex-wrap gap-1 mb-2">
+          {% for acc in company_accounts[:20] %}
+          <span class="acc-balance-chip {{ 'neg' if acc.current_balance < -0.01 else ('pos' if acc.current_balance > 0.01 else 'zero') }}">
+            <i class="fas fa-{{ 'building-columns' if acc.type == 'bank' else 'wallet' }}"></i>
+            {{ acc.name }}: {{ "{:,.0f}".format(acc.current_balance or 0) }}
+          </span>
+          {% endfor %}
+        </div>
+        {% if company_accounts|length == 0 %}
+        <div class="text-muted small">No company accounts found. <a href="{{ url_for('hdc_accounts_manage') }}">Create one</a></div>
+        {% endif %}
+      </div>
+    </div>
+
+    {# Recent transactions timeline #}
+    <div class="card hdc-card mt-3">
+      <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+        <span><i class="fas fa-clock-rotate-left me-2"></i>Recent Ledger Entries</span>
+        <a href="{{ url_for('hdc_accounts_entries') }}" class="btn btn-sm btn-outline-secondary">All</a>
+      </div>
+      <div class="card-body p-2">
+        {% for txn in recent_txns[:15] %}
+        <div class="txn-timeline-item">
+          <div class="txn-dot {{ 'in' if txn.type in ['project_income','party_receipt','client_payment'] else ('transfer' if txn.type == 'transfer' else 'out') }}"></div>
+          <div class="flex-fill">
+            <div class="d-flex justify-content-between">
+              <span class="fw-semibold">{{ txn.type.replace('_',' ').title() }}</span>
+              <span class="fw-bold">Rs. {{ "{:,.0f}".format(txn.amount or 0) }}</span>
+            </div>
+            <div class="small text-muted">
+              {{ txn.date.isoformat() if txn.date else '' }} ·
+              {{ txn.from_account.name if txn.from_account else '?' }} → {{ txn.to_account.name if txn.to_account else (txn.party_name or 'Off-ledger') }}
+              {% if txn.project %} · {{ txn.project.name }}{% endif %}
+            </div>
+          </div>
+        </div>
+        {% else %}
+        <div class="text-muted small text-center py-3">No transactions yet.</div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  {# ── RIGHT: Money Flows + Pending ── #}
+  <div class="col-12 col-xl-7">
+    {# Tabs for flows #}
+    <ul class="nav nav-pills mb-3" role="tablist">
+      <li class="nav-item"><button class="nav-link active" data-bs-toggle="pill" data-bs-target="#flows-in" type="button"><i class="fas fa-arrow-down me-1" style="color:#10b981;"></i>Money IN ({{ in_count }})</button></li>
+      <li class="nav-item"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#flows-out" type="button"><i class="fas fa-arrow-up me-1" style="color:#f43f5e;"></i>Money OUT ({{ out_count }})</button></li>
+      <li class="nav-item"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#flows-transfer" type="button"><i class="fas fa-right-left me-1" style="color:#3b82f6;"></i>Transfers ({{ transfer_count }})</button></li>
+      <li class="nav-item"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#pending-tab" type="button"><i class="fas fa-hand-holding-dollar me-1"></i>Pending ({{ pending.totals.workers_count + pending.totals.subcontractors_count + pending.totals.suppliers_count + pending.totals.office_staff_count + pending.totals.projects_count }})</button></li>
+      <li class="nav-item"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#diagram-tab" type="button"><i class="fas fa-diagram-project me-1"></i>How It Works</button></li>
+    </ul>
+
+    <div class="tab-content">
+      {# Money IN flows #}
+      <div class="tab-pane fade show active" id="flows-in">
+        <div class="row g-3">
+          {% for flow in grouped_flows.in %}
+          <div class="col-12 col-md-6">
+            <div class="flow-card" style="--flow-color:{% if flow.color=='emerald' %}#10b981{% elif flow.color=='cyan' %}#06b6d4{% else %}#3b82f6{% endif %};">
+              <div class="flow-card-header">
+                <div class="flow-icon {{ flow.color }}"><i class="fas {{ flow.icon }}"></i></div>
+                <div class="flex-fill">
+                  <div class="flow-title">{{ flow.label }}</div>
+                  <span class="flow-module">{{ flow.module }}</span>
+                </div>
+                <span class="flow-badge in"><i class="fas fa-arrow-down me-1"></i>IN</span>
+              </div>
+              <div class="flow-desc">{{ flow.accounts_type }}</div>
+              <div class="flow-posting"><strong>Posting:</strong> {{ flow.posting }}</div>
+              <div class="flow-meta">
+                <span class="flow-badge">Tx: {{ flow.tx_type }}</span>
+                <span class="flow-badge">{{ flow.category }}</span>
+                {% if flow.needs_receiving_account %}<span class="flow-badge"><i class="fas fa-building-columns me-1"></i>Needs receiving account</span>{% endif %}
+              </div>
+              <div class="flow-meta">
+                <span class="flow-badge" title="Duplicate guard"><i class="fas fa-clone me-1"></i>{{ flow.duplicate_guard[:60] }}...</span>
+              </div>
+              <div class="flow-meta">
+                <span class="flow-badge" title="Void sync"><i class="fas fa-link me-1"></i>{{ flow.void_sync[:70] }}...</span>
+              </div>
+              <div class="flow-actions mt-2">
+                <button class="btn btn-outline-success btn-sm" onclick="mcQuickSelectType('{{ flow.accounts_entry_intent }}')"><i class="fas fa-plus me-1"></i>{{ flow.quick_action }}</button>
+                {% if flow.route %}<a href="{{ url_for(flow.route) if flow.route.startswith('hdc_') else '#' }}" class="btn btn-outline-secondary btn-sm">Open Module</a>{% endif %}
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      {# Money OUT flows #}
+      <div class="tab-pane fade" id="flows-out">
+        <div class="row g-3">
+          {% for flow in grouped_flows.out %}
+          <div class="col-12 col-md-6">
+            <div class="flow-card" style="--flow-color:#f43f5e;">
+              <div class="flow-card-header">
+                <div class="flow-icon {{ flow.color }}"><i class="fas {{ flow.icon }}"></i></div>
+                <div class="flex-fill">
+                  <div class="flow-title">{{ flow.label }}</div>
+                  <span class="flow-module">{{ flow.module }}</span>
+                </div>
+                <span class="flow-badge out"><i class="fas fa-arrow-up me-1"></i>OUT</span>
+              </div>
+              <div class="flow-desc">{{ flow.accounts_type }}</div>
+              <div class="flow-posting"><strong>Posting:</strong> {{ flow.posting }}</div>
+              <div class="flow-meta">
+                <span class="flow-badge">Tx: {{ flow.tx_type }}</span>
+                <span class="flow-badge">{{ flow.category }}</span>
+                {% if flow.needs_receiving_account %}<span class="flow-badge">Needs account</span>{% endif %}
+              </div>
+              {% if flow.excess_handling %}
+              <div class="flow-posting" style="background:#fffbeb; border-color:#fde68a;"><strong>Excess:</strong> {{ flow.excess_handling }}</div>
+              {% endif %}
+              <div class="flow-meta">
+                <span class="flow-badge" title="{{ flow.pending_calc }}"><i class="fas fa-calculator me-1"></i>Pending: {{ flow.pending_calc[:80] }}</span>
+              </div>
+              <div class="flow-actions mt-2">
+                <button class="btn btn-outline-danger btn-sm" onclick="mcQuickSelectType('{{ flow.accounts_entry_intent }}')"><i class="fas fa-plus me-1"></i>{{ flow.quick_action }}</button>
+                {% if flow.route %}<a href="{{ url_for(flow.route) if flow.route.startswith('hdc_') else '#' }}" class="btn btn-outline-secondary btn-sm">Open Module</a>{% endif %}
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      {# Transfers #}
+      <div class="tab-pane fade" id="flows-transfer">
+        <div class="row g-3">
+          {% for flow in grouped_flows.transfer %}
+          <div class="col-12 col-md-6">
+            <div class="flow-card" style="--flow-color:#3b82f6;">
+              <div class="flow-card-header">
+                <div class="flow-icon {{ flow.color }}"><i class="fas {{ flow.icon }}"></i></div>
+                <div class="flex-fill">
+                  <div class="flow-title">{{ flow.label }}</div>
+                  <span class="flow-module">{{ flow.module }}</span>
+                </div>
+                <span class="flow-badge transfer"><i class="fas fa-right-left me-1"></i>TRANSFER</span>
+              </div>
+              <div class="flow-desc">{{ flow.accounts_type }}</div>
+              <div class="flow-posting"><strong>Posting:</strong> {{ flow.posting }}</div>
+              <div class="flow-meta">
+                <span class="flow-badge">Tx: {{ flow.tx_type }}</span>
+                <span class="flow-badge">Overdraft: {{ 'Blocked' if 'Blocked' in flow.overdraft else flow.overdraft }}</span>
+              </div>
+              <div class="flow-meta">
+                <span class="flow-badge" title="Void sync"><i class="fas fa-link me-1"></i>{{ flow.void_sync[:80] }}</span>
+              </div>
+              <div class="flow-actions mt-2">
+                <button class="btn btn-outline-primary btn-sm" onclick="mcQuickSelectType('{{ flow.accounts_entry_intent }}')"><i class="fas fa-plus me-1"></i>{{ flow.quick_action }}</button>
+                <a href="{{ url_for('hdc_accounts') }}" class="btn btn-outline-secondary btn-sm">Transactions</a>
+                <a href="{{ url_for('hdc_cashflow_register') }}" class="btn btn-outline-secondary btn-sm">CF Register</a>
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+
+        <div class="card hdc-card mt-3">
+          <div class="card-header hdc-card-header"><i class="fas fa-code-branch me-2"></i>Split Transfer Logic (Smooth Handling)</div>
+          <div class="card-body small">
+            <p class="text-muted">When <code>from_account != executed_by_account</code>, the system auto-creates 2 rows with same <code>group_id</code>:</p>
+            <ul class="mb-2">
+              <li><strong>Step 1:</strong> <code>transfer</code> from Source → Executor (internal)</li>
+              <li><strong>Step 2:</strong> actual type (e.g. <code>payroll</code>) from Executor → Final Destination</li>
+            </ul>
+            <p class="text-muted">Overdraft checked on both steps sequentially. Void by group_id voids both. Duplicate guard treats group as one.</p>
+            <div class="alert alert-light border small mb-0">
+              <strong>Example:</strong> Pay worker from Bank via Cash — Bank → Cash (step1 transfer), Cash → Worker (step2 payroll), same group_id.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {# Pending tab #}
+      <div class="tab-pane fade" id="pending-tab">
+        <div class="row g-2 mb-3">
+          <div class="col-6 col-md-3"><div class="mc-kpi warn p-2"><div class="mc-kpi-label">Workers</div><div class="mc-kpi-value" style="font-size:1.1rem;">Rs. {{ "{:,.0f}".format(pending.totals.workers_pending or 0) }}</div><div class="mc-kpi-sub">{{ pending.totals.workers_count }} workers</div></div></div>
+          <div class="col-6 col-md-3"><div class="mc-kpi warn p-2"><div class="mc-kpi-label">Subcontractors</div><div class="mc-kpi-value" style="font-size:1.1rem;">Rs. {{ "{:,.0f}".format(pending.totals.subcontractors_pending or 0) }}</div><div class="mc-kpi-sub">{{ pending.totals.subcontractors_count }} subs</div></div></div>
+          <div class="col-6 col-md-3"><div class="mc-kpi warn p-2"><div class="mc-kpi-label">Suppliers</div><div class="mc-kpi-value" style="font-size:1.1rem;">Rs. {{ "{:,.0f}".format(pending.totals.suppliers_pending or 0) }}</div><div class="mc-kpi-sub">{{ pending.totals.suppliers_count }} suppliers</div></div></div>
+          <div class="col-6 col-md-3"><div class="mc-kpi warn p-2"><div class="mc-kpi-label">Office Staff</div><div class="mc-kpi-value" style="font-size:1.1rem;">Rs. {{ "{:,.0f}".format(pending.totals.office_staff_pending or 0) }}</div><div class="mc-kpi-sub">{{ pending.totals.office_staff_count }} staff</div></div></div>
+        </div>
+        <div class="row g-2 mb-3">
+          <div class="col-6"><div class="mc-kpi pos p-2"><div class="mc-kpi-label">Projects Receivable</div><div class="mc-kpi-value" style="font-size:1.1rem;">Rs. {{ "{:,.0f}".format(pending.totals.projects_receivable or 0) }}</div><div class="mc-kpi-sub">{{ pending.totals.projects_count }} projects</div></div></div>
+          <div class="col-6"><div class="mc-kpi pos p-2"><div class="mc-kpi-label">Tool Rentals Receivable</div><div class="mc-kpi-value" style="font-size:1.1rem;">Rs. {{ "{:,.0f}".format(pending.totals.tool_rentals_receivable or 0) }}</div><div class="mc-kpi-sub">{{ pending.totals.tool_rentals_count }} rentals</div></div></div>
+        </div>
+
+        <div class="row g-3">
+          <div class="col-12 col-md-6">
+            <div class="pending-card">
+              <div class="pending-header"><span class="pending-title"><i class="fas fa-helmet-safety me-1" style="color:#f43f5e;"></i>Workers Pending</span><span class="pending-total">Rs. {{ "{:,.0f}".format(pending.totals.workers_pending or 0) }}</span></div>
+              {% for w in pending.workers[:15] %}
+              <div class="pending-item">
+                <div><div class="name">{{ w.name }}</div><div class="code">{{ w.code }} · Paid {{ "{:,.0f}".format(w.paid) }} / {{ "{:,.0f}".format(w.total) }}</div></div>
+                <div class="text-end"><div class="amt pos">Rs. {{ "{:,.0f}".format(w.pending) }}</div><button class="btn btn-sm btn-outline-danger py-0 px-2 mt-1" style="font-size:0.65rem;" onclick="mcPayEntity('worker', {{ w.id }}, '{{ w.name }}', {{ w.pending }})">Pay</button></div>
+              </div>
+              {% else %}<div class="small text-muted text-center py-2">No worker payables pending 🎉</div>{% endfor %}
+            </div>
+
+            <div class="pending-card">
+              <div class="pending-header"><span class="pending-title"><i class="fas fa-truck-field me-1" style="color:#f43f5e;"></i>Suppliers Pending</span><span class="pending-total">Rs. {{ "{:,.0f}".format(pending.totals.suppliers_pending or 0) }}</span></div>
+              {% for s in pending.suppliers[:15] %}
+              <div class="pending-item">
+                <div><div class="name">{{ s.name }}</div><div class="code">{{ s.code }} · Paid {{ "{:,.0f}".format(s.paid) }} / {{ "{:,.0f}".format(s.total) }}</div></div>
+                <div class="text-end"><div class="amt pos">Rs. {{ "{:,.0f}".format(s.pending) }}</div><button class="btn btn-sm btn-outline-danger py-0 px-2 mt-1" style="font-size:0.65rem;" onclick="mcPayEntity('supplier', {{ s.id }}, '{{ s.name }}', {{ s.pending }})">Pay</button></div>
+              </div>
+              {% else %}<div class="small text-muted text-center py-2">No supplier payables pending 🎉</div>{% endfor %}
+            </div>
+          </div>
+
+          <div class="col-12 col-md-6">
+            <div class="pending-card">
+              <div class="pending-header"><span class="pending-title"><i class="fas fa-people-group me-1" style="color:#f43f5e;"></i>Subcontractors Pending</span><span class="pending-total">Rs. {{ "{:,.0f}".format(pending.totals.subcontractors_pending or 0) }}</span></div>
+              {% for s in pending.subcontractors[:15] %}
+              <div class="pending-item">
+                <div><div class="name">{{ s.name }}</div><div class="code">{{ s.code }}{% if s.project %} · {{ s.project }}{% endif %}{% if s.stage %} / {{ s.stage }}{% endif %}</div></div>
+                <div class="text-end"><div class="amt pos">Rs. {{ "{:,.0f}".format(s.pending) }}</div><button class="btn btn-sm btn-outline-danger py-0 px-2 mt-1" style="font-size:0.65rem;" onclick="mcPayEntity('subcontractor', {{ s.id }}, '{{ s.name }}', {{ s.pending }})">Pay</button></div>
+              </div>
+              {% else %}<div class="small text-muted text-center py-2">No subcontractor payables pending 🎉</div>{% endfor %}
+            </div>
+
+            <div class="pending-card">
+              <div class="pending-header"><span class="pending-title"><i class="fas fa-user-tie me-1" style="color:#f43f5e;"></i>Office Staff Pending</span><span class="pending-total">Rs. {{ "{:,.0f}".format(pending.totals.office_staff_pending or 0) }}</span></div>
+              {% for st in pending.office_staff[:15] %}
+              <div class="pending-item">
+                <div><div class="name">{{ st.name }}</div><div class="code">{{ st.code }} · Paid {{ "{:,.0f}".format(st.paid) }}</div></div>
+                <div class="text-end"><div class="amt pos">Rs. {{ "{:,.0f}".format(st.pending) }}</div><button class="btn btn-sm btn-outline-danger py-0 px-2 mt-1" style="font-size:0.65rem;" onclick="mcPayEntity('office_staff', {{ st.id }}, '{{ st.name }}', {{ st.pending }})">Pay</button></div>
+              </div>
+              {% else %}<div class="small text-muted text-center py-2">No office staff payables pending 🎉</div>{% endfor %}
+            </div>
+
+            <div class="pending-card">
+              <div class="pending-header"><span class="pending-title"><i class="fas fa-building me-1" style="color:#10b981;"></i>Projects Receivable</span><span class="pending-total" style="color:#065f46;">Rs. {{ "{:,.0f}".format(pending.totals.projects_receivable or 0) }}</span></div>
+              {% for p in pending.projects_receivable[:15] %}
+              <div class="pending-item">
+                <div><div class="name">{{ p.name }}</div><div class="code">{{ p.client }} · Received {{ "{:,.0f}".format(p.paid) }} / {{ "{:,.0f}".format(p.total) }}</div></div>
+                <div class="text-end"><div class="amt pos">Rs. {{ "{:,.0f}".format(p.pending) }}</div><button class="btn btn-sm btn-outline-success py-0 px-2 mt-1" style="font-size:0.65rem;" onclick="mcReceiveProject({{ p.id }}, '{{ p.name }}', {{ p.pending }})">Receive</button></div>
+              </div>
+              {% else %}<div class="small text-muted text-center py-2">No project receivables pending 🎉</div>{% endfor %}
+            </div>
+
+            {% if pending.tool_rentals_receivable %}
+            <div class="pending-card">
+              <div class="pending-header"><span class="pending-title"><i class="fas fa-screwdriver-wrench me-1" style="color:#10b981;"></i>Tool Rentals Receivable</span><span class="pending-total" style="color:#065f46;">Rs. {{ "{:,.0f}".format(pending.totals.tool_rentals_receivable or 0) }}</span></div>
+              {% for tr in pending.tool_rentals_receivable[:10] %}
+              <div class="pending-item">
+                <div><div class="name">{{ tr.name }}</div><div class="code">{{ tr.code }} · Paid {{ "{:,.0f}".format(tr.paid) }}</div></div>
+                <div class="text-end"><div class="amt pos">Rs. {{ "{:,.0f}".format(tr.pending) }}</div></div>
+              </div>
+              {% endfor %}
+            </div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+
+      {# How it works / diagram #}
+      <div class="tab-pane fade" id="diagram-tab">
+        <div class="card hdc-card">
+          <div class="card-header hdc-card-header"><i class="fas fa-diagram-project me-2"></i>How Money Flows — One Ledger, No Duplicates</div>
+          <div class="card-body">
+            <div class="row g-3">
+              <div class="col-12 col-md-6">
+                <h6><i class="fas fa-shield-halved me-1" style="color:#10b981;"></i>Smooth Handling Guarantees</h6>
+                <ul class="small" style="line-height:1.8;">
+                  <li><strong>Single Source of Truth:</strong> Every module posts to <code>hdc_account_txn</code> unified ledger. Balances derived as opening + in − out, never stored.</li>
+                  <li><strong>Overdraft Protection:</strong> Company/cash/bank accounts cannot go negative. Checked in minor units (paisa) exact. Transfer checks both legs.</li>
+                  <li><strong>Duplicate Guard:</strong> <code>source_type:source_id</code> unique + <code>_has_recent_duplicate</code> time-window check prevents double entry.</li>
+                  <li><strong>Void Sync:</strong> Voiding source row (LabourLedger, Expense, etc.) auto-voids linked AccountTransaction and vice versa via <code>_accounts_set_void_by_source</code>.</li>
+                  <li><strong>Receipt Consistency:</strong> Every transaction generates receipt via <code>_receipt_company_profile</code>, linked by group_id for split transactions.</li>
+                  <li><strong>Reconciliation:</strong> Forensic scan finds orphan_txns, void_mismatch, duplicate_active, group_inconsistent, orphan_sources.</li>
+                  <li><strong>Day Lock:</strong> CF Register entries immutable, void-only, day lock via <code>CashDayLock</code> prevents back-dated edits, carries counted closing forward.</li>
+                  <li><strong>Excess Split:</strong> Overpayment auto-split: <code>payment_part=min(amount,pending)</code>, excess=amount−payment_part, tip+advance must equal excess.</li>
+                </ul>
+              </div>
+              <div class="col-12 col-md-6">
+                <h6><i class="fas fa-list-check me-1" style="color:#3b82f6;"></i>All Money Types Inventory ({{ flows_count }} flows)</h6>
+                <div class="small">
+                  <div class="mb-2"><strong style="color:#10b981;">IN ({{ in_count }}):</strong> Owner receipt, Client payment, Party receipt, Tool rental income, CF Register In, Supplier refund/settlement</div>
+                  <div class="mb-2"><strong style="color:#f43f5e;">OUT ({{ out_count }}):</strong> Worker payment/advance/tip, Supplier payment, Subcontractor payment, Sub-labour payment, Office staff payment/advance, Office expense, Material expense, Personal expense, Purchase paid, Tool purchase</div>
+                  <div class="mb-2"><strong style="color:#3b82f6;">TRANSFER ({{ transfer_count }}):</strong> Internal transfer (company accounts), Split transfer (source→executor→destination), Advance to person</div>
+                </div>
+
+                <h6 class="mt-3"><i class="fas fa-right-left me-1"></i>Account Section Smooth UX</h6>
+                <ul class="small" style="line-height:1.8;">
+                  <li><strong>Money Center</strong> (this page) — unified entry for all money types with direction → type → details stepper, real-time pending & balance hints</li>
+                  <li><strong>Transactions</strong> — KPI drilldown, full form with intent_matrix, excess split UI, settle_shortfall, office_target, receiving account validation</li>
+                  <li><strong>CF Register</strong> — primary entry for simple cash flow, immutable docs, day lock, project/party scoped</li>
+                  <li><strong>Manage Accounts</strong> — every account with live balance, classification, archive, bank detail</li>
+                  <li><strong>All Entries</strong> — audit view with filters, receipts, void/restore, reverse, group_id split view</li>
+                  <li><strong>Day Close</strong> — counted vs expected, difference, lock, carry forward</li>
+                  <li><strong>Reconciliation</strong> — forensic health check</li>
+                </ul>
+              </div>
+            </div>
+
+            <div class="alert alert-light border mt-3 small">
+              <i class="fas fa-circle-info me-1"></i>
+              <strong>Money flow example — Worker Wage:</strong> TimeEntry calculates wage → LabourLedger entry_type=work (earned, non-cash) → Payroll run creates payment capped at balance → LabourLedger payment + Expense wage → AccountTransaction payroll via <code>_accounts_post_labour_ledger_row</code> from company to worker person account → Overdraft check in minor units → Duplicate guard via source_type:source_id → Receipt via company profile. Void sync ensures all three void together.
+            </div>
+
+            <div class="mt-3">
+              <h6><i class="fas fa-code me-1"></i>Posting Paths (Code)</h6>
+              <div class="table-responsive">
+                <table class="table table-sm small">
+                  <thead><tr><th>Module</th><th>Model</th><th>Service Function</th><th>Tx Type</th><th>Direction</th></tr></thead>
+                  <tbody>
+                    <tr><td>Workers</td><td>LabourLedger</td><td>_accounts_post_labour_ledger_row</td><td>payroll / advance_to_person</td><td>OUT</td></tr>
+                    <tr><td>Office</td><td>OfficeStaffLedger</td><td>_accounts_upsert_office_staff_ledger_txn</td><td>office_management_payment</td><td>OUT</td></tr>
+                    <tr><td>Office</td><td>OfficeExpense</td><td>_accounts_upsert_office_expense_txn</td><td>office_management_payment</td><td>OUT</td></tr>
+                    <tr><td>Expenses</td><td>Expense</td><td>_accounts_post_expense_row</td><td>expense_material / expense_general</td><td>OUT</td></tr>
+                    <tr><td>Projects</td><td>OwnerPayment</td><td>_accounts_post_owner_receipt</td><td>project_income</td><td>IN</td></tr>
+                    <tr><td>Purchase</td><td>PurchaseV2 (paid)</td><td>_accounts_upsert_purchase_paid_txn</td><td>purchase</td><td>OUT</td></tr>
+                    <tr><td>Purchase</td><td>SupplierLedger (credit)</td><td>_accounts_post_supplier_credit_row</td><td>purchase</td><td>OUT</td></tr>
+                    <tr><td>Subcontract</td><td>SubcontractPayment</td><td>_accounts_post_subcontract_payment_row</td><td>expense_subcontractor</td><td>OUT</td></tr>
+                    <tr><td>Subcontract Labour</td><td>SubcontractLabourPayment</td><td>_accounts_post_subcontract_labour_payment_row</td><td>payroll</td><td>OUT</td></tr>
+                    <tr><td>Tool Rental</td><td>ToolRentalPayment</td><td>post_tool_rental_payment_to_accounts</td><td>party_receipt</td><td>IN</td></tr>
+                    <tr><td>Accounts Direct</td><td>AccountTransaction</td><td>_create_accounts_transaction_with_sync</td><td>any</td><td>IN/OUT/TRANSFER</td></tr>
+                    <tr><td>CF Register</td><td>CashFlowEntry</td><td>register engine → AccountTransaction</td><td>party_receipt / party_payment / transfer</td><td>IN/OUT/TRANSFER</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ── Enhanced Accounts Hub link ── #}
+<div class="card hdc-card mt-4">
+  <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+    <span><i class="fas fa-map me-2"></i>Accounts Section Map — Where to Handle Money</span>
+    <span class="badge bg-success">All money via unified ledger</span>
+  </div>
+  <div class="card-body">
+    <div class="row g-2 small">
+      <div class="col-12 col-md-4"><strong style="color:#10b981;">Money Center (this page):</strong> Smooth entry for all money types — direction → type → details with pending & balance hints. <a href="{{ url_for('hdc_money_center') }}">Open</a></div>
+      <div class="col-12 col-md-4"><strong>CF Register:</strong> Simple cash in/out/transfer with project/party, immutable docs, day lock. <a href="{{ url_for('hdc_cashflow_register') }}">Open</a></div>
+      <div class="col-12 col-md-4"><strong>Transactions:</strong> Full workspace with KPI drilldown, intent matrix, excess split, receiving account validation. <a href="{{ url_for('hdc_accounts') }}">Open</a></div>
+      <div class="col-12 col-md-4"><strong>Manage Accounts:</strong> Master list, create/classify/suspend/archive, live balances derived from ledger. <a href="{{ url_for('hdc_accounts_manage') }}">Open</a></div>
+      <div class="col-12 col-md-4"><strong>All Entries:</strong> Audit view — every ledger row, filters, receipts, void/restore/reverse, group_id splits. <a href="{{ url_for('hdc_accounts_entries') }}">Open</a></div>
+      <div class="col-12 col-md-4"><strong>Day Close + Reconciliation:</strong> Counted vs expected, lock, forensic health check. <a href="{{ url_for('hdc_cashflow_reconciliation') }}">Day Close</a> · <a href="{{ url_for('hdc_accounts_reconciliation') }}">Reconciliation</a></div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// ── Money Center JS — smooth handling ──
+const entryConfig = {{ entry_config_json|safe }};
+const intentMatrix = {{ intent_matrix_json|safe }};
+let currentDirection = '';
+let currentType = '';
+
+const typeConfigByIntent = {
+  'receive_from_project': { label: 'Receive from Project', icon: 'fa-building', color: '#10b981', bg: '#ecfdf5', direction: 'receive', tx_type: 'project_income', related: 'project', pending: 'project_receivable' },
+  'receive_from_credit_debit': { label: 'Receive from Party', icon: 'fa-hand-holding-dollar', color: '#06b6d4', bg: '#cffafe', direction: 'receive', tx_type: 'party_receipt', related: '', pending: '' },
+  'receive_intra_company': { label: 'Transfer from Intra-Company', icon: 'fa-right-left', color: '#3b82f6', bg: '#eff6ff', direction: 'receive', tx_type: 'transfer', related: '', pending: '' },
+  'payroll': { label: 'Wage / Payroll Payment', icon: 'fa-helmet-safety', color: '#f43f5e', bg: '#fff1f2', direction: 'pay', tx_type: 'payroll', related: 'worker', pending: 'worker_payable' },
+  'purchase': { label: 'Supplier / Material Payment', icon: 'fa-truck-field', color: '#f43f5e', bg: '#fff1f2', direction: 'pay', tx_type: 'purchase', related: 'supplier', pending: 'supplier_payable' },
+  'expense_subcontractor': { label: 'Subcontractor Payment', icon: 'fa-people-group', color: '#f43f5e', bg: '#fff1f2', direction: 'pay', tx_type: 'expense_subcontractor', related: 'subcontractor', pending: 'subcontract_payable' },
+  'office_management_payment': { label: 'Office Management Payment', icon: 'fa-user-tie', color: '#64748b', bg: '#f1f5f9', direction: 'pay', tx_type: 'office_management_payment', related: 'office_staff', pending: 'office_staff_payable' },
+  'personal_management_payment': { label: 'Personal / Party Payment', icon: 'fa-user', color: '#64748b', bg: '#f1f5f9', direction: 'pay', tx_type: 'personal_management_payment', related: '', pending: '' },
+  'expense_general': { label: 'General Expense', icon: 'fa-receipt', color: '#64748b', bg: '#f1f5f9', direction: 'pay', tx_type: 'expense_general', related: '', pending: '' },
+  'pay_intra_company': { label: 'Transfer to Intra-Company', icon: 'fa-right-left', color: '#3b82f6', bg: '#eff6ff', direction: 'pay', tx_type: 'transfer', related: '', pending: '' },
+  'pay_to_credit_debit': { label: 'Pay to Party', icon: 'fa-arrow-up', color: '#64748b', bg: '#f1f5f9', direction: 'pay', tx_type: 'party_payment', related: '', pending: '' },
+};
+
+let workerOptions = [], supplierOptions = [], subcontractorOptions = [], officeStaffOptions = [], expenseCategories = [], officeExpCats = [];
+let pendingCache = {};
+
+function mcSelectDirection(dir) {
+  currentDirection = dir;
+  document.querySelectorAll('.dir-btn').forEach(b => b.classList.remove('active'));
+  const btn = document.querySelector(`.dir-btn[data-direction="${dir}"]`);
+  if (btn) btn.classList.add('active');
+
+  // Update step indicator
+  document.getElementById('step1-dot').className = 'step-dot done';
+  document.getElementById('step1-dot').innerHTML = '<i class="fas fa-check"></i>';
+  document.getElementById('step1-label').className = 'step-label';
+  document.getElementById('step1-2-line').className = 'step-line done';
+  document.getElementById('step2-dot').className = 'step-dot active';
+  document.getElementById('step2-label').className = 'step-label active';
+
+  // Build type grid
+  const grid = document.getElementById('mc-type-grid');
+  grid.innerHTML = '';
+  Object.entries(typeConfigByIntent).forEach(([intent, cfg]) => {
+    if (cfg.direction !== dir) return;
+    // For transfer, both pay and receive transfer intents
+    if (dir === 'transfer' && cfg.direction !== 'pay' && cfg.direction !== 'receive') return;
+    if (dir === 'transfer' && !intent.includes('intra_company')) return;
+    // Filter logic
+    if (dir === 'receive' && !intent.startsWith('receive_')) return;
+    if (dir === 'pay' && intent.startsWith('receive_')) return;
+    if (dir === 'transfer' && !intent.includes('intra_company')) return;
+
+    const div = document.createElement('div');
+    div.className = 'type-btn';
+    div.style.setProperty('--flow-color', cfg.color);
+    div.style.setProperty('--flow-bg', cfg.bg);
+    div.dataset.intent = intent;
+    div.innerHTML = `<i class="fas ${cfg.icon}" style="color:${cfg.color};"></i><div><div class="t-title">${cfg.label}</div><div class="t-desc">${cfg.tx_type} · ${cfg.pending || 'no pending'} · ${intent}</div></div>`;
+    div.onclick = () => mcSelectType(intent);
+    grid.appendChild(div);
+  });
+
+  // Special: for transfer, show both receive and pay intra company
+  if (dir === 'transfer') {
+    ['receive_intra_company', 'pay_intra_company'].forEach(intent => {
+      if (grid.querySelector(`[data-intent="${intent}"]`)) return;
+      const cfg = typeConfigByIntent[intent];
+      if (!cfg) return;
+      const div = document.createElement('div');
+      div.className = 'type-btn';
+      div.style.setProperty('--flow-color', cfg.color);
+      div.style.setProperty('--flow-bg', cfg.bg);
+      div.dataset.intent = intent;
+      div.innerHTML = `<i class="fas ${cfg.icon}" style="color:${cfg.color};"></i><div><div class="t-title">${cfg.label}</div><div class="t-desc">${cfg.tx_type} · internal treasury</div></div>`;
+      div.onclick = () => mcSelectType(intent);
+      grid.appendChild(div);
+    });
+  }
+
+  document.getElementById('mc-step1').classList.add('d-none');
+  document.getElementById('mc-step2').classList.remove('d-none');
+  document.getElementById('mc-step3').classList.add('d-none');
+}
+
+function mcBackToStep(step) {
+  if (step === 1) {
+    document.getElementById('mc-step1').classList.remove('d-none');
+    document.getElementById('mc-step2').classList.add('d-none');
+    document.getElementById('mc-step3').classList.add('d-none');
+    document.getElementById('step1-dot').className = 'step-dot active';
+    document.getElementById('step1-dot').textContent = '1';
+    document.getElementById('step1-label').className = 'step-label active';
+    document.getElementById('step1-2-line').className = 'step-line';
+    document.getElementById('step2-dot').className = 'step-dot';
+    document.getElementById('step2-label').className = 'step-label';
+    document.getElementById('step2-3-line').className = 'step-line';
+    document.getElementById('step3-dot').className = 'step-dot';
+    document.getElementById('step3-label').className = 'step-label';
+  } else if (step === 2) {
+    document.getElementById('mc-step1').classList.add('d-none');
+    document.getElementById('mc-step2').classList.remove('d-none');
+    document.getElementById('mc-step3').classList.add('d-none');
+    document.getElementById('step2-dot').className = 'step-dot active';
+    document.getElementById('step2-label').className = 'step-label active';
+    document.getElementById('step2-3-line').className = 'step-line';
+    document.getElementById('step3-dot').className = 'step-dot';
+    document.getElementById('step3-label').className = 'step-label';
+  }
+}
+
+function mcSelectType(intent) {
+  currentType = intent;
+  document.querySelectorAll('.type-btn').forEach(b => b.classList.remove('active'));
+  const btn = document.querySelector(`.type-btn[data-intent="${intent}"]`);
+  if (btn) btn.classList.add('active');
+
+  const cfg = typeConfigByIntent[intent] || { label: intent, icon: 'fa-money-bill', color: '#64748b', bg: '#f1f5f9', direction: currentDirection, tx_type: intent, related: '', pending: '' };
+  document.getElementById('mc_type').value = cfg.tx_type;
+  document.getElementById('mc_related_type').value = cfg.related || '';
+
+  document.getElementById('step2-dot').className = 'step-dot done';
+  document.getElementById('step2-dot').innerHTML = '<i class="fas fa-check"></i>';
+  document.getElementById('step2-label').className = 'step-label';
+  document.getElementById('step2-3-line').className = 'step-line done';
+  document.getElementById('step3-dot').className = 'step-dot active';
+  document.getElementById('step3-label').className = 'step-label active';
+
+  // Show selected type info
+  const info = document.getElementById('mc-selected-type-info');
+  info.innerHTML = `<i class="fas ${cfg.icon} me-1" style="color:${cfg.color};"></i><strong>${cfg.label}</strong> — Tx: <code>${cfg.tx_type}</code> · Direction: ${cfg.direction} · Related: ${cfg.related || 'none'} · Pending: ${cfg.pending || 'none'}<br><small class="text-muted">Intent: ${intent} · Posting: ${entryConfig[intent] ? entryConfig[intent].tips?.[0] || '' : ''}</small>`;
+
+  // Update labels
+  const fromLabel = document.getElementById('mc_from_label');
+  const toLabel = document.getElementById('mc_to_label');
+  const relatedLabel = document.getElementById('mc_related_label');
+  if (cfg.direction === 'receive') {
+    fromLabel.textContent = 'From Account (Party / Source) *';
+    toLabel.textContent = 'Receive In (Company Account) *';
+  } else if (cfg.tx_type === 'transfer') {
+    fromLabel.textContent = 'From Account (Company) *';
+    toLabel.textContent = 'To Account (Company) *';
+  } else {
+    fromLabel.textContent = 'Pay From (Company Account) *';
+    toLabel.textContent = 'To Account (optional)';
+  }
+
+  // Show/hide sections based on type
+  const isWorker = cfg.related === 'worker';
+  const isSupplier = cfg.related === 'supplier';
+  const isSub = cfg.related === 'subcontractor';
+  const isOfficeStaff = cfg.related === 'office_staff';
+  const isOffice = cfg.tx_type === 'office_management_payment';
+  const isExpenseGeneral = cfg.tx_type === 'expense_general';
+  const isTransfer = cfg.tx_type === 'transfer';
+
+  document.getElementById('mc_related_wrap').classList.toggle('d-none', !cfg.related);
+  if (cfg.related) {
+    relatedLabel.textContent = `Related ${cfg.related.charAt(0).toUpperCase()+cfg.related.slice(1)} *`;
+    document.getElementById('mc_related_help').textContent = `Select ${cfg.related} for pending calculation and auto party name`;
+    loadRelatedOptions(cfg.related);
+  }
+
+  document.getElementById('mc_office_target_wrap').classList.toggle('d-none', !isOffice);
+  document.getElementById('mc_office_cat_wrap').classList.toggle('d-none', !(isOffice && document.getElementById('mc_office_target').value === 'expense'));
+  document.getElementById('mc_exp_cat_wrap').classList.toggle('d-none', !isExpenseGeneral);
+  document.getElementById('mc_project_wrap').classList.toggle('d-none', isTransfer && !isExpenseGeneral);
+  document.getElementById('mc_to_wrap').classList.toggle('d-none', false);
+
+  // Show excess split for payable types
+  const showExcess = ['payroll','purchase','expense_subcontractor','office_management_payment'].includes(cfg.tx_type);
+  document.getElementById('mc_excess_wrap').classList.toggle('d-none', !showExcess);
+  document.getElementById('mc_settle_wrap').classList.toggle('d-none', !(['payroll','expense_subcontractor'].includes(cfg.tx_type)));
+
+  // Project required for some
+  const projectRequired = ['project_income','expense_general'].includes(cfg.tx_type);
+  document.getElementById('mc_project').required = projectRequired;
+
+  // Filter from/to accounts
+  filterAccountsByType(cfg);
+
+  document.getElementById('mc-step1').classList.add('d-none');
+  document.getElementById('mc-step2').classList.add('d-none');
+  document.getElementById('mc-step3').classList.remove('d-none');
+
+  // Load expense categories if needed
+  if (isExpenseGeneral) loadExpenseCategories();
+  if (isOffice) loadOfficeCategories();
+}
+
+function filterAccountsByType(cfg) {
+  const fromSel = document.getElementById('mc_from_account');
+  const toSel = document.getElementById('mc_to_account');
+  // For now keep all, but could filter by company type
+  // Company accounts should be from for OUT, to for IN
+  // This is smooth - show all but hint
+}
+
+function loadRelatedOptions(type) {
+  const sel = document.getElementById('mc_related_id');
+  sel.innerHTML = '<option value="">Select</option>';
+  let opts = [];
+  if (type === 'worker') opts = workerOptions;
+  else if (type === 'supplier') opts = supplierOptions;
+  else if (type === 'subcontractor') opts = subcontractorOptions;
+  else if (type === 'office_staff') opts = officeStaffOptions;
+
+  opts.forEach(o => {
+    const opt = document.createElement('option');
+    opt.value = o.id;
+    opt.textContent = o.label || o.name || `#${o.id}`;
+    sel.appendChild(opt);
+  });
+}
+
+function mcQuickSelectType(intent) {
+  const cfg = typeConfigByIntent[intent];
+  if (!cfg) return;
+  mcSelectDirection(cfg.direction);
+  setTimeout(() => mcSelectType(intent), 100);
+  document.querySelector('.quick-entry-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function mcPayEntity(entityType, id, name, pending) {
+  let intent = 'payroll';
+  if (entityType === 'supplier') intent = 'purchase';
+  else if (entityType === 'subcontractor') intent = 'expense_subcontractor';
+  else if (entityType === 'office_staff') intent = 'office_management_payment';
+  mcQuickSelectType(intent);
+  setTimeout(() => {
+    document.getElementById('mc_related_id').value = id;
+    document.getElementById('mc_amount').value = pending.toFixed(2);
+    document.getElementById('mc_party_name').value = name;
+    // Trigger pending fetch
+    fetchPending();
+  }, 300);
+}
+
+function mcReceiveProject(projectId, projectName, pending) {
+  mcQuickSelectType('receive_from_project');
+  setTimeout(() => {
+    document.getElementById('mc_project').value = projectId;
+    document.getElementById('mc_amount').value = pending.toFixed(2);
+    document.getElementById('mc_party_name').value = projectName;
+    fetchPending();
+  }, 300);
+}
+
+// ── Fetch helpers ──
+function fetchPending() {
+  const type = document.getElementById('mc_type').value;
+  const relatedType = document.getElementById('mc_related_type').value;
+  const relatedId = document.getElementById('mc_related_id').value;
+  const projectId = document.getElementById('mc_project').value;
+  const stageId = document.getElementById('mc_stage').value;
+  if (!type) return;
+
+  const qs = new URLSearchParams({ type, related_entity_type: relatedType, related_entity_id: relatedId, project_id: projectId, stage_id: stageId });
+  fetch(`/api/accounts/pending_context?${qs}`)
+    .then(r => r.json())
+    .then(j => {
+      const item = j.item;
+      if (!item || (!item.pending && !item.total)) {
+        document.getElementById('mc_pending_wrap').classList.add('d-none');
+        return;
+      }
+      document.getElementById('mc_pending_wrap').classList.remove('d-none');
+      document.getElementById('mc_pending_label').textContent = item.kind ? item.kind.replace(/_/g,' ').toUpperCase() : 'Pending';
+      document.getElementById('mc_pending_value').textContent = `Rs. ${Number(item.pending||0).toLocaleString()} pending`;
+      document.getElementById('mc_pending_breakdown').textContent = `Total: ${Number(item.total||0).toLocaleString()} | Paid: ${Number(item.paid||0).toLocaleString()} | ${item.message||''}`;
+      pendingCache = item;
+      updateExcessInfo();
+    });
+}
+
+function updateExcessInfo() {
+  const amt = parseFloat(document.getElementById('mc_amount').value || '0') || 0;
+  const pending = pendingCache.pending || 0;
+  const excess = Math.max(0, amt - pending);
+  const el = document.getElementById('mc_excess_info');
+  if (!el) return;
+  if (excess > 0.01) {
+    const tip = parseFloat(document.getElementById('mc_tip').value || '0') || 0;
+    const adv = parseFloat(document.getElementById('mc_advance').value || '0') || 0;
+    el.innerHTML = `<span class="text-warning">Excess: Rs. ${excess.toLocaleString()} = Tip ${tip.toLocaleString()} + Advance ${adv.toLocaleString()}</span>`;
+    document.getElementById('mc_excess_wrap').classList.remove('d-none');
+  } else {
+    el.textContent = amt > 0 ? `Amount within pending (${pending.toLocaleString()}), no excess.` : '';
+  }
+}
+
+// ── Account balance hints ──
+function updateBalanceHint(selectId, hintId) {
+  const sel = document.getElementById(selectId);
+  const hint = document.getElementById(hintId);
+  if (!sel || !hint) return;
+  const opt = sel.options[sel.selectedIndex];
+  if (!opt || !opt.value) { hint.classList.add('d-none'); return; }
+  const bal = parseFloat(opt.dataset.balance || '0') || 0;
+  hint.classList.remove('d-none', 'pos', 'neg', 'warn');
+  if (bal < -0.01) {
+    hint.className = 'balance-hint neg';
+    hint.textContent = `⚠️ Overdrawn: Rs. ${bal.toLocaleString()} — further outflows blocked`;
+  } else if (bal < 1000) {
+    hint.className = 'balance-hint warn';
+    hint.textContent = `Low balance: Rs. ${bal.toLocaleString()}`;
+  } else {
+    hint.className = 'balance-hint pos';
+    hint.textContent = `Available: Rs. ${bal.toLocaleString()}`;
+  }
+}
+
+// ── Event listeners ──
+document.getElementById('mc_from_account')?.addEventListener('change', () => { updateBalanceHint('mc_from_account','mc_from_balance'); });
+document.getElementById('mc_amount')?.addEventListener('input', () => { updateExcessInfo(); });
+document.getElementById('mc_tip')?.addEventListener('input', () => { updateExcessInfo(); });
+document.getElementById('mc_related_id')?.addEventListener('change', () => { fetchPending(); });
+document.getElementById('mc_project')?.addEventListener('change', () => {
+  const pid = document.getElementById('mc_project').value;
+  if (!pid) { document.getElementById('mc_stage_wrap').classList.add('d-none'); fetchPending(); return; }
+  fetch(`/hdc/api/project_stages/${pid}`).then(r=>r.json()).then(items=>{
+    const stageSel = document.getElementById('mc_stage');
+    stageSel.innerHTML = '<option value="">Select stage</option>';
+    (items||[]).forEach(st=>{
+      const opt = document.createElement('option');
+      opt.value = st.id;
+      opt.textContent = st.name;
+      stageSel.appendChild(opt);
+    });
+    document.getElementById('mc_stage_wrap').classList.remove('d-none');
+    fetchPending();
+  });
+});
+document.getElementById('mc_stage')?.addEventListener('change', () => fetchPending());
+document.getElementById('mc_office_target')?.addEventListener('change', (e)=>{
+  const isExp = e.target.value === 'expense';
+  document.getElementById('mc_office_cat_wrap').classList.toggle('d-none', !isExp);
+  document.getElementById('mc_related_wrap').classList.toggle('d-none', isExp);
+});
+
+// ── Load options from APIs ──
+function loadWorkerOptions() {
+  fetch('/hdc/api/workers/options').then(r=>r.json()).then(j=>{
+    workerOptions = j.items || j || [];
+    if (!Array.isArray(workerOptions)) workerOptions = [];
+  }).catch(()=>{});
+}
+function loadSupplierOptions() {
+  fetch('/hdc/api/suppliers/options').then(r=>r.json()).then(j=>{
+    supplierOptions = j.items || j || [];
+    if (!Array.isArray(supplierOptions)) supplierOptions = [];
+  }).catch(()=>{});
+}
+function loadSubcontractorOptions() {
+  fetch('/hdc/api/subcontractors/options').then(r=>r.json()).then(j=>{
+    subcontractorOptions = j.items || j || [];
+    if (!Array.isArray(subcontractorOptions)) subcontractorOptions = [];
+  }).catch(()=>{});
+}
+function loadOfficeStaffOptions() {
+  fetch('/hdc/api/office_staff/options').then(r=>r.json()).then(j=>{
+    officeStaffOptions = j.items || j || [];
+    if (!Array.isArray(officeStaffOptions)) officeStaffOptions = [];
+  }).catch(()=>{});
+}
+function loadExpenseCategories() {
+  fetch('/hdc/api/expense_categories').then(r=>r.json()).then(j=>{
+    const cats = j.items || j.categories || j || [];
+    const sel = document.getElementById('mc_exp_cat');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">Select category</option>';
+    (Array.isArray(cats)?cats:[]).forEach(c=>{
+      const opt = document.createElement('option');
+      opt.value = c.id || c.value;
+      opt.textContent = c.name || c.label || c;
+      sel.appendChild(opt);
+    });
+  }).catch(()=>{});
+}
+function loadOfficeCategories() {
+  fetch('/hdc/api/office_expense_categories').then(r=>r.json()).then(j=>{
+    const cats = j.categories || [];
+    const dl = document.getElementById('mcOfficeCatList');
+    if (!dl) return;
+    dl.innerHTML = '';
+    cats.forEach(c=>{
+      const opt = document.createElement('option');
+      opt.value = c;
+      dl.appendChild(opt);
+    });
+  }).catch(()=>{});
+}
+
+// Try multiple endpoints for options
+async function loadAllOptions() {
+  // Workers
+  try {
+    const r = await fetch('/api/accounts/list_accounts_with_balances?include_inactive=0');
+    const j = await r.json();
+  } catch(e){}
+
+  // Use existing page data if available, else fetch
+  try {
+    // Workers from timekeeping/workers APIs
+    const endpoints = [
+      { url: '/hdc/api/workers', type: 'worker' },
+      { url: '/hdc/api/suppliers', type: 'supplier' },
+      { url: '/hdc/api/subcontractors', type: 'subcontractor' },
+    ];
+    for (const ep of endpoints) {
+      try {
+        const resp = await fetch(ep.url);
+        const data = await resp.json();
+        const items = data.items || data || [];
+        if (ep.type === 'worker') workerOptions = Array.isArray(items) ? items.map(x=>({id:x.id||x.value, label:x.name||x.label||x.text||`#${x.id}`})) : [];
+        if (ep.type === 'supplier') supplierOptions = Array.isArray(items) ? items.map(x=>({id:x.id||x.value, label:x.name||x.label||x.text||`#${x.id}`})) : [];
+        if (ep.type === 'subcontractor') subcontractorOptions = Array.isArray(items) ? items.map(x=>({id:x.id||x.value, label:x.name||x.label||x.text||`#${x.id}`})) : [];
+      } catch(e){}
+    }
+  } catch(e){}
+
+  // Fallback: scrape from DOM if options exist elsewhere
+  // For now, try to get from global worker_option_rows if defined in other page - not here, so keep empty and rely on manual entry + pending API
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  loadAllOptions();
+  loadOfficeCategories();
+});
+</script>
+{% endblock %}
