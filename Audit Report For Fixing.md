@@ -511,7 +511,9 @@ print(c.get('/hdc/accounts/money-center').status_code)   # must print 200
 PY
 ```
 
-### Step 2 — Fix the supplier payment crash (fix 4.2)
+### Step 2 — Fix the supplier payment crash (fix 4.2) — ✅ COMPLETED (2026-09-20)
+
+> **Done.** One-word fix applied: `PurchaseV2.order_date` → `PurchaseV2.date` in `_sync_supplier_po_payment_status` (`hdc/services/purchase.py`). Verified end-to-end: supplier payment now returns *"Payment posted successfully."*, the `SupplierLedger` credit row persists (debit 120,000 → credit 30,000 → balance 90,000 → 0 after full pay), `supplier_credit_*` txn posted to the unified ledger, FIFO sync flips the PO to `paid`, and `order_date` no longer appears anywhere in `hdc/`. `check_layers.py` OK.
 
 **File:** `hdc/services/purchase.py:70`
 
@@ -783,7 +785,7 @@ Apply `or ''` to `bank_name`, `account_number`, `iban` as well, then re-download
 ## 12. Definition of done (tick these before closing the audit)
 
 - [x] `GET /hdc/accounts/money-center` returns 200; all 22 flow links resolve (Step 1) ✅ 2026-09-20
-- [ ] Recording a supplier payment succeeds and reduces the payable (Step 2)
+- [x] Recording a supplier payment succeeds and reduces the payable (Step 2) ✅ 2026-09-20
 - [ ] Voiding from either side keeps ledger + CF document in the same void state (Step 3)
 - [ ] Void reason/user/time persisted and visible (Step 4)
 - [ ] `/hdc/accounts/reconciliation` shows 0 findings on a clean dataset (Step 5)

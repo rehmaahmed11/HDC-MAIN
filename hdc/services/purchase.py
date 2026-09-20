@@ -67,7 +67,7 @@ def _sync_supplier_po_payment_status(supplier_id):
     """FIFO auto-update PurchaseV2.payment_status after a supplier payment."""
     pos = (PurchaseV2.query
            .filter(PurchaseV2.supplier_id == supplier_id, PurchaseV2.is_void == False)
-           .order_by(PurchaseV2.order_date, PurchaseV2.id)
+           .order_by(PurchaseV2.date, PurchaseV2.id)
            .all())
     total_credits = float(db.session.query(func.coalesce(func.sum(SupplierLedger.amount), 0.0))
                           .filter(
