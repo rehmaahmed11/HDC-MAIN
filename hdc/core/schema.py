@@ -1436,6 +1436,164 @@ def _ensure_cashflow_schema():
         'amends_entry_id': "amends_entry_id INTEGER REFERENCES hdc_cash_flow_entry(id)",
         'superseded_by_entry_id': "superseded_by_entry_id INTEGER REFERENCES hdc_cash_flow_entry(id)",
     })
+    # Field rules per category (Settings → Cash Flow): which of party / project
+    # the entry form must ask for, which party types are allowed, and whether
+    # the category is one of the four loan movements.  Defaults are applied by
+    # ``_ensure_cashflow_seed_data`` only where the column is still NULL, so an
+    # operator's own rule is never overwritten by a later deploy.
+    _ensure_table_columns_sqlite('hdc_cash_flow_category', {
+        'party_mode': "party_mode VARCHAR(10)",
+        'project_mode': "project_mode VARCHAR(10)",
+        'party_types': "party_types VARCHAR(200)",
+        'loan_effect': "loan_effect VARCHAR(12)",
+    })
+    _ensure_loan_schema()
+
+
+def _ensure_account_intent_schema():
+    """Accounts → All Entries field rules (Settings → Cash Flow).
+
+    The table is additive: an existing database keeps working, and the shipped
+    defaults in ``hdc.services.accounts`` answer for any type with no row.
+    """
+    tables = [
+        """
+        CREATE TABLE IF NOT EXISTS hdc_account_intent_rule (
+            id                    INTEGER PRIMARY KEY,
+            tx_type               VARCHAR(60) NOT NULL UNIQUE,
+            label                 VARCHAR(120),
+            direction             VARCHAR(12),
+            show_from_account     BOOLEAN DEFAULT 1,
+            show_to_account       BOOLEAN DEFAULT 1,
+            to_account_required   BOOLEAN DEFAULT 0,
+            show_project          BOOLEAN DEFAULT 1,
+            project_required      BOOLEAN DEFAULT 0,
+            show_stage            BOOLEAN DEFAULT 1,
+            stage_required        BOOLEAN DEFAULT 0,
+            show_related          BOOLEAN DEFAULT 1,
+            related_type          VARCHAR(30),
+            show_party            BOOLEAN DEFAULT 1,
+            party_required        BOOLEAN DEFAULT 0,
+            show_reference        BOOLEAN DEFAULT 1,
+            show_expense_category BOOLEAN DEFAULT 0,
+            show_office_target    BOOLEAN DEFAULT 0,
+            is_active             BOOLEAN DEFAULT 1,
+            sort_order            INTEGER DEFAULT 0,
+            updated_at            DATETIME
+        )
+        """,
+    ]
+    indexes = [
+        'CREATE INDEX IF NOT EXISTS ix_hdc_account_intent_rule_tx_type '
+        'ON hdc_account_intent_rule (tx_type)',
+    ]
+    for ddl in tables:
+        try:
+            db.session.execute(text(ddl))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+    for ddl in indexes:
+        try:
+            db.session.execute(text(ddl))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+    _ensure_table_columns_sqlite('hdc_account_intent_rule', {
+        'show_expense_category': 'BOOLEAN DEFAULT 0',
+        'show_office_target': 'BOOLEAN DEFAULT 0',
+    })
+
+
+def _ensure_loan_schema():
+    """Create the loan ledger tables on a database that predates them.
+
+    ``db.create_all()`` already creates them from the models; the explicit DDL
+    is the same belt-and-braces used by the tool-rental / cash-flow migrations,
+    and keeps a legacy file usable even if a model is ever renamed.
+    """
+    tables = [
+        """
+        CREATE TABLE IF NOT EXISTS hdc_loan (
+            id INTEGER PRIMARY KEY,
+            loan_code VARCHAR(30),
+            direction VARCHAR(10) NOT NULL,
+            party_id INTEGER REFERENCES hdc_cash_flow_party(id),
+            party_name VARCHAR(160) NOT NULL,
+            party_type VARCHAR(40),
+            phone VARCHAR(40),
+            party_account_id INTEGER REFERENCES hdc_account(id),
+            principal FLOAT DEFAULT 0,
+            principal_minor BIGINT,
+            interest_rate FLOAT DEFAULT 0,
+            purpose VARCHAR(200),
+            start_date DATE,
+            due_date DATE,
+            account_id INTEGER REFERENCES hdc_account(id),
+            status VARCHAR(10) DEFAULT 'open',
+            closed_at DATETIME,
+            closed_by VARCHAR(80),
+            close_reason VARCHAR(300),
+            note VARCHAR(500),
+            created_by VARCHAR(80),
+            created_at DATETIME,
+            updated_at DATETIME
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS hdc_loan_movement (
+            id INTEGER PRIMARY KEY,
+            loan_id INTEGER NOT NULL REFERENCES hdc_loan(id),
+            kind VARCHAR(20) NOT NULL,
+            date DATE,
+            account_id INTEGER REFERENCES hdc_account(id),
+            amount FLOAT DEFAULT 0,
+            amount_minor BIGINT,
+            principal_amount FLOAT DEFAULT 0,
+            principal_amount_minor BIGINT,
+            interest_amount FLOAT DEFAULT 0,
+            interest_amount_minor BIGINT,
+            cash_flow_entry_id INTEGER REFERENCES hdc_cash_flow_entry(id),
+            account_txn_id INTEGER REFERENCES hdc_account_txn(id),
+            source_type VARCHAR(40),
+            reference VARCHAR(80),
+            note VARCHAR(500),
+            is_void BOOLEAN DEFAULT 0,
+            voided_at DATETIME,
+            voided_by VARCHAR(80),
+            void_reason VARCHAR(300),
+            created_by VARCHAR(80),
+            created_at DATETIME
+        )
+        """,
+    ]
+    idx_sql = [
+        "CREATE INDEX IF NOT EXISTS idx_hdc_loan_party ON hdc_loan(party_name, status)",
+        "CREATE INDEX IF NOT EXISTS idx_hdc_loan_direction ON hdc_loan(direction, status)",
+        "CREATE INDEX IF NOT EXISTS idx_hdc_loan_due ON hdc_loan(due_date)",
+        "CREATE INDEX IF NOT EXISTS idx_hdc_loan_movement_loan ON hdc_loan_movement(loan_id, date, id)",
+        "CREATE INDEX IF NOT EXISTS idx_hdc_loan_movement_entry ON hdc_loan_movement(cash_flow_entry_id)",
+        "CREATE INDEX IF NOT EXISTS idx_hdc_loan_movement_txn ON hdc_loan_movement(account_txn_id)",
+    ]
+    with db.engine.connect() as conn:
+        for ddl in tables:
+            try:
+                conn.execute(text(ddl))
+                conn.commit()
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+        for sql in idx_sql:
+            try:
+                conn.execute(text(sql))
+                conn.commit()
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
 
 
 def _ensure_tool_rental_schema():

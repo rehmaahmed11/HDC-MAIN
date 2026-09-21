@@ -46,7 +46,9 @@ from hdc.services.accounts import _create_account
 from hdc.services.cashflow_register import (
     _cf_normalize_direction,
     category_options,
+    category_rules_map,
     party_options,
+    party_type_options,
     save_manual_cash_flow_entry,
     save_cf_party,
 )
@@ -67,6 +69,7 @@ __all__ = [
     "create_project_quick",
     "entry_form_context",
     "entry_form_values",
+    "category_rules_map",
     "money_accounts",
     "party_types",
     "pop_entry_form",
@@ -78,16 +81,10 @@ __all__ = [
 # Account types that can hold real money — the only ones the entry form offers.
 MONEY_ACCOUNT_TYPES = ('cash', 'bank', 'company')
 
-# Party kinds offered by the ``+ Add New Party`` modal.  Mirrors the comment on
-# ``CashFlowParty.party_type`` so the register vocabulary stays the source.
-PARTY_TYPES = (
-    ('client', 'Client / Owner'),
-    ('supplier', 'Supplier / Vendor'),
-    ('worker', 'Worker / Labour'),
-    ('staff', 'Office Staff'),
-    ('subcontractor', 'Subcontractor'),
-    ('other', 'Other'),
-)
+# Party kinds offered by the ``+ Add New Party`` modal.  The register's
+# vocabulary is the single source (it also carries the loan parties), so the
+# form, the settings page and the engine can never drift apart.
+PARTY_TYPES = party_type_options()
 
 # Every field the New Transaction form posts.  The tuple doubles as the
 # whitelist for the session draft, so it is what gets replayed back.
@@ -268,6 +265,11 @@ def entry_form_context(form_values=None, error=None):
         # the form never hard-codes a category, subcategory or party type.
         'accounts': money_accounts(),
         'categories': category_options(),
+        # Which fields each category needs (party / project: none | optional |
+        # required, plus the party types it is for).  The template renders them
+        # as data attributes and the script reveals fields from them, so the
+        # form asks exactly what the selected category justifies.
+        'category_rules': category_rules_map(),
         'parties': party_options(),
         'projects': Project.query.order_by(Project.name.asc(), Project.id.asc()).all(),
         'party_type_options': PARTY_TYPES,

@@ -207,3 +207,73 @@ class OwnerPayment(db.Model):
     created_at = db.Column(db.DateTime, default=_pkt_now_naive)
 
     received_to_account = db.relationship('Account', foreign_keys=[received_to_account_id], backref='owner_receipts')
+
+
+class AccountIntentRule(db.Model):
+    """Which fields one *transaction type* shows on Accounts → All Entries.
+
+    The entry form is driven by the type the user picks first: a transfer needs
+    two accounts, a supplier payment needs the supplier, a loan needs the person
+    and nothing else.  Those rules used to live in the page's JavaScript, which
+    meant every field was rendered and most of them were force-shown — asking
+    "Related Entity" and "Party / Purpose" even on a type that has neither.
+
+    Each row here is one type's answer, editable in **Settings → Cash Flow**
+    without a deploy.  ``hdc.services.accounts._account_intent_field_matrix()``
+    merges these rows over the shipped defaults, and the page renders the result
+    as the ``intentMatrix`` JSON the script obeys — so what is asked for is
+    always the data, never the code.
+    """
+
+    __tablename__ = 'hdc_account_intent_rule'
+
+    id = db.Column(db.Integer, primary_key=True)
+    tx_type = db.Column(db.String(60), nullable=False, unique=True, index=True)
+    label = db.Column(db.String(120))
+    direction = db.Column(db.String(12))          # receive | pay | transfer | ''
+
+    show_from_account = db.Column(db.Boolean, default=True)
+    show_to_account = db.Column(db.Boolean, default=True)
+    to_account_required = db.Column(db.Boolean, default=False)
+
+    show_project = db.Column(db.Boolean, default=True)
+    project_required = db.Column(db.Boolean, default=False)
+    show_stage = db.Column(db.Boolean, default=True)
+    stage_required = db.Column(db.Boolean, default=False)
+
+    show_related = db.Column(db.Boolean, default=True)
+    related_type = db.Column(db.String(30))       # worker | supplier | subcontractor | office_staff
+
+    show_party = db.Column(db.Boolean, default=True)
+    party_required = db.Column(db.Boolean, default=False)
+    show_reference = db.Column(db.Boolean, default=True)
+    # The two one-off pickers that only some types have.
+    show_expense_category = db.Column(db.Boolean, default=False)
+    show_office_target = db.Column(db.Boolean, default=False)
+
+    is_active = db.Column(db.Boolean, default=True, index=True)
+    sort_order = db.Column(db.Integer, default=0)
+    updated_at = db.Column(db.DateTime, default=_pkt_now_naive, onupdate=_pkt_now_naive)
+
+    def as_dict(self):
+        """The shape the page script reads (kept in one place on purpose)."""
+        return {
+            'direction': self.direction or '',
+            'from_account': bool(self.show_from_account),
+            'to_account': bool(self.show_to_account),
+            'to_account_required': bool(self.to_account_required),
+            'project': bool(self.show_project),
+            'project_required': bool(self.project_required),
+            'stage': bool(self.show_stage),
+            'stage_required': bool(self.stage_required),
+            'related': bool(self.show_related),
+            'related_type': (self.related_type or ''),
+            'party_name': bool(self.show_party),
+            'party_name_required': bool(self.party_required),
+            'reference': bool(self.show_reference),
+            'expense_category': bool(self.show_expense_category),
+            'office_target': bool(self.show_office_target),
+        }
+
+    def __repr__(self):  # pragma: no cover - debugging aid
+        return f"<AccountIntentRule {self.tx_type!r}>"

@@ -1,6 +1,6 @@
 """All ORM models, re-exported from their domain modules."""
 
-from hdc.models.accounts import Account, AccountTransaction, Alert, Expense, ExpenseCategory, OwnerPayment, PersonalExpense, PersonalExpenseCategory
+from hdc.models.accounts import Account, AccountIntentRule, AccountTransaction, Alert, Expense, ExpenseCategory, OwnerPayment, PersonalExpense, PersonalExpenseCategory
 from hdc.models.auth import ActivityLog, HDCUser, UserActivity
 from hdc.models.materials import Delivery, Material, MaterialUsage, MaterialV2, Purchase, PurchaseV2, Supplier, SupplierLedger, UsageLogV2
 from hdc.models.office import AllowanceCategory, OfficeExpense, OfficeExpenseCategory, OfficeStaff, OfficeStaffAttendance, OfficeStaffLedger, StaffAllowance
@@ -8,10 +8,12 @@ from hdc.models.projects import CustomFormula, Estimation, EstimationStage, Proj
 from hdc.models.subcontract import SubcontractAttendance, SubcontractEvent, SubcontractLabourAttendance, SubcontractLabourPayment, SubcontractLabourWorker, SubcontractPayment, SubcontractTeamAttendance, Subcontractor
 from hdc.models.workforce import Attendance, AttendanceDay, AttendanceMark, LabourLedger, LabourRateHistory, PayrollItem, PayrollRun, TimeEntry, Worker, WorkerRate, WorkerTrade
 from hdc.models.cashflow import AccountReconciliation, CashDayAccountPosition, CashDayLock, CashFlowCategory, CashFlowEntry, CashFlowEntryAudit, CashFlowParty, CashFlowSubcategory
+from hdc.models.loans import Loan, LoanMovement
 from hdc.models.tool_rental import Tool, ToolCategory, ToolMovementLog, ToolRental, ToolRentalAccountTxn, ToolRentalItem, ToolRentalPayment, ToolRentalReturn, ToolRentalReturnItem, ToolRentalTransfer, ToolRentalTransferItem
 
 __all__ = [
     "Account",
+    "AccountIntentRule",
     "AccountReconciliation",
     "AccountTransaction",
     "ActivityLog",
@@ -36,6 +38,8 @@ __all__ = [
     "HDCUser",
     "LabourLedger",
     "LabourRateHistory",
+    "Loan",
+    "LoanMovement",
     "Material",
     "MaterialUsage",
     "MaterialV2",

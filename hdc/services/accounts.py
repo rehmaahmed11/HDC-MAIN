@@ -11,7 +11,8 @@ from sqlalchemy import and_, case, func, or_, text
 
 from hdc.core.flags import _runtime_flag_get, _runtime_flag_set
 from hdc.extensions import db
-from hdc.models.accounts import Account, AccountTransaction, Expense, OwnerPayment, PersonalExpense
+from hdc.models.accounts import (Account, AccountIntentRule, AccountTransaction, Expense,
+                                 OwnerPayment, PersonalExpense)
 from hdc.models.cashflow import CashFlowEntry
 from hdc.models.materials import PurchaseV2, Supplier, SupplierLedger, UsageLogV2
 from hdc.models.office import OfficeExpense, OfficeStaff, OfficeStaffLedger
@@ -371,7 +372,23 @@ _ACCOUNT_TXN_FORM_OPTIONS = (
     {'value': 'office_management_payment', 'label': 'Pay To Office Management', 'direction': 'pay'},
     {'value': 'personal_management_payment', 'label': 'Pay To Personal Management (Party/Purpose)', 'direction': 'pay'},
     {'value': 'expense_general', 'label': 'General Expense', 'direction': 'pay'},
+    # Loan movements: the money posts as an ordinary receipt/payment and is
+    # attached to the person's loan by hdc.services.loans, so "who owes whom"
+    # stays answerable per person (Accounts → Loans).
+    {'value': 'loan_taken', 'label': 'Loan Taken (from person/bank)', 'direction': 'receive'},
+    {'value': 'loan_given', 'label': 'Loan Given (to person)', 'direction': 'pay'},
+    {'value': 'loan_repayment', 'label': 'Loan Repayment (we pay back)', 'direction': 'pay'},
+    {'value': 'loan_recovery', 'label': 'Loan Recovery (borrower pays us)', 'direction': 'receive'},
 )
+
+#: Intent -> (loan effect, ledger type).  The route reads the raw intent, posts
+#: the ledger type and then hands the row to the loan ledger.
+_ACCOUNT_LOAN_INTENTS = {
+    'loan_taken': ('take', 'party_receipt'),
+    'loan_given': ('give', 'party_payment'),
+    'loan_repayment': ('repay', 'party_payment'),
+    'loan_recovery': ('recover', 'party_receipt'),
+}
 
 
 _ACCOUNT_TXN_RECEIVE_TYPES = (
@@ -1559,33 +1576,285 @@ def _accounts_forensic_report(limit=100):
     return out
 
 
-def _account_intent_field_matrix():
-    out = {
-        'transfer': {'from_account': True, 'to_account': True, 'project': False, 'stage': False, 'related': False},
-        'expense_material': {'from_account': True, 'to_account': False, 'project': False, 'stage': False, 'related': True},
-        # Wage/subcontractor payments may optionally carry project/stage;
-        # project+stage become mandatory only when tip/settlement is used.
-        'expense_wage': {'from_account': True, 'to_account': False, 'project': True, 'stage': True, 'related': True},
-        'expense_subcontractor': {'from_account': True, 'to_account': False, 'project': True, 'stage': True, 'related': True},
-        'office_management_payment': {'from_account': True, 'to_account': False, 'project': False, 'stage': False, 'related': True},
-        'personal_management_payment': {'from_account': True, 'to_account': True, 'project': False, 'stage': False, 'related': False},
-        'expense_general': {'from_account': True, 'to_account': False, 'project': True, 'stage': True, 'related': False},
-        'project_income': {'from_account': True, 'to_account': True, 'project': True, 'stage': False, 'related': False},
-        'party_receipt': {'from_account': True, 'to_account': True, 'project': False, 'stage': False, 'related': False},
-        'client_payment': {'from_account': True, 'to_account': True, 'project': False, 'stage': False, 'related': False},
-        'party_payment': {'from_account': True, 'to_account': True, 'project': False, 'stage': False, 'related': False},
-        'advance_to_person': {'from_account': True, 'to_account': True, 'project': True, 'stage': True, 'related': True},
-        'purchase': {'from_account': True, 'to_account': False, 'project': False, 'stage': False, 'related': True},
-        'payroll': {'from_account': True, 'to_account': False, 'project': True, 'stage': True, 'related': True},
+#: Shipped defaults for "which fields does this transaction type ask for?".
+#:
+#: Keyed by the value the form actually submits — the *intent* names the user
+#: sees in the dropdown (``pay_to_project``, ``receive_from_credit_debit`` …) as
+#: well as the ledger type they normalise to.  A key exists for every type the
+#: engine can post, so the same rule set answers the form, the filters and the
+#: Money Center.
+#:
+#: ``A/AR`` below is ``show/required``.  Every entry is a plain data row; an
+#: operator's edit in Settings → Cash Flow is stored in ``hdc_account_intent_rule``
+#: and merged over these (see :func:`_account_intent_field_matrix`).
+def _intent_rule(tx_type, *, label='', direction='', from_account=True, to_account=True,
+                 to_required=False, project=True, project_required=False, stage=True,
+                 stage_required=False, related=True, related_type='', party=True,
+                 party_required=False, reference=True, expense_category=False,
+                 office_target=False, sort_order=0):
+    return {
+        'tx_type': tx_type,
+        'label': label,
+        'direction': direction,
+        'show_from_account': from_account,
+        'show_to_account': to_account,
+        'to_account_required': to_required,
+        'show_project': project,
+        'project_required': project_required,
+        'show_stage': stage,
+        'stage_required': stage_required,
+        'show_related': related,
+        'related_type': related_type,
+        'show_party': party,
+        'party_required': party_required,
+        'show_reference': reference,
+        'show_expense_category': expense_category,
+        'show_office_target': office_target,
+        'sort_order': sort_order,
     }
-    out['receive_from_project'] = dict(out['project_income'])
-    out['receive_intra_company'] = dict(out['transfer'])
-    out['receive_from_credit_debit'] = dict(out['party_receipt'])
-    out['pay_to_project'] = dict(out['party_payment'])
-    out['pay_intra_company'] = dict(out['transfer'])
-    out['pay_to_credit_debit'] = dict(out['party_payment'])
-    out['personal_payment'] = dict(out['personal_management_payment'])
+
+
+_ACCOUNT_INTENT_DEFAULT_RULES = {
+    # ── the dropdown the user starts from ────────────────────────────────────
+    'receive_from_project': _intent_rule(
+        'receive_from_project', label='Receive from Project', direction='receive',
+        to_account=True, to_required=True, project=True, project_required=True,
+        stage=False, related=False, party=False, sort_order=10),
+    'receive_intra_company': _intent_rule(
+        'receive_intra_company', label='Transfer from Intra Company', direction='receive',
+        to_account=True, to_required=True, project=False, stage=False, related=False,
+        party=False, sort_order=20),
+    'receive_from_credit_debit': _intent_rule(
+        'receive_from_credit_debit', label='Receive from Credit/Debit', direction='receive',
+        to_account=True, to_required=True, project=False, stage=False, related=False,
+        party=True, sort_order=30),
+    'pay_to_project': _intent_rule(
+        'pay_to_project', label='Pay to Project', direction='pay',
+        to_account=True, project=True, project_required=True, stage=False,
+        related=False, party=False, sort_order=40),
+    'pay_intra_company': _intent_rule(
+        'pay_intra_company', label='Transfer to Intra Company', direction='pay',
+        to_account=True, to_required=True, project=False, stage=False, related=False,
+        party=False, sort_order=50),
+    'pay_to_credit_debit': _intent_rule(
+        'pay_to_credit_debit', label='Pay to Credit/Debit', direction='pay',
+        to_account=True, project=False, stage=False, related=False, party=True,
+        sort_order=60),
+    'purchase_intent': _intent_rule(
+        'purchase_intent', label='Material Payment (Supplier)', direction='pay',
+        to_account=True, project=True, stage=True, related=True, related_type='supplier',
+        party=True, sort_order=70),
+    'payroll_intent': _intent_rule(
+        'payroll_intent', label='Wage / Payroll Payment', direction='pay',
+        to_account=True, project=True, stage=True, related=True, related_type='worker',
+        party=True, reference=False, sort_order=80),
+    'expense_subcontractor_intent': _intent_rule(
+        'expense_subcontractor_intent', label='Subcontractor Payment', direction='pay',
+        to_account=True, project=True, stage=True, related=True,
+        related_type='subcontractor', party=True, sort_order=90),
+    'office_management_payment_intent': _intent_rule(
+        'office_management_payment_intent', label='Pay To Office Management', direction='pay',
+        to_account=True, project=False, stage=False, related=True,
+        related_type='office_staff', party=True, office_target=True, sort_order=100),
+    'personal_management_payment_intent': _intent_rule(
+        'personal_management_payment_intent', label='Pay To Personal Management (Party/Purpose)',
+        direction='pay', to_account=True, project=False, stage=False, related=False,
+        party=True, party_required=True, sort_order=110),
+    'expense_general_intent': _intent_rule(
+        'expense_general_intent', label='General Expense', direction='pay',
+        to_account=True, project=True, project_required=True, stage=True,
+        stage_required=True, related=False, party=True, expense_category=True,
+        sort_order=120),
+    # ── the loan types (Accounts → All Entries) ──────────────────────────────
+    'loan_taken': _intent_rule(
+        'loan_taken', label='Loan Taken (from person/bank)', direction='receive',
+        to_account=True, project=False, stage=False, related=False,
+        party=True, party_required=True, sort_order=130),
+    'loan_given': _intent_rule(
+        'loan_given', label='Loan Given (to person)', direction='pay',
+        to_account=True, project=False, stage=False, related=False,
+        party=True, party_required=True, sort_order=140),
+    'loan_repayment': _intent_rule(
+        'loan_repayment', label='Loan Repayment (we pay back)', direction='pay',
+        to_account=True, project=False, stage=False, related=False,
+        party=True, party_required=True, sort_order=150),
+    'loan_recovery': _intent_rule(
+        'loan_recovery', label='Loan Recovery (borrower pays us)', direction='receive',
+        to_account=True, project=False, stage=False, related=False,
+        party=True, party_required=True, sort_order=160),
+
+    # ── the ledger types themselves (filters, Money Center, API callers) ────
+    'transfer': _intent_rule('transfer', direction='transfer', to_account=True,
+                             to_required=True, project=False, stage=False, related=False,
+                             party=False),
+    'expense_material': _intent_rule('expense_material', direction='pay',
+                                     to_account=True, stage=True,
+                                     related=True, related_type='supplier'),
+    'expense_wage': _intent_rule('expense_wage', direction='pay', to_account=True,
+                                 stage=True, stage_required=True, related=True,
+                                 related_type='worker', reference=False),
+    'expense_subcontractor': _intent_rule('expense_subcontractor', direction='pay',
+                                          to_account=True, stage=True, stage_required=True,
+                                          related=True, related_type='subcontractor'),
+    'office_management_payment': _intent_rule('office_management_payment', direction='pay',
+                                              to_account=True, project=False, stage=False,
+                                              related=True, related_type='office_staff',
+                                              office_target=True),
+    'personal_management_payment': _intent_rule('personal_management_payment', direction='pay',
+                                                to_account=True, project=False, stage=False,
+                                                related=False, party_required=True),
+    'expense_general': _intent_rule('expense_general', direction='pay', to_account=True,
+                                    project_required=True, stage=True, stage_required=True,
+                                    related=False, expense_category=True),
+    'project_income': _intent_rule('project_income', direction='receive', to_account=True,
+                                   to_required=True, project=True, project_required=True,
+                                   stage=False, related=False, party=False),
+    'party_receipt': _intent_rule('party_receipt', direction='receive', to_account=True,
+                                  to_required=True, project=False, stage=False,
+                                  related=False),
+    'client_payment': _intent_rule('client_payment', direction='receive', to_account=True,
+                                   to_required=True, project=False, stage=False,
+                                   related=False),
+    'party_payment': _intent_rule('party_payment', direction='pay', to_account=True,
+                                  project=False, stage=False, related=False),
+    'advance_to_person': _intent_rule('advance_to_person', direction='pay', to_account=True,
+                                      to_required=True, stage=True, stage_required=True,
+                                      related=True, related_type='worker', party=False),
+    'purchase': _intent_rule('purchase', direction='pay', to_account=True,
+                             related=True, related_type='supplier'),
+    'payroll': _intent_rule('payroll', direction='pay', to_account=True, stage=True,
+                            stage_required=True, related=True, related_type='worker',
+                            reference=False),
+}
+
+
+def _account_intent_field_matrix():
+    """The effective field rules per transaction type (defaults + Settings).
+
+    Returned rows are exactly what the page script reads, so an edit in
+    Settings → Cash Flow changes the form on the next page load with no deploy
+    and no code change.
+    """
+    out = {}
+    for tx_type, row in _ACCOUNT_INTENT_DEFAULT_RULES.items():
+        out[tx_type] = {
+            'direction': row['direction'],
+            'from_account': bool(row['show_from_account']),
+            'to_account': bool(row['show_to_account']),
+            'to_account_required': bool(row['to_account_required']),
+            'project': bool(row['show_project']),
+            'project_required': bool(row['project_required']),
+            'stage': bool(row['show_stage']),
+            'stage_required': bool(row['stage_required']),
+            'related': bool(row['show_related']),
+            'related_type': row['related_type'] or '',
+            'party_name': bool(row['show_party']),
+            'party_name_required': bool(row['party_required']),
+            'reference': bool(row['show_reference']),
+            'expense_category': bool(row['show_expense_category']),
+            'office_target': bool(row['show_office_target']),
+        }
+    try:
+        for row in AccountIntentRule.query.all():
+            key = (row.tx_type or '').strip().lower()
+            if not key:
+                continue
+            out[key] = row.as_dict()
+    except Exception:
+        # A database that predates the table must not break the page: the
+        # shipped defaults above are always a complete answer.
+        pass
     return out
+
+
+def account_intent_rule_rows():
+    """Editable rows for Settings → Cash Flow: ``(rule_dict, is_customised)``."""
+    custom = {}
+    try:
+        custom = {(r.tx_type or '').strip().lower(): r for r in AccountIntentRule.query.all()}
+    except Exception:
+        custom = {}
+    rows = []
+    for tx_type, default in _ACCOUNT_INTENT_DEFAULT_RULES.items():
+        row = custom.get(tx_type)
+        rows.append({
+            'tx_type': tx_type,
+            'label': (row.label if row is not None and row.label else default['label']) or tx_type.replace('_', ' ').title(),
+            'is_customised': row is not None,
+            'is_active': bool(row.is_active) if row is not None else True,
+            'rule': (row.as_dict() if row is not None else {
+                'direction': default['direction'],
+                'from_account': bool(default['show_from_account']),
+                'to_account': bool(default['show_to_account']),
+                'to_account_required': bool(default['to_account_required']),
+                'project': bool(default['show_project']),
+                'project_required': bool(default['project_required']),
+                'stage': bool(default['show_stage']),
+                'stage_required': bool(default['stage_required']),
+                'related': bool(default['show_related']),
+                'related_type': default['related_type'] or '',
+                'party_name': bool(default['show_party']),
+                'party_name_required': bool(default['party_required']),
+                'reference': bool(default['show_reference']),
+                'expense_category': bool(default['show_expense_category']),
+                'office_target': bool(default['show_office_target']),
+            }),
+        })
+    rows.sort(key=lambda r: _ACCOUNT_INTENT_DEFAULT_RULES.get(r['tx_type'], {}).get('sort_order', 999))
+    return rows
+
+
+def save_account_intent_rule(tx_type, *, values, label=None, is_active=True, commit=True):
+    """Create/overwrite one type's field rules (Settings → Cash Flow)."""
+    key = (tx_type or '').strip().lower()
+    if key not in _ACCOUNT_INTENT_DEFAULT_RULES:
+        raise ValueError('Unknown transaction type.')
+    default = _ACCOUNT_INTENT_DEFAULT_RULES[key]
+    related_type = (values.get('related_type') or '').strip().lower()
+    if related_type not in ('', 'worker', 'supplier', 'subcontractor', 'office_staff'):
+        raise ValueError('Choose a valid entity type (or none).')
+
+    def flag(name):
+        return str(values.get(name) or '').strip().lower() in ('1', 'on', 'true', 'yes')
+
+    row = AccountIntentRule.query.filter(func.lower(AccountIntentRule.tx_type) == key).first()
+    if row is None:
+        row = AccountIntentRule(tx_type=key)
+        db.session.add(row)
+    row.label = (label or default['label'] or key)[:120]
+    row.direction = default['direction'] or None
+    row.show_from_account = flag('show_from_account')
+    row.show_to_account = flag('show_to_account')
+    row.to_account_required = flag('to_account_required') and row.show_to_account
+    row.show_project = flag('show_project')
+    row.project_required = flag('project_required') and row.show_project
+    row.show_stage = flag('show_stage') and row.show_project
+    row.stage_required = flag('stage_required') and row.show_stage
+    row.show_related = flag('show_related')
+    row.related_type = related_type if row.show_related else None
+    row.show_party = flag('show_party')
+    row.party_required = flag('party_required') and row.show_party
+    row.show_reference = flag('show_reference')
+    row.show_expense_category = flag('show_expense_category')
+    row.show_office_target = flag('show_office_target')
+    row.is_active = bool(is_active)
+    row.sort_order = int(default.get('sort_order') or 0)
+    db.session.flush()
+    if commit:
+        db.session.commit()
+    return row
+
+
+def reset_account_intent_rule(tx_type, *, commit=True):
+    """Drop a customised rule so the shipped default applies again."""
+    key = (tx_type or '').strip().lower()
+    row = AccountIntentRule.query.filter(func.lower(AccountIntentRule.tx_type) == key).first()
+    if row is not None:
+        db.session.delete(row)
+        db.session.flush()
+    if commit:
+        db.session.commit()
+    return None
 
 
 def _account_entity_label(entity_type, entity_id):

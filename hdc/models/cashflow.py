@@ -46,6 +46,22 @@ class CashFlowCategory(db.Model):
     business can add heads without a deploy.  ``direction`` restricts where a
     category may be used (``in`` = money received, ``out`` = money spent,
     ``both`` = allowed on either side).
+
+    A category also carries the **field rules** for its entries, so the entry
+    form can ask only for what this kind of transaction actually needs (and the
+    engine can enforce it):
+
+    ``party_mode`` / ``project_mode``
+        ``none``     — the field is not shown at all
+        ``optional`` — shown, may be left empty (default)
+        ``required`` — shown, and the entry is rejected without it
+    ``party_types``
+        Comma-separated allowed ``CashFlowParty.party_type`` values (empty =
+        any).  A loan category, for example, allows ``lender,borrower``.
+    ``loan_effect``
+        Empty for an ordinary category.  ``take`` / ``give`` / ``repay`` /
+        ``recover`` mark the four loan movements, so an entry booked on this
+        category is mirrored into the loan ledger (``hdc_loan``).
     """
 
     __tablename__ = 'hdc_cash_flow_category'
@@ -55,8 +71,45 @@ class CashFlowCategory(db.Model):
     is_active = db.Column(db.Boolean, default=True, index=True)
     sort_order = db.Column(db.Integer, default=0)
     notes = db.Column(db.String(300))
+    # NULL means "not configured" and reads as ``optional`` — it has to be
+    # distinguishable from an explicit choice so the shipped defaults can be
+    # filled in once without ever overwriting a rule the operator set.
+    party_mode = db.Column(db.String(10))                                 # none | optional | required
+    project_mode = db.Column(db.String(10))                               # none | optional | required
+    party_types = db.Column(db.String(200))                               # CSV of allowed party types
+    loan_effect = db.Column(db.String(12), index=True)                    # take | give | repay | recover
     created_at = db.Column(db.DateTime, default=_pkt_now_naive)
     updated_at = db.Column(db.DateTime, default=_pkt_now_naive, onupdate=_pkt_now_naive)
+
+    #: the only accepted values for the two ``*_mode`` columns
+    FIELD_MODES = ('none', 'optional', 'required')
+
+    @property
+    def party_mode_value(self):
+        value = (self.party_mode or 'optional').strip().lower()
+        return value if value in self.FIELD_MODES else 'optional'
+
+    @property
+    def project_mode_value(self):
+        value = (self.project_mode or 'optional').strip().lower()
+        return value if value in self.FIELD_MODES else 'optional'
+
+    @property
+    def allowed_party_types(self):
+        """Allowed ``party_type`` values as a tuple (empty = any)."""
+        raw = (self.party_types or '').strip()
+        if not raw:
+            return ()
+        out = []
+        for chunk in raw.replace(';', ',').split(','):
+            item = chunk.strip().lower()
+            if item and item not in out:
+                out.append(item)
+        return tuple(out)
+
+    @property
+    def is_loan(self):
+        return bool((self.loan_effect or '').strip())
 
     def __repr__(self):  # pragma: no cover - debugging aid
         return f"<CashFlowCategory {self.id}:{self.name!r}>"
@@ -81,12 +134,25 @@ class CashFlowSubcategory(db.Model):
 
 
 class CashFlowParty(db.Model):
-    """Reusable counterparty names for the register (client, supplier, worker...)."""
+    """Reusable counterparty names for the register (client, supplier, worker...).
+
+    This is where every name the entry form offers in its *Party / Person*
+    picker is stored — the list is the table, so a new counterparty exists the
+    moment it is added (Settings → Cash Flow, the register, or the form's
+    ``+ Add New Party``), and deactivating a row hides it without touching the
+    entries that already reference it.
+
+    ``party_type`` (``client | supplier | worker | staff | subcontractor |
+    lender | borrower | other``) is the *criterion* the field rules use: a
+    category can allow only some types (a loan category allows ``lender`` /
+    ``borrower``), which is what makes the party list shorten itself to the
+    people who make sense for the transaction being booked.
+    """
 
     __tablename__ = 'hdc_cash_flow_party'
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(160), nullable=False, index=True)
-    party_type = db.Column(db.String(40), default='other', index=True)    # client | supplier | worker | staff | other
+    party_type = db.Column(db.String(40), default='other', index=True)
     phone = db.Column(db.String(40))
     note = db.Column(db.String(300))
     is_active = db.Column(db.Boolean, default=True, index=True)
