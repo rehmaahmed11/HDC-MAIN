@@ -611,6 +611,9 @@
         if (officeExpenseCategoryInput && !Object.prototype.hasOwnProperty.call(keep, 'office_expense_category')) officeExpenseCategoryInput.value = '';
         clearPendingInfo();
         setResetNotice(reason || 'Form details were reset after vital field change.');
+        // The searchable combo inputs mirror these selects; values cleared
+        // directly (not via an option rebuild) need an explicit re-sync.
+        document.dispatchEvent(new Event('hdc:sync-combos'));
     }
     function filterTxnTypeOptionsByDirection() {
         if (!txnType) return;
@@ -1416,12 +1419,16 @@
             if (projectId) {
                 editLoadProjectStages(projectId, stageId).then(function () {
                     if (editStage) editStage.value = stageId || '';
+                    document.dispatchEvent(new Event('hdc:sync-combos'));
                 });
             } else if (editStage) {
                 editStage.innerHTML = '<option value=\"\">Select stage</option>';
                 editStage.value = '';
             }
             editRefillEntitySelect((relatedType || editRelatedType.value || ''), relatedId || '');
+            // The modal pre-fill sets the account/project selects directly;
+            // mirror those values into the searchable combo inputs.
+            document.dispatchEvent(new Event('hdc:sync-combos'));
             txnEditModal.show();
         });
     });
@@ -1543,6 +1550,9 @@
             if (relTypeEl) relTypeEl.value = __hdcEdit.relatedType;
             var relIdEl = document.getElementById('related_entity_id');
             if (relIdEl) relIdEl.value = __hdcEdit.relatedId;
+            // Values were set straight on the selects; mirror them into the
+            // searchable combo inputs.
+            document.dispatchEvent(new Event('hdc:sync-combos'));
         }, 80);
 
         // Scroll the edit form into view so the user actually sees it
@@ -1551,5 +1561,61 @@
                 host.scrollIntoView({ behavior: 'smooth', block: 'start' });
             }
         }, 120);
+    });
+})();
+
+// ── Searchable combo boxes for the New Transaction form ────────────────────
+// Every party / person / account / project / stage pick in the Create
+// Transaction form and the Update Transaction modal becomes a type-to-search
+// combo box (HDCComboList).  The <select> keeps its name= so the posted
+// payload and the server contract are unchanged; the input carries no name
+// and is never submitted.  Strict mode means a value can only be set by
+// picking it from the filtered list.
+(function () {
+    function attachCombo(inputId, selectId, comboOpts) {
+        if (!window.HDCComboList) return null;
+        var input = document.getElementById(inputId);
+        var select = document.getElementById(selectId);
+        if (!input || !select) return null;
+        return window.HDCComboList.attach(input, select, comboOpts);
+    }
+    var combos = {
+        fromAccount: attachCombo('from_account_input', 'from_account', { strict: true, maxItems: 50 }),
+        toAccount: attachCombo('to_account_input', 'to_account', { strict: true, maxItems: 50, includeEmpty: true }),
+        project: attachCombo('project_id_input', 'project_id', { strict: true, includeEmpty: true }),
+        stage: attachCombo('stage_id_input', 'stage_id', { strict: true, includeEmpty: true }),
+        relatedEntity: attachCombo('related_entity_id_input', 'related_entity_id', { strict: true, maxItems: 50 }),
+        editFromAccount: attachCombo('edit_from_account_input', 'edit_from_account', { strict: true, maxItems: 50 }),
+        editToAccount: attachCombo('edit_to_account_input', 'edit_to_account', { strict: true, maxItems: 50, includeEmpty: true }),
+        editProject: attachCombo('edit_project_id_input', 'edit_project_id', { strict: true, includeEmpty: true }),
+        editStage: attachCombo('edit_stage_id_input', 'edit_stage_id', { strict: true, includeEmpty: true }),
+        editRelatedEntity: attachCombo('edit_related_id_input', 'edit_related_id', { strict: true, maxItems: 50 })
+    };
+    function syncAllCombos() {
+        Object.keys(combos).forEach(function (key) {
+            if (combos[key] && combos[key].syncFromSelect) combos[key].syncFromSelect();
+        });
+    }
+    // Page code that assigns a select's value programmatically (form reset,
+    // edit pre-fill) dispatches this event so the inputs mirror it.
+    document.addEventListener('hdc:sync-combos', syncAllCombos);
+
+    // The account selects refreshed their live balances on focus/mousedown.
+    // They are hidden now, so forward the combo input's focus events to them
+    // and keep that behaviour alive.
+    [
+        ['from_account_input', 'from_account'],
+        ['to_account_input', 'to_account'],
+        ['edit_from_account_input', 'edit_from_account'],
+        ['edit_to_account_input', 'edit_to_account']
+    ].forEach(function (pair) {
+        var input = document.getElementById(pair[0]);
+        var select = document.getElementById(pair[1]);
+        if (!input || !select) return;
+        ['focus', 'mousedown'].forEach(function (evtName) {
+            input.addEventListener(evtName, function () {
+                select.dispatchEvent(new Event(evtName));
+            });
+        });
     });
 })();
