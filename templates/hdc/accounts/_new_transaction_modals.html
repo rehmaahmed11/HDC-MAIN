@@ -1,0 +1,157 @@
+{# ==========================================================================
+   "+ Add New …" modals for the New Transaction form.
+
+   Small, focused, and *not* a page change: each one posts JSON to
+   /hdc/accounts/new-transaction/<entity>, and on success the picker that
+   opened it gets a new option, refreshes, and selects it.  Nothing in the
+   transaction form is touched, so a half-filled transaction survives creating
+   a missing account, party or project.
+
+   Markup only — behaviour lives in static/hdc/js/pages/new_transaction.js.
+   ========================================================================== #}
+
+{# ── New Account ──────────────────────────────────────────────────────────── #}
+<div class="modal fade hdc-modal" id="txnNewAccountModal" tabindex="-1"
+     aria-labelledby="txnNewAccountTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered hdc-mini-modal">
+        <form class="modal-content" id="txnNewAccountForm" novalidate>
+            <div class="modal-header">
+                <h6 class="modal-title" id="txnNewAccountTitle">
+                    <i class="fas fa-wallet me-2" aria-hidden="true"></i>Add New Account
+                </h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="hdc-form-error" data-modal-error hidden role="alert"></div>
+                <div class="mb-2">
+                    <label class="form-label" for="txnNaName">Account name <span class="hdc-req" aria-hidden="true">*</span></label>
+                    <input type="text" id="txnNaName" class="form-control" maxlength="120"
+                           placeholder="e.g. MCB 1109" autocomplete="off" required>
+                    <div class="form-text">Keep it recognisable — the searchable picker matches on this.</div>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label" for="txnNaMode">Type</label>
+                    <select id="txnNaMode" class="form-select">
+                        <option value="cash" selected>Cash</option>
+                        <option value="bank">Bank</option>
+                    </select>
+                </div>
+                <div id="txnNaBankFields" hidden>
+                    <div class="mb-2">
+                        <label class="form-label" for="txnNaBankName">Bank name <span class="hdc-req" aria-hidden="true">*</span></label>
+                        <input type="text" id="txnNaBankName" class="form-control" maxlength="120"
+                               placeholder="e.g. MCB" autocomplete="off">
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label" for="txnNaBankNumber">Account number <span class="hdc-req" aria-hidden="true">*</span></label>
+                        <input type="text" id="txnNaBankNumber" class="form-control" maxlength="80"
+                               placeholder="e.g. 1109" autocomplete="off">
+                    </div>
+                </div>
+                <div class="mb-1">
+                    <label class="form-label" for="txnNaOpening">Opening balance <span class="hdc-optional">optional</span></label>
+                    <input type="text" inputmode="decimal" id="txnNaOpening" class="form-control"
+                           value="0" autocomplete="off">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+                <button type="submit" class="btn btn-primary btn-sm">
+                    <span class="hdc-save-idle"><i class="fas fa-plus me-1" aria-hidden="true"></i>Save &amp; select</span>
+                    <span class="hdc-save-busy" hidden>
+                        <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Saving…
+                    </span>
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{# ── New Party ────────────────────────────────────────────────────────────── #}
+<div class="modal fade hdc-modal" id="txnNewPartyModal" tabindex="-1"
+     aria-labelledby="txnNewPartyTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered hdc-mini-modal">
+        <form class="modal-content" id="txnNewPartyForm" novalidate>
+            <div class="modal-header">
+                <h6 class="modal-title" id="txnNewPartyTitle">
+                    <i class="fas fa-user-plus me-2" aria-hidden="true"></i>Add New Party
+                </h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="hdc-form-error" data-modal-error hidden role="alert"></div>
+                <div class="mb-2">
+                    <label class="form-label" for="txnNpName">Party / person name <span class="hdc-req" aria-hidden="true">*</span></label>
+                    <input type="text" id="txnNpName" class="form-control" maxlength="160"
+                           placeholder="e.g. Al-Kabir Store" autocomplete="off" required>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label" for="txnNpType">Type</label>
+                    <select id="txnNpType" class="form-select">
+                        {% for value, label in party_type_options %}
+                        <option value="{{ value }}" {% if value == 'supplier' %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                    <div class="form-text">Used for grouping in the register and reports.</div>
+                </div>
+                <div class="mb-1">
+                    <label class="form-label" for="txnNpPhone">Phone <span class="hdc-optional">optional</span></label>
+                    <input type="text" id="txnNpPhone" class="form-control" maxlength="40"
+                           placeholder="e.g. 0300 1234567" autocomplete="off">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+                <button type="submit" class="btn btn-primary btn-sm">
+                    <span class="hdc-save-idle"><i class="fas fa-plus me-1" aria-hidden="true"></i>Save &amp; select</span>
+                    <span class="hdc-save-busy" hidden>
+                        <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Saving…
+                    </span>
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{# ── New Project ──────────────────────────────────────────────────────────── #}
+<div class="modal fade hdc-modal" id="txnNewProjectModal" tabindex="-1"
+     aria-labelledby="txnNewProjectTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered hdc-mini-modal">
+        <form class="modal-content" id="txnNewProjectForm" novalidate>
+            <div class="modal-header">
+                <h6 class="modal-title" id="txnNewProjectTitle">
+                    <i class="fas fa-diagram-project me-2" aria-hidden="true"></i>Add New Project
+                </h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="hdc-form-error" data-modal-error hidden role="alert"></div>
+                <div class="mb-2">
+                    <label class="form-label" for="txnNprName">Project name <span class="hdc-req" aria-hidden="true">*</span></label>
+                    <input type="text" id="txnNprName" class="form-control" maxlength="100"
+                           placeholder="e.g. JPS KhanPur 5 Marla" autocomplete="off" required>
+                    <div class="form-text">The project code is generated automatically.</div>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label" for="txnNprClient">Client <span class="hdc-optional">optional</span></label>
+                    <input type="text" id="txnNprClient" class="form-control" maxlength="100"
+                           placeholder="e.g. Abdul Rehman" autocomplete="off">
+                </div>
+                <div class="mb-1">
+                    <label class="form-label" for="txnNprLocation">Location <span class="hdc-optional">optional</span></label>
+                    <input type="text" id="txnNprLocation" class="form-control" maxlength="200"
+                           placeholder="e.g. KhanPur" autocomplete="off">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+                <button type="submit" class="btn btn-primary btn-sm">
+                    <span class="hdc-save-idle"><i class="fas fa-plus me-1" aria-hidden="true"></i>Save &amp; select</span>
+                    <span class="hdc-save-busy" hidden>
+                        <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Saving…
+                    </span>
+                </button>
+            </div>
+        </form>
+    </div>
+</div>

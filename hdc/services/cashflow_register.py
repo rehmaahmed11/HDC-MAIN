@@ -212,6 +212,30 @@ def _cf_find_party(party_id=None, name=None, party_type=None, active_only=True):
     return q.first()
 
 
+def _cf_resolve_project(project_id, stage_id=None):
+    """Validate the optional project / stage a form submitted.
+
+    A project id that does not resolve is rejected rather than dropped: quietly
+    posting the money with no project is how a cost ends up attributed to
+    nothing, which is worse than asking the user to pick again.  The same goes
+    for a stage that is not part of the chosen project.
+    """
+    if not project_id:
+        if stage_id:
+            raise ValueError('Select a project before choosing a stage.')
+        return None, None
+    from hdc.models.projects import Project, Stage
+    row = db.session.get(Project, int(project_id))
+    if row is None:
+        raise ValueError('That project no longer exists. Pick another project.')
+    stage = db.session.get(Stage, int(stage_id)) if stage_id else None
+    if stage_id and stage is None:
+        raise ValueError('That stage no longer exists. Pick another stage.')
+    if stage is not None and int(stage.project_id or 0) != int(row.id):
+        raise ValueError('That stage does not belong to the selected project.')
+    return row, stage
+
+
 def _cf_resolve_category(direction, category_id=None, category_name=None,
                          required=True, create_if_missing=True):
     """Resolve (or create) the cash-flow category for an entry."""
@@ -243,8 +267,16 @@ def _cf_resolve_subcategory(category, subcategory_id=None, subcategory_name=None
     sub = None
     if subcategory_id:
         sub = db.session.get(CashFlowSubcategory, int(subcategory_id))
-        if sub is not None and int(sub.category_id or 0) != int(category.id):
-            sub = None
+        if sub is None:
+            raise ValueError('That subcategory no longer exists. Pick another one.')
+        if int(sub.category_id or 0) != int(category.id):
+            # A stale Category + Subcategory pair.  Silently dropping it used to
+            # save an entry that disagreed with what the user saw on screen, so
+            # the mismatch is now rejected outright.
+            raise ValueError(
+                f'"{sub.name}" is not a subcategory of "{category.name}". '
+                'Pick a subcategory from the selected category.'
+            )
     if sub is None and (subcategory_name or '').strip():
         nm = subcategory_name.strip()
         sub = CashFlowSubcategory.query.filter(
@@ -422,12 +454,18 @@ def save_manual_cash_flow_entry(*, direction, amount, account_id, destination_ac
                                 party_type=None, description=None, note=None, reference=None,
                                 date_posted=None, idempotency_key=None, actor=None,
                                 create_missing=True, project_id=None, stage_id=None,
-                                source_type=SRC_MANUAL, source_id=None, commit=True):
+                                source_type=SRC_MANUAL, source_id=None, commit=True,
+                                validate_scope=True):
     """Post a new register entry **and** its ledger transaction atomically.
 
     Returns ``(entry, created)``.  When ``idempotency_key`` matches an existing
     entry the existing row is returned with ``created=False`` — a retried or
     double-clicked form cannot double-post.
+
+    ``validate_scope`` (default on) checks that a submitted ``project_id`` /
+    ``stage_id`` actually exists before money is posted.  Amend turns it off for
+    the leg it carries forward from the original entry, so an entry whose project
+    was removed later can still be corrected.
     """
     key = (idempotency_key or '').strip() or None
     if key:
@@ -444,6 +482,10 @@ def save_manual_cash_flow_entry(*, direction, amount, account_id, destination_ac
     )
     posted = date_posted or _pkt_now_naive()
     assert_period_open(int(account.id), posted, operation='posted')
+    if validate_scope:
+        project, stage = _cf_resolve_project(project_id, stage_id)
+        project_id = int(project.id) if project is not None else None
+        stage_id = int(stage.id) if stage is not None else None
 
     cat = None
     sub = None
@@ -588,6 +630,10 @@ def amend_manual_cash_flow_entry(entry, *, direction=None, amount=None, account_
         source_type=entry.source_type,
         create_missing=create_missing,
         commit=False,
+        # The project / stage carried over from the original row is trusted
+        # as-is; a deliberately re-picked one still goes through the normal
+        # form path (and therefore through scope validation).
+        validate_scope=(project_id is not None),
     )
     new_entry.amends_entry_id = int(entry.id)
     db.session.flush()
@@ -820,7 +866,15 @@ def party_options(active_only=True):
 
 
 def save_cf_party(name, party_type='other', phone=None, note=None):
-    """Get-or-create a party by name (case-insensitive).  Returns ``(row, created)``."""
+    """Get-or-create a party by name (case-insensitive).  Returns ``(row, created)``.
+
+    A generic ``other`` never overwrites a specific classification.  The entry
+    form posts the name the user picked and only carries a type when the picker
+    could supply one, so treating that default as an instruction would quietly
+    re-file a known supplier as "other" every time a payment was recorded
+    against them.  An explicit type still wins (that is how a party is
+    reclassified), and ``other`` still applies to a party that has none.
+    """
     nm = (name or '').strip()
     if not nm:
         raise ValueError('Party name is required.')
@@ -829,7 +883,8 @@ def save_cf_party(name, party_type='other', phone=None, note=None):
     if row:
         if not row.is_active:
             row.is_active = True
-        if ptype and row.party_type != ptype:
+        current = (row.party_type or 'other').strip().lower() or 'other'
+        if ptype and ptype != current and (ptype != 'other' or current == 'other'):
             row.party_type = ptype
         db.session.flush()
         return row, False
