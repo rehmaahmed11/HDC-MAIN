@@ -49,6 +49,29 @@
                 }
 
                 var state = { items: [], idx: -1 };
+                var requiredEchoGuard = false;
+                function selectedOption() {
+                    return select.options[select.selectedIndex] || null;
+                }
+                function syncFromSelect(force) {
+                    // While the user is typing in the input they own the text;
+                    // it is reconciled on blur (strict) or by exact match.
+                    if (!force && document.activeElement === input) return;
+                    var opt = selectedOption();
+                    input.value = (opt && opt.value) ? (opt.text || '') : '';
+                }
+                function syncRequired() {
+                    if (opts.mirrorRequired === false) return;
+                    var need = !!select.required;
+                    input.required = need;
+                    if (need) {
+                        // The hidden select must never be the control the
+                        // browser tries to focus for "required" validation -
+                        // the visible input owns that contract now.
+                        requiredEchoGuard = true;
+                        select.required = false;
+                    }
+                }
                 function placeMenu() {
                     if (menu.classList.contains('d-none')) return;
                     var rect = input.getBoundingClientRect();
@@ -112,14 +135,17 @@
                     var opt = state.items[i];
                     if (!opt) return;
                     select.value = opt.value;
-                    input.value = opt.text;
+                    input.value = (opt.value || !opts.strict) ? opt.text : '';
                     select.dispatchEvent(new Event('change', { bubbles: true }));
                     menu.classList.add('d-none');
                 }
                 function syncByExact() {
                     var q = (input.value || '').trim().toLowerCase();
                     if (!q) {
-                        if (opts.clearOnEmpty !== false) select.value = '';
+                        if (opts.clearOnEmpty !== false) {
+                            select.value = '';
+                            if (opts.strict) select.dispatchEvent(new Event('change', { bubbles: true }));
+                        }
                         return;
                     }
                     var exact = Array.from(select.options).find(function (o) {
@@ -127,7 +153,14 @@
                     });
                     if (exact) {
                         select.value = exact.value;
+                        if (opts.strict) input.value = exact.text;
                         select.dispatchEvent(new Event('change', { bubbles: true }));
+                    } else if (opts.strict) {
+                        // Strict combos must always mirror the select: typed
+                        // text that matches no option reverts to the current
+                        // selection so the input can never claim a value the
+                        // select does not hold.
+                        syncFromSelect(true);
                     }
                 }
 
@@ -174,8 +207,25 @@
                     pick(parseInt(row.getAttribute('data-idx') || '-1', 10));
                 });
 
+                // Page code rebuilds these selects as direction / type /
+                // project change and rewrites option labels when balances
+                // refresh; mirror every such change into the input text.
+                if (window.MutationObserver) {
+                    new MutationObserver(function () { syncFromSelect(false); })
+                        .observe(select, { childList: true, subtree: true });
+                    new MutationObserver(function () {
+                        if (requiredEchoGuard) {
+                            requiredEchoGuard = false;
+                            return;
+                        }
+                        syncRequired();
+                    }).observe(select, { attributes: true, attributeFilter: ['required'] });
+                }
+                syncRequired();
+
                 return {
-                    refresh: render
+                    refresh: render,
+                    syncFromSelect: function () { syncFromSelect(true); }
                 };
             }
         };

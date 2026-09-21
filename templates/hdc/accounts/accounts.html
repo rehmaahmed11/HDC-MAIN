@@ -218,6 +218,7 @@
                     </div>
                     <div class="mt-2" id="from_wrap">
                         <label class="form-label" id="from_account_label">From Account</label>
+                        <input type="text" id="from_account_input" class="form-control" placeholder="Type to search account..." autocomplete="off">
                         <select name="from_account_id" id="from_account" class="form-select" required>
                             <option value="">Select</option>
                             {% for a in accounts %}
@@ -228,6 +229,7 @@
                     </div>
                     <div class="mt-2" id="to_wrap">
                         <label class="form-label" id="to_account_label">To Account (optional for off-ledger party)</label>
+                        <input type="text" id="to_account_input" class="form-control" placeholder="Type to search account (empty = off-ledger party)..." autocomplete="off">
                         <select name="to_account_id" id="to_account" class="form-select">
                             <option value="">Off-ledger Party</option>
                             {% for a in accounts %}
@@ -237,6 +239,7 @@
                     </div>
                     <div class="mt-2" id="project_wrap">
                         <label class="form-label">Project</label>
+                        <input type="text" id="project_id_input" class="form-control" placeholder="Type to search project..." autocomplete="off">
                         <select name="project_id" id="project_id" class="form-select">
                             <option value="">None</option>
                             {% for p in projects %}
@@ -246,6 +249,7 @@
                     </div>
                     <div class="mt-2 d-none" id="stage_wrap">
                         <label class="form-label">Stage</label>
+                        <input type="text" id="stage_id_input" class="form-control" placeholder="Type to search stage..." autocomplete="off">
                         <select name="stage_id" id="stage_id" class="form-select">
                             <option value="">Select stage</option>
                         </select>
@@ -253,6 +257,7 @@
                     <div class="mt-2" id="related_wrap">
                         <label class="form-label">Related Entity</label>
                         <input type="hidden" name="related_entity_type" id="related_entity_type">
+                        <input type="text" id="related_entity_id_input" class="form-control" placeholder="Type to search worker / supplier / person..." autocomplete="off">
                         <select name="related_entity_id" id="related_entity_id" class="form-select">
                             <option value="">Select entity</option>
                         </select>
@@ -613,6 +618,7 @@
                     </div>
                     <div class="mt-2" id="edit_from_wrap">
                         <label class="form-label">From Account</label>
+                        <input type="text" id="edit_from_account_input" class="form-control" placeholder="Type to search account..." autocomplete="off">
                         <select name="from_account_id" id="edit_from_account" class="form-select" required>
                             <option value="">Select</option>
                             {% for a in form_accounts %}
@@ -623,6 +629,7 @@
                     </div>
                     <div class="mt-2" id="edit_to_wrap">
                         <label class="form-label">To Account (optional for off-ledger party)</label>
+                        <input type="text" id="edit_to_account_input" class="form-control" placeholder="Type to search account (empty = off-ledger party)..." autocomplete="off">
                         <select name="to_account_id" id="edit_to_account" class="form-select">
                             <option value="">Off-ledger Party</option>
                             {% for a in form_accounts %}
@@ -632,6 +639,7 @@
                     </div>
                     <div class="mt-2" id="edit_project_wrap">
                         <label class="form-label">Project</label>
+                        <input type="text" id="edit_project_id_input" class="form-control" placeholder="Type to search project..." autocomplete="off">
                         <select name="project_id" id="edit_project_id" class="form-select">
                             <option value="">None</option>
                             {% for p in projects %}
@@ -641,12 +649,14 @@
                     </div>
                     <div class="mt-2 d-none" id="edit_stage_wrap">
                         <label class="form-label">Stage</label>
+                        <input type="text" id="edit_stage_id_input" class="form-control" placeholder="Type to search stage..." autocomplete="off">
                         <select name="stage_id" id="edit_stage_id" class="form-select">
                             <option value="">Select stage</option>
                         </select>
                     </div>
                     <div class="mt-2" id="edit_related_wrap">
                         <label class="form-label">Related Entity</label>
+                        <input type="text" id="edit_related_id_input" class="form-control" placeholder="Type to search worker / supplier / person..." autocomplete="off">
                         <select name="related_entity_id" id="edit_related_id" class="form-select">
                             <option value="">Select entity</option>
                         </select>

@@ -238,6 +238,8 @@ function mcPayEntity(entityType, id, name, pending) {
     document.getElementById('mc_related_id').value = id;
     document.getElementById('mc_amount').value = pending.toFixed(2);
     document.getElementById('mc_party_name').value = name;
+    // Value was set straight on the select; mirror it into the combo input.
+    document.dispatchEvent(new Event('hdc:sync-combos'));
     // Trigger pending fetch
     fetchPending();
   }, 300);
@@ -249,6 +251,8 @@ function mcReceiveProject(projectId, projectName, pending) {
     document.getElementById('mc_project').value = projectId;
     document.getElementById('mc_amount').value = pending.toFixed(2);
     document.getElementById('mc_party_name').value = projectName;
+    // Value was set straight on the select; mirror it into the combo input.
+    document.dispatchEvent(new Event('hdc:sync-combos'));
     fetchPending();
   }, 300);
 }
@@ -421,4 +425,36 @@ document.addEventListener('DOMContentLoaded', () => {
   loadAllOptions();
   loadOfficeCategories();
 });
+})();
+
+// ── Searchable combo boxes (HDCComboList) ───────────────────────────────────
+// Every party / person / account / project / stage / category pick in the
+// quick-entry form becomes a type-to-search combo box.  The <select> keeps
+// its name= so the posted payload and the server contract are unchanged; the
+// input carries no name and is never submitted.  Strict mode means a value
+// can only be set by picking it from the filtered list.
+(function () {
+  function attachCombo(inputId, selectId, comboOpts) {
+    if (!window.HDCComboList) return null;
+    var input = document.getElementById(inputId);
+    var select = document.getElementById(selectId);
+    if (!input || !select) return null;
+    return window.HDCComboList.attach(input, select, comboOpts);
+  }
+  var mcCombos = {
+    fromAccount: attachCombo('mc_from_account_input', 'mc_from_account', { strict: true, maxItems: 50 }),
+    toAccount: attachCombo('mc_to_account_input', 'mc_to_account', { strict: true, maxItems: 50, includeEmpty: true }),
+    project: attachCombo('mc_project_input', 'mc_project', { strict: true, includeEmpty: true }),
+    stage: attachCombo('mc_stage_input', 'mc_stage', { strict: true, includeEmpty: true }),
+    relatedEntity: attachCombo('mc_related_id_input', 'mc_related_id', { strict: true, maxItems: 50 }),
+    expenseCategory: attachCombo('mc_exp_cat_input', 'mc_exp_cat', { strict: true, includeEmpty: true })
+  };
+  function syncMcCombos() {
+    Object.keys(mcCombos).forEach(function (key) {
+      if (mcCombos[key] && mcCombos[key].syncFromSelect) mcCombos[key].syncFromSelect();
+    });
+  }
+  // Quick-pay / quick-receive buttons set the selects programmatically; they
+  // dispatch this event so the combo inputs mirror the chosen values.
+  document.addEventListener('hdc:sync-combos', syncMcCombos);
 })();
