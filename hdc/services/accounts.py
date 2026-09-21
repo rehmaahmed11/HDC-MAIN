@@ -18,7 +18,7 @@ from hdc.models.office import OfficeExpense, OfficeStaff, OfficeStaffLedger
 from hdc.models.projects import Project, Stage
 from hdc.models.subcontract import SubcontractPayment, Subcontractor
 from hdc.models.workforce import LabourLedger, Worker
-from hdc.services.ledger import _office_staff_ledger_snapshot, _remove_office_salary_expense_for_ledger, _sync_office_staff_expense_from_ledger, _worker_payable_snapshot
+from hdc.services.ledger import _is_linked_office_salary_expense, _office_staff_ledger_snapshot, _remove_office_salary_expense_for_ledger, _sync_office_staff_expense_from_ledger, _worker_payable_snapshot
 from hdc.services.lookups import _ensure_expense_category, _ensure_expense_category_by_id
 from hdc.services.purchase import _sync_purchase_v2_ledger
 from hdc.services.subcontract import _log_subcontract_event, _subcontract_stage_snapshot
@@ -251,7 +251,7 @@ def _accounts_reconciliation_findings():
                 'party': (s.name if s else f'Staff #{r.staff_id}'),
             })
 
-    # Owner payments and office expenses always pair to one cash txn.
+    # Owner payments and standalone office expenses pair to one cash txn.
     for r in OwnerPayment.query.filter(OwnerPayment.is_void == False, OwnerPayment.amount > 0).all():
         if _has_txn_for('owner_payment', r.id):
             continue
@@ -264,6 +264,10 @@ def _accounts_reconciliation_findings():
             'party': '-',
         })
     for r in OfficeExpense.query.filter(OfficeExpense.is_void == False, OfficeExpense.amount > 0).all():
+        # Staff payments/advances/tips have an expense mirror, but the staff
+        # ledger row owns the cash posting and is checked above.
+        if _is_linked_office_salary_expense(r):
+            continue
         if _has_txn_for('office_expense', r.id):
             continue
         orphan_sources.append({

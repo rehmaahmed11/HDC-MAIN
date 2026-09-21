@@ -598,27 +598,36 @@ def _accounts_toggle_transaction_void_state(txn_id, make_void=True, reason='', a
 
 **Verify:** void a row, reload `/hdc/accounts/entries` → the reason/user/time appear; restore → they clear.
 
-### Step 5 — Stop the false "orphan" on the Reconciliation page (fix 5.4)
+### Step 5 — Stop the false "orphan" on the Reconciliation page (fix 5.4) — ✅ COMPLETED (2026-09-21)
 
-**File:** `hdc/services/accounts.py` (inside `_accounts_reconciliation_findings`, in the loop over `SOURCE_MAP` entries, before appending to `orphan_sources`):
+> **Done.** `_accounts_reconciliation_findings` now uses the existing `_is_linked_office_salary_expense` helper to skip linked office-expense mirrors; the owning staff ledger row is still checked for its cash posting. Added `tests/test_accounts_reconciliation.py`: four regression tests covering payment/advance/tip mirrors, genuine unlinked office expenses, missing staff postings, and void mismatches. The tests reproduced the bug before the fix and all pass afterward. On a fresh isolated test database with all three staff posting types, every finding total is zero and `GET /hdc/accounts/reconciliation` returns **200** with **"0 issues found"**. Layer and DB-safety checks pass. Full suite: **261 tests, one pre-existing failure** (`test_hub_explains_what_each_page_is_for`, Step 9). Production data was not touched.
+
+**File:** `hdc/services/accounts.py` (inside `_accounts_reconciliation_findings`, in the `OfficeExpense` loop, before checking for an independent posting):
 
 ```python
-        # A salary payment legitimately creates TWO source rows (the staff
-        # ledger row + its OfficeExpense mirror) for ONE posting.  Only the
-        # ledger row owns the txn, so the mirror must not be reported.
-        if base == 'office_expense' and getattr(src, 'office_staff_ledger_id', None):
+        # Staff payments/advances/tips have an expense mirror, but the staff
+        # ledger row owns the cash posting and is checked above.
+        if _is_linked_office_salary_expense(r):
             continue
 ```
 
 **Verify:** with the audit dataset, `_accounts_reconciliation_findings()['orphan_sources'] == []`, and `/hdc/accounts/reconciliation` shows 0 findings.
 
-### Step 6 — Repair the Money Center dropdown URLs (fix 7.1)
+### Step 6 — Repair the Money Center dropdown URLs (fix 7.1) — ✅ COMPLETED (2026-09-21)
 
-**File:** `templates/hdc/accounts/money_center.html:1201,1207,1213,1219` — drop the `/options` suffix (`/hdc/api/workers`, `/hdc/api/suppliers`, `/hdc/api/subcontractors`, `/hdc/api/office_staff`). The endpoints already return `{ok, items:[{id,label}]}` which is what the JS reads.
+> **Done.** Removed the four `/options` suffixes and wired all four loaders into `loadAllOptions`, replacing the duplicated fallback loading path and its unused account-list request. Office staff was previously never loaded on initialization; its API also referenced the nonexistent `OfficeStaff.is_void` field, returning `ok=false` with an empty list. The API now filters on `active_status`. All four feeds return **200**, `ok=true`, and seeded `{id, label}` options. Initialization preserves API labels and refreshes the selector if the user chooses a type before loading completes. Added four passing regression tests in `tests/test_money_center.py`, including actual rendered JavaScript execution under Node with real test API payloads and a minimal DOM. The tests reproduced the failures before the fix. Money Center renders **200**; inactive workers/staff and void suppliers remain excluded. Layer and DB-safety checks pass. Full suite: **265 tests, one pre-existing Hub-explainer failure** (Step 9). Verification used isolated test databases and a simulated DOM, not a browser-console/visual pass of all Accounts pages. Step 10's broader regression-test work remains pending.
+
+**Files:** `templates/hdc/accounts/money_center.html`, `hdc/routes/money_center.py`, `tests/test_money_center.py`. The corrected feeds are `/hdc/api/workers`, `/hdc/api/suppliers`, `/hdc/api/subcontractors`, and `/hdc/api/office_staff`; each returns `{ok, items:[{id,label}]}` as the JS expects.
 
 **Verify:** in the browser console on `/hdc/accounts/money-center` — no 404s; worker/supplier/staff selectors list rows. Or: `curl -b cookie 'http://host/hdc/api/workers' | head`.
 
-### Step 7 — Close the money-write authorization hole (fix 6.1)
+### Step 7 — Close the money-write authorization hole (fix 6.1) — ✅ COMPLETED (2026-09-21)
+
+> **Done.** Added `_money_only()` and the reusable `_money_write_required()` decorator in `hdc/extensions.py`. Operational money writes now require **admin or accountant**; staff, manager, blank, NULL, and unknown roles are denied before handler lookups/mutations. Applied to **107 handlers / 111 route-method cases**, including all seven minimum modules below plus purchase JSON APIs, office category APIs, wage-affecting timekeeping (both aliases), legacy material routes, owner receipt create/void/restore, stage status/subcontractor-progress aliases, and personal-expense void/category writes. HTML denials redirect to `/hdc/` with an explanatory flash; API denials return JSON **403**. Existing login/CSRF enforcement, operational reads, and stricter admin-only Accounts/Money Center/settings/user-management rules remain unchanged. README §Accounts & Cash now records the role matrix and implementation pattern; broader per-page read-policy decisions remain Step 15.
+>
+> **Verified:** `tests/test_money_permissions.py` adds **10 passing tests**, exercising every protected route/method under five denied roles with unchanged full-database snapshots; valid seeded money submissions also fail safely for staff. Admin, accountant, and normalized accountant roles successfully post owner receipts, worker advances, site expenses, supplier/subcontractor payments, office salaries, payroll payments, and tool inventory. Accountant JSON POST/PUT/DELETE/PATCH operations succeed. Anonymous and missing-CSRF requests remain blocked. Full suite: **275 tests, only the pre-existing Hub-explainer failure** (Step 9). Python compile, layer, and DB-safety checks pass. Fresh-DB smoke: **87 reads, 16 write/result entries, 0 errors**. No production data was used.
+
+Implementation follows the planned policy below, using a shared decorator to keep mixed GET/POST handlers and JSON methods consistent.
 
 1. Add one helper in `hdc/extensions.py` beside `_admin_only()`:
 
@@ -645,7 +654,7 @@ def _money_only():
 
 3. Write the decision down (README §Accounts & Cash): *"Money writes require role admin or accountant; staff can view operational pages that the admin decides to expose."*
 
-**Verify:** repeat the E2E as `staff` — every money POST must return 302 to `/hdc/` **without** changing row counts (the test in Step 10 encodes this).
+**Verify:** `.venv/bin/python -m unittest discover -s tests -p 'test_money_permissions.py' -v`. Repeat money writes as `staff`: HTML handlers return 302 to `/hdc/`, JSON handlers return 403, and database contents stay unchanged. Repeat valid submissions as `admin`/`accountant`: operational postings succeed, while existing admin-only Accounts restrictions remain in force.
 
 ### Step 8 — Make CSRF work without JavaScript (fix 6.2)
 
@@ -792,9 +801,10 @@ Apply `or ''` to `bank_name`, `account_number`, `iban` as well, then re-download
 - [x] Recording a supplier payment succeeds and reduces the payable (Step 2) ✅ 2026-09-20
 - [x] Voiding from either side keeps ledger + CF document in the same void state (Step 3) ✅ 2026-09-20
 - [x] Void reason/user/time persisted and visible (Step 4) ✅ 2026-09-20
-- [ ] `/hdc/accounts/reconciliation` shows 0 findings on a clean dataset (Step 5)
-- [ ] No 404s in the browser console on any Accounts page (Step 6)
-- [ ] `staff`/`accountant` cannot post money outside Accounts; decision written down (Step 7)
+- [x] `/hdc/accounts/reconciliation` shows 0 findings on a clean dataset (Step 5) ✅ 2026-09-21
+- [x] Four Money Center dropdown feeds resolve and populate selectors (Step 6) ✅ 2026-09-21 — API + rendered-JS regression tests; full Accounts browser-console pass remains pending.
+- [ ] No 404s in the browser console on any Accounts page (broader acceptance check, Step 11)
+- [x] Operational money writes require `admin`/`accountant`; staff/other roles cannot mutate money records, existing admin-only restrictions remain, and policy is documented (Step 7) ✅ 2026-09-21 — corrected the original checklist's contradiction with the Step 7 accountant-allowed policy.
 - [ ] A form POST works with JavaScript disabled (Step 8)
 - [ ] `unittest discover` → OK; `reorganize_frontend.py --check` → exit 0; **HDC CI green on main** (Step 9)
 - [ ] `tests/test_money_center.py` exists and passes (Step 10)

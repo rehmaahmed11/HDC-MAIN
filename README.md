@@ -109,6 +109,46 @@ contradictory account (a client receivable holding a bank account number) cannot
 be saved. `hdc/services/accounts_manage.py` holds the list/edit/archive rules;
 `hdc/routes/accounts_manage.py` stays thin.
 
+### Money-write permissions
+
+**Operational money writes require role `admin` or `accountant`.** Staff,
+manager, blank, and unrecognized roles are denied. The role check runs on the
+server before record lookup or mutation; hiding a button is not authorization.
+
+| Area | Admin | Accountant | Staff / other roles |
+|---|---|---|---|
+| Operational money writes | Allowed | Allowed | Denied |
+| Existing operational reads | Unchanged | Unchanged | Unchanged |
+| Accounts, Money Center, cash-flow administration, settings and user administration | Existing admin access | Still denied wherever admin-only | Still denied wherever admin-only |
+
+This covers worker payments/advances/rates/ledger corrections, payroll,
+expenses and categories, subcontractor contracts/payments/attendance, office
+staff/salary/allowances/expenses, purchases/payments/delivery/usage/transfers,
+tool inventory/rentals/payments/returns, and wage-affecting timekeeping. Owner
+receipts (including void/restore), stage status/subcontractor-progress updates,
+personal-expense voids/categories, legacy
+material routes and purchase/office write APIs use the same guard. This policy
+does **not** grant accountants access to the admin-only Accounts workspace.
+
+On mixed read/write routes, `GET`, `HEAD`, and `OPTIONS` keep existing access.
+`POST`, `PUT`, `PATCH`, and `DELETE` are guarded: denied HTML requests redirect
+to the dashboard with **“Admin/Accountant access required.”**; denied API writes
+return JSON `403` with `ok: false`. Login and CSRF checks remain required.
+Existing staff views (payroll, workers, expenses, reports, purchasing, tools,
+office, etc.) are unchanged; the finer per-page read matrix remains the
+separate audit Step 15 decision, not a newly implemented admin-configurable
+permissions system. Unrelated project/estimation/drawing workflows are not
+reclassified by this money-posting guard.
+
+For a new operational finance write route, use `@_money_write_required()`
+**below** `@login_required` (use `@_money_write_required(api=True)` for JSON APIs).
+Keep stricter `_admin_only()` checks where they already exist. Regression
+coverage is in `tests/test_money_permissions.py`:
+
+```bash
+.venv/bin/python -m unittest discover -s tests -p 'test_money_permissions.py' -v
+```
+
 ## Run
 
 ```bash

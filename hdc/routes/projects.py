@@ -13,7 +13,7 @@ from sqlalchemy import func
 from werkzeug.utils import secure_filename
 
 from hdc.config import get_runtime_settings
-from hdc.extensions import db
+from hdc.extensions import _money_write_required, db
 from hdc.models.accounts import Account, OwnerPayment
 from hdc.models.materials import Material
 from hdc.models.projects import Project, Stage, StageDefinition, StageDrawing, StageRateHistory
@@ -199,6 +199,7 @@ def register(app):
 
     @app.route('/hdc/projects/<int:pid>/owner_payment', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_add_owner_payment(pid):
         prj = Project.query.get_or_404(pid)
         pay_date = _parse_date(request.form.get('date'))
@@ -273,6 +274,7 @@ def register(app):
 
     @app.route('/hdc/projects/<int:pid>/owner_payment/<int:oid>/delete', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_delete_owner_payment(pid, oid):
         op = OwnerPayment.query.get_or_404(oid)
         if int(op.project_id or 0) != int(pid):
@@ -292,6 +294,7 @@ def register(app):
 
     @app.route('/hdc/projects/<int:pid>/owner_payment/<int:oid>/restore', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_restore_owner_payment(pid, oid):
         op = OwnerPayment.query.get_or_404(oid)
         if int(op.project_id or 0) != int(pid):
@@ -399,6 +402,7 @@ def register(app):
 
     @app.route('/hdc/stage/<int:sid>/status', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_stage_status(sid):
         s = Stage.query.get_or_404(sid)
         old_status = (s.status or '').strip().lower()
@@ -445,6 +449,7 @@ def register(app):
 
     @app.route('/hdc/stage/<int:sid>/sub-progress', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_stage_sub_progress(sid):
         s = Stage.query.get_or_404(sid)
         sub = s.assigned_subcontractor

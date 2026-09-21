@@ -10,7 +10,7 @@ from flask import abort, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 from sqlalchemy import func, or_
 
-from hdc.extensions import _admin_only, db
+from hdc.extensions import _money_write_required, _admin_only, db
 from hdc.models.accounts import Account, AccountTransaction, ExpenseCategory, PersonalExpense, PersonalExpenseCategory
 from hdc.models.materials import Supplier
 from hdc.models.office import OfficeStaff
@@ -472,6 +472,7 @@ def register(app):
 
     @app.route('/hdc/personal-management/expenses', methods=['GET', 'POST'])
     @login_required
+    @_money_write_required()
     def hdc_personal_expenses():
         if request.method == 'POST':
             action = (request.form.get('action') or '').strip().lower()
@@ -513,6 +514,7 @@ def register(app):
 
     @app.route('/hdc/personal-management/expenses/<int:eid>/void', methods=['GET', 'POST'])
     @login_required
+    @_money_write_required()
     def hdc_personal_expense_void(eid):
         row = PersonalExpense.query.get_or_404(eid)
         if request.method == 'POST':
@@ -534,6 +536,7 @@ def register(app):
 
     @app.route('/hdc/personal-management/categories', methods=['GET', 'POST'])
     @login_required
+    @_money_write_required()
     def hdc_personal_expense_categories():
         if request.method == 'POST':
             action = (request.form.get('action') or '').strip().lower()
@@ -569,6 +572,7 @@ def register(app):
 
     @app.route('/hdc/personal-management/categories/<int:cat_id>/suspend', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_personal_category_suspend(cat_id):
         cat = PersonalExpenseCategory.query.get_or_404(cat_id)
         cat.active_status = False
@@ -579,6 +583,7 @@ def register(app):
 
     @app.route('/hdc/personal-management/categories/<int:cat_id>/activate', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_personal_category_activate(cat_id):
         cat = PersonalExpenseCategory.query.get_or_404(cat_id)
         cat.active_status = True

@@ -10,7 +10,7 @@ from flask import abort, flash, redirect, render_template, request, url_for
 from flask_login import login_required
 from sqlalchemy import func
 
-from hdc.extensions import db
+from hdc.extensions import _money_write_required, db
 from hdc.models.accounts import Expense
 from hdc.models.projects import Project, Stage
 from hdc.models.workforce import LabourLedger, LabourRateHistory, TimeEntry, Worker, WorkerRate, WorkerTrade
@@ -28,6 +28,7 @@ def register(app):
     # â”€â”€ Workers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     @app.route('/hdc/workers', methods=['GET', 'POST'])
     @login_required
+    @_money_write_required()
     def hdc_workers():
         if request.method == 'POST':
             code = request.form.get('worker_code','').strip()
@@ -64,6 +65,7 @@ def register(app):
 
     @app.route('/hdc/trades', methods=['GET', 'POST'])
     @login_required
+    @_money_write_required()
     def hdc_trades():
         if request.method == 'POST':
             action = (request.form.get('action') or '').strip()
@@ -120,6 +122,7 @@ def register(app):
 
     @app.route('/hdc/workers/<int:wid>/toggle', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_toggle_worker(wid):
         w = Worker.query.get_or_404(wid)
         w.active_status = not w.active_status
@@ -130,6 +133,7 @@ def register(app):
 
     @app.route('/hdc/workers/<int:wid>/edit', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_edit_worker(wid):
         w = Worker.query.get_or_404(wid)
         code = (request.form.get('worker_code') or '').strip()
@@ -268,6 +272,7 @@ def register(app):
 
     @app.route('/hdc/workers/<int:wid>/advance', methods=['GET', 'POST'])
     @login_required
+    @_money_write_required()
     def hdc_worker_advance(wid):
         w = Worker.query.get_or_404(wid)
         projects = Project.query.all()
@@ -316,6 +321,7 @@ def register(app):
 
     @app.route('/hdc/workers/<int:wid>/payment', methods=['GET', 'POST'])
     @login_required
+    @_money_write_required()
     def hdc_worker_payment(wid):
         w = Worker.query.get_or_404(wid)
         projects = Project.query.all()
@@ -628,6 +634,7 @@ def register(app):
 
     @app.route('/hdc/workers/<int:wid>/ledger/<int:lid>/edit', methods=['GET', 'POST'])
     @login_required
+    @_money_write_required()
     def hdc_worker_ledger_edit(wid, lid):
         w = Worker.query.get_or_404(wid)
         row = LabourLedger.query.get_or_404(lid)
@@ -694,6 +701,7 @@ def register(app):
 
     @app.route('/hdc/workers/<int:wid>/ledger/<int:lid>/void', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_worker_ledger_void(wid, lid):
         Worker.query.get_or_404(wid)
         row = LabourLedger.query.get_or_404(lid)
@@ -729,6 +737,7 @@ def register(app):
 
     @app.route('/hdc/workers/<int:wid>/ledger/<int:lid>/restore', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_worker_ledger_restore(wid, lid):
         Worker.query.get_or_404(wid)
         row = LabourLedger.query.get_or_404(lid)
@@ -762,6 +771,7 @@ def register(app):
 
     @app.route('/hdc/workers/<int:wid>/rate', methods=['GET', 'POST'])
     @login_required
+    @_money_write_required()
     def hdc_worker_rate(wid):
         w = Worker.query.get_or_404(wid)
         if request.method == 'POST':

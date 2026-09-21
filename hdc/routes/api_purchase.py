@@ -8,7 +8,7 @@ from flask import jsonify, request
 from flask_login import current_user, login_required
 from sqlalchemy import func
 
-from hdc.extensions import db
+from hdc.extensions import _money_write_required, db
 from hdc.models.materials import Delivery, MaterialV2, PurchaseV2, Supplier, SupplierLedger, UsageLogV2
 from hdc.models.projects import Project, Stage
 from hdc.services.accounts import _accounts_post_supplier_credit_row, _accounts_set_void_by_source, _accounts_upsert_purchase_paid_txn
@@ -22,6 +22,7 @@ def register(app):
     """Register JSON API: /api/v2/purchase/*."""
     @app.route('/api/v2/purchase/suppliers', methods=['GET', 'POST'])
     @login_required
+    @_money_write_required(api=True)
     def api_v2_suppliers():
         if request.method == 'POST':
             payload = request.get_json(silent=True) or request.form
@@ -66,6 +67,7 @@ def register(app):
 
     @app.route('/api/v2/purchase/suppliers/<int:supplier_id>', methods=['PUT', 'DELETE'])
     @login_required
+    @_money_write_required(api=True)
     def api_v2_supplier_item(supplier_id):
         row = Supplier.query.get_or_404(supplier_id)
         if request.method == 'PUT':
@@ -105,6 +107,7 @@ def register(app):
 
     @app.route('/api/v2/purchase/materials', methods=['GET', 'POST'])
     @login_required
+    @_money_write_required(api=True)
     def api_v2_materials():
         if request.method == 'POST':
             payload = request.get_json(silent=True) or request.form
@@ -139,6 +142,7 @@ def register(app):
 
     @app.route('/api/v2/purchase/materials/<int:material_id>', methods=['PUT', 'DELETE'])
     @login_required
+    @_money_write_required(api=True)
     def api_v2_material_item(material_id):
         row = MaterialV2.query.get_or_404(material_id)
         if request.method == 'PUT':
@@ -181,6 +185,7 @@ def register(app):
 
     @app.route('/api/v2/purchase/purchases', methods=['GET', 'POST'])
     @login_required
+    @_money_write_required(api=True)
     def api_v2_purchases():
         if request.method == 'POST':
             payload = request.get_json(silent=True) or request.form
@@ -254,6 +259,7 @@ def register(app):
 
     @app.route('/api/v2/purchase/purchases/<int:purchase_id>', methods=['PUT', 'DELETE'])
     @login_required
+    @_money_write_required(api=True)
     def api_v2_purchase_item(purchase_id):
         row = PurchaseV2.query.get_or_404(purchase_id)
         if row.is_void:
@@ -321,6 +327,7 @@ def register(app):
 
     @app.route('/api/v2/purchase/payments', methods=['POST'])
     @login_required
+    @_money_write_required(api=True)
     def api_v2_payments():
         payload = request.get_json(silent=True) or request.form
         supplier_id = _payload_int(payload, 'supplier_id')
@@ -446,6 +453,7 @@ def register(app):
 
     @app.route('/api/v2/purchase/deliveries', methods=['GET', 'POST'])
     @login_required
+    @_money_write_required(api=True)
     def api_v2_deliveries():
         if request.method == 'POST':
             payload = request.get_json(silent=True) or request.form
@@ -513,6 +521,7 @@ def register(app):
 
     @app.route('/api/v2/purchase/deliveries/<int:delivery_id>', methods=['DELETE'])
     @login_required
+    @_money_write_required(api=True)
     def api_v2_delivery_item(delivery_id):
         row = Delivery.query.get_or_404(delivery_id)
         if row.is_void:
@@ -527,6 +536,7 @@ def register(app):
 
     @app.route('/api/v2/purchase/usage', methods=['GET', 'POST'])
     @login_required
+    @_money_write_required(api=True)
     def api_v2_usage():
         if request.method == 'POST':
             payload = request.get_json(silent=True) or request.form
@@ -603,6 +613,7 @@ def register(app):
 
     @app.route('/api/v2/purchase/usage/<int:usage_id>', methods=['DELETE'])
     @login_required
+    @_money_write_required(api=True)
     def api_v2_usage_item(usage_id):
         row = UsageLogV2.query.get_or_404(usage_id)
         if row.is_void:
@@ -698,6 +709,7 @@ def register(app):
 
     @app.route('/api/v2/purchase/recalculate-stock', methods=['POST'])
     @login_required
+    @_money_write_required(api=True)
     def api_v2_recalculate_stock():
         materials = MaterialV2.query.filter_by(is_void=False).all()
         rows = []

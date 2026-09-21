@@ -11,7 +11,7 @@ from flask_login import current_user, login_required
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 
-from hdc.extensions import db
+from hdc.extensions import _money_write_required, db
 from hdc.models.accounts import Expense
 from hdc.models.projects import Project, Stage
 from hdc.models.subcontract import SubcontractAttendance, SubcontractEvent, SubcontractLabourAttendance, SubcontractLabourPayment, SubcontractLabourWorker, SubcontractPayment, SubcontractTeamAttendance, Subcontractor
@@ -28,6 +28,7 @@ def register(app):
     """Register Subcontractors, labour teams, ledgers and stage shifts."""
     @app.route('/hdc/projects/<int:pid>/add_subcontractor', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_add_subcontractor(pid):
         Project.query.get_or_404(pid)
         stage_id = request.form.get('stage_id', type=int)
@@ -70,6 +71,7 @@ def register(app):
 
     @app.route('/hdc/subcontractor/<int:sid>/pay', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_pay_subcontractor(sid):
         sub = Subcontractor.query.get_or_404(sid)
         return_to = (request.form.get('return_to') or '').strip().lower()
@@ -319,6 +321,7 @@ def register(app):
 
     @app.route('/hdc/subcontractor/<int:sid>/attendance', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_subcontractor_attendance(sid):
         sub = Subcontractor.query.get_or_404(sid)
         att_date = _parse_date(request.form.get('date'))
@@ -368,6 +371,7 @@ def register(app):
 
     @app.route('/hdc/subcontractor/<int:sid>/labour_attendance', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_subcontractor_labour_attendance(sid):
         sub = Subcontractor.query.get_or_404(sid)
         return_to = (request.form.get('return_to') or '').strip().lower()
@@ -698,6 +702,7 @@ def register(app):
 
     @app.route('/hdc/subcontractor/<int:sid>/team_attendance', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_subcontractor_team_attendance(sid):
         sub = Subcontractor.query.get_or_404(sid)
         rid = request.form.get('rid', type=int)
@@ -844,6 +849,7 @@ def register(app):
 
     @app.route('/hdc/subcontractor/<int:sid>/team_attendance/<int:rid>/delete', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_subcontractor_team_attendance_delete(sid, rid):
         sub = Subcontractor.query.get_or_404(sid)
         row = SubcontractTeamAttendance.query.get_or_404(rid)
@@ -873,6 +879,7 @@ def register(app):
 
     @app.route('/hdc/subcontractor/<int:sid>/labour_attendance/<int:rid>/delete', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_subcontractor_labour_attendance_delete(sid, rid):
         sub = Subcontractor.query.get_or_404(sid)
         row = SubcontractLabourAttendance.query.get_or_404(rid)
@@ -903,6 +910,7 @@ def register(app):
 
     @app.route('/hdc/subcontractor/<int:sid>/workers', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_subcontractor_add_worker(sid):
         sub = Subcontractor.query.get_or_404(sid)
         name = (request.form.get('name') or '').strip()
@@ -943,6 +951,7 @@ def register(app):
 
     @app.route('/hdc/subcontractor/<int:sid>/workers/<int:wid>/edit', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_subcontractor_worker_edit(sid, wid):
         sub = Subcontractor.query.get_or_404(sid)
         w = SubcontractLabourWorker.query.get_or_404(wid)
@@ -974,6 +983,7 @@ def register(app):
 
     @app.route('/hdc/subcontractor/<int:sid>/workers/<int:wid>/toggle', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_subcontractor_worker_toggle(sid, wid):
         sub = Subcontractor.query.get_or_404(sid)
         w = SubcontractLabourWorker.query.get_or_404(wid)
@@ -995,6 +1005,7 @@ def register(app):
 
     @app.route('/hdc/subcontractor/<int:sid>/workers/<int:wid>/pay', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_subcontractor_worker_pay(sid, wid):
         sub = Subcontractor.query.get_or_404(sid)
         w = SubcontractLabourWorker.query.get_or_404(wid)
@@ -1362,6 +1373,7 @@ def register(app):
 
     @app.route('/hdc/subcontractor/<int:sid>/progress', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_subcontractor_progress(sid):
         sub = Subcontractor.query.get_or_404(sid)
         pct = _flt(request.form.get('work_done_percentage'))
@@ -1553,6 +1565,7 @@ def register(app):
 
     @app.route('/hdc/subcontractor/<int:sid>/events/rebuild', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_subcontractor_events_rebuild(sid):
         sub = Subcontractor.query.get_or_404(sid)
         if (getattr(current_user, 'role', '') or '').lower() != 'admin':
@@ -1566,6 +1579,7 @@ def register(app):
 
     @app.route('/hdc/stage/<int:sid>/shift/subcontractor', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_stage_shift_to_subcontractor(sid):
         stg = Stage.query.get_or_404(sid)
         sub_id = request.form.get('subcontractor_id', type=int)
@@ -1674,6 +1688,7 @@ def register(app):
 
     @app.route('/hdc/stage/<int:sid>/shift/company', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_stage_shift_to_company(sid):
         stg = Stage.query.get_or_404(sid)
         prev_sub = stg.assigned_subcontractor
@@ -1697,6 +1712,7 @@ def register(app):
 
     @app.route('/hdc/subcontractors', methods=['GET', 'POST'])
     @login_required
+    @_money_write_required()
     def hdc_subcontractors():
         if request.method == 'POST':
             name = (request.form.get('name') or '').strip()

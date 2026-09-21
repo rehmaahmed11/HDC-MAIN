@@ -1198,25 +1198,25 @@ document.getElementById('mc_office_target')?.addEventListener('change', (e)=>{
 
 // ── Load options from APIs ──
 function loadWorkerOptions() {
-  fetch('/hdc/api/workers/options').then(r=>r.json()).then(j=>{
+  return fetch('/hdc/api/workers').then(r=>r.json()).then(j=>{
     workerOptions = j.items || j || [];
     if (!Array.isArray(workerOptions)) workerOptions = [];
   }).catch(()=>{});
 }
 function loadSupplierOptions() {
-  fetch('/hdc/api/suppliers/options').then(r=>r.json()).then(j=>{
+  return fetch('/hdc/api/suppliers').then(r=>r.json()).then(j=>{
     supplierOptions = j.items || j || [];
     if (!Array.isArray(supplierOptions)) supplierOptions = [];
   }).catch(()=>{});
 }
 function loadSubcontractorOptions() {
-  fetch('/hdc/api/subcontractors/options').then(r=>r.json()).then(j=>{
+  return fetch('/hdc/api/subcontractors').then(r=>r.json()).then(j=>{
     subcontractorOptions = j.items || j || [];
     if (!Array.isArray(subcontractorOptions)) subcontractorOptions = [];
   }).catch(()=>{});
 }
 function loadOfficeStaffOptions() {
-  fetch('/hdc/api/office_staff/options').then(r=>r.json()).then(j=>{
+  return fetch('/hdc/api/office_staff').then(r=>r.json()).then(j=>{
     officeStaffOptions = j.items || j || [];
     if (!Array.isArray(officeStaffOptions)) officeStaffOptions = [];
   }).catch(()=>{});
@@ -1249,36 +1249,23 @@ function loadOfficeCategories() {
   }).catch(()=>{});
 }
 
-// Try multiple endpoints for options
+// Load every party feed once, including office staff.
 async function loadAllOptions() {
-  // Workers
-  try {
-    const r = await fetch('/api/accounts/list_accounts_with_balances?include_inactive=0');
-    const j = await r.json();
-  } catch(e){}
+  await Promise.all([
+    loadWorkerOptions(),
+    loadSupplierOptions(),
+    loadSubcontractorOptions(),
+    loadOfficeStaffOptions(),
+  ]);
 
-  // Use existing page data if available, else fetch
-  try {
-    // Workers from timekeeping/workers APIs
-    const endpoints = [
-      { url: '/hdc/api/workers', type: 'worker' },
-      { url: '/hdc/api/suppliers', type: 'supplier' },
-      { url: '/hdc/api/subcontractors', type: 'subcontractor' },
-    ];
-    for (const ep of endpoints) {
-      try {
-        const resp = await fetch(ep.url);
-        const data = await resp.json();
-        const items = data.items || data || [];
-        if (ep.type === 'worker') workerOptions = Array.isArray(items) ? items.map(x=>({id:x.id||x.value, label:x.name||x.label||x.text||`#${x.id}`})) : [];
-        if (ep.type === 'supplier') supplierOptions = Array.isArray(items) ? items.map(x=>({id:x.id||x.value, label:x.name||x.label||x.text||`#${x.id}`})) : [];
-        if (ep.type === 'subcontractor') subcontractorOptions = Array.isArray(items) ? items.map(x=>({id:x.id||x.value, label:x.name||x.label||x.text||`#${x.id}`})) : [];
-      } catch(e){}
-    }
-  } catch(e){}
-
-  // Fallback: scrape from DOM if options exist elsewhere
-  // For now, try to get from global worker_option_rows if defined in other page - not here, so keep empty and rely on manual entry + pending API
+  // The user may choose a type before its feed finishes loading.
+  const relatedType = document.getElementById('mc_related_type').value;
+  if (relatedType) {
+    const sel = document.getElementById('mc_related_id');
+    const selected = sel.value;
+    loadRelatedOptions(relatedType);
+    sel.value = selected;
+  }
 }
 
 document.addEventListener('DOMContentLoaded', () => {

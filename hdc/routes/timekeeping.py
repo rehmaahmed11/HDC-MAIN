@@ -10,7 +10,7 @@ from flask import flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 from sqlalchemy import func
 
-from hdc.extensions import db
+from hdc.extensions import _money_write_required, db
 from hdc.models.projects import Project, Stage
 from hdc.models.workforce import AttendanceDay, AttendanceMark, TimeEntry, Worker
 from hdc.services.audit import log_action
@@ -25,6 +25,7 @@ def register(app):
     @app.route('/hdc/attendance', methods=['GET', 'POST'])
     @app.route('/hdc/timekeeping', methods=['GET', 'POST'])
     @login_required
+    @_money_write_required()
     def hdc_attendance():
         if request.method == 'POST':
             if (request.form.get('bulk_mode') or '').strip() == '1':
@@ -550,6 +551,7 @@ def register(app):
 
     @app.route('/hdc/timekeeping/<int:tid>/edit', methods=['GET', 'POST'])
     @login_required
+    @_money_write_required()
     def hdc_edit_attendance(tid):
         t = TimeEntry.query.get_or_404(tid)
         if t.is_void:
@@ -630,6 +632,7 @@ def register(app):
 
     @app.route('/hdc/timekeeping/<int:tid>/delete', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_delete_attendance(tid):
         t = TimeEntry.query.get_or_404(tid)
         if t.is_void:
@@ -657,6 +660,7 @@ def register(app):
 
     @app.route('/hdc/timekeeping/<int:tid>/reactivate', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_reactivate_attendance(tid):
         t = TimeEntry.query.get_or_404(tid)
         if not t.is_void:

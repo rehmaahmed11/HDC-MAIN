@@ -341,7 +341,7 @@ def register(app):
             return jsonify(ok=False, message='Admin access required.'), 403
         try:
             from hdc.models.office import OfficeStaff
-            staff = OfficeStaff.query.filter(OfficeStaff.is_void == False).order_by(OfficeStaff.name.asc()).limit(500).all()
+            staff = OfficeStaff.query.filter(OfficeStaff.active_status == True).order_by(OfficeStaff.name.asc()).limit(500).all()
             items = []
             for s in staff:
                 code = s.staff_code or 'OFF-{}'.format(s.id)
