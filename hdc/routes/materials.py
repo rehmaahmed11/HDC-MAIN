@@ -7,7 +7,7 @@ original @app.route decorator and endpoint name.
 from flask import flash, jsonify, redirect, render_template, request, url_for
 from flask_login import login_required
 
-from hdc.extensions import db
+from hdc.extensions import _money_write_required, db
 from hdc.models.materials import Material, MaterialUsage, Purchase
 from hdc.models.projects import Project, Stage
 from hdc.services.purchase import _material_stock_for_scope, _material_stock_map
@@ -20,6 +20,7 @@ def register(app):
     # â”€â”€ Materials â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     @app.route('/hdc/materials', methods=['GET', 'POST'])
     @login_required
+    @_money_write_required()
     def hdc_materials():
         flash('Materials are now managed in Purchases.', 'info')
         return redirect(url_for('hdc_purchase_v2_materials'))
@@ -47,6 +48,7 @@ def register(app):
 
     @app.route('/hdc/materials/usage', methods=['GET', 'POST'])
     @login_required
+    @_money_write_required()
     def hdc_material_usage():
         flash('Material Usage is now managed in Purchases.', 'info')
         return redirect(url_for('hdc_purchase_v2_usage_page'))
@@ -114,6 +116,7 @@ def register(app):
 
     @app.route('/hdc/purchases', methods=['GET', 'POST'])
     @login_required
+    @_money_write_required()
     def hdc_purchases():
         flash('Purchases are now managed in Purchase Orders.', 'info')
         return redirect(url_for('hdc_purchase_v2_purchases'))

@@ -11,7 +11,7 @@ from flask import flash, redirect, render_template, request, url_for
 from flask_login import login_required
 from sqlalchemy import func
 
-from hdc.extensions import db
+from hdc.extensions import _money_write_required, db
 from hdc.models.workforce import LabourLedger, PayrollItem, PayrollRun, TimeEntry, Worker
 from hdc.services.accounts import _accounts_post_labour_ledger_row, _accounts_set_void_by_source
 from hdc.services.timekeeping import _has_recent_duplicate
@@ -29,6 +29,7 @@ def register(app):
 
     @app.route('/hdc/payroll/generate', methods=['GET', 'POST'])
     @login_required
+    @_money_write_required()
     def hdc_payroll_generate():
         if request.method == 'POST':
             action = (request.form.get('action') or 'generate').strip().lower()
@@ -433,6 +434,7 @@ def register(app):
 
     @app.route('/hdc/payroll/<int:run_id>/delete', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_payroll_delete(run_id):
         run = PayrollRun.query.get_or_404(run_id)
         items = PayrollItem.query.filter_by(run_id=run.id).all()

@@ -6,8 +6,9 @@ See MODULARIZATION_PLAN.md for the module map.
 import os
 import secrets
 import sqlite3
+from functools import wraps
 
-from flask import abort, current_app, flash, request, session
+from flask import abort, current_app, flash, jsonify, redirect, request, session, url_for
 from flask_login import current_user
 from sqlalchemy import event, inspect as sa_inspect
 from sqlalchemy.engine import Engine
@@ -93,6 +94,38 @@ def _admin_only():
         flash('Admin access required.', 'danger')
         return True
     return False
+
+
+_MONEY_ROLES = frozenset({'admin', 'accountant'})
+_MONEY_ACCESS_MESSAGE = 'Admin/Accountant access required.'
+
+
+def _money_only():
+    """Return True when the current user must not make operational money writes."""
+    role = (getattr(current_user, 'role', None) or '').strip().lower()
+    if not current_user.is_authenticated or role not in _MONEY_ROLES:
+        flash(_MONEY_ACCESS_MESSAGE, 'danger')
+        return True
+    return False
+
+
+def _money_write_required(*, api=False):
+    """Guard unsafe methods before the handler can query or mutate records.
+
+    Apply below ``@login_required`` on operational money routes (including
+    mixed GET/POST views). Existing read access and admin-only guards stay
+    unchanged. JSON APIs return 403 rather than redirecting to an HTML page.
+    """
+    def decorate(view):
+        @wraps(view)
+        def guarded(*args, **kwargs):
+            if request.method not in ('GET', 'HEAD', 'OPTIONS') and _money_only():
+                if api:
+                    return jsonify(ok=False, message=_MONEY_ACCESS_MESSAGE), 403
+                return redirect(url_for('hdc_dashboard'))
+            return view(*args, **kwargs)
+        return guarded
+    return decorate
 
 
 # â”€â”€ Login Manager â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

@@ -8,7 +8,7 @@ from flask import flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 from sqlalchemy import func
 
-from hdc.extensions import db
+from hdc.extensions import _money_write_required, db
 from hdc.models.accounts import Alert, Expense, ExpenseCategory
 from hdc.models.projects import Project, Stage
 from hdc.services.accounts import _accounts_post_expense_row
@@ -25,6 +25,7 @@ def register(app):
     """Register Site expenses and alerts."""
     @app.route('/hdc/expense_categories', methods=['GET', 'POST'])
     @login_required
+    @_money_write_required()
     def hdc_expense_categories():
         if request.method == 'POST':
             action = (request.form.get('action') or '').strip()
@@ -92,6 +93,7 @@ def register(app):
 
     @app.route('/hdc/alerts/<int:aid>/resolve', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_alerts_resolve(aid):
         a = Alert.query.get_or_404(aid)
         a.resolved = True
@@ -103,6 +105,7 @@ def register(app):
     # â”€â”€ Expenses â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     @app.route('/hdc/expenses', methods=['GET', 'POST'])
     @login_required
+    @_money_write_required()
     def hdc_expenses():
         if request.method == 'POST':
             pid = request.form.get('project_id', type=int)
@@ -187,6 +190,7 @@ def register(app):
 
     @app.route('/hdc/expenses/<int:eid>/edit', methods=['GET', 'POST'])
     @login_required
+    @_money_write_required()
     def hdc_expense_edit(eid):
         exp = Expense.query.get_or_404(eid)
         if _is_linked_system_expense(exp):
@@ -259,6 +263,7 @@ def register(app):
 
     @app.route('/hdc/expenses/<int:eid>/delete', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_expense_delete(eid):
         exp = Expense.query.get_or_404(eid)
         if _is_linked_system_expense(exp):

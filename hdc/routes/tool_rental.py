@@ -7,7 +7,7 @@ from flask import flash, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 from sqlalchemy import func
 
-from hdc.extensions import db
+from hdc.extensions import _money_write_required, db
 from hdc.models.accounts import Account
 from hdc.models.projects import Project, Stage
 from hdc.models.tool_rental import (
@@ -189,6 +189,7 @@ def register(app):
     # ------------------ INVENTORY ------------------
     @app.route('/hdc/tool-rental/inventory', methods=['GET','POST'])
     @login_required
+    @_money_write_required()
     def hdc_tool_rental_inventory():
         if request.method == 'POST':
             action = (request.form.get('action') or 'add').strip()
@@ -266,6 +267,7 @@ def register(app):
 
     @app.route('/hdc/tool-rental/inventory/<int:tool_id>/edit', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_tool_rental_tool_edit(tool_id):
         tool = Tool.query.get_or_404(tool_id)
         name = (request.form.get('name') or tool.name).strip()
@@ -309,6 +311,7 @@ def register(app):
 
     @app.route('/hdc/tool-rental/inventory/<int:tool_id>/delete', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_tool_rental_tool_delete(tool_id):
         tool = Tool.query.get_or_404(tool_id)
         pending = db.session.query(func.coalesce(func.sum(ToolRentalItem.qty_pending),0.0)).filter(ToolRentalItem.tool_id==tool.id).scalar() or 0.0
@@ -324,6 +327,7 @@ def register(app):
     # ------------------ CREATE RENTAL ------------------
     @app.route('/hdc/tool-rental/create', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_tool_rental_create():
         renter_type = (request.form.get('renter_type') or 'internal').strip().lower()
         if renter_type not in ('internal','external'):
@@ -528,6 +532,7 @@ def register(app):
     # ------------------ RETURN (FULL/PARTIAL) WITH ACCOUNTS ------------------
     @app.route('/hdc/tool-rental/<int:rental_id>/return', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_tool_rental_return(rental_id):
         rental = ToolRental.query.get_or_404(rental_id)
         if rental.is_void:
@@ -685,6 +690,7 @@ def register(app):
     # ------------------ ADD PAYMENT WITH ACCOUNTS ------------------
     @app.route('/hdc/tool-rental/<int:rental_id>/payment', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_tool_rental_payment(rental_id):
         rental = ToolRental.query.get_or_404(rental_id)
         if rental.billing_type=='no_charge':
@@ -743,6 +749,7 @@ def register(app):
 
     @app.route('/hdc/tool-rental/payment/<int:payment_id>/void', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_tool_rental_payment_void(payment_id):
         pay = ToolRentalPayment.query.get_or_404(payment_id)
         if pay.is_void:
@@ -786,6 +793,7 @@ def register(app):
     # ------------------ TRANSFER SITE TO SITE ------------------
     @app.route('/hdc/tool-rental/<int:rental_id>/transfer', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_tool_rental_transfer(rental_id):
         rental = ToolRental.query.get_or_404(rental_id)
         if rental.status in ('returned','closed'):

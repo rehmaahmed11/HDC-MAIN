@@ -8,7 +8,7 @@ from flask import abort, flash, jsonify, redirect, render_template, request, url
 from flask_login import login_required
 from sqlalchemy import func
 
-from hdc.extensions import db
+from hdc.extensions import _money_write_required, db
 from hdc.models.office import AllowanceCategory, OfficeExpense, OfficeExpenseCategory, OfficeStaff, OfficeStaffAttendance, OfficeStaffLedger, StaffAllowance
 from hdc.models.projects import Project, Stage
 from hdc.services.accounts import _accounts_set_void_by_source, _accounts_upsert_office_expense_txn, _accounts_upsert_office_staff_ledger_txn
@@ -66,6 +66,7 @@ def register(app):
 
     @app.route('/hdc/office-management/staff/ledger', methods=['GET', 'POST'])
     @login_required
+    @_money_write_required()
     def hdc_office_staff_ledger_list():
         if request.method == 'POST':
             code = (request.form.get('staff_code') or '').strip() or _next_office_staff_code()
@@ -103,6 +104,7 @@ def register(app):
 
     @app.route('/hdc/office-management/staff/<int:sid>/edit', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_office_staff_edit(sid):
         row = OfficeStaff.query.get_or_404(sid)
         code = (request.form.get('staff_code') or '').strip()
@@ -127,6 +129,7 @@ def register(app):
 
     @app.route('/hdc/office-management/staff/<int:sid>/toggle', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_office_staff_toggle(sid):
         row = OfficeStaff.query.get_or_404(sid)
         row.active_status = not bool(row.active_status)
@@ -137,6 +140,7 @@ def register(app):
 
     @app.route('/hdc/office-management/staff/<int:sid>/ledger', methods=['GET', 'POST'])
     @login_required
+    @_money_write_required()
     def hdc_office_staff_ledger(sid):
         row = OfficeStaff.query.get_or_404(sid)
         if request.method == 'POST':
@@ -196,6 +200,7 @@ def register(app):
 
     @app.route('/hdc/office-management/staff/<int:sid>/payment', methods=['GET', 'POST'])
     @login_required
+    @_money_write_required()
     def hdc_office_staff_payment(sid):
         staff_row = OfficeStaff.query.get_or_404(sid)
         snap = _office_staff_ledger_snapshot(sid)
@@ -288,6 +293,7 @@ def register(app):
 
     @app.route('/hdc/office-management/staff/<int:sid>/ledger/<int:lid>/edit', methods=['GET', 'POST'])
     @login_required
+    @_money_write_required()
     def hdc_office_staff_ledger_edit(sid, lid):
         row = OfficeStaff.query.get_or_404(sid)
         entry = OfficeStaffLedger.query.get_or_404(lid)
@@ -325,6 +331,7 @@ def register(app):
 
     @app.route('/hdc/office-management/staff/<int:sid>/ledger/<int:lid>/void', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_office_staff_ledger_void(sid, lid):
         OfficeStaff.query.get_or_404(sid)
         entry = OfficeStaffLedger.query.get_or_404(lid)
@@ -351,6 +358,7 @@ def register(app):
 
     @app.route('/hdc/office-management/staff/attendance', methods=['GET', 'POST'])
     @login_required
+    @_money_write_required()
     def hdc_office_staff_attendance():
         attendance_date = _parse_date(request.values.get('date'), fallback=_pkt_today())
         if request.method == 'POST':
@@ -397,6 +405,7 @@ def register(app):
 
     @app.route('/hdc/office-management/expenses', methods=['GET', 'POST'])
     @login_required
+    @_money_write_required()
     def hdc_office_expenses():
         if request.method == 'POST':
             exp_date = _parse_date(request.form.get('date'))
@@ -459,6 +468,7 @@ def register(app):
 
     @app.route('/hdc/office-management/expenses/<int:eid>/edit', methods=['GET', 'POST'])
     @login_required
+    @_money_write_required()
     def hdc_office_expense_edit(eid):
         row = OfficeExpense.query.get_or_404(eid)
         if row.is_void:
@@ -499,6 +509,7 @@ def register(app):
 
     @app.route('/hdc/office-management/expenses/<int:eid>/delete', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_office_expense_delete(eid):
         row = OfficeExpense.query.get_or_404(eid)
         if row.is_void:
@@ -519,6 +530,7 @@ def register(app):
     # â”€â”€ Allowance Categories â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     @app.route('/hdc/office-management/allowance-categories', methods=['GET', 'POST'])
     @login_required
+    @_money_write_required()
     def hdc_allowance_categories():
         if request.method == 'POST':
             name = (request.form.get('name') or '').strip()
@@ -541,6 +553,7 @@ def register(app):
 
     @app.route('/hdc/office-management/allowance-categories/<int:cid>/edit', methods=['GET', 'POST'])
     @login_required
+    @_money_write_required()
     def hdc_allowance_category_edit(cid):
         row = AllowanceCategory.query.get_or_404(cid)
         if request.method == 'POST':
@@ -566,6 +579,7 @@ def register(app):
 
     @app.route('/hdc/office-management/allowance-categories/<int:cid>/toggle', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_allowance_category_toggle(cid):
         row = AllowanceCategory.query.get_or_404(cid)
         row.is_active = not bool(row.is_active)
@@ -578,6 +592,7 @@ def register(app):
     # â”€â”€ Staff Allowances â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     @app.route('/hdc/office-management/staff/<int:sid>/allowances', methods=['GET', 'POST'])
     @login_required
+    @_money_write_required()
     def hdc_office_staff_allowances(sid):
         staff = OfficeStaff.query.get_or_404(sid)
         if request.method == 'POST':
@@ -643,6 +658,7 @@ def register(app):
 
     @app.route('/hdc/office-management/staff/<int:sid>/allowances/<int:aid>/edit', methods=['GET', 'POST'])
     @login_required
+    @_money_write_required()
     def hdc_office_staff_allowance_edit(sid, aid):
         staff = OfficeStaff.query.get_or_404(sid)
         allowance = StaffAllowance.query.get_or_404(aid)
@@ -672,6 +688,7 @@ def register(app):
 
     @app.route('/hdc/office-management/staff/<int:sid>/allowances/<int:aid>/remove', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_office_staff_allowance_remove(sid, aid):
         staff = OfficeStaff.query.get_or_404(sid)
         allowance = StaffAllowance.query.get_or_404(aid)
@@ -686,6 +703,7 @@ def register(app):
 
     @app.route('/hdc/api/office_expense_categories', methods=['GET', 'POST'])
     @login_required
+    @_money_write_required(api=True)
     def hdc_api_office_expense_categories():
         if request.method == 'GET':
             return jsonify({'categories': _get_all_office_expense_categories()})
@@ -709,6 +727,7 @@ def register(app):
 
     @app.route('/hdc/api/office_expense_categories/<int:category_id>', methods=['PATCH'])
     @login_required
+    @_money_write_required(api=True)
     def hdc_api_office_expense_category(category_id):
         data = request.get_json(silent=True) or {}
         action = (data.get('action') or '').strip().lower()

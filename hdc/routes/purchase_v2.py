@@ -10,7 +10,7 @@ from flask import flash, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 from sqlalchemy import func, or_
 
-from hdc.extensions import db
+from hdc.extensions import _money_write_required, db
 from hdc.models.materials import Delivery, MaterialV2, PurchaseV2, Supplier, SupplierLedger, UsageLogV2
 from hdc.models.projects import Project, Stage
 from hdc.services.accounts import _accounts_post_supplier_credit_row, _accounts_set_void_by_source, _accounts_upsert_purchase_paid_txn
@@ -53,6 +53,7 @@ def register(app):
 
     @app.route('/hdc/purchase-v2/materials', methods=['GET', 'POST'])
     @login_required
+    @_money_write_required()
     def hdc_purchase_v2_materials():
         if request.method == 'POST':
             name = _normalize_name_ci(request.form.get('name'))
@@ -115,6 +116,7 @@ def register(app):
 
     @app.route('/hdc/purchase-v2/materials/<int:material_id>/edit', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_purchase_v2_material_edit(material_id):
         row = MaterialV2.query.get_or_404(material_id)
         name = _normalize_name_ci(request.form.get('name')) or row.name
@@ -147,6 +149,7 @@ def register(app):
 
     @app.route('/hdc/purchase-v2/materials/<int:material_id>/delete', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_purchase_v2_material_delete(material_id):
         row = MaterialV2.query.get_or_404(material_id)
         has_purchase = PurchaseV2.query.filter_by(material_id=row.id, is_void=False).first() is not None
@@ -169,6 +172,7 @@ def register(app):
 
     @app.route('/hdc/purchase-v2/purchases', methods=['GET', 'POST'])
     @login_required
+    @_money_write_required()
     def hdc_purchase_v2_purchases():
         if request.method == 'POST':
             supplier_id = request.form.get('supplier_id', type=int)
@@ -274,6 +278,7 @@ def register(app):
 
     @app.route('/hdc/purchase-v2/purchases/<int:purchase_id>/edit', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_purchase_v2_purchase_edit(purchase_id):
         row = PurchaseV2.query.get_or_404(purchase_id)
         if row.is_void:
@@ -345,6 +350,7 @@ def register(app):
 
     @app.route('/hdc/purchase-v2/purchases/<int:purchase_id>/delete', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_purchase_v2_purchase_delete(purchase_id):
         row = PurchaseV2.query.get_or_404(purchase_id)
         if row.is_void:
@@ -368,6 +374,7 @@ def register(app):
 
     @app.route('/hdc/purchase-v2/suppliers', methods=['GET', 'POST'])
     @login_required
+    @_money_write_required()
     def hdc_purchase_v2_suppliers():
         if request.method == 'POST':
             name = _normalize_name_ci(request.form.get('name'))
@@ -563,6 +570,7 @@ def register(app):
 
     @app.route('/hdc/purchase-v2/suppliers/<int:supplier_id>/purchase', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_purchase_v2_supplier_purchase(supplier_id):
         supplier = Supplier.query.get_or_404(supplier_id)
         if supplier.is_void or (supplier.status or 'active').strip().lower() != 'active':
@@ -616,6 +624,7 @@ def register(app):
 
     @app.route('/hdc/purchase-v2/suppliers/<int:supplier_id>/payment', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_purchase_v2_supplier_payment(supplier_id):
         supplier = Supplier.query.get_or_404(supplier_id)
         amount = max(0.0, _flt(request.form.get('amount'), 0.0))
@@ -653,6 +662,7 @@ def register(app):
 
     @app.route('/hdc/purchase-v2/suppliers/<int:supplier_id>/edit', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_purchase_v2_supplier_edit(supplier_id):
         supplier = Supplier.query.get_or_404(supplier_id)
         name = _normalize_name_ci(request.form.get('name')) or supplier.name
@@ -702,6 +712,7 @@ def register(app):
 
     @app.route('/hdc/purchase-v2/suppliers/<int:supplier_id>/suspend', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_purchase_v2_supplier_suspend(supplier_id):
         supplier = Supplier.query.get_or_404(supplier_id)
         mode = (request.form.get('mode') or 'suspend').strip().lower()
@@ -718,6 +729,7 @@ def register(app):
 
     @app.route('/hdc/purchase-v2/delivered', methods=['GET', 'POST'])
     @login_required
+    @_money_write_required()
     def hdc_purchase_v2_delivered():
         if request.method == 'POST':
             purchase_id = request.form.get('purchase_id', type=int)
@@ -849,6 +861,7 @@ def register(app):
 
     @app.route('/hdc/purchase-v2/delivered/transfer', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_purchase_v2_delivery_transfer():
         material_id = request.form.get('material_id', type=int)
         from_project_id = request.form.get('from_project_id', type=int)
@@ -923,6 +936,7 @@ def register(app):
 
     @app.route('/hdc/purchase-v2/usage', methods=['GET', 'POST'])
     @login_required
+    @_money_write_required()
     def hdc_purchase_v2_usage_page():
         if request.method == 'POST':
             purchase_id = request.form.get('purchase_id', type=int)
@@ -1113,6 +1127,7 @@ def register(app):
 
     @app.route('/hdc/purchase-v2/delivered/<int:delivery_id>/void', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_purchase_v2_delivery_void(delivery_id):
         row = Delivery.query.get_or_404(delivery_id)
         if row.is_void:
@@ -1130,6 +1145,7 @@ def register(app):
 
     @app.route('/hdc/purchase-v2/delivered/<int:delivery_id>/edit', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_purchase_v2_delivery_edit(delivery_id):
         row = Delivery.query.get_or_404(delivery_id)
         if row.is_void:
@@ -1164,6 +1180,7 @@ def register(app):
 
     @app.route('/hdc/purchase-v2/usage/<int:usage_id>/void', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_purchase_v2_usage_void(usage_id):
         row = UsageLogV2.query.get_or_404(usage_id)
         if row.is_void:
@@ -1181,6 +1198,7 @@ def register(app):
 
     @app.route('/hdc/purchase-v2/usage/<int:usage_id>/edit', methods=['POST'])
     @login_required
+    @_money_write_required()
     def hdc_purchase_v2_usage_edit(usage_id):
         row = UsageLogV2.query.get_or_404(usage_id)
         if row.is_void:
