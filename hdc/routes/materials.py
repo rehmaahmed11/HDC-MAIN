@@ -17,7 +17,7 @@ from hdc.utils.format import _activity_at_for, _flt, _parse_date
 
 def register(app):
     """Register Legacy (v1) materials, usage and purchases."""
-    # â”€â”€ Materials â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # --- Materials -------------------------------------------------------------
     @app.route('/hdc/materials', methods=['GET', 'POST'])
     @login_required
     @_money_write_required()

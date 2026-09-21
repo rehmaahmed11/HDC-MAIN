@@ -6,6 +6,7 @@ See MODULARIZATION_PLAN.md for the module map.
 from sqlalchemy import text
 
 from hdc.extensions import db
+from hdc.utils.dates import _pkt_now_naive
 
 def _ensure_timeentry_unique_indexes():
     with db.engine.connect() as conn:
@@ -824,21 +825,21 @@ def _run_migrations():
                 # Ensure default fallback category exists.
                 conn.execute(text("""
                     INSERT INTO hdc_expense_category(name, active_status, created_at)
-                    SELECT 'Misc', 1, CURRENT_TIMESTAMP
+                    SELECT 'Misc', 1, :pkt_now
                     WHERE NOT EXISTS (
                         SELECT 1 FROM hdc_expense_category WHERE lower(trim(name)) = 'misc'
                     )
-                """))
+                """), {"pkt_now": _pkt_now_naive()})
                 if has_category:
                     conn.execute(text("""
                         INSERT INTO hdc_expense_category(name, active_status, created_at)
-                        SELECT DISTINCT trim(category), 1, CURRENT_TIMESTAMP
+                        SELECT DISTINCT trim(category), 1, :pkt_now
                         FROM hdc_expense
                         WHERE category IS NOT NULL AND trim(category) <> ''
                           AND lower(trim(category)) NOT IN (
                               SELECT lower(trim(name)) FROM hdc_expense_category
                           )
-                    """))
+                    """), {"pkt_now": _pkt_now_naive()})
                     conn.execute(text("""
                         UPDATE hdc_expense
                         SET category_id = (
@@ -949,13 +950,13 @@ def _run_migrations():
                     (subcontractor_id, project_id, stage_id, actor_user_id, event_type, from_value, to_value, amount, notes, created_at)
                 SELECT
                     s.id, s.project_id, s.stage_id, NULL, 'create', '', COALESCE(s.subcontractor_code, ''), 0,
-                    'Backfill: subcontractor profile', COALESCE(s.created_at, CURRENT_TIMESTAMP)
+                    'Backfill: subcontractor profile', COALESCE(s.created_at, :pkt_now)
                 FROM hdc_subcontractor s
                 WHERE NOT EXISTS (
                     SELECT 1 FROM hdc_subcontract_event e
                     WHERE e.subcontractor_id = s.id AND e.event_type = 'create'
                 )
-            """))
+            """), {"pkt_now": _pkt_now_naive()})
             conn.commit()
         except Exception:
             pass
@@ -968,7 +969,7 @@ def _run_migrations():
                     s.id, s.project_id, s.stage_id, NULL, 'shift', 'backfill',
                     COALESCE(st.name, ('STAGE#' || s.stage_id)), 0,
                     'Backfill: stage assignment',
-                    COALESCE(st.created_at, s.created_at, CURRENT_TIMESTAMP)
+                    COALESCE(st.created_at, s.created_at, :pkt_now)
                 FROM hdc_subcontractor s
                 LEFT JOIN hdc_stage st ON st.id = s.stage_id
                 WHERE s.stage_id IS NOT NULL
@@ -979,7 +980,7 @@ def _run_migrations():
                       AND e.stage_id = s.stage_id
                       AND e.event_type IN ('shift', 'reassign')
                 )
-            """))
+            """), {"pkt_now": _pkt_now_naive()})
             conn.commit()
         except Exception:
             pass
@@ -995,7 +996,7 @@ def _run_migrations():
                         ELSE COALESCE(s.lump_sum_amount, 0)
                     END,
                     ('Backfill: Rate ' || COALESCE(s.rate_per_sqft, 0) || ' | Sqft ' || COALESCE(s.total_sqft, 0) || ' | Lump ' || COALESCE(s.lump_sum_amount, 0)),
-                    COALESCE(s.created_at, CURRENT_TIMESTAMP)
+                    COALESCE(s.created_at, :pkt_now)
                 FROM hdc_subcontractor s
                 WHERE s.stage_id IS NOT NULL
                   AND NOT EXISTS (
@@ -1004,7 +1005,7 @@ def _run_migrations():
                       AND e.stage_id = s.stage_id
                       AND e.event_type = 'price_update'
                 )
-            """))
+            """), {"pkt_now": _pkt_now_naive()})
             conn.commit()
         except Exception:
             pass

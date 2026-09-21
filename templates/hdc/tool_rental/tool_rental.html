@@ -200,7 +200,10 @@
                             <div class="row g-2">
                                 <div class="col-6">
                                     <label class="form-label">Project / Site</label>
-                                    <select name="project_id" class="form-select">
+                                    {# The id is what syncRentalStages() below hooks into,
+                                       so choosing a site narrows the Stage list to that
+                                       project (audit 7.3 / Step 12.5). #}
+                                    <select name="project_id" id="rentalProjectSelect" class="form-select">
                                         <option value="">Select Site</option>
                                         {% for p in projects %}
                                         <option value="{{ p.id }}">{{ p.name }} ({{ p.project_code }})</option>

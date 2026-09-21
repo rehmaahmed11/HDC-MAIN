@@ -31,7 +31,7 @@ from hdc.utils.format import _activity_at_for, _amount_to_words, _flt, _is_pdf_u
 
 def register(app):
     """Register Projects, stages, drawings, stage library, owner payments."""
-    # â”€â”€ Projects â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # --- Projects --------------------------------------------------------------
     @app.route('/hdc/projects')
     @login_required
     def hdc_projects():
@@ -312,7 +312,7 @@ def register(app):
         return redirect(url_for('hdc_project_detail', pid=pid))
 
 
-    # â”€â”€ Stages â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # --- Stages ----------------------------------------------------------------
     @app.route('/hdc/projects/<int:pid>/stage/add', methods=['GET', 'POST'])
     @login_required
     def hdc_add_stage(pid):

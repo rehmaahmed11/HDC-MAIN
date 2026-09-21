@@ -26,7 +26,8 @@ import csv
 import io
 from datetime import timedelta
 
-from flask import Response, abort, flash, redirect, render_template, request, url_for
+from flask import (Response, abort, current_app, flash, redirect, render_template,
+                   request, url_for)
 from flask_login import current_user, login_required
 from sqlalchemy import func, or_
 
@@ -154,6 +155,19 @@ def _hub_context():
     except Exception:
         money_pending = {}
 
+    # Day-close difference policy (audit 5.6 / decision 15.2): show the
+    # threshold on the Hub, and flag any already-locked day whose variance
+    # exceeds it so a large difference is visible, never buried.
+    try:
+        day_close_threshold = float(
+            current_app.config.get('HDC_DAY_CLOSE_DIFFERENCE_THRESHOLD', 5000) or 0)
+    except Exception:
+        day_close_threshold = 5000.0
+    large_difference_locks = [
+        l for l in lock_history
+        if day_close_threshold > 0 and abs(float(l.difference or 0)) > day_close_threshold
+    ]
+
     return {
         'today': today.isoformat(),
         'yesterday': yesterday.isoformat(),
@@ -165,6 +179,8 @@ def _hub_context():
         'lock_yesterday': lock_yesterday,
         'yesterday_expected': yesterday_expected,
         'lock_history': lock_history,
+        'day_close_threshold': day_close_threshold,
+        'large_difference_locks': large_difference_locks,
         'entry_total': entry_total,
         'txn_total': txn_total,
         'accounts': accounts,
@@ -321,12 +337,21 @@ def register(app):
                     'Opening Balance', 'Current Balance', 'Posted Txns',
                     'Linked Entity', 'Party', 'Created'])
         for a in accounts:
+            # Never let the literal text "None" reach a CSV cell.  For an
+            # account with no linked entity the classification label *is* the
+            # string "None" (ENTITY_LABELS["none"]), which reads like a leaked
+            # Python None in Excel — so write a blank instead (audit 7.5).
+            linked = '' if str(a.get('linked_entity_type') or '').lower() in ('', 'none') \
+                else (a.get('linked_entity_label') or '')
             w.writerow([a['id'], a['name'], a['status'], a['class_category'],
-                        a['class_subcategory'], a['class_account_type'], a['channel_label'],
-                        a['type'], a['bank_name'], a['account_number'], a['iban'],
+                        a['class_subcategory'], a['class_account_type'],
+                        a.get('channel_label') or '',
+                        a['type'], a.get('bank_name') or '', a.get('account_number') or '',
+                        a.get('iban') or '',
                         f"{a['opening_balance']:.2f}", f"{a['current_balance']:.2f}",
-                        a['txn_count'], a['linked_entity_label'], a['linked_party_name'],
-                        a['created_at']])
+                        a['txn_count'], linked,
+                        a.get('linked_party_name') or '',
+                        a['created_at'] or ''])
         fname = f"hdc-accounts-{_show_mode()}-{_pkt_today().isoformat()}.csv"
         return Response(buf.getvalue(), mimetype='text/csv',
                         headers={'Content-Disposition': f'attachment; filename="{fname}"'})

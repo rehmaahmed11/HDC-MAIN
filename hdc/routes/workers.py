@@ -25,7 +25,7 @@ from hdc.utils.normalize import _normalize_trade_name
 
 def register(app):
     """Register Workers, trades, ledgers, advances, payments and rates."""
-    # â”€â”€ Workers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # --- Workers ---------------------------------------------------------------
     @app.route('/hdc/workers', methods=['GET', 'POST'])
     @login_required
     @_money_write_required()

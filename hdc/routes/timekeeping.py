@@ -21,7 +21,7 @@ from hdc.utils.format import _activity_at_for, _flt, _parse_date
 
 def register(app):
     """Register Attendance / timekeeping day sheet and corrections."""
-    # â”€â”€ Attendance â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # --- Attendance ------------------------------------------------------------
     @app.route('/hdc/attendance', methods=['GET', 'POST'])
     @app.route('/hdc/timekeeping', methods=['GET', 'POST'])
     @login_required

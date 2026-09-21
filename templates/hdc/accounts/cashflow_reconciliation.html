@@ -130,7 +130,21 @@
                         <i class="fas fa-floppy-disk me-1"></i>Save counted balances
                     </button>
                     <input type="text" name="note" class="form-control" style="max-width:280px;"
-                           placeholder="Note (optional, saved with the lock)">
+                           {% if day_difference_exceeds_threshold %}required{% endif %}
+                           placeholder="{% if day_difference_exceeds_threshold %}Reason (required — large difference){% else %}Note (optional, saved with the lock){% endif %}">
+                    {% if day_difference_exceeds_threshold %}
+                    <div class="form-check border rounded px-3 py-2 bg-warning-subtle" style="max-width:420px;">
+                        <input class="form-check-input" type="checkbox" value="1" id="confirmDifference"
+                               name="confirm_difference" required>
+                        <label class="form-check-label small" for="confirmDifference">
+                            I confirm the
+                            <strong>{{ money(totals.difference_minor) }}</strong>
+                            difference — this is above the
+                            {{ "{:,.0f}".format(day_close_threshold) }} PKR threshold.
+                            A written reason above is required to lock.
+                        </label>
+                    </div>
+                    {% endif %}
                     <button type="submit" name="action" value="lock_day" class="btn btn-success">
                         <i class="fas fa-lock me-1"></i>Verify &amp; lock day
                     </button>

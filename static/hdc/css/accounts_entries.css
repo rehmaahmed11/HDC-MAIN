@@ -1,0 +1,38 @@
+/* Accounts — All Entries page styles, extracted from
+   templates/hdc/accounts/accounts_entries.html (audit 7.3). */
+.entries-compact th,
+.entries-compact td {
+    padding: .26rem .34rem;
+    font-size: .76rem;
+    vertical-align: middle;
+}
+.entries-compact .badge {
+    font-size: .62rem;
+}
+.text-truncate-cell {
+    max-width: 120px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.entries-compact .small {
+    font-size: .68rem !important;
+    line-height: 1.2;
+}
+.action-cell {
+    white-space: nowrap;
+    min-width: 126px;
+}
+.btn-mini {
+    padding: .08rem .3rem;
+    font-size: .67rem;
+    line-height: 1.2;
+}
+.badge-mini {
+    padding: .18em .35em;
+    font-size: .58rem;
+}
+@media (max-width: 1400px) {
+    .text-truncate-cell { max-width: 95px; }
+    .action-cell { min-width: 112px; }
+}

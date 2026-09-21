@@ -186,6 +186,40 @@ This report documents the implementation of unified money handling from the **Ac
 - Error messages include readable balance after transaction
 - Prevents floating-point edge cases
 
+## Corrections — the independent audit found this page dead on arrival
+
+**Read this before trusting the ✅ list below.** An independent audit
+(`Audit Report For Fixing.md`, main @ `068d124`) re-ran this feature and found
+that the code described here did not actually work as reported. The table in
+the next section is the *intended* design; this section records what was
+broken and what fixed it.
+
+| Reported as working | What the audit actually found | Fixed by |
+|---|---|---|
+| Money Center page | **HTTP 500 for every user, always.** `BuildError` on `url_for(flow.route)` — 14 of the 22 `MONEY_FLOWS` routes were unbuildable in `money_center.html` (4 endpoints that do not exist, 9 that need arguments, 1 composite string) | **Step 1** — every flow route replaced with its argument-free list endpoint, `safe_url_for()` added as a Jinja global in `hdc/app.py`, template switched to it |
+| Four dropdown feeds | **4 × 404.** The JS called `/hdc/api/workers/options`, `/hdc/api/suppliers/options`, `/hdc/api/subcontractors/options`, `/hdc/api/office_staff/options` — no such URLs. Office staff was additionally never loaded on init, and its API filtered on a non-existent `OfficeStaff.is_void` field | **Step 6** — `/options` suffix removed, all four loaders wired into `loadAllOptions()`, API filters on `active_status`; regression-tested in `tests/test_money_center.py` |
+| "Supplier / Material Payment" flow | Recording a supplier payment returned **HTTP 500** and saved nothing — `PurchaseV2.order_date` does not exist (the column is `date`) | **Step 2** — one-word fix in `hdc/services/purchase.py` |
+| Single source of truth for payables | Paying a supplier through the generic `party_payment` path **recorded the money but never reduced the payable**, so the same supplier could be paid twice | **Step 15.3** — `party_payment` (and its `pay_to_project` / `pay_to_credit_debit` aliases) now *refuse* a supplier/subcontractor/worker with a message naming the correct entry screen |
+| "Void Sync" | Voiding a ledger row from *All Entries* left the Cash Flow document **active** — register, cash-flow report and ledger disagreed with no warning | **Step 3** — the ledger row back-links to the CF document (`cash_flow_entry_<direction>`), and the void-sync + forensic scan cover all three CF families |
+
+The ✅ list below is **verified by `tests/test_money_center.py`** (10 tests:
+the flow routes all build, the page is 200, the four feeds answer, a supplier
+payment reduces the payable, a void from either side syncs, and quick-post
+refuses a one-sided supplier payment). If you change this feature, run that
+file first — it exists precisely because the claims in this report were once
+wrong.
+
+Two further corrections to the numbers in this document:
+
+* The page is no longer a single 75 KB template with ~21 KB of inline JS. The
+  styles live in `static/hdc/css/money_center.css` and the script in
+  `static/hdc/js/pages/money_center.js`; the template passes server data
+  through a `<script id="moneyCenterConfig" type="application/json">` block
+  (audit Step 12).
+* The Money Center is **admin-only** for both reading and posting. Operational
+  money writes elsewhere require `admin`/`accountant` — see the access matrix
+  in `hdc/extensions.py` and the README.
+
 ## Acceptance Criteria Met
 
 ✅ **Inventory all money types (in/out/transfer) across modules:**

@@ -16,7 +16,7 @@ from hdc.utils.format import _is_strong_password, _parse_date
 
 def register(app):
     """Register User management and event recorder."""
-    # â”€â”€ User Management â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # --- User Management -------------------------------------------------------
     @app.route('/hdc/users', methods=['GET', 'POST'])
     @login_required
     def hdc_users():

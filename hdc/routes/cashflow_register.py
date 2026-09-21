@@ -22,7 +22,8 @@ import io
 import secrets
 from datetime import timedelta
 
-from flask import Response, flash, redirect, render_template, request, url_for
+from flask import (Response, current_app, flash, redirect, render_template,
+                   request, url_for)
 from flask_login import current_user, login_required
 
 from hdc.extensions import _admin_only, db
@@ -53,6 +54,7 @@ from hdc.services.cashflow_register import (
 )
 from hdc.utils.dates import _pkt_now_naive, _pkt_today
 from hdc.utils.format import _parse_date, _payload_int
+from hdc.utils.money import from_minor
 
 PER_PAGE = 50
 
@@ -306,8 +308,12 @@ def register(app):
                     flash('Counted balances saved.', 'success')
 
                 elif action == 'lock_day':
-                    lock = lock_cash_day(day, actor=current_user,
-                                         note=(request.form.get('note') or '').strip() or None)
+                    # ``confirm_difference`` is the explicit tick that lets a
+                    # variance above the threshold through (audit 5.6).
+                    lock = lock_cash_day(
+                        day, actor=current_user,
+                        note=(request.form.get('note') or '').strip() or None,
+                        confirm_difference=bool(request.form.get('confirm_difference')))
                     flash(f'Day {day.isoformat()} verified and locked '
                           f'(difference {lock.difference:,.2f} PKR). Counted balances now carry forward.',
                           'success')
@@ -347,6 +353,17 @@ def register(app):
         # Day register rows so the counted figure can be checked against them.
         day_entries = register_row_dicts(register_rows(date_from=day, date_to=day, limit=None))
 
+        # Large-variance gate (audit 5.6): the template only shows the confirm
+        # checkbox + required reason once the difference is over the threshold.
+        try:
+            day_close_threshold = float(
+                current_app.config.get('HDC_DAY_CLOSE_DIFFERENCE_THRESHOLD', 5000) or 0)
+        except Exception:
+            day_close_threshold = 5000.0
+        day_difference = abs(float(from_minor(int(totals.get('difference_minor') or 0))))
+        day_difference_exceeds_threshold = bool(
+            day_close_threshold > 0 and day_difference > day_close_threshold)
+
         return render_template(
             'accounts/cashflow_reconciliation.html',
             day=day,
@@ -356,6 +373,9 @@ def register(app):
             lock=lock,
             locked=lock is not None,
             day_entries=day_entries,
+            day_close_threshold=day_close_threshold,
+            day_difference=day_difference,
+            day_difference_exceeds_threshold=day_difference_exceeds_threshold,
             prev_day=(day - timedelta(days=1)).isoformat(),
             next_day=(day + timedelta(days=1)).isoformat(),
             today=_pkt_today().isoformat(),
