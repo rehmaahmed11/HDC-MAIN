@@ -5,7 +5,7 @@ from hdc.models.auth import ActivityLog, HDCUser, UserActivity
 from hdc.models.materials import Delivery, Material, MaterialUsage, MaterialV2, Purchase, PurchaseV2, Supplier, SupplierLedger, UsageLogV2
 from hdc.models.office import AllowanceCategory, OfficeExpense, OfficeExpenseCategory, OfficeStaff, OfficeStaffAttendance, OfficeStaffLedger, StaffAllowance
 from hdc.models.projects import CustomFormula, Estimation, EstimationStage, Project, Stage, StageDefinition, StageDrawing, StageRateHistory
-from hdc.models.subcontract import SubcontractAttendance, SubcontractEvent, SubcontractLabourAttendance, SubcontractLabourPayment, SubcontractLabourWorker, SubcontractPayment, Subcontractor
+from hdc.models.subcontract import SubcontractAttendance, SubcontractEvent, SubcontractLabourAttendance, SubcontractLabourPayment, SubcontractLabourWorker, SubcontractPayment, SubcontractTeamAttendance, Subcontractor
 from hdc.models.workforce import Attendance, AttendanceDay, AttendanceMark, LabourLedger, LabourRateHistory, PayrollItem, PayrollRun, TimeEntry, Worker, WorkerRate, WorkerTrade
 from hdc.models.cashflow import AccountReconciliation, CashDayAccountPosition, CashDayLock, CashFlowCategory, CashFlowEntry, CashFlowEntryAudit, CashFlowParty, CashFlowSubcategory
 from hdc.models.tool_rental import Tool, ToolCategory, ToolMovementLog, ToolRental, ToolRentalAccountTxn, ToolRentalItem, ToolRentalPayment, ToolRentalReturn, ToolRentalReturnItem, ToolRentalTransfer, ToolRentalTransferItem

@@ -47,9 +47,45 @@ def register(app):
         )
 
 
-    @app.route('/hdc/office-management/staff')
+    def _create_office_staff_from_form():
+        """Create one office-staff row from the submitted form.
+
+        Shared by ``POST /hdc/office-management/staff`` (the canonical URL the
+        UI points at) and the legacy ``POST …/staff/ledger`` — a create action
+        landing on a URL called "ledger" was the confusing part (audit 13.5).
+        """
+        code = (request.form.get('staff_code') or '').strip() or _next_office_staff_code()
+        name = (request.form.get('name') or '').strip()
+        role_type = (request.form.get('role_type') or '').strip()
+        phone = (request.form.get('phone') or '').strip()
+        monthly_salary = _flt(request.form.get('monthly_salary'))
+        if not name:
+            flash('Staff name is required.', 'warning')
+            return redirect(url_for('hdc_office_staff_ledger_list'))
+        if OfficeStaff.query.filter(OfficeStaff.staff_code == code).first():
+            flash('Staff code already exists.', 'danger')
+            return redirect(url_for('hdc_office_staff_ledger_list'))
+        row = OfficeStaff(
+            staff_code=code,
+            name=name,
+            role_type=role_type,
+            phone=phone,
+            monthly_salary=monthly_salary,
+            active_status=True
+        )
+        db.session.add(row)
+        db.session.commit()
+        flash(f'Office staff "{row.name}" added.', 'success')
+        return redirect(url_for('hdc_office_staff_ledger_list'))
+
+
+    @app.route('/hdc/office-management/staff', methods=['GET', 'POST'])
     @login_required
+    @_money_write_required()
     def hdc_office_staff_home():
+        # POST = add a staff member, which is what this URL reads like.
+        if request.method == 'POST':
+            return _create_office_staff_from_form()
         staff_count = int(OfficeStaff.query.count() or 0)
         attendance_days = int(
             db.session.query(func.count(OfficeStaffAttendance.id))
@@ -68,30 +104,10 @@ def register(app):
     @login_required
     @_money_write_required()
     def hdc_office_staff_ledger_list():
+        # Legacy create path — kept working so old bookmarks and any external
+        # form still post successfully.
         if request.method == 'POST':
-            code = (request.form.get('staff_code') or '').strip() or _next_office_staff_code()
-            name = (request.form.get('name') or '').strip()
-            role_type = (request.form.get('role_type') or '').strip()
-            phone = (request.form.get('phone') or '').strip()
-            monthly_salary = _flt(request.form.get('monthly_salary'))
-            if not name:
-                flash('Staff name is required.', 'warning')
-                return redirect(url_for('hdc_office_staff_ledger_list'))
-            if OfficeStaff.query.filter(OfficeStaff.staff_code == code).first():
-                flash('Staff code already exists.', 'danger')
-                return redirect(url_for('hdc_office_staff_ledger_list'))
-            row = OfficeStaff(
-                staff_code=code,
-                name=name,
-                role_type=role_type,
-                phone=phone,
-                monthly_salary=monthly_salary,
-                active_status=True
-            )
-            db.session.add(row)
-            db.session.commit()
-            flash(f'Office staff "{row.name}" added.', 'success')
-            return redirect(url_for('hdc_office_staff_ledger_list'))
+            return _create_office_staff_from_form()
 
         staff_rows = OfficeStaff.query.order_by(OfficeStaff.created_at.desc(), OfficeStaff.id.desc()).all()
         snapshots = {int(s.id): _office_staff_ledger_snapshot(s.id) for s in staff_rows}
@@ -527,7 +543,7 @@ def register(app):
         return redirect(url_for('hdc_office_expenses'))
 
 
-    # â”€â”€ Allowance Categories â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # --- Allowance Categories --------------------------------------------------
     @app.route('/hdc/office-management/allowance-categories', methods=['GET', 'POST'])
     @login_required
     @_money_write_required()
@@ -589,7 +605,7 @@ def register(app):
         return redirect(url_for('hdc_allowance_categories'))
 
 
-    # â”€â”€ Staff Allowances â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # --- Staff Allowances ------------------------------------------------------
     @app.route('/hdc/office-management/staff/<int:sid>/allowances', methods=['GET', 'POST'])
     @login_required
     @_money_write_required()

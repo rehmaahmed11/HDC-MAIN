@@ -73,7 +73,10 @@ tests/                  differential smoke test vs the pre-split baseline
 ```
 
 **Dependency rule:** `routes → services/core → models → utils`, never
-upwards. `scripts/check_layers.py` enforces it (acyclic, 64 modules).
+upwards. `scripts/check_layers.py` enforces it (acyclic, 70 modules).
+
+**Scale (keep these honest — the audits check them):** 98 templates,
+73 models, 70 modules.
 
 ## Accounts &amp; Cash
 
@@ -82,9 +85,25 @@ The money side of the app is one section with a single ledger
 disagree between screens. `/hdc/accounts/hub` is the landing page and explains
 each of these in the UI.
 
+### Who may do what
+
+Money **writes** require role `admin` or `accountant`. This is enforced by
+`_money_write_required()` in `hdc/extensions.py`, applied at the top of every
+money-moving handler (HTML handlers redirect to the dashboard with a message;
+JSON handlers return **403**). Reads are deliberately wider than writes: staff
+may *view* the operational pages (workers, payroll, expenses, subcontractors,
+purchase-v2, tools, office, reports, timekeeping) but the Accounts section,
+Money Center, `/hdc/settings` and `/hdc/users` stay `admin`/`accountant` only.
+
+The matrix is written down as data in `ACCESS_MATRIX` (also in
+`hdc/extensions.py`) and pinned by
+`tests/test_money_permissions.py::test_read_matrix_is_complete_and_matches_enforcement`,
+which fails if a new route lands in no bucket.
+
 | Page | URL | Job |
 |---|---|---|
 | **Accounts Hub** | `/hdc/accounts/hub` | Landing page: today's in/out, what needs attention, and what every other page is for |
+| **Money Center** | `/hdc/accounts/money-center` | One workspace for recording money — Direction → Type → Details, with pendings per party and a quick-post API |
 | **Manage Accounts** | `/hdc/accounts/manage` | The account master list — every account, live balances, classification groups, filters, suspend/archive/restore, CSV |
 | **Add / Edit Account** | `/hdc/accounts/new`, `/hdc/accounts/<id>/edit` | Full form for details *and* the Category → Subcategory → Account Type → Channel hierarchy |
 | **Transactions** | `/hdc/accounts` | Transaction workspace: KPI tiles with drilldown, project receivables, the full double-entry form |
@@ -93,6 +112,26 @@ each of these in the UI.
 | **Cash Flow** | `/hdc/accounts/cashflow` | **Where you read** — the daily in/out report over the whole ledger, including flows other modules posted |
 | **Day Close** | `/hdc/accounts/cashflow/reconciliation` | Counted cash vs ledger per account, then lock the day; a locked day rolls its counted closing forward and rejects back-dated entries |
 | **Reconciliation Check** | `/hdc/accounts/reconciliation` | Forensic scan of ledger rows vs the source records that created them |
+
+### Day Close: the large-difference rule
+
+Closing a day with a cash difference larger than
+`HDC_DAY_CLOSE_DIFFERENCE_THRESHOLD` (**5,000 PKR** by default, set the env var
+to change it, `0` disables the rule) requires an explicit confirmation **and** a
+written reason. Without both, `lock_cash_day()` refuses and nothing is written.
+The Hub lists recent closes and highlights any locked day above the threshold
+with its reason. This exists because a −492,000 PKR difference could previously
+be locked silently.
+
+### Supplier payments have one path
+
+Paying a party that keeps its own ledger (supplier, subcontractor, worker) must
+go through **that party's own payment entry** — *Pay supplier/materials* on the
+supplier page, or the worker/subcontractor payment screen. The generic
+`party_payment` type refuses those parties with an explanatory message, because
+it would move the cash and leave the payable untouched (so the same supplier
+could be paid twice). Ordinary party payments that have no payable — expenses
+paid straight to a person — still work as before.
 
 Two rules worth knowing before changing this area:
 

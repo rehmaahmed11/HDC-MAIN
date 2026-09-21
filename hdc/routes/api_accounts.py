@@ -18,7 +18,7 @@ from hdc.utils.money import sync_money_fields
 
 def register(app):
     """Register JSON API: /api/accounts/*."""
-    # â”€â”€ Bootstrap â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # --- Bootstrap -------------------------------------------------------------
     @app.route('/api/accounts/create_account', methods=['POST'])
     @login_required
     def api_accounts_create_account():

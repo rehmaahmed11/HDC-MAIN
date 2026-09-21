@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta
 
+from flask import current_app
 from sqlalchemy import func, or_
 
 from hdc.extensions import db
@@ -1069,13 +1070,26 @@ def _is_dormant(pos):
     ))
 
 
-def lock_cash_day(day, actor=None, note=None, commit=True):
+def _day_close_difference_threshold():
+    """PKR threshold above which a day-close variance needs a reason."""
+    try:
+        return float(current_app.config.get('HDC_DAY_CLOSE_DIFFERENCE_THRESHOLD', 5000) or 0)
+    except Exception:
+        return 5000.0
+
+
+def lock_cash_day(day, actor=None, note=None, confirm_difference=False, commit=True):
     """Verify & lock a financial day; each counted closing carries forward.
 
     Every money account must have a counted figure.  Where the counted figure
     differs from the ledger-computed closing, an immutable
     :class:`AccountReconciliation` snapshot is written per account so the
     discrepancy is on the record rather than silently absorbed.
+
+    A total variance larger than ``HDC_DAY_CLOSE_DIFFERENCE_THRESHOLD`` (5,000
+    PKR by default) is not allowed to be locked until the caller both confirms
+    it and writes a reason — the fix for audit 5.6, where a -492,000 PKR
+    difference could be locked silently.
     """
     if is_day_locked(day):
         raise ValueError(f'Financial day {day.isoformat()} is already locked.')
@@ -1101,6 +1115,22 @@ def lock_cash_day(day, actor=None, note=None, commit=True):
     actor_name = _cf_actor_name(actor)
     now = _pkt_now_naive()
     totals = day_totals(positions)
+
+    # Large-variance gate (audit 5.6 / decision 15.2).  Checked on the totals
+    # before anything is written, so a refused close leaves no partial state.
+    threshold = _day_close_difference_threshold()
+    variance = float(from_minor(int(totals.get('difference_minor') or 0)))
+    if threshold > 0 and abs(variance) > threshold:
+        if not confirm_difference:
+            raise ValueError(
+                f'Day difference is {variance:,.2f} PKR, which is more than the '
+                f'{threshold:,.0f} PKR threshold. Confirm the difference before locking.'
+            )
+        if not (note or '').strip():
+            raise ValueError(
+                f'Day difference is {variance:,.2f} PKR (above the {threshold:,.0f} PKR '
+                'threshold) — a written reason is required to lock this day.'
+            )
 
     for pos in positions:
         pos.is_locked = True

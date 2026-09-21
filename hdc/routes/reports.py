@@ -32,7 +32,7 @@ from hdc.utils.format import _parse_date
 
 def register(app):
     """Register Reports and CSV/XLSX/print exports."""
-    # â”€â”€ Reports â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # --- Reports ---------------------------------------------------------------
     @app.route('/hdc/reports')
     @login_required
     def hdc_reports():
@@ -574,7 +574,7 @@ def register(app):
         out = io.StringIO()
         w   = csv.writer(out)
 
-        w.writerow(['HDC ERP â€“ Project Report', p.name])
+        w.writerow(['HDC ERP - Project Report', p.name])
         w.writerow(['Client', p.client or ''])
         w.writerow(['Location', p.location or ''])
         w.writerow(['Contract Type', p.contract_type])
@@ -647,7 +647,7 @@ def register(app):
         p   = d['project']
         wb  = openpyxl.Workbook()
 
-        # â”€â”€ colour palette
+        # --- colour palette --------------------------------------------------------
         GREEN  = '87AF32'
         DKGREY = '2D2D2D'
         LTGREY = 'F2F2F2'
@@ -679,16 +679,16 @@ def register(app):
                 ws.cell(row=row, column=col).border = Border(
                     top=thin, bottom=thin, left=thin, right=thin)
 
-        # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-        # Sheet 1 â€“ Summary
-        # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+        # ----------------------------------------------------------------------------
+        # Sheet 1 - Summary
+        # ----------------------------------------------------------------------------
         ws = wb.active
         ws.title = 'Summary'
         ws.column_dimensions['A'].width = 28
         ws.column_dimensions['B'].width = 22
         ws.row_dimensions[1].height = 30
 
-        _hdr(ws, 1, list(range(1, 3)), 'HDC ERP â€” Project Report', size=14)
+        _hdr(ws, 1, list(range(1, 3)), 'HDC ERP - Project Report', size=14)
         _row(ws, 2, ['Project', p.name], bg=LTGREY, bold=True)
         _row(ws, 3, ['Client', p.client or ''])
         _row(ws, 4, ['Location', p.location or ''])
@@ -716,9 +716,9 @@ def register(app):
             ws.cell(row=i, column=2).number_format = '#,##0.00'
             _border(ws, i, 2)
 
-        # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-        # Sheet 2 â€“ Stage Breakdown
-        # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+        # ----------------------------------------------------------------------------
+        # Sheet 2 - Stage Breakdown
+        # ----------------------------------------------------------------------------
         ws2 = wb.create_sheet('Stage Breakdown')
         hdrs = ['Stage', 'Type', 'Status', 'Stage Value (Rs)',
                 'Labour (Rs)', 'Materials (Rs)', 'Expenses (Rs)', 'Subcontracts (Rs)', 'Total Cost (Rs)']
@@ -751,9 +751,9 @@ def register(app):
                     c.number_format = '#,##0.00'
                 _border(ws2, ri, len(vals))
 
-        # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-        # Sheet 3 â€“ Attendance
-        # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+        # ----------------------------------------------------------------------------
+        # Sheet 3 - Attendance
+        # ----------------------------------------------------------------------------
         ws3 = wb.create_sheet('Attendance')
         att_hdrs = ['Date', 'Worker', 'Hours', 'Wage (Rs)', 'Stage', 'Notes']
         for i, h in enumerate(att_hdrs, 1):
@@ -774,9 +774,9 @@ def register(app):
                 if ci in (3, 4):
                     c.number_format = '#,##0.00'
 
-        # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-        # Sheet 4 â€“ Expenses
-        # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+        # ----------------------------------------------------------------------------
+        # Sheet 4 - Expenses
+        # ----------------------------------------------------------------------------
         ws4 = wb.create_sheet('Expenses')
         exp_hdrs = ['Date', 'Category', 'Amount (Rs)', 'Stage', 'Description']
         for i, h in enumerate(exp_hdrs, 1):
@@ -796,9 +796,9 @@ def register(app):
                 if ci == 3:
                     c.number_format = '#,##0.00'
 
-        # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-        # Sheet 5 â€“ Materials
-        # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+        # ----------------------------------------------------------------------------
+        # Sheet 5 - Materials
+        # ----------------------------------------------------------------------------
         ws5 = wb.create_sheet('Materials')
         mat_hdrs = ['Date', 'Type', 'Material', 'Unit', 'Qty', 'Rate (Rs)', 'Total (Rs)', 'Stage', 'Supplier', 'Return Ref', 'Reason', 'Approved By']
         for i, h in enumerate(mat_hdrs, 1):
@@ -823,9 +823,9 @@ def register(app):
                 if ci in (5, 6, 7):
                     c.number_format = '#,##0.00'
 
-        # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-        # Sheet 6 â€“ Subcontract Payments
-        # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+        # ----------------------------------------------------------------------------
+        # Sheet 6 - Subcontract Payments
+        # ----------------------------------------------------------------------------
         ws6 = wb.create_sheet('Subcontract Payments')
         sp_hdrs = ['Date', 'Subcontractor', 'Amount (Rs)', 'Stage', 'Notes']
         for i, h in enumerate(sp_hdrs, 1):
@@ -845,9 +845,9 @@ def register(app):
                 if ci == 3:
                     c.number_format = '#,##0.00'
 
-        # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-        # Sheet 7 â€“ Owner Payments
-        # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+        # ----------------------------------------------------------------------------
+        # Sheet 7 - Owner Payments
+        # ----------------------------------------------------------------------------
         ws7 = wb.create_sheet('Owner Payments')
         op_hdrs = ['Date', 'Amount (Rs)', 'Remarks']
         for i, h in enumerate(op_hdrs, 1):

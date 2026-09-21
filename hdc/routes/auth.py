@@ -57,7 +57,7 @@ def register(app):
     def _clear_login_failures(key):
         with login_state['lock']:
             login_state['attempts'].pop(key, None)
-    # â”€â”€ Auth â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # --- Auth ------------------------------------------------------------------
     @app.route('/hdc/login', methods=['GET', 'POST'])
     def hdc_login():
         if current_user.is_authenticated:

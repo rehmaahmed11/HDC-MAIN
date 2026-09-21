@@ -22,7 +22,7 @@ from hdc.utils.dates import _pkt_today
 
 def register(app):
     """Register Dashboard, KPI drill-down and cost-entries explorer."""
-    # â”€â”€ Dashboard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # --- Dashboard -------------------------------------------------------------
     @app.route('/hdc/')
     @login_required
     def hdc_dashboard():

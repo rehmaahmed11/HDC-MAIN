@@ -215,11 +215,43 @@ does not need nine confirmations.
 5. **No overdraft.** Treasury accounts (company/cash/bank) cannot go negative;
    the check runs against the derived balance before the row is written.
 6. **No post-dated tampering.** A locked financial day rejects every mutation.
+   A day whose cash difference exceeds `HDC_DAY_CLOSE_DIFFERENCE_THRESHOLD`
+   (default 5,000 PKR) cannot be locked at all until the caller confirms it
+   *and* writes a reason — a large variance is never absorbed silently
+   (decision 15.2).
 7. **Reconciliation is reproducible.** The full carry chain
    (previous → opening → movement → expected → actual → difference → final) is
    stored, so any closing can be re-derived without replaying history.
 8. **Nothing else changed.** Existing screens, reports, imports and APIs are
    untouched; the new columns are additive and optional.
+
+---
+
+## 4b. What the "Total Spent" KPI does and does not include
+
+Decision recorded for audit finding 5.5. The Accounts **Total Spent** tile is a
+**cash-out** figure: `received_total` and `spent_total` are summed from
+`hdc_account_txn` rows whose category is `income`, or one of
+`expense / purchase / payroll / advance`. It answers *"how much money left the
+company in this period"*.
+
+Material that has been **consumed on site** is deliberately *not* part of that
+number. Consumption is recorded in the purchase-v2 usage log
+(`hdc_usage_log_v2`: `quantity`, `cost`), and it is not a cash movement — the
+material was already counted as spend when it was paid for. Adding it to
+`spent_total` would count the same rupees twice.
+
+Because a site engineer still needs that figure, it is surfaced **next to** the
+tile, clearly labelled, as a memo line:
+
+> Consumed (memo, not in total): `<material_consumed_total>`
+
+Backed by `material_consumed_total` / `material_consumed_qty` from
+`_account_dashboard_kpis()` in `hdc/services/accounts.py` (voided usage rows
+excluded, date-range filtered). The tile's label also reads **"Total Spent
+(cash paid)"** so the meaning is unambiguous on screen. If you ever add usage
+cost to the spend total, change this section and the tile together — the memo
+line's tooltip tells the user which one it is.
 
 ---
 

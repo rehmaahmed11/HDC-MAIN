@@ -8,7 +8,7 @@ from flask_login import UserMixin
 from hdc.extensions import db
 from hdc.utils.dates import _pkt_now_naive
 
-# â”€â”€ MODELS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# --- MODELS ----------------------------------------------------------------
 
 class HDCUser(UserMixin, db.Model):
     __tablename__ = 'hdc_user'

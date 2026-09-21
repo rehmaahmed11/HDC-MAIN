@@ -179,4 +179,10 @@ def get_flask_config(settings=None):
         'HDC_LOGIN_MAX_ATTEMPTS': int(os.environ.get('HDC_LOGIN_MAX_ATTEMPTS', '5') or 5),
         'HDC_LOGIN_WINDOW_SECONDS': int(os.environ.get('HDC_LOGIN_WINDOW_SECONDS', '300') or 300),
         'HDC_LOGIN_LOCKOUT_SECONDS': int(os.environ.get('HDC_LOGIN_LOCKOUT_SECONDS', '900') or 900),
+        # Day Close policy (audit 5.6 / decision 15.2): closing a financial day
+        # with a cash difference larger than this requires an explicit
+        # confirmation and a written reason, so a half-million-rupee variance
+        # can never be locked silently.  Set to 0 to disable the prompt.
+        'HDC_DAY_CLOSE_DIFFERENCE_THRESHOLD': float(
+            os.environ.get('HDC_DAY_CLOSE_DIFFERENCE_THRESHOLD', '5000') or 5000),
     }

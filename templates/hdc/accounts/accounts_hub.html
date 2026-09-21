@@ -387,8 +387,16 @@
                     </thead>
                     <tbody>
                         {% for l in lock_history %}
-                        <tr>
-                            <td class="acc-name">{{ l.lock_date.isoformat() }}</td>
+                        <tr {% if day_close_threshold > 0 and (l.difference or 0)|abs > day_close_threshold %}class="table-warning"{% endif %}>
+                            <td class="acc-name">
+                                {{ l.lock_date.isoformat() }}
+                                {% if day_close_threshold > 0 and (l.difference or 0)|abs > day_close_threshold %}
+                                <span class="badge bg-warning text-dark ms-1"
+                                      title="Difference is above the {{ '{:,.0f}'.format(day_close_threshold) }} PKR threshold. This day was locked with a confirmed reason: {{ l.note or 'no reason recorded' }}">
+                                    <i class="fas fa-triangle-exclamation me-1"></i>Large
+                                </span>
+                                {% endif %}
+                            </td>
                             <td class="text-end acc-muted-amount">{{ "{:,.2f}".format(l.total_expected or 0) }}</td>
                             <td class="text-end acc-muted-amount">{{ "{:,.2f}".format(l.total_counted or 0) }}</td>
                             <td class="text-end acc-amount {{ 'neg' if (l.difference or 0) != 0 else 'pos' }}">
@@ -413,6 +421,118 @@
                 </table>
                 <div class="p-2 small text-muted border-top">
                     <i class="fas fa-info-circle me-1"></i>Day Close moved from sidebar to Hub action — now part of Accounts Hub single entry. Click "Open Day Close" above to close today.
+                </div>
+                {% if day_close_threshold > 0 %}
+                <div class="p-2 small border-top">
+                    <i class="fas fa-scale-unbalanced me-1" style="color:#f59e0b;"></i>
+                    <strong>Large-difference rule:</strong>
+                    a day whose cash difference is more than
+                    <strong>{{ "{:,.0f}".format(day_close_threshold) }} PKR</strong>
+                    cannot be locked until someone confirms it and writes a reason.
+                    {% if large_difference_locks %}
+                    <span class="text-danger">
+                        {{ large_difference_locks|length }} locked day{{ '' if large_difference_locks|length == 1 else 's' }}
+                        above the threshold — see the highlighted row{{ '' if large_difference_locks|length == 1 else 's' }} above.
+                    </span>
+                    {% endif %}
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+{# ── Which page does what — the map the sidebar no longer gives ─────────── #}
+<div class="row g-3 mt-1">
+    <div class="col-12">
+        <div class="acc-section mb-0">
+            <div class="acc-section-head">
+                <h5><i class="fas fa-map-signs me-2" style="color:#0ea5e9;"></i>What Each Page Is For</h5>
+                <span class="small text-muted">Where to record, where to read</span>
+            </div>
+            <div class="acc-section-body">
+                <div class="table-responsive">
+                    <table class="table acc-table align-middle mb-3">
+                        <thead>
+                            <tr>
+                                <th style="width:16rem;">Page</th>
+                                <th>What you do there</th>
+                                <th>Kind</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>
+                                    <a href="{{ url_for('hdc_money_center') }}"><strong>Money Center</strong></a>
+                                </td>
+                                <td class="small">
+                                    The one workspace for recording money — pick <em>Direction → Type → Details</em>.
+                                    Starts an owner receipt, worker payment, supplier payment, tool rental and the rest.
+                                </td>
+                                <td><span class="badge bg-success">Record</span></td>
+                            </tr>
+                            <tr>
+                                <td>
+                                    <a href="{{ url_for('hdc_cashflow_register') }}"><strong>CF Register</strong></a>
+                                </td>
+                                <td class="small">
+                                    The raw register of every cash-flow document (in / out / transfer), with void and amend.
+                                    This is the <strong>book of record</strong> for cash movements.
+                                </td>
+                                <td><span class="badge bg-success">Record</span></td>
+                            </tr>
+                            <tr>
+                                <td>
+                                    <a href="{{ url_for('hdc_accounts_manage') }}"><strong>Manage Accounts</strong></a>
+                                </td>
+                                <td class="small">
+                                    Accounts master list — categories, banks, opening balances and the current balance
+                                    derived as <code>opening + in − out</code>. Balances are never stored, so they cannot drift.
+                                </td>
+                                <td><span class="badge bg-primary">Read</span></td>
+                            </tr>
+                            <tr>
+                                <td>
+                                    <a href="{{ url_for('hdc_cashflow') }}"><strong>Cash Flow</strong></a>
+                                </td>
+                                <td class="small">
+                                    The day-by-day cash-flow <em>report</em> — how much came in and went out, by account
+                                    and period. Read-only view over the ledger and the register.
+                                </td>
+                                <td><span class="badge bg-primary">Read</span></td>
+                            </tr>
+                            <tr>
+                                <td>
+                                    <a href="{{ url_for('hdc_accounts_entries') }}"><strong>All Entries</strong></a>
+                                </td>
+                                <td class="small">
+                                    The unified-ledger audit view. Every posting from every module, with receipts,
+                                    void / restore and group splits. Use it to investigate a number.
+                                </td>
+                                <td><span class="badge bg-primary">Read</span></td>
+                            </tr>
+                            <tr>
+                                <td>
+                                    <a href="{{ url_for('hdc_cashflow_reconciliation') }}"><strong>Day Close</strong></a>
+                                </td>
+                                <td class="small">
+                                    Count the cash, compare it against the ledger, then lock the financial day.
+                                    A locked day rejects back-dated entries and rolls counted closing forward.
+                                </td>
+                                <td><span class="badge bg-warning text-dark">Close</span></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="alert alert-light border small mb-0" style="background:var(--card-header-bg);">
+                    <i class="fas fa-circle-info me-1" style="color:#0ea5e9;"></i>
+                    <strong>Cash Flow vs CF Register</strong> — these two are easy to mix up, so to be explicit:
+                    the <strong>CF Register</strong> is where you <em>record</em> a cash movement (it creates the document
+                    and its ledger posting), while <strong>Cash Flow</strong> is where you <em>read</em> the totals
+                    (a report over what is already recorded). If you want to enter money, use the CF Register or the
+                    Money Center; if you want to see how much moved, open Cash Flow. Nothing is ever entered twice —
+                    both views read the same unified ledger (<code>hdc_account_txn</code>).
                 </div>
             </div>
         </div>

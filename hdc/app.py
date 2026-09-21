@@ -4,8 +4,9 @@ Builds the Flask app from the modular package. Behaviour is identical to
 the legacy single-file app: same URLs, same endpoint names, same database.
 """
 import os
+import re
 
-from flask import Flask, url_for
+from flask import Flask, session, url_for
 from werkzeug.routing import BuildError
 
 from hdc.config import BASE_DIR, ensure_dirs, get_flask_config, settings_for_app
@@ -31,6 +32,45 @@ def _safe_url_for(endpoint, **values):
         return "#"
 
 
+# Server-side CSRF injection (audit Step 8).  The base template used to add
+# the hidden token with JavaScript only, so with JS disabled every form POST
+# came back 400.  These two patterns let the server do it for every POST form
+# instead, which also covers any template added later.
+_CSRF_FORM_RE = re.compile(
+    r'<form\b(?=[^>]*\bmethod\s*=\s*["\']?\s*post\b)[^>]*>'
+    # Skip forms that already carry the token (several templates add it by
+    # hand); their hidden input sits right after the opening tag.
+    r'(?!\s*<input\b[^>]*\bname\s*=\s*["\']?_csrf_token)',
+    re.IGNORECASE,
+)
+
+
+def _csrf_hidden_input(token):
+    return '<input type="hidden" name="_csrf_token" value="%s">' % token
+
+
+def _inject_csrf_into_forms(response):
+    """Add a hidden ``_csrf_token`` input to every POST form in HTML output.
+
+    Mirrors what ``static/hdc/js/core/../base.html`` does in the browser, so a
+    form submits correctly whether or not JavaScript ever runs.  The client
+    side hook stays in place as a second layer.
+    """
+    if response.mimetype != 'text/html' or response.is_streamed:
+        return response
+    token = (session.get('_csrf_token') or '').strip()
+    if not token:
+        return response
+    body = response.get_data(as_text=True)
+    if '<form' not in body:
+        return response
+    new_body, added = _CSRF_FORM_RE.subn(
+        lambda m: m.group(0) + _csrf_hidden_input(token), body)
+    if added:
+        response.set_data(new_body)
+    return response
+
+
 def create_app(config_overrides=None):
     """Create and fully initialise one isolated HDC Flask application."""
     settings = settings_for_app(config_overrides)
@@ -52,11 +92,20 @@ def create_app(config_overrides=None):
     login_manager.init_app(app)
     login_manager.user_loader(load_user)
 
+    # A trailing slash should never 404: ``/hdc/workers/`` is matched by the
+    # ``/hdc/workers`` rule (audit 7.4).  Rules that *declare* a trailing
+    # slash keep their own behaviour.
+    app.url_map.strict_slashes = False
+
     # Same hook order as the original module: runtime self-heal first,
     # then CSRF enforcement.
     app.context_processor(_inject_alert_count)
     app.before_request(_ensure_db_runtime_ready)
     app.before_request(_csrf_protect)
+
+    # …and the matching write side: every POST form gets the token inline so
+    # forms keep working with JavaScript disabled.
+    app.after_request(_inject_csrf_into_forms)
 
     @app.after_request
     def _security_headers(response):

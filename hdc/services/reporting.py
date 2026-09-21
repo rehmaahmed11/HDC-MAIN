@@ -237,7 +237,7 @@ def _refresh_alerts():
     db.session.commit()
 
 
-# â”€â”€ Project Report Exports â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# --- Project Report Exports ------------------------------------------------
 def _project_report_data(pid):
     """Gather all data needed for project exports."""
     p      = Project.query.get_or_404(pid)

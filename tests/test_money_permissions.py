@@ -16,7 +16,7 @@ os.environ.setdefault('HDC_SECRET_KEY', 'unit-test-secret')
 os.environ.setdefault('HDC_BOOTSTRAP_ADMIN_PASSWORD', 'Admin@1234')
 
 from hdc.app import create_app
-from hdc.extensions import db
+from hdc.extensions import ACCESS_MATRIX, db
 from hdc.models.accounts import Account, AccountTransaction, Expense, ExpenseCategory, OwnerPayment, PersonalExpense
 from hdc.models.auth import HDCUser
 from hdc.models.materials import Supplier, SupplierLedger
@@ -280,6 +280,62 @@ class MoneyPermissionsTestCase(unittest.TestCase):
                 response = self.client.post(url, json={'name': 'No CSRF'})
                 self.assertEqual(response.status_code, 400)
             self.assertEqual(self._snapshot(), before)
+
+    # ---- decision 15.4: the written read matrix --------------------------
+    def test_read_matrix_is_complete_and_matches_enforcement(self):
+        """Every route must fall in a known bucket, and reads must match it.
+
+        Decision 15.4: staff/other roles may *read* operational pages
+        (workers, payroll, expenses, subcontractors, purchase-v2, tools,
+        office, reports) but finance areas stay admin/accountant-only.  This
+        pins the matrix down so a new module cannot silently widen access.
+        """
+        from hdc.extensions import (ACCESS_MATRIX_PUBLIC_EXACT,
+                                    ACCESS_MATRIX_PUBLIC_PREFIXES,
+                                    _access_matrix_roles)
+
+        known_prefixes = tuple(prefix for prefix, _kind, _roles in ACCESS_MATRIX)
+        with self.app.test_request_context('/'):
+            paths = {rule.rule for rule in self.app.url_map.iter_rules()}
+        unclassified = sorted(
+            p for p in paths
+            if not p.startswith(known_prefixes)
+            and p not in ACCESS_MATRIX_PUBLIC_EXACT
+            and not p.startswith(ACCESS_MATRIX_PUBLIC_PREFIXES))
+        self.assertEqual(unclassified, [],
+                         'these routes are in no access-matrix bucket')
+
+        # the specific, more restrictive rules must win over the catch-all
+        self.assertEqual(_access_matrix_roles('/hdc/accounts', 'read'),
+                         {'admin', 'accountant'})
+        self.assertEqual(_access_matrix_roles('/hdc/accounts/money-center', 'read'),
+                         {'admin'})
+        self.assertEqual(_access_matrix_roles('/hdc/settings', 'read'), {'admin'})
+        self.assertEqual(_access_matrix_roles('/hdc/users', 'read'), {'admin'})
+        # operational reads stay open to staff, writes do not
+        for path in ('/hdc/workers', '/hdc/payroll', '/hdc/expenses',
+                     '/hdc/subcontractors', '/hdc/purchase-v2/suppliers',
+                     '/hdc/tool-rental', '/hdc/office-management/staff'):
+            with self.subTest(path=path):
+                self.assertIn('staff', _access_matrix_roles(path, 'read'))
+                self.assertEqual(_access_matrix_roles(path, 'write'),
+                                 {'admin', 'accountant'})
+
+    def test_staff_keeps_reads_but_not_the_finance_section(self):
+        """The matrix above, exercised through real requests."""
+        self._as('staff')
+        for url in ('/hdc/workers', '/hdc/payroll', '/hdc/expenses',
+                    '/hdc/subcontractors', '/hdc/purchase-v2/suppliers',
+                    '/hdc/tool-rental', '/hdc/office-management/staff'):
+            with self.subTest(url=url):
+                self.assertNotEqual(self.client.get(url).status_code, 403)
+        # finance + admin sections remain closed, as documented
+        for url in ('/hdc/accounts', '/hdc/accounts/manage', '/hdc/settings',
+                    '/hdc/users'):
+            with self.subTest(url=url):
+                response = self.client.get(url)
+                self.assertEqual(response.status_code, 302)
+                self.assertEqual(urlsplit(response.location).path, self.dashboard)
 
 
 if __name__ == '__main__':

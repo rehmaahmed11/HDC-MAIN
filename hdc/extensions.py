@@ -128,7 +128,97 @@ def _money_write_required(*, api=False):
     return decorate
 
 
-# â”€â”€ Login Manager â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ---------------------------------------------------------------------------
+# Non-admin access matrix (audit 6.1 / decision 15.4)
+# ---------------------------------------------------------------------------
+# The written policy: who may READ which part of the app, and who may WRITE
+# money.  Read is deliberately wider than write — a site supervisor needs to
+# look at workers, attendance and materials; only finance roles may move money.
+#
+# These are URL prefixes.  The first matching prefix wins, so order matters:
+# the most specific rule must come first.
+ACCESS_MATRIX = (
+    # --- reads every signed-in operational user may do ---------------------
+    ('/hdc/',                 'read',  {'admin', 'accountant', 'staff', 'manager'}),
+    # --- reads restricted to finance/administration ------------------------
+    ('/hdc/accounts',          'read',  {'admin', 'accountant'}),
+    ('/hdc/accounts/money-center', 'read', {'admin'}),
+    ('/hdc/settings',          'read',  {'admin'}),
+    ('/hdc/users',             'read',  {'admin'}),
+    ('/hdc/api/accounts',      'read',  {'admin', 'accountant'}),
+    # --- money writes: finance roles only (enforced by _money_write_required)
+    ('/hdc/workers',           'write', {'admin', 'accountant'}),
+    ('/hdc/payroll',           'write', {'admin', 'accountant'}),
+    ('/hdc/expenses',          'write', {'admin', 'accountant'}),
+    ('/hdc/subcontractors',    'write', {'admin', 'accountant'}),
+    ('/hdc/office-management', 'write', {'admin', 'accountant'}),
+    ('/hdc/purchase-v2',       'write', {'admin', 'accountant'}),
+    ('/hdc/tool-rental',       'write', {'admin', 'accountant'}),
+    ('/hdc/personal-management', 'write', {'admin', 'accountant'}),
+    ('/hdc/materials',         'write', {'admin', 'accountant'}),
+    ('/hdc/purchases',         'write', {'admin', 'accountant'}),
+    ('/hdc/timekeeping',       'write', {'admin', 'accountant'}),
+    # --- legacy / non-/hdc aliases and the JSON APIs -----------------------
+    # ``/api/accounts/*`` is the same money data the Accounts section shows,
+    # so it keeps the finance read rule.
+    ('/api/accounts',          'read',  {'admin', 'accountant'}),
+    ('/api/accounts',          'write', {'admin', 'accountant'}),
+    # ``/api/v2/purchase/*`` mirrors /hdc/purchase-v2: read for operational
+    # users, money writes finance-only.
+    ('/api/v2/purchase',       'read',  {'admin', 'accountant', 'staff', 'manager'}),
+    ('/api/v2/purchase',       'write', {'admin', 'accountant'}),
+    # Estimation legacy aliases (/hdc/estimation is the canonical path).
+    ('/project-estimation',    'read',  {'admin', 'accountant', 'staff', 'manager'}),
+    ('/project-estimation',    'write', {'admin', 'accountant'}),
+)
+
+# Paths that are always reachable regardless of matrix (login, logout, static
+# assets) — otherwise nobody could sign in.
+ACCESS_MATRIX_PUBLIC_PREFIXES = ('/hdc/login', '/hdc/logout', '/hdc_static', '/static')
+
+# Exact public paths.  ``/`` cannot live in the prefix tuple above: as a prefix
+# it would match every path and make the whole matrix useless.
+ACCESS_MATRIX_PUBLIC_EXACT = ('/',)
+
+
+# Matching is longest-prefix-wins, so a specific rule such as
+# ``/hdc/accounts/money-center`` beats the broad ``/hdc/`` everything-else rule
+# no matter which order they are declared in.
+_ACCESS_MATRIX_BY_LENGTH = tuple(
+    sorted(ACCESS_MATRIX, key=lambda rule: len(rule[0]), reverse=True))
+
+
+def _access_matrix_roles(path, mode='read'):
+    """Return the roles allowed to ``mode`` (``read``/``write``) ``path``.
+
+    ``mode='write'`` falls back to the read rule for the same prefix when no
+    explicit write rule exists, because the money-write decorator is what
+    actually enforces writes (see ``_money_write_required``).
+    """
+    p = str(path or '')
+    if p in ACCESS_MATRIX_PUBLIC_EXACT or p.startswith(ACCESS_MATRIX_PUBLIC_PREFIXES):
+        return None                      # public — no role required
+    fallback = None
+    for prefix, kind, roles in _ACCESS_MATRIX_BY_LENGTH:
+        if not p.startswith(prefix):
+            continue
+        if kind == mode:
+            return set(roles)
+        if kind == 'read' and fallback is None:
+            fallback = set(roles)
+    return fallback if fallback is not None else set()
+
+
+def _role_may_read(path):
+    """True when the current user's role may read ``path``."""
+    allowed = _access_matrix_roles(path, 'read')
+    if allowed is None:
+        return True
+    role = (getattr(current_user, 'role', None) or '').strip().lower()
+    return bool(current_user.is_authenticated and role in allowed)
+
+
+# --- Login Manager ---------------------------------------------------------
 def load_user(uid):
     from hdc.models.auth import HDCUser
     return db.session.get(HDCUser, int(uid))

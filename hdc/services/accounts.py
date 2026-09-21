@@ -13,7 +13,7 @@ from hdc.core.flags import _runtime_flag_get, _runtime_flag_set
 from hdc.extensions import db
 from hdc.models.accounts import Account, AccountTransaction, Expense, OwnerPayment, PersonalExpense
 from hdc.models.cashflow import CashFlowEntry
-from hdc.models.materials import PurchaseV2, Supplier, SupplierLedger
+from hdc.models.materials import PurchaseV2, Supplier, SupplierLedger, UsageLogV2
 from hdc.models.office import OfficeExpense, OfficeStaff, OfficeStaffLedger
 from hdc.models.projects import Project, Stage
 from hdc.models.subcontract import SubcontractPayment, Subcontractor
@@ -1938,6 +1938,21 @@ def _create_accounts_transaction_with_sync(payload):
         rel_type = expected_rel
         data['related_entity_type'] = expected_rel
 
+    # Product decision 15.3 (audit 5.1): a payer's liability to a party that
+    # keeps its own ledger (supplier / subcontractor / worker) must be reduced
+    # by the module that owns that ledger, not by the generic "pay to party"
+    # type — which only moves cash and would leave the payable untouched, so
+    # the same supplier could be paid twice.  Refuse it and name the path that
+    # does the sync, instead of silently recording one-sided money.
+    if tx_type in ('party_payment', 'pay_to_project', 'pay_to_credit_debit') and rel_type in (
+            'supplier', 'subcontractor', 'worker'):
+        return False, (
+            f'"{rel_type.title()}" cannot be paid through a generic party payment: '
+            'it moves the cash but leaves the payable untouched. Use '
+            '"Pay supplier/materials" on the supplier page, or the '
+            f'{rel_type.title()} payment entry for labour.'
+        ), []
+
     # Hard-bind party_name to the selected entity's canonical name. This is the
     # single most important guard against the "1 person but 2 ledgers" class of
     # mistake: if the user picked Worker A but typed a different name in the
@@ -2585,6 +2600,27 @@ def _account_dashboard_kpis(date_from=None, date_to=None):
         entries_q = entries_q.filter(AccountTransaction.date <= date_to)
     entries_total = int(entries_q.scalar() or 0)
 
+    # Material that has actually been consumed on site (from the purchase-v2
+    # usage log).  This is a *memo* figure, deliberately kept out of
+    # ``spent_total``: consuming material is not a cash movement, and the
+    # material was already counted as spend when it was paid for.  Adding it
+    # would double-count the same rupees (audit 5.5 / decision 15.1).
+    usage_q = db.session.query(
+        func.coalesce(func.sum(UsageLogV2.cost), 0.0),
+        func.coalesce(func.sum(UsageLogV2.quantity), 0.0),
+    ).filter(UsageLogV2.is_void == False)
+    if date_from:
+        usage_q = usage_q.filter(UsageLogV2.date >= date_from)
+    if date_to:
+        usage_q = usage_q.filter(UsageLogV2.date <= date_to)
+    try:
+        material_consumed_total, material_consumed_qty = usage_q.first() or (0.0, 0.0)
+    except Exception:
+        # Usage logging is an optional module — never break the dashboard.
+        material_consumed_total, material_consumed_qty = 0.0, 0.0
+    material_consumed_total = float(material_consumed_total or 0.0)
+    material_consumed_qty = float(material_consumed_qty or 0.0)
+
     return {
         'company_owned_total': float(company_owned_total),
         'cash_total': float(cash_total),
@@ -2596,6 +2632,10 @@ def _account_dashboard_kpis(date_from=None, date_to=None):
         'labour_expense_total': labour_expense_total,
         'material_expense_total': material_expense_total,
         'purchased_expense_total': purchased_expense_total,
+        # Memo only — "material consumed, not yet paid" is NOT part of the
+        # spend KPI above.  See CASHFLOW_MODEL.md.
+        'material_consumed_total': material_consumed_total,
+        'material_consumed_qty': material_consumed_qty,
         'net_cashflow': float(income_total - expense_total),
         'entries_total': entries_total,
         'expense_total': expense_total,

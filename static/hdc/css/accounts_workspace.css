@@ -1,0 +1,19 @@
+/* Accounts workspace — extra styles extracted from
+   templates/hdc/accounts/accounts.html (audit 7.3). */
+.accounts-compact-table th,
+.accounts-compact-table td {
+    padding: .32rem .4rem;
+    font-size: .78rem;
+    vertical-align: middle;
+}
+.accounts-compact-table .badge {
+    font-size: .62rem;
+}
+.account-actions-cell {
+    white-space: nowrap;
+}
+.btn-mini {
+    padding: .1rem .32rem;
+    font-size: .68rem;
+    line-height: 1.2;
+}
