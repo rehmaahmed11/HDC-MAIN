@@ -71,6 +71,10 @@ __all__ = [
     "category_options",
     "subcategory_options",
     "party_options",
+    "party_type_label",
+    "party_type_options",
+    "category_field_rules",
+    "category_rules_map",
     "save_cf_party",
     "save_cf_category",
     "save_cf_subcategory",
@@ -100,6 +104,61 @@ SRC_QUICK_ENTRY = 'CASH_FLOW_QUICK_ENTRY'
 
 # Account types that hold real money (cash / bank / company treasury).
 _MONEY_ACCOUNT_TYPES = ('company', 'cash', 'bank')
+
+# ---------------------------------------------------------------------------
+# party vocabulary — the *criteria* the Party / Person picker is built from
+# ---------------------------------------------------------------------------
+
+#: Every ``CashFlowParty.party_type`` the app understands, with the label shown
+#: in the pickers.  ``lender`` / ``borrower`` are the loan parties: a lender
+#: gives us a loan (we owe them), a borrower takes a loan from us (they owe us).
+PARTY_TYPES = (
+    ('client', 'Client / Owner'),
+    ('supplier', 'Supplier / Vendor'),
+    ('worker', 'Worker / Labour'),
+    ('staff', 'Office Staff'),
+    ('subcontractor', 'Subcontractor'),
+    ('lender', 'Loan Giver / Financier'),
+    ('borrower', 'Loan Taker / Borrower'),
+    ('other', 'Other'),
+)
+
+PARTY_TYPE_VALUES = tuple(value for value, _label in PARTY_TYPES)
+
+#: Types that mean "this party has a loan with us".
+LOAN_PARTY_TYPES = ('lender', 'borrower')
+
+#: The four loan movements a category can be tagged with (``loan_effect``).
+LOAN_EFFECTS = ('take', 'give', 'repay', 'recover')
+
+LOAN_EFFECT_LABELS = {
+    'take': 'Loan taken (money in, we owe)',
+    'give': 'Loan given (money out, they owe)',
+    'repay': 'Loan repayment (money out, reduces what we owe)',
+    'recover': 'Loan recovery (money in, reduces what we are owed)',
+}
+
+#: Default party type used when a category is tagged with a loan effect.
+LOAN_EFFECT_PARTY_TYPE = {
+    'take': 'lender',
+    'give': 'borrower',
+    'repay': 'lender',
+    'recover': 'borrower',
+}
+
+
+def party_type_label(value):
+    """Label for a ``party_type`` value (falls back to the raw value)."""
+    key = (value or '').strip().lower()
+    for candidate, label in PARTY_TYPES:
+        if candidate == key:
+            return label
+    return key or 'Other'
+
+
+def party_type_options():
+    """The ``(value, label)`` pairs every party picker / modal offers."""
+    return PARTY_TYPES
 
 # register ledger type used for each register direction
 _CF_TX_TYPE = {
@@ -455,7 +514,7 @@ def save_manual_cash_flow_entry(*, direction, amount, account_id, destination_ac
                                 date_posted=None, idempotency_key=None, actor=None,
                                 create_missing=True, project_id=None, stage_id=None,
                                 source_type=SRC_MANUAL, source_id=None, commit=True,
-                                validate_scope=True):
+                                validate_scope=True, enforce_category_rules=True):
     """Post a new register entry **and** its ledger transaction atomically.
 
     Returns ``(entry, created)``.  When ``idempotency_key`` matches an existing
@@ -466,6 +525,12 @@ def save_manual_cash_flow_entry(*, direction, amount, account_id, destination_ac
     ``stage_id`` actually exists before money is posted.  Amend turns it off for
     the leg it carries forward from the original entry, so an entry whose project
     was removed later can still be corrected.
+
+    ``enforce_category_rules`` (default on) applies the category's own field
+    rules — a category that needs a party (or a project) cannot be posted
+    without one, and a party whose known type is not allowed on that category is
+    refused.  The form hides those fields for a reason; this is the same rule
+    enforced where it counts.
     """
     key = (idempotency_key or '').strip() or None
     if key:
@@ -502,6 +567,20 @@ def save_manual_cash_flow_entry(*, direction, amount, account_id, destination_ac
     if party is not None:
         party_name = party.name
         ptype = party.party_type or ptype
+
+    # ── the category's own field rules ───────────────────────────────────────
+    if cat is not None and enforce_category_rules:
+        rules = category_field_rules(cat)
+        if rules['project_mode'] == 'required' and not project_id:
+            raise ValueError(f'"{cat.name}" needs a project — pick one.')
+        if rules['party_mode'] == 'required' and not (party_name or '').strip() and not party_id:
+            raise ValueError(
+                f'"{cat.name}" needs a party — choose who this transaction is for.')
+        if not party_type_allowed(rules, ptype):
+            wanted = ', '.join(party_type_label(v) for v in rules['party_types'])
+            raise ValueError(
+                f'"{cat.name}" is for {wanted} — pick that kind of party '
+                f'(the selected party is classified as {party_type_label(ptype)}).')
 
     desc = (description or '').strip()
     if not desc:
@@ -573,9 +652,27 @@ def save_manual_cash_flow_entry(*, direction, amount, account_id, destination_ac
 
     _cf_write_audit(entry, 'Created', after=_cf_snapshot(entry), actor=actor)
     db.session.flush()
+
+    # A loan category (loan_effect on the CashFlowCategory) mirrors the entry
+    # into the loan ledger: the four loan movements are what make "who owes
+    # whom, and how much is left" answerable per person.  This runs inside the
+    # same transaction, so an entry can never exist without its loan movement.
+    _cf_apply_loan_effect(entry, cat, actor=actor)
+
     if commit:
         db.session.commit()
     return entry, True
+
+
+def _cf_apply_loan_effect(entry, category, actor=None):
+    """Mirror a register entry into the loan ledger when its category says so."""
+    effect = (getattr(category, 'loan_effect', '') or '').strip().lower()
+    if not effect:
+        return None
+    # Imported lazily: hdc.services.loans posts through this module, so a
+    # module-level import would be circular.
+    from hdc.services.loans import apply_cash_flow_entry
+    return apply_cash_flow_entry(entry, effect, actor=actor)
 
 
 def amend_manual_cash_flow_entry(entry, *, direction=None, amount=None, account_id=None,
@@ -684,6 +781,15 @@ def void_manual_cash_flow_entry(entry, reason=None, actor=None, commit=True,
     _cf_write_audit(entry, 'Voided', before=before, after=_cf_snapshot(entry),
                     reason=reason_txt, actor=actor)
     db.session.flush()
+
+    # Keep the loan ledger in step: a voided entry must stop counting towards
+    # "how much is still owed" (and say so, rather than disappearing silently).
+    try:
+        from hdc.services.loans import void_movement_for_entry
+        void_movement_for_entry(entry, reason=reason_txt, actor=actor_name, commit=False)
+    except ImportError:  # pragma: no cover - loans module always present
+        pass
+
     if commit:
         db.session.commit()
     return entry
@@ -718,6 +824,13 @@ def restore_manual_cash_flow_entry(entry, actor=None, commit=True):
 
     _cf_write_audit(entry, 'Restored', before=before, after=_cf_snapshot(entry), actor=actor)
     db.session.flush()
+
+    try:
+        from hdc.services.loans import restore_movement_for_entry
+        restore_movement_for_entry(entry, commit=False)
+    except ImportError:  # pragma: no cover - loans module always present
+        pass
+
     if commit:
         db.session.commit()
     return entry
@@ -865,6 +978,50 @@ def party_options(active_only=True):
     return q.order_by(CashFlowParty.name.asc()).all()
 
 
+def category_field_rules(category):
+    """The field rules a category carries, as a plain dict.
+
+    This is *the* single answer to "which fields does this kind of transaction
+    need?" — the entry form renders it as data attributes, the picker filters
+    its party options with it and the engine enforces it on POST, so the three
+    can never disagree.
+    """
+    if category is None:
+        return {
+            'party_mode': 'optional',
+            'project_mode': 'optional',
+            'party_types': (),
+            'loan_effect': '',
+        }
+    return {
+        'party_mode': category.party_mode_value,
+        'project_mode': category.project_mode_value,
+        'party_types': tuple(category.allowed_party_types),
+        'loan_effect': (category.loan_effect or '').strip().lower(),
+    }
+
+
+def category_rules_map(active_only=True):
+    """``{category_id: rules}`` for every category (used by the entry form)."""
+    return {int(row.id): category_field_rules(row)
+            for row in category_options(active_only=active_only)}
+
+
+def party_type_allowed(rules, party_type):
+    """Is ``party_type`` acceptable for a category carrying ``rules``?
+
+    An empty ``party_types`` means "any".  ``other`` (the type a name typed by
+    hand gets) is always acceptable: the restriction is guidance about who this
+    kind of transaction is for, never a trap for a name that is not classified
+    yet.
+    """
+    allowed = tuple((rules or {}).get('party_types') or ())
+    if not allowed:
+        return True
+    ptype = (party_type or 'other').strip().lower() or 'other'
+    return ptype in allowed or ptype == 'other'
+
+
 def save_cf_party(name, party_type='other', phone=None, note=None):
     """Get-or-create a party by name (case-insensitive).  Returns ``(row, created)``.
 
@@ -895,7 +1052,17 @@ def save_cf_party(name, party_type='other', phone=None, note=None):
     return row, True
 
 
-def save_cf_category(name, direction='both', notes=None, sort_order=0):
+def save_cf_category(name, direction='both', notes=None, sort_order=0,
+                     party_mode=None, project_mode=None, party_types=None,
+                     loan_effect=None):
+    """Get-or-create a category by name (case-insensitive).
+
+    ``party_mode`` / ``project_mode`` / ``party_types`` / ``loan_effect`` are the
+    field rules (see :class:`~hdc.models.cashflow.CashFlowCategory`).  They are
+    applied only on create — an existing category keeps the rules the operator
+    set in Settings, exactly like ``save_cf_party`` never downgrades a known
+    supplier to ``other``.
+    """
     nm = (name or '').strip()
     if not nm:
         raise ValueError('Category name is required.')
@@ -909,10 +1076,148 @@ def save_cf_category(name, direction='both', notes=None, sort_order=0):
         db.session.flush()
         return row, False
     row = CashFlowCategory(name=nm[:120], direction=d, is_active=True,
-                           sort_order=int(sort_order or 0), notes=(notes or '').strip() or None)
+                           sort_order=int(sort_order or 0), notes=(notes or '').strip() or None,
+                           party_mode=_clean_field_mode(party_mode),
+                           project_mode=_clean_field_mode(project_mode),
+                           party_types=_clean_party_types(party_types),
+                           loan_effect=_clean_loan_effect(loan_effect))
     db.session.add(row)
     db.session.flush()
     return row, True
+
+
+def _clean_field_mode(value, default=None):
+    """Normalise a field mode; ``None`` means "leave it unset".
+
+    Unset is not the same as ``optional``: the shipped defaults are applied once
+    to a database using this, and they must never overwrite a rule an operator
+    chose in Settings.  The model reads NULL back as ``optional`` for the form.
+    """
+    mode = (value or '').strip().lower()
+    if not mode:
+        return default
+    return mode if mode in ('none', 'optional', 'required') else default
+
+
+def _clean_party_types(value):
+    if isinstance(value, (list, tuple, set)):
+        items = [str(v or '').strip().lower() for v in value]
+    else:
+        items = [chunk.strip().lower() for chunk in str(value or '').replace(';', ',').split(',')]
+    seen = []
+    for item in items:
+        if item and item not in seen:
+            seen.append(item)
+    return ','.join(seen) or None
+
+
+def _clean_loan_effect(value):
+    effect = (value or '').strip().lower()
+    return effect if effect in LOAN_EFFECTS else None
+
+
+def update_cf_category(category, *, name=None, direction=None, notes=None, sort_order=None,
+                       party_mode=None, project_mode=None, party_types=None, loan_effect=None,
+                       is_active=None, commit=True):
+    """Edit an existing category and its field rules (Settings → Cash Flow).
+
+    Only the keyword arguments actually passed are touched, so the settings
+    form can post one panel at a time without clearing the others.
+    """
+    if category is None:
+        raise ValueError('Category not found.')
+    if name is not None:
+        nm = (name or '').strip()
+        if not nm:
+            raise ValueError('Category name is required.')
+        clash = (CashFlowCategory.query
+                 .filter(func.lower(func.trim(CashFlowCategory.name)) == nm.lower(),
+                         CashFlowCategory.id != int(category.id))
+                 .first())
+        if clash is not None:
+            raise ValueError(f'A category named "{nm}" already exists.')
+        category.name = nm[:120]
+    if direction is not None:
+        d = _cf_normalize_direction(direction)
+        category.direction = d if d in CF_DIRECTIONS else 'both'
+    if notes is not None:
+        category.notes = (notes or '').strip() or None
+    if sort_order is not None:
+        try:
+            category.sort_order = int(sort_order or 0)
+        except (TypeError, ValueError):
+            raise ValueError('Sort order must be a whole number.')
+    if party_mode is not None:
+        category.party_mode = _clean_field_mode(party_mode)
+    if project_mode is not None:
+        category.project_mode = _clean_field_mode(project_mode)
+    if party_types is not None:
+        category.party_types = _clean_party_types(party_types)
+    if loan_effect is not None:
+        category.loan_effect = _clean_loan_effect(loan_effect)
+    if is_active is not None:
+        category.is_active = bool(is_active)
+    db.session.flush()
+    if commit:
+        db.session.commit()
+    return category
+
+
+def update_cf_party(party, *, name=None, party_type=None, phone=None, note=None,
+                    is_active=None, commit=True):
+    """Edit a register party (Settings → Cash Flow).  Only passed fields change."""
+    if party is None:
+        raise ValueError('Party not found.')
+    if name is not None:
+        nm = (name or '').strip()
+        if not nm:
+            raise ValueError('Party name is required.')
+        clash = (CashFlowParty.query
+                 .filter(func.lower(func.trim(CashFlowParty.name)) == nm.lower(),
+                         CashFlowParty.id != int(party.id))
+                 .first())
+        if clash is not None:
+            raise ValueError(f'A party named "{nm}" already exists.')
+        party.name = nm[:160]
+    if party_type is not None:
+        ptype = (party_type or 'other').strip().lower() or 'other'
+        if ptype not in PARTY_TYPE_VALUES:
+            raise ValueError('Choose a valid party type.')
+        party.party_type = ptype
+    if phone is not None:
+        party.phone = (phone or '').strip()[:40] or None
+    if note is not None:
+        party.note = (note or '').strip()[:300] or None
+    if is_active is not None:
+        party.is_active = bool(is_active)
+    db.session.flush()
+    if commit:
+        db.session.commit()
+    return party
+
+
+def update_cf_subcategory(subcategory, *, name=None, is_active=None, commit=True):
+    """Rename or (de)activate a subcategory (Settings → Cash Flow)."""
+    if subcategory is None:
+        raise ValueError('Subcategory not found.')
+    if name is not None:
+        nm = (name or '').strip()
+        if not nm:
+            raise ValueError('Subcategory name is required.')
+        clash = (CashFlowSubcategory.query
+                 .filter(CashFlowSubcategory.category_id == int(subcategory.category_id),
+                         func.lower(func.trim(CashFlowSubcategory.name)) == nm.lower(),
+                         CashFlowSubcategory.id != int(subcategory.id))
+                 .first())
+        if clash is not None:
+            raise ValueError(f'A subcategory named "{nm}" already exists here.')
+        subcategory.name = nm[:120]
+    if is_active is not None:
+        subcategory.is_active = bool(is_active)
+    db.session.flush()
+    if commit:
+        db.session.commit()
+    return subcategory
 
 
 def save_cf_subcategory(category_id, name, notes=None):
@@ -1313,17 +1618,48 @@ _DEFAULT_CATEGORIES = [
     ('Owner / Client Receipt', 'in', 10),
     ('Scrap & Salvage Sale', 'in', 20),
     ('Loan Received', 'in', 30),
-    ('Other Income', 'in', 40),
-    ('Material & Purchase', 'out', 50),
-    ('Labour & Wages', 'out', 60),
-    ('Subcontractor Payment', 'out', 70),
-    ('Fuel & Transport', 'out', 80),
-    ('Equipment & Machinery', 'out', 90),
-    ('Office Expense', 'out', 100),
-    ('Staff Salary', 'out', 110),
-    ('Personal Expense', 'out', 120),
-    ('Miscellaneous', 'out', 130),
+    ('Loan Recovery', 'in', 40),
+    ('Other Income', 'in', 50),
+    ('Material & Purchase', 'out', 60),
+    ('Labour & Wages', 'out', 70),
+    ('Subcontractor Payment', 'out', 80),
+    ('Fuel & Transport', 'out', 90),
+    ('Equipment & Machinery', 'out', 100),
+    ('Office Expense', 'out', 110),
+    ('Staff Salary', 'out', 120),
+    ('Personal Expense', 'out', 130),
+    ('Loan Given', 'out', 140),
+    ('Loan Repayment', 'out', 150),
+    ('Miscellaneous', 'out', 160),
 ]
+
+#: Field rules for the seeded categories: ``name -> (party_mode, project_mode,
+#: allowed party types, loan effect)``.  Only ever applied where the column is
+#: still empty — an operator's own rule (Settings → Cash Flow) always wins.
+_DEFAULT_CATEGORY_RULES = {
+    # The four loan movements are the only categories that *require* a party:
+    # "Loan Given" to nobody is not a loan.  Everything else keeps the app's
+    # existing behaviour (party/project optional) — but the two fields are
+    # hidden outright where they make no sense, which is what stops the form
+    # asking a question that has no answer.  An operator can tighten any of
+    # these to "required" in Settings → Cash Flow without a deploy.
+    'Owner / Client Receipt': ('optional', 'optional', 'client', ''),
+    'Scrap & Salvage Sale': ('none', 'none', '', ''),
+    'Loan Received': ('required', 'none', 'lender', 'take'),
+    'Loan Recovery': ('required', 'none', 'borrower', 'recover'),
+    'Other Income': ('optional', 'none', '', ''),
+    'Material & Purchase': ('optional', 'optional', 'supplier', ''),
+    'Labour & Wages': ('optional', 'optional', 'worker', ''),
+    'Subcontractor Payment': ('optional', 'optional', 'subcontractor', ''),
+    'Fuel & Transport': ('optional', 'optional', '', ''),
+    'Equipment & Machinery': ('optional', 'optional', '', ''),
+    'Office Expense': ('none', 'none', '', ''),
+    'Staff Salary': ('optional', 'none', 'staff', ''),
+    'Personal Expense': ('none', 'none', '', ''),
+    'Loan Given': ('required', 'none', 'borrower', 'give'),
+    'Loan Repayment': ('required', 'none', 'lender', 'repay'),
+    'Miscellaneous': ('optional', 'optional', '', ''),
+}
 
 _DEFAULT_SUBCATEGORIES = {
     'Material & Purchase': ['Cement', 'Steel / Saria', 'Sand / Crush', 'Bricks / Blocks',
@@ -1333,6 +1669,10 @@ _DEFAULT_SUBCATEGORIES = {
     'Fuel & Transport': ['Diesel / Petrol', 'Vehicle Rent', 'Freight / Cartage', 'Toll & Parking'],
     'Office Expense': ['Rent', 'Utilities', 'Stationery', 'Internet & Phone', 'Tea / Refreshment'],
     'Owner / Client Receipt': ['Project Payment', 'Advance Received', 'Final Settlement'],
+    'Loan Received': ['Bank Loan', 'Personal Loan', 'Director Loan'],
+    'Loan Given': ['Personal Loan', 'Business Loan'],
+    'Loan Repayment': ['Principal', 'Principal + Interest'],
+    'Loan Recovery': ['Principal', 'Principal + Interest'],
 }
 
 
@@ -1341,17 +1681,23 @@ def ensure_cashflow_seed_data(commit=True):
 
     Idempotent: existing names are never duplicated or renamed.  Only runs the
     (slightly more expensive) subcategory pass when the tables are empty, so
-    startup cost stays negligible.
+    startup cost stays negligible.  The field-rule pass is separate
+    (:func:`ensure_category_field_rules`) because it also has to reach a
+    database whose categories already exist.
     """
     created = 0
     try:
         if CashFlowCategory.query.first() is not None:
+            ensure_category_field_rules(commit=False)
+            if commit:
+                db.session.commit()
             return 0
         for name, direction, order in _DEFAULT_CATEGORIES:
             row, is_new = save_cf_category(name, direction=direction, sort_order=order)
             created += 1 if is_new else 0
             for sub_name in _DEFAULT_SUBCATEGORIES.get(name, []):
                 save_cf_subcategory(row.id, sub_name)
+        ensure_category_field_rules(commit=False)
         if commit:
             db.session.commit()
     except Exception:
@@ -1361,6 +1707,46 @@ def ensure_cashflow_seed_data(commit=True):
             pass
         return 0
     return created
+
+
+def ensure_category_field_rules(commit=True):
+    """Apply the default field rules to the shipped categories, once.
+
+    A category that already has any rule (party/project mode, allowed types or a
+    loan effect) is left exactly as it is — the operator's settings are the
+    source of truth and a deploy must never quietly reset them.
+    """
+    touched = 0
+    try:
+        for row in CashFlowCategory.query.all():
+            party_mode, project_mode, party_types, loan_effect = _DEFAULT_CATEGORY_RULES.get(
+                (row.name or '').strip(), (None, None, None, None))
+            if party_mode is None and project_mode is None and party_types is None and loan_effect is None:
+                continue
+            dirty = False
+            if party_mode is not None and (row.party_mode or '').strip() == '':
+                row.party_mode = party_mode
+                dirty = True
+            if project_mode is not None and (row.project_mode or '').strip() == '':
+                row.project_mode = project_mode
+                dirty = True
+            if party_types is not None and not (row.party_types or '').strip():
+                row.party_types = party_types
+                dirty = True
+            if loan_effect is not None and not (row.loan_effect or '').strip() and loan_effect:
+                row.loan_effect = loan_effect
+                dirty = True
+            if dirty:
+                touched += 1
+        if commit:
+            db.session.commit()
+    except Exception:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        return 0
+    return touched
 
 
 def _ensure_cashflow_seed_data():

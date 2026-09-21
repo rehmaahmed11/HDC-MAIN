@@ -13,7 +13,11 @@
  *      genuinely needs, so a transfer never asks for a category.
  *   2. Category → Subcategory is a real dependency read from the options the
  *      server rendered (each subcategory carries its parent's id).  Changing the
- *      category clears a subcategory that is no longer valid.
+ *      category clears a subcategory that is no longer valid.  The same options
+ *      carry the category's *field rules* (party / project: none | optional |
+ *      required, plus the party types it is for), so the category also decides
+ *      which of those fields exist on screen and which parties are offered.
+
  *   3. Account / Party / Project are searchable comboboxes built on the shared
  *      HDCComboList widget, each with "+ Add New …" that opens a small modal,
  *      saves over JSON, refreshes the picker and selects the new row — without
@@ -140,11 +144,18 @@
         var subcategorySelect = byId('txnSubcategory');
         var subcategoryHint = byId('txnSubcategoryHint');
         var whoBlock = byId('txnWhoBlock');
+        var partyField = byId('txnPartyField');
         var partySelect = byId('txnParty');
         var partyInput = byId('txnPartyInput');
         var partyTypeField = byId('txnPartyType');
+        var partyReq = byId('txnPartyReq');
+        var partyHint = byId('txnPartyHint');
+        var projectField = byId('txnProjectField');
         var projectSelect = byId('txnProject');
         var projectInput = byId('txnProjectInput');
+        var projectReq = byId('txnProjectReq');
+        var projectHint = byId('txnProjectHint');
+        var rulesHelp = byId('txnRulesHelp');
         var amountInput = byId('txnAmount');
         var dateInput = byId('txnDate');
         var saveButton = byId('txnSaveBtn');
@@ -225,6 +236,11 @@
             if (partyInput) partyInput.disabled = isTransfer;
             if (projectSelect) projectSelect.disabled = isTransfer;
             if (projectInput) projectInput.disabled = isTransfer;
+            if (isTransfer) {
+                /* Nothing below applies to a transfer; hide rather than ask. */
+                setFieldVisible('party', false);
+                setFieldVisible('project', false);
+            }
 
             if (amountLegend) {
                 amountLegend.textContent = isTransfer
@@ -241,6 +257,7 @@
             }
 
             filterCategories();
+            applyCategoryRules();
         }
 
         /* ── 2. category → subcategory ───────────────────────────────────── */
@@ -262,6 +279,156 @@
                 setFieldError(form, 'category_id', '');
             }
             filterSubcategories();
+        }
+
+        /* ── 2b. the category's field rules ───────────────────────────────
+           A category says whether a party / project belongs to it at all
+           ("none" hides the field outright), whether it is mandatory, and
+           which party types it is for.  Everything below reads those rules
+           from the option the server rendered — the form never decides for
+           itself which kind of transaction needs what. */
+
+        function selectedCategoryOption() {
+            if (!categorySelect || categorySelect.selectedIndex < 0) return null;
+            var option = categorySelect.options[categorySelect.selectedIndex];
+            return (option && option.value) ? option : null;
+        }
+
+        function categoryRule(name, fallback) {
+            var option = selectedCategoryOption();
+            if (!option) return fallback;
+            var value = (option.getAttribute('data-' + name) || '').trim().toLowerCase();
+            return value || fallback;
+        }
+
+        function allowedPartyTypes() {
+            var raw = categoryRule('party-types', '');
+            if (!raw) return [];
+            return raw.split(',').map(function (part) { return part.trim(); }).filter(Boolean);
+        }
+
+        function setFieldVisible(kind, visible) {
+            var field = kind === 'party' ? partyField : projectField;
+            var control = kind === 'party' ? partySelect : projectSelect;
+            var input = kind === 'party' ? partyInput : projectInput;
+            var hint = kind === 'party' ? partyHint : projectHint;
+            if (field) field.hidden = !visible;
+            /* Disabled controls are not submitted: a hidden field must not
+               smuggle a stale value into the entry. */
+            if (control) control.disabled = !visible || currentDirection() === DIRECTION_TRANSFER;
+            if (input) {
+                input.disabled = !visible || currentDirection() === DIRECTION_TRANSFER;
+                input.required = false;
+            }
+            if (!visible) {
+                setFieldError(form, kind === 'party' ? 'party_name' : 'project_id', '');
+                if (hint) { hint.hidden = true; hint.textContent = ''; }
+            }
+        }
+
+        function setRequiredMark(node, required) {
+            if (node) node.hidden = !required;
+        }
+
+        function setFieldHint(node, text) {
+            if (!node) return;
+            if (text) {
+                node.textContent = text;
+                node.hidden = false;
+            } else {
+                node.textContent = '';
+                node.hidden = true;
+            }
+        }
+
+        function partyTypeLabel(value) {
+            var labels = {
+                client: 'Client / Owner',
+                supplier: 'Supplier / Vendor',
+                worker: 'Worker / Labour',
+                staff: 'Office Staff',
+                subcontractor: 'Subcontractor',
+                lender: 'Loan Giver / Financier',
+                borrower: 'Loan Taker / Borrower',
+                other: 'Other'
+            };
+            return labels[value] || value;
+        }
+
+        /* Hide the parties the chosen category is not for — the list shortens
+           itself to the people who make sense, and "other" always stays. */
+        function filterPartyTypes(allowed) {
+            if (!partySelect) return;
+            var selectedOption = partySelect.options[partySelect.selectedIndex];
+            Array.prototype.forEach.call(partySelect.options, function (option) {
+                if (!option.value) return;
+                var type = (option.getAttribute('data-party-type') || 'other').toLowerCase();
+                var keep = !allowed.length || allowed.indexOf(type) !== -1 || type === 'other';
+                if (option.style) option.style.display = keep ? '' : 'none';
+                option.disabled = !keep;
+            });
+            if (selectedOption && selectedOption.value && selectedOption.disabled) {
+                partySelect.value = '';
+                if (partyInput) partyInput.value = '';
+                if (partyTypeField) partyTypeField.value = 'other';
+            }
+        }
+
+        function applyCategoryRules() {
+            if (currentDirection() === DIRECTION_TRANSFER || !currentDirection()) {
+                setFieldVisible('party', false);
+                setFieldVisible('project', false);
+                setRequiredMark(partyReq, false);
+                setRequiredMark(projectReq, false);
+                if (rulesHelp) { rulesHelp.textContent = ''; rulesHelp.hidden = true; }
+                return;
+            }
+            var hasCategory = !!(categorySelect && categorySelect.value);
+            var partyMode = hasCategory ? categoryRule('party-mode', 'optional') : 'none';
+            var projectMode = hasCategory ? categoryRule('project-mode', 'optional') : 'none';
+            var allowed = hasCategory ? allowedPartyTypes() : [];
+            var loanEffect = hasCategory ? categoryRule('loan-effect', '') : '';
+
+            var showParty = partyMode !== 'none';
+            var showProject = projectMode !== 'none';
+            setFieldVisible('party', showParty);
+            setFieldVisible('project', showProject);
+
+            var partyRequired = showParty && partyMode === 'required';
+            var projectRequired = showProject && projectMode === 'required';
+            if (partySelect) partySelect.required = partyRequired;
+            if (projectSelect) projectSelect.required = projectRequired;
+            setRequiredMark(partyReq, partyRequired);
+            setRequiredMark(projectReq, projectRequired);
+
+            if (showParty && allowed.length) {
+                filterPartyTypes(allowed);
+                var names = allowed.map(partyTypeLabel).join(' / ');
+                setFieldHint(partyHint, partyRequired
+                    ? 'Required for this category — pick the ' + names + '.'
+                    : 'For this category the party is usually the ' + names + '.');
+            } else {
+                filterPartyTypes([]);
+                setFieldHint(partyHint, '');
+            }
+            setFieldHint(projectHint, projectRequired
+                ? 'Required for this category — the cost or receipt must land on a project.'
+                : '');
+            if (rulesHelp) {
+                var explained = [];
+                if (loanEffect === 'take') explained.push('money received as a loan — the person is a Loan Giver');
+                if (loanEffect === 'give') explained.push('money given as a loan — the person is a Loan Taker');
+                if (loanEffect === 'repay') explained.push('repaying a loan we took');
+                if (loanEffect === 'recover') explained.push('a borrower paying us back');
+                if (explained.length) {
+                    rulesHelp.textContent = 'Loan ledger: ' + explained.join('; ') +
+                        '. The amount is tracked against that person’s loan (Accounts → Loans).';
+                    rulesHelp.hidden = false;
+                } else {
+                    rulesHelp.textContent = '';
+                    rulesHelp.hidden = true;
+                }
+            }
         }
 
         function filterSubcategories() {
@@ -621,6 +788,20 @@
                     fail('subcategory_id', 'That subcategory does not belong to the chosen category.',
                         subcategorySelect);
                 }
+                /* The category decides whether a party / project is required;
+                   the server checks the same rules again. */
+                var option = selectedCategoryOption();
+                if (option) {
+                    if (option.getAttribute('data-project-mode') === 'required'
+                        && (!projectSelect || !projectSelect.value)) {
+                        fail('project_id', 'This category needs a project — pick one.', projectInput);
+                    }
+                    if (option.getAttribute('data-party-mode') === 'required'
+                        && (!partySelect || !partySelect.value)) {
+                        fail('party_name', 'This category needs a party — choose who it is for.',
+                            partyInput);
+                    }
+                }
             }
 
             if (firstBad && firstBad.focus) firstBad.focus();
@@ -665,7 +846,12 @@
         }
 
         directionSelect.addEventListener('change', applyDirection);
-        if (categorySelect) categorySelect.addEventListener('change', filterSubcategories);
+        if (categorySelect) {
+            categorySelect.addEventListener('change', function () {
+                filterSubcategories();
+                applyCategoryRules();
+            });
+        }
         if (amountInput) {
             amountInput.addEventListener('blur', function () {
                 var parsed = parseAmount(amountInput.value);
@@ -693,6 +879,7 @@
                 if (combos.party && combos.party.syncFromSelect) combos.party.syncFromSelect();
                 if (combos.project && combos.project.syncFromSelect) combos.project.syncFromSelect();
                 applyDirection();
+                applyCategoryRules();
                 directionSelect.focus();
             });
         }
@@ -725,6 +912,7 @@
 
         ensureCombos();
         applyDirection();
+        applyCategoryRules();
     }
 
     function boot() {

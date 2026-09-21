@@ -181,10 +181,17 @@
                     <select name="category_id" id="txnCategory" class="form-select">
                         <option value="">Choose category…</option>
                         {# Filtered by direction from the database — never a
-                           hard-coded list of category names. #}
+                           hard-coded list of category names.  Each option also
+                           carries the category's own field rules, so picking
+                           one is what decides which fields appear below. #}
                         {% for c in categories %}
+                        {% set rules = (category_rules or {}).get(c.id, {}) %}
                         <option value="{{ c.id }}"
                                 data-direction="{{ (c.direction or 'both')|lower }}"
+                                data-party-mode="{{ rules.get('party_mode', 'optional') }}"
+                                data-project-mode="{{ rules.get('project_mode', 'optional') }}"
+                                data-party-types="{{ (rules.get('party_types') or [])|join(',') }}"
+                                data-loan-effect="{{ rules.get('loan_effect', '') }}"
                                 {% if sel.get('category_id') == c.id %}selected{% endif %}>{{ c.name }}</option>
                         {% endfor %}
                     </select>
@@ -218,8 +225,13 @@
             <legend class="hdc-txn-legend"><span class="hdc-txn-step" aria-hidden="true">4</span>
                 Who and where</legend>
             <div class="hdc-txn-grid">
-                <div class="hdc-field">
-                    <label class="form-label" for="txnPartyInput">Party / Person</label>
+                {# Both fields below are revealed by the category rules the
+                   server sent with the options above: a category that does not
+                   involve a party (or a project) never asks for one. #}
+                <div class="hdc-field" id="txnPartyField" data-field="party">
+                    <label class="form-label" for="txnPartyInput">
+                        Party / Person <span class="hdc-req" id="txnPartyReq" hidden aria-hidden="true">*</span>
+                    </label>
                     <input type="text" id="txnPartyInput" class="form-control" data-combo-input
                            placeholder="Search party or person… (e.g. abd)"
                            autocomplete="off" role="combobox" aria-expanded="false"
@@ -234,11 +246,14 @@
                     </select>
                     <input type="hidden" name="party_type" id="txnPartyType"
                            value="{{ v.get('party_type') or 'other' }}">
+                    <div class="hdc-field-hint" id="txnPartyHint" hidden></div>
                     <div class="hdc-field-error" data-error-for="party_name" hidden></div>
                 </div>
 
-                <div class="hdc-field">
-                    <label class="form-label" for="txnProjectInput">Project</label>
+                <div class="hdc-field" id="txnProjectField" data-field="project">
+                    <label class="form-label" for="txnProjectInput">
+                        Project <span class="hdc-req" id="txnProjectReq" hidden aria-hidden="true">*</span>
+                    </label>
                     <input type="text" id="txnProjectInput" class="form-control" data-combo-input
                            placeholder="Search project… (e.g. JPS)"
                            autocomplete="off" role="combobox" aria-expanded="false"
@@ -250,9 +265,11 @@
                                 {% if sel.get('project_id') == p.id %}selected{% endif %}>{{ p.name }}</option>
                         {% endfor %}
                     </select>
+                    <div class="hdc-field-hint" id="txnProjectHint" hidden></div>
                     <div class="hdc-field-error" data-error-for="project_id" hidden></div>
                 </div>
             </div>
+            <div class="hdc-txn-help" id="txnRulesHelp"></div>
         </fieldset>
 
         {# ── 5. Optional detail ───────────────────────────────────────────── #}

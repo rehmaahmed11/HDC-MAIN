@@ -48,6 +48,14 @@ def _normalize_account_tx_type(v):
         'pay_intra_company': 'transfer',
         'pay_to_credit_debit': 'party_payment',
         'personal_payment': 'personal_management_payment',
+        # The loan types the entry form offers.  The money itself is an
+        # ordinary receipt / payment; ``hdc.services.loans`` records which loan
+        # it belongs to (the intent is read before this normalisation by the
+        # route, which is what passes the loan effect on).
+        'loan_taken': 'party_receipt',
+        'loan_given': 'party_payment',
+        'loan_repayment': 'party_payment',
+        'loan_recovery': 'party_receipt',
     }
     return alias_map.get(tx, tx)
 

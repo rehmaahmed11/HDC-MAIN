@@ -17,13 +17,14 @@ from hdc.models.office import OfficeStaff
 from hdc.models.projects import Project, Stage
 from hdc.models.subcontract import Subcontractor
 from hdc.models.workforce import Worker
-from hdc.services.accounts import _ACCOUNT_TXN_CATEGORIES, _ACCOUNT_TXN_FORM_OPTIONS, _ACCOUNT_TXN_TYPES, _ACCOUNT_TYPES, _account_dashboard_kpis, _account_dashboard_subgroups, _account_entity_label, _account_group_mode_for_row, _account_intent_field_matrix, _account_kpi_detail_context, _account_ledger_rows, _account_reverse_transaction_group, _account_running_balance_rows, _account_transaction_history, _account_tx_direction_for_type, _account_txn_group_rows, _accounts_reconciliation_findings, _accounts_set_void_by_source, _accounts_toggle_transaction_void_state, _accounts_update_manual_transaction, _create_account, _create_accounts_transaction_with_sync, _list_accounts_with_balances, _resolve_account_type
+from hdc.services.accounts import _ACCOUNT_LOAN_INTENTS, _ACCOUNT_TXN_CATEGORIES, _ACCOUNT_TXN_FORM_OPTIONS, _ACCOUNT_TXN_TYPES, _ACCOUNT_TYPES, _account_dashboard_kpis, _account_dashboard_subgroups, _account_entity_label, _account_group_mode_for_row, _account_intent_field_matrix, _account_kpi_detail_context, _account_ledger_rows, _account_reverse_transaction_group, _account_running_balance_rows, _account_transaction_history, _account_tx_direction_for_type, _account_txn_group_rows, _accounts_reconciliation_findings, _accounts_set_void_by_source, _accounts_toggle_transaction_void_state, _accounts_update_manual_transaction, _create_account, _create_accounts_transaction_with_sync, _list_accounts_with_balances, _resolve_account_type
 from hdc.services.aggregation import _running_projects_receivable_rows
 from hdc.services.ledger import _office_staff_ledger_snapshot, _personal_expense_month, _personal_expense_total
 from hdc.services.receipts import _account_receipt_recent_entries, _receipt_company_profile
 from hdc.utils.dates import _pkt_now_naive, _pkt_today
 from hdc.utils.format import _amount_to_words, _flt, _parse_date
 from hdc.utils.money import sync_money_fields
+from hdc.services.loans import attach_ledger_transaction, find_open_loan
 from hdc.utils.normalize import _normalize_account_group, _normalize_account_mode, _normalize_account_tx_direction, _normalize_account_tx_type, _normalize_name_ci, _normalize_related_entity_type
 
 def register(app):
@@ -207,13 +208,39 @@ def register(app):
                 return redirect(request.referrer or url_for('hdc_accounts'))
 
             if action == 'create_transaction':
-                req_tx_type = _normalize_account_tx_type(request.form.get('type') or request.form.get('transaction_type'))
-                if req_tx_type == 'advance_to_person':
+                raw_tx_type = (request.form.get('type') or request.form.get('transaction_type') or '').strip().lower()
+                req_tx_type = _normalize_account_tx_type(raw_tx_type)
+                if req_tx_type == 'advance_to_person' and raw_tx_type not in _ACCOUNT_LOAN_INTENTS:
                     flash('Advance To Worker is removed from Accounts. Use Worker payment/ledger instead.', 'warning')
                     return redirect(url_for('hdc_accounts'))
+
+                # Loan movements: what the loan ledger needs is checked *before*
+                # the money is posted, so a repayment against nobody is refused
+                # outright instead of leaving a posting with no loan behind it.
+                loan_effect = None
+                loan_ledger_type = None
+                if raw_tx_type in _ACCOUNT_LOAN_INTENTS:
+                    loan_effect, loan_ledger_type = _ACCOUNT_LOAN_INTENTS[raw_tx_type]
+                    loan_party = _normalize_name_ci(request.form.get('party_name'))
+                    if not loan_party:
+                        flash('A loan needs the person\u2019s name \u2014 fill the Party field.', 'danger')
+                        return redirect(url_for('hdc_accounts'))
+                    if loan_effect in ('repay', 'recover'):
+                        loan_direction = 'received' if loan_effect == 'repay' else 'given'
+                        if find_open_loan(loan_party, loan_direction) is None:
+                            label = 'Loan Taken' if loan_effect == 'repay' else 'Loan Given'
+                            flash(
+                                'No open loan for "%s" \u2014 record it as %s first '
+                                '(or open it in Accounts \u2192 Loans), then book the %s.'
+                                % (loan_party, label,
+                                   'repayment' if loan_effect == 'repay' else 'recovery'),
+                                'danger')
+                            return redirect(url_for('hdc_accounts'))
+
                 payload = {
                     'date': (request.form.get('date') or '').strip(),
-                    'type': request.form.get('type') or request.form.get('transaction_type'),
+                    'type': (loan_ledger_type if loan_effect else
+                             (request.form.get('type') or request.form.get('transaction_type'))),
                     'amount': request.form.get('amount'),
                     'from_account_id': request.form.get('from_account_id'),
                     'to_account_id': request.form.get('to_account_id'),
@@ -240,7 +267,21 @@ def register(app):
                 if not ok:
                     flash(msg or 'Unable to create transaction.', 'danger')
                 else:
-                    flash(f'Transaction recorded ({len(rows)} row{"s" if len(rows) != 1 else ""}).', 'success')
+                    if loan_effect and rows:
+                        try:
+                            attach_ledger_transaction(
+                                rows[0], loan_effect,
+                                principal_amount=request.form.get('loan_principal_amount'),
+                                interest_amount=request.form.get('loan_interest_amount'),
+                                actor=current_user, commit=True)
+                        except ValueError as exc:
+                            # The ledger row is posted (it is real money and must
+                            # not be silently dropped); say what to do next.
+                            flash('Transaction recorded, but the loan ledger could not be '
+                                  'updated: %s Fix that in Accounts \u2192 Loans.' % exc, 'warning')
+                    flash('Transaction recorded (%d row%s%s).'
+                          % (len(rows), 's' if len(rows) != 1 else '',
+                             ', linked to the loan ledger' if loan_effect else ''), 'success')
                     last_id = max([int(getattr(r, 'id', 0) or 0) for r in (rows or [])] or [0])
                     if last_id > 0:
                         return redirect(url_for('hdc_accounts', print_txn_id=last_id))

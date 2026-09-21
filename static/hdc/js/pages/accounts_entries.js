@@ -76,40 +76,28 @@ document.addEventListener('wheel', function (e) {
     }
 }, { capture: true, passive: false });
 
-var relatedTypeByTxn = {
-    expense_material: 'supplier',
-    purchase: 'supplier',
-    expense_subcontractor: 'subcontractor',
-    expense_wage: 'worker',
-    payroll: 'worker',
-    advance_to_person: 'worker',
-    office_management_payment: 'office_staff'
-};
-var toAccountRequiredByTxn = {
-    transfer: true,
-    advance_to_person: true,
-    project_income: true,
-    party_receipt: true,
-    client_payment: true,
-    receive_from_project: true,
-    receive_intra_company: true,
-    receive_from_credit_debit: true
-};
-var toOrPartyRequiredByTxn = {
-    expense_material: true,
-    expense_wage: true,
-    expense_subcontractor: true,
-    office_management_payment: true,
-    personal_management_payment: true,
-    expense_general: true,
-    purchase: true,
-    payroll: true,
-    party_payment: true
-};
-var hideReferenceByTxn = {
-    payroll: true,
-    expense_wage: true
-};
+// ── the field rules ────────────────────────────────────────────────────────
+// Which fields this form shows is NOT decided here: every type's answer comes
+// from the server (intentMatrix = hdc.services.accounts._account_intent_field_matrix,
+// editable in Settings → Cash Flow).  Looking a rule up first by the type the
+// user actually picked, then by the ledger type it normalises to, is what stops
+// a "Pay to Project" asking for a Related Entity it can never have.
+function intentRule(tx) {
+    var raw = String(tx || '').toLowerCase();
+    if (!raw) return {};
+    if (intentMatrix && intentMatrix[raw]) return intentMatrix[raw];
+    var normalized = normalizeTxnType(raw);
+    if (intentMatrix && intentMatrix[normalized]) return intentMatrix[normalized];
+    return {};
+}
+function ruleFlag(m, name, fallback) {
+    if (!m || typeof m[name] === 'undefined' || m[name] === null) return !!fallback;
+    return !!m[name];
+}
+function ruleText(m, name) {
+    if (!m) return '';
+    return String(m[name] || '').trim();
+}
 function normalizeTxnType(tx) {
     var t = String(tx || '').toLowerCase();
     if (t === 'receive_from_project') return 'project_income';
@@ -140,22 +128,6 @@ var counterpartyGroupByTxn = {
     payroll: 'credit_debit',
     expense_wage: 'credit_debit',
     advance_to_person: 'credit_debit'
-};
-var stageRequiredByTxn = {
-    expense_material: false,
-    expense_wage: true,
-    expense_subcontractor: true,
-    expense_general: true,
-    purchase: false,
-    payroll: true,
-    advance_to_person: true
-};
-var projectRequiredByTxn = {
-    project_income: true,
-    expense_general: true
-};
-var expenseCategoryRequiredByTxn = {
-    expense_general: true
 };
 var treasuryAccountTypes = { company: true, cash: true, bank: true };
 var fromBaseOptions = Array.prototype.slice.call((fromSel && fromSel.options) ? fromSel.options : []).map(function (o) { return o.cloneNode(true); });
@@ -293,31 +265,31 @@ function _syncPartyToPersonalSuggestion() {
 }
 function updateTxnUI() {
     if (!txnType) return;
-    var tx = normalizeTxnType(txnType.value || '');
-    var dir = (tx in toAccountRequiredByTxn) ? 'receive' : 'pay';
+    var rawTx = String(txnType.value || '').toLowerCase();
+    var tx = normalizeTxnType(rawTx);
+    var m = intentRule(rawTx);
+    var hasType = !!(txnType.value || '');
+    var dir = ruleText(m, 'direction') || ((ruleFlag(m, 'to_account', false)) ? 'receive' : 'pay');
     if (txnDirection) txnDirection.value = dir;
     applyReceiveSourceKindUI();
     if (txnDirectionWrap) txnDirectionWrap.classList.toggle('d-none', false);
     var isReceive = (dir === 'receive');
-    var isPay = (dir === 'pay');
     var isTransfer = (tx === 'transfer');
-    var isProjectIncome = (tx === 'project_income');
-    var isPartyReceipt = (tx === 'party_receipt');
-    var isClientPayment = (tx === 'client_payment');
-    var isExpenseGeneral = (tx === 'expense_general');
-    var isPurchase = (tx === 'purchase');
     var isPayroll = (tx === 'payroll');
     var isExpenseWage = (tx === 'expense_wage');
     var isExpenseSubcontractor = (tx === 'expense_subcontractor');
-    var isExpenseMaterial = (tx === 'expense_material');
-    var isOfficeManagementPayment = (tx === 'office_management_payment');
-    var isPersonalManagementPayment = (tx === 'personal_management_payment');
-    var isPartyPayment = (tx === 'party_payment');
-    var isAdvanceToPerson = (tx === 'advance_to_person');
-    var m = intentMatrix[tx] || {};
+
     if (fromLabel) fromLabel.textContent = isReceive ? 'From Account' : 'Paying Account';
     if (toLabel) toLabel.textContent = isReceive ? 'To Account' : 'Receiving Account';
-    if (toWrap) toWrap.classList.toggle('d-none', false);
+
+    /* ── every field below is shown because its rule says so ───────────── */
+    var showFrom = ruleFlag(m, 'from_account', true);
+    var showTo = ruleFlag(m, 'to_account', true);
+    var fromWrap = document.getElementById('from_wrap');
+    if (fromWrap) fromWrap.classList.toggle('d-none', !showFrom);
+    if (fromSel) fromSel.required = showFrom;
+    if (toWrap) toWrap.classList.toggle('d-none', !hasType || !showTo);
+
     var isWorkerProjectStageScope = (isPayroll || isExpenseWage || isExpenseSubcontractor);
     var workerProjectStageActive = true;
     if (isWorkerProjectStageScope) {
@@ -325,39 +297,39 @@ function updateTxnUI() {
         var settleActive = !!(settleShortfallInput && settleShortfallInput.checked);
         workerProjectStageActive = (tipAmount > 0.000001 || settleActive);
     }
-    var showProjectScope = (!!m.project && (!isWorkerProjectStageScope || workerProjectStageActive));
-    var showStageScope = (!!m.stage && (!isWorkerProjectStageScope || workerProjectStageActive));
+    var showProjectScope = (ruleFlag(m, 'project', false) && (!isWorkerProjectStageScope || workerProjectStageActive));
+    var showStageScope = (ruleFlag(m, 'stage', false) && (!isWorkerProjectStageScope || workerProjectStageActive));
     var hasProject = !!(projectSelect && projectSelect.value);
     if (projectWrap) projectWrap.classList.toggle('d-none', (!hasType || !showProjectScope));
     if (stageWrap) stageWrap.classList.toggle('d-none', (!hasType || !showStageScope || !hasProject));
-    if (relatedWrap) relatedWrap.classList.toggle('d-none', false);
+    if (relatedWrap) relatedWrap.classList.toggle('d-none', !hasType || !ruleFlag(m, 'related', false));
     if (receiveSourceWrap) receiveSourceWrap.classList.toggle('d-none', !isReceive);
-    if (officeTargetWrap) officeTargetWrap.classList.toggle('d-none', !isOfficeManagementPayment);
-    if (officeExpenseCategoryWrap) officeExpenseCategoryWrap.classList.toggle('d-none', !isOfficeManagementPayment);
-    if (partyNameWrap) partyNameWrap.classList.toggle('d-none', false);
-    if (refWrap) refWrap.classList.toggle('d-none', tx in hideReferenceByTxn);
+    if (officeTargetWrap) officeTargetWrap.classList.toggle('d-none', !hasType || !ruleFlag(m, 'office_target', false));
+    if (officeExpenseCategoryWrap) officeExpenseCategoryWrap.classList.toggle('d-none', !hasType || !ruleFlag(m, 'office_target', false));
+    if (partyNameWrap) partyNameWrap.classList.toggle('d-none', !hasType || !ruleFlag(m, 'party_name', false));
+    if (refWrap) refWrap.classList.toggle('d-none', !hasType || !ruleFlag(m, 'reference', true));
     if (excessSplitWrap) excessSplitWrap.classList.toggle('d-none', !isPayroll);
     if (settleShortfallWrap) settleShortfallWrap.classList.toggle('d-none', !isPayroll);
-    if (expenseCategoryWrap) expenseCategoryWrap.classList.toggle('d-none', !(isExpenseGeneral));
-    if (amountInput) amountInput.min = isReceive ? '0.01' : '0.01';
+    if (expenseCategoryWrap) expenseCategoryWrap.classList.toggle('d-none', !hasType || !ruleFlag(m, 'expense_category', false));
+    if (amountInput) amountInput.min = '0.01';
+
     if (toAccountSelect) {
-        toAccountSelect.required = tx in toAccountRequiredByTxn;
+        toAccountSelect.required = ruleFlag(m, 'to_account_required', false);
         toAccountSelect.classList.toggle('d-none', false);
     }
     if (partyNameInput) {
-        partyNameInput.required = (tx in toOrPartyRequiredByTxn) && !(toAccountSelect && toAccountSelect.value);
+        /* Required when the rule says so, and — for the types that use the
+           off-ledger party as their payee — when no To Account was picked. */
+        var partyRequired = ruleFlag(m, 'party_name_required', false);
+        var partyOrTo = partyRequired && !(toAccountSelect && toAccountSelect.value);
+        partyNameInput.required = (partyOrTo || (partyRequired && !ruleFlag(m, 'to_account', true)));
     }
-    if (projectSelect) {
-        projectSelect.required = showProjectScope && (tx in projectRequiredByTxn);
-    }
-    if (stageSelect) {
-        stageSelect.required = showStageScope && (tx in stageRequiredByTxn);
-    }
-    if (expenseCategoryInput) {
-        expenseCategoryInput.required = tx in expenseCategoryRequiredByTxn;
-    }
+    if (projectSelect) projectSelect.required = showProjectScope && ruleFlag(m, 'project_required', false);
+    if (stageSelect) stageSelect.required = showStageScope && ruleFlag(m, 'stage_required', false);
+    if (expenseCategoryInput) expenseCategoryInput.required = ruleFlag(m, 'expense_category', false);
+
+    var relType = ruleFlag(m, 'related', false) ? ruleText(m, 'related_type') : '';
     if (relatedTypeSelect && relatedIdSelect) {
-        var relType = relatedTypeByTxn[tx] || '';
         relatedTypeSelect.value = relType;
         relatedIdSelect.innerHTML = '<option value="">Select entity</option>';
         if (relType) {
@@ -374,10 +346,11 @@ function updateTxnUI() {
             });
         }
     }
+    if (relatedIdSelect) relatedIdSelect.required = !!relType;
     if (relatedHelp) {
-        relatedHelp.classList.toggle('d-none', !relatedTypeByTxn[tx]);
-        if (relatedTypeByTxn[tx]) {
-            relatedHelp.textContent = 'Select the ' + String(relatedTypeByTxn[tx] || 'entity').replace('_', ' ') + ' for this transaction.';
+        relatedHelp.classList.toggle('d-none', !relType);
+        if (relType) {
+            relatedHelp.textContent = 'Select the ' + String(relType || 'entity').replace('_', ' ') + ' for this transaction.';
         }
     }
     if (pendingInfo) pendingInfo.classList.add('d-none');
