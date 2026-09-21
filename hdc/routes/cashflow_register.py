@@ -19,7 +19,6 @@ entry that points back at the one it amended.
 
 import csv
 import io
-import secrets
 from datetime import timedelta
 
 from flask import (Response, current_app, flash, redirect, render_template,
@@ -27,19 +26,15 @@ from flask import (Response, current_app, flash, redirect, render_template,
 from flask_login import current_user, login_required
 
 from hdc.extensions import _admin_only, db
-from hdc.models.accounts import Account
 from hdc.models.cashflow import CashFlowEntry
-from hdc.models.projects import Project
 from hdc.services.cashflow_register import (
     CF_DIRECTIONS,
     CF_DIRECTION_LABELS,
     amend_manual_cash_flow_entry,
-    category_options,
     day_lock_state,
     day_positions,
     day_totals,
     lock_cash_day,
-    party_options,
     register_row_dicts,
     register_rows,
     register_summary,
@@ -48,11 +43,18 @@ from hdc.services.cashflow_register import (
     save_cf_party,
     save_cf_subcategory,
     save_counted_position,
-    save_manual_cash_flow_entry,
     unlock_cash_day,
     void_manual_cash_flow_entry,
 )
-from hdc.utils.dates import _pkt_now_naive, _pkt_today
+from hdc.services.transaction_entry import (
+    clear_entry_form,
+    create_entry_from_form,
+    entry_form_context,
+    pop_entry_form,
+    posted_datetime_from_form_date,
+    stash_entry_form,
+)
+from hdc.utils.dates import _pkt_today
 from hdc.utils.format import _parse_date, _payload_int
 from hdc.utils.money import from_minor
 
@@ -97,15 +99,6 @@ def _register_filter_query(flt):
     return {k: v for k, v in q.items() if v not in ('', None)}
 
 
-def _money_accounts():
-    """Active treasury accounts (cash / bank / company)."""
-    rows = Account.query.filter(Account.is_void == False).all()  # noqa: E712
-    return [a for a in rows
-            if not a.is_void
-            and str(a.status or 'active').strip().lower() == 'active'
-            and str(a.type or '').strip().lower() in ('company', 'cash', 'bank')]
-
-
 def register(app):
     """Register the Cash Flow register + reconciliation pages."""
 
@@ -119,27 +112,11 @@ def register(app):
             action = (request.form.get('action') or '').strip().lower()
             try:
                 if action == 'create_entry':
-                    entry, created = save_manual_cash_flow_entry(
-                        direction=request.form.get('direction'),
-                        amount=request.form.get('amount'),
-                        account_id=_payload_int(request.form, 'account_id'),
-                        destination_account_id=(_payload_int(request.form, 'destination_account_id') or None),
-                        category_id=(_payload_int(request.form, 'category_id') or None),
-                        category_name=(request.form.get('category_name') or '').strip() or None,
-                        subcategory_id=(_payload_int(request.form, 'subcategory_id') or None),
-                        subcategory_name=(request.form.get('subcategory_name') or '').strip() or None,
-                        party_name=(request.form.get('party_name') or '').strip() or None,
-                        party_type=(request.form.get('party_type') or '').strip() or 'other',
-                        description=(request.form.get('description') or '').strip() or None,
-                        note=(request.form.get('note') or '').strip() or None,
-                        reference=(request.form.get('reference') or '').strip() or None,
-                        date_posted=_cf_posted_datetime(request.form.get('date')),
-                        project_id=(_payload_int(request.form, 'project_id') or None),
-                        stage_id=(_payload_int(request.form, 'stage_id') or None),
-                        idempotency_key=(request.form.get('_idempotency_key') or '').strip() or None,
-                        actor=current_user,
-                    )
+                    # Same engine, same validation as the New Transaction page;
+                    # only the marshalling is shared (services.transaction_entry).
+                    entry, created = create_entry_from_form(request.form, actor=current_user)
                     db.session.commit()
+                    clear_entry_form()
                     if not created:
                         flash('That entry was already recorded (duplicate submission ignored).', 'info')
                     else:
@@ -198,13 +175,20 @@ def register(app):
                     flash('Unknown action.', 'danger')
             except ValueError as exc:
                 db.session.rollback()
+                # The register is POST-redirect-GET, so without this the user
+                # would land on an empty form after a validation error.
+                if action == 'create_entry':
+                    stash_entry_form(request.form, str(exc))
                 flash(str(exc), 'danger')
             except Exception as exc:
                 db.session.rollback()
+                if action == 'create_entry':
+                    stash_entry_form(request.form, 'Unexpected error — your entry was not saved.')
                 flash(f'Unable to complete the action: {exc}', 'danger')
             return redirect(url_for('hdc_cashflow_register', **_register_filter_query(_register_filters())))
 
         flt = _register_filters()
+        draft_values, draft_error = pop_entry_form()
         all_rows = register_rows(
             date_from=flt['date_from'], date_to=flt['date_to'], account_id=flt['account_id'],
             direction=flt['direction'], category_id=flt['category_id'], project_id=flt['project_id'],
@@ -223,11 +207,9 @@ def register(app):
             'accounts/cashflow_register.html',
             rows=register_row_dicts(page_rows),
             summary=summary,
-            accounts=_money_accounts(),
-            categories=category_options(),
-            parties=party_options(),
-            projects=Project.query.order_by(Project.name.asc()).all(),
             directions=[(d, CF_DIRECTION_LABELS[d]) for d in CF_DIRECTIONS],
+            # The shared New Transaction form partial renders from this.
+            **entry_form_context(draft_values or None, draft_error or None),
             today=_pkt_today().isoformat(),
             filter_date_from=(flt['date_from'].isoformat() if flt['date_from'] else ''),
             filter_date_to=(flt['date_to'].isoformat() if flt['date_to'] else ''),
@@ -245,7 +227,6 @@ def register(app):
             pg_url_kwargs={},
             pg_query=pg_query,
             pg_query_no_void={k: v for k, v in pg_query.items() if k != 'show_void'},
-            form_token=secrets.token_hex(16),
             pg_label='entries',
         )
 
@@ -384,11 +365,7 @@ def register(app):
 
 def _cf_posted_datetime(raw_date):
     """Build a PKT datetime from a ``YYYY-MM-DD`` form field (time = now)."""
-    d = _parse_date((raw_date or '').strip(), fallback=None)
-    if d is None:
-        return None
-    now = _pkt_now_naive()
-    return now.replace(year=d.year, month=d.month, day=d.day)
+    return posted_datetime_from_form_date(raw_date)
 
 
 def _handle_vocabulary_action(action, form):

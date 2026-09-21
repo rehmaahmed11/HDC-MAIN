@@ -41,104 +41,26 @@
 </div>
 
 {# ── Record an entry ──────────────────────────────────────────────────────── #}
-<div class="card hdc-card mb-3">
-    <div class="card-header hdc-card-header">
-        <span><i class="fas fa-plus-circle me-2"></i>Record Cash Flow</span>
-        <span class="small text-muted">comma-formatted amounts accepted — e.g. 12,34,567.89</span>
-    </div>
-    <div class="card-body py-3">
-        <form method="POST" id="cfRegisterForm" class="row g-2 align-items-end">
-            <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
-            <input type="hidden" name="action" value="create_entry">
-            <input type="hidden" name="_idempotency_key" value="{{ form_token }}">
-
-            <div class="col-12 col-md-2">
-                <label class="form-label">Direction <span class="text-danger">*</span></label>
-                <select name="direction" id="cfDirection" class="form-select" required>
-                    <option value="in">Received (Money In)</option>
-                    <option value="out" selected>Spent (Money Out)</option>
-                    <option value="transfer">Internal Transfer</option>
-                </select>
-            </div>
-            <div class="col-12 col-md-2">
-                <label class="form-label">Date</label>
-                <input type="date" name="date" class="form-control" value="{{ today }}">
-            </div>
-            <div class="col-12 col-md-2">
-                <label class="form-label">Amount (PKR) <span class="text-danger">*</span></label>
-                <input type="text" inputmode="decimal" name="amount" class="form-control" placeholder="4,500.25" required>
-            </div>
-            <div class="col-12 col-md-2">
-                <label class="form-label">Account <span class="text-danger">*</span></label>
-                <select name="account_id" class="form-select" required>
-                    <option value="">— choose —</option>
-                    {% for a in accounts %}
-                    <option value="{{ a.id }}">{{ a.name }} ({{ 'Bank' if a.type == 'bank' else 'Cash' }})</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="col-12 col-md-2" id="cfDestWrap" style="display:none;">
-                <label class="form-label">Destination Account</label>
-                <select name="destination_account_id" class="form-select">
-                    <option value="">— choose —</option>
-                    {% for a in accounts %}
-                    <option value="{{ a.id }}">{{ a.name }} ({{ 'Bank' if a.type == 'bank' else 'Cash' }})</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="col-12 col-md-2" id="cfCategoryWrap">
-                <label class="form-label">Category <span class="text-danger">*</span></label>
-                <select name="category_id" id="cfCategory" class="form-select">
-                    <option value="">— choose —</option>
-                    {% for c in categories %}
-                    <option value="{{ c.id }}" data-direction="{{ c.direction or 'both' }}">{{ c.name }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="col-12 col-md-2" id="cfSubWrap">
-                <label class="form-label">Subcategory</label>
-                <select name="subcategory_id" id="cfSubcategory" class="form-select">
-                    <option value="">— none —</option>
-                    {% for c in categories %}
-                        {% for s in c.subcategories %}
-                        <option value="{{ s.id }}" data-category="{{ c.id }}" style="display:none;">{{ s.name }}</option>
-                        {% endfor %}
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="col-12 col-md-2" id="cfPartyWrap">
-                <label class="form-label">Party / Person</label>
-                <input type="text" name="party_name" id="cfParty" class="form-control" maxlength="160"
-                       list="cfPartyList" placeholder="e.g. Al-Kabir Store" autocomplete="off">
-                <datalist id="cfPartyList">
-                    {% for p in parties %}<option value="{{ p.name }}">{% endfor %}
-                </datalist>
-            </div>
-            <div class="col-12 col-md-2">
-                <label class="form-label">Reference</label>
-                <input type="text" name="reference" class="form-control" maxlength="80" placeholder="Cheque / slip no.">
-            </div>
-            <div class="col-12 col-md-2">
-                <label class="form-label">Project</label>
-                <select name="project_id" class="form-select">
-                    <option value="">— none —</option>
-                    {% for p in projects %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
-                </select>
-            </div>
-            <div class="col-12 col-md-3">
-                <label class="form-label">Description</label>
-                <input type="text" name="description" class="form-control" maxlength="200" placeholder="Auto-filled from category + party">
-            </div>
-            <div class="col-12 col-md-3">
-                <label class="form-label">Note</label>
-                <input type="text" name="note" class="form-control" maxlength="500" placeholder="Internal note (optional)">
-            </div>
-            <div class="col-12 col-md-2 d-grid">
-                <button type="submit" class="btn btn-primary">
-                    <i class="fas fa-check me-1"></i>Record
-                </button>
-            </div>
-        </form>
+{#
+  The entry form is the shared New Transaction form
+  (templates/hdc/accounts/_new_transaction_form.html) — the same partial the
+  focused /hdc/accounts/new-transaction page renders, posting to the same
+  engine.  It used to be a flat 12-column row of every field at once; it is now
+  direction-first and progressive, with searchable Account / Party / Project
+  pickers that can create what is missing without leaving the page.
+#}
+<div class="hdc-txn-embed">
+    <link rel="stylesheet" href="/hdc_static/css/new_transaction.css">
+    <div class="card hdc-card mb-3">
+        <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+            <span><i class="fas fa-plus-circle me-2" aria-hidden="true"></i>New Transaction</span>
+            <a href="{{ url_for('hdc_new_transaction') }}" class="btn btn-sm btn-outline-secondary">
+                <i class="fas fa-up-right-and-down-left-from-center me-1" aria-hidden="true"></i>Open full page
+            </a>
+        </div>
+        <div class="card-body">
+            {% include "accounts/_new_transaction_form.html" %}
+        </div>
     </div>
 </div>
 
@@ -392,56 +314,8 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
-(function () {
-    var dirSel = document.getElementById('cfDirection');
-    var destWrap = document.getElementById('cfDestWrap');
-    var catWrap = document.getElementById('cfCategoryWrap');
-    var subWrap = document.getElementById('cfSubWrap');
-    var partyWrap = document.getElementById('cfPartyWrap');
-    var catSel = document.getElementById('cfCategory');
-    var subSel = document.getElementById('cfSubcategory');
-    if (!dirSel) return;
-
-    function filterCategories() {
-        var dir = dirSel.value;
-        Array.prototype.forEach.call(catSel.options, function (o) {
-            if (!o.value) return;
-            var d = (o.getAttribute('data-direction') || 'both').toLowerCase();
-            o.hidden = !(d === 'both' || d === dir);
-        });
-        // keep a valid selection
-        if (catSel.selectedOptions.length && catSel.selectedOptions[0].hidden) {
-            catSel.value = '';
-        }
-        filterSubcategories();
-    }
-
-    function filterSubcategories() {
-        var catId = catSel.value;
-        Array.prototype.forEach.call(subSel.options, function (o) {
-            if (!o.value) return;
-            o.style.display = (o.getAttribute('data-category') === catId) ? '' : 'none';
-        });
-        if (subSel.selectedOptions.length && subSel.selectedOptions[0].style.display === 'none') {
-            subSel.value = '';
-        }
-    }
-
-    function applyDirection() {
-        var dir = dirSel.value;
-        destWrap.style.display = (dir === 'transfer') ? '' : 'none';
-        var showCat = (dir !== 'transfer');
-        catWrap.style.display = showCat ? '' : 'none';
-        subWrap.style.display = showCat ? '' : 'none';
-        catSel.required = showCat;
-        partyWrap.style.display = (dir === 'transfer') ? 'none' : '';
-        filterCategories();
-    }
-
-    dirSel.addEventListener('change', applyDirection);
-    catSel.addEventListener('change', filterSubcategories);
-    applyDirection();
-})();
-</script>
+{# The direction / category / subcategory dependency and the searchable pickers
+   are the shared New Transaction controller — the same file the focused page
+   loads, so the two entry surfaces cannot behave differently. #}
+<script src="/hdc_static/js/pages/new_transaction.js"></script>
 {% endblock %}

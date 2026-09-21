@@ -44,6 +44,16 @@ COMBO_PAGES = {
         'templates/hdc/accounts/money_center.html',
         'static/hdc/js/pages/money_center.js',
     ),
+    # The New Transaction form is one shared partial rendered by two surfaces;
+    # both promise the same combo contract and are driven by the same script.
+    '/hdc/accounts/new-transaction': (
+        'templates/hdc/accounts/_new_transaction_form.html',
+        'static/hdc/js/pages/new_transaction.js',
+    ),
+    '/hdc/accounts/cashflow/register': (
+        'templates/hdc/accounts/_new_transaction_form.html',
+        'static/hdc/js/pages/new_transaction.js',
+    ),
 }
 
 # The searchable combo pairs each page promises: combo input id -> mirrored
@@ -61,6 +71,12 @@ EXPECTED_COMBO_PAIRS = {
         ('edit_stage_id_input', 'edit_stage_id'),
         ('edit_related_id_input', 'edit_related_id'),
     ],
+    '/hdc/accounts/new-transaction': [
+        ('txnAccountInput', 'txnAccount'),
+        ('txnToAccountInput', 'txnToAccount'),
+        ('txnPartyInput', 'txnParty'),
+        ('txnProjectInput', 'txnProject'),
+    ],
     '/hdc/accounts/money-center': [
         ('mc_from_account_input', 'mc_from_account'),
         ('mc_to_account_input', 'mc_to_account'),
@@ -70,6 +86,9 @@ EXPECTED_COMBO_PAIRS = {
         ('mc_exp_cat_input', 'mc_exp_cat'),
     ],
 }
+# The register and the focused page share the same partial, so the same pairs.
+EXPECTED_COMBO_PAIRS['/hdc/accounts/cashflow/register'] = EXPECTED_COMBO_PAIRS[
+    '/hdc/accounts/new-transaction']
 
 
 class ComboWidgetHarnessTestCase(unittest.TestCase):

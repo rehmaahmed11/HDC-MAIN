@@ -70,6 +70,11 @@ DOMAIN_OF = {
                  "account_edit.html",
                  "cashflow.html", "cashflow_report.html",
                  "cashflow_register.html", "cashflow_reconciliation.html",
+                 # New Transaction — the focused entry surface, the form it
+                 # shares with the register, and its add-new modals
+                 "new_transaction.html",
+                 "_new_transaction_form.html",
+                 "_new_transaction_modals.html",
                  # Money Center — the single-entry workspace over the flows
                  "money_center.html",
                  "personal_management.html", "personal_expenses.html",

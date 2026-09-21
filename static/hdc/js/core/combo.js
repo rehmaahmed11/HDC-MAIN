@@ -18,7 +18,15 @@
                 '.hdc-combo-item{padding:8px 10px;cursor:pointer;font-size:.9rem;border-bottom:1px solid #f7d2a5;white-space:nowrap;}',
                 '[data-theme="dark"] .hdc-combo-item{border-bottom-color:#444;}',
                 '.hdc-combo-item:last-child{border-bottom:0;}',
-                '.hdc-combo-item:hover,.hdc-combo-item.active{background:#87af32;color:#fff;}'
+                '.hdc-combo-item:hover,.hdc-combo-item.active{background:#87af32;color:#fff;}',
+                // Shown only when the caller passes emptyText / onAdd, so pages
+                // that do not opt in render exactly what they always did.
+                '.hdc-combo-empty{padding:8px 10px;font-size:.85rem;color:#64748b;}',
+                '[data-theme="dark"] .hdc-combo-empty{color:#cbd5e1;}',
+                '.hdc-combo-add{padding:8px 10px;cursor:pointer;font-size:.85rem;font-weight:600;',
+                'color:#137a5f;border-top:1px dashed #f3b66d;white-space:nowrap;}',
+                '.hdc-combo-add:hover,.hdc-combo-add.active{background:#87af32;color:#fff;}',
+                '[data-theme="dark"] .hdc-combo-add{color:#5eead4;}'
             ].join('');
             document.head.appendChild(style);
         }
@@ -40,6 +48,9 @@
                 // Append menu to <body> so no parent overflow:hidden can clip it.
                 var menu = document.createElement('div');
                 menu.className = 'hdc-combo-menu d-none';
+                menu.setAttribute('role', 'listbox');
+                if (!menu.id) menu.id = select.id ? select.id + '_menu' : '';
+                if (menu.id) input.setAttribute('aria-controls', menu.id);
                 document.body.appendChild(menu);
 
                 if (opts.hideSelect !== false) select.classList.add('d-none');
@@ -112,26 +123,69 @@
                     }
                     return all.slice(0, opts.maxItems || 25);
                 }
+                // The "+ Add New …" affordance is opt-in: a combo only shows it
+                // when the caller passes onAdd, so every existing caller keeps
+                // exactly the list it had before.
+                function hasAddRow() {
+                    return typeof opts.onAdd === 'function';
+                }
+                function escapeHtml(text) {
+                    return String(text == null ? '' : text)
+                        .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                        .replace(/>/g, '&gt;').replace(/\"/g, '&quot;');
+                }
                 function render() {
                     state.items = getOptions();
                     state.idx = state.items.length ? 0 : -1;
+                    var rows = state.items.map(function (o, i) {
+                        return '<div class=\"hdc-combo-item' + (i === 0 ? ' active' : '') +
+                            '\" role=\"option\" data-idx=\"' + i + '\">' + escapeHtml(o.text) + '</div>';
+                    });
                     if (!state.items.length) {
+                        // No matches.  Rather than an empty box, point at the way
+                        // out when the caller offered one.
+                        if (opts.emptyText || hasAddRow()) {
+                            var empty = '<div class=\"hdc-combo-empty\">' +
+                                escapeHtml(opts.emptyText || 'No matches found.') + '</div>';
+                            var addOnly = hasAddRow()
+                                ? '<div class=\"hdc-combo-add\" role=\"option\" data-idx=\"' + state.items.length +
+                                  '\">' + escapeHtml(opts.addLabel || '+ Add new') + '</div>'
+                                : '';
+                            menu.innerHTML = empty + addOnly;
+                            state.idx = -1;
+                            menu.classList.remove('d-none');
+                            placeMenu();
+                            return;
+                        }
                         menu.innerHTML = '';
                         menu.classList.add('d-none');
                         return;
                     }
-                    menu.innerHTML = state.items.map(function (o, i) {
-                        return '<div class=\"hdc-combo-item' + (i === state.idx ? ' active' : '') + '\" data-idx=\"' + i + '\">' + o.text + '</div>';
-                    }).join('');
+                    if (hasAddRow()) {
+                        rows.push('<div class=\"hdc-combo-add\" role=\"option\" data-idx=\"' +
+                            state.items.length + '\">' +
+                            escapeHtml(opts.addLabel || '+ Add new') + '</div>');
+                    }
+                    menu.innerHTML = rows.join('');
                     menu.classList.remove('d-none');
                     placeMenu();
                 }
                 function highlight() {
-                    Array.from(menu.querySelectorAll('.hdc-combo-item')).forEach(function (el, i) {
-                        el.classList.toggle('active', i === state.idx);
+                    Array.from(menu.querySelectorAll('.hdc-combo-item, .hdc-combo-add')).forEach(function (el) {
+                        el.classList.toggle('active', parseInt(el.getAttribute('data-idx') || '-1', 10) === state.idx);
                     });
                 }
+                function maxIdx() {
+                    return hasAddRow() ? state.items.length : state.items.length - 1;
+                }
                 function pick(i) {
+                    if (hasAddRow() && i === state.items.length) {
+                        // The action row is not a value: it never touches the
+                        // select, so a cancelled modal leaves the field as-is.
+                        menu.classList.add('d-none');
+                        opts.onAdd(input, select);
+                        return;
+                    }
                     var opt = state.items[i];
                     if (!opt) return;
                     select.value = opt.value;
@@ -175,7 +229,7 @@
                     if (menu.classList.contains('d-none')) return;
                     if (e.key === 'ArrowDown') {
                         e.preventDefault();
-                        state.idx = Math.min(state.idx + 1, state.items.length - 1);
+                        state.idx = Math.min(state.idx + 1, maxIdx());
                         highlight();
                     } else if (e.key === 'ArrowUp') {
                         e.preventDefault();
