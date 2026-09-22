@@ -188,6 +188,9 @@ def register(app):
                 'id': int(row.id),
                 'name': row.name,
                 'project_code': row.project_code,
+                # The owner: a project receipt is booked against this name, so
+                # the form can fill it in the moment the project is created.
+                'client': (row.client or ''),
                 'label': row.name,
             },
         )

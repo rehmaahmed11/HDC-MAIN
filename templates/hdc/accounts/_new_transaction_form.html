@@ -192,6 +192,7 @@
                                 data-project-mode="{{ rules.get('project_mode', 'optional') }}"
                                 data-party-types="{{ (rules.get('party_types') or [])|join(',') }}"
                                 data-loan-effect="{{ rules.get('loan_effect', '') }}"
+                                data-project-effect="{{ rules.get('project_effect', '') }}"
                                 {% if sel.get('category_id') == c.id %}selected{% endif %}>{{ c.name }}</option>
                         {% endfor %}
                     </select>
@@ -229,8 +230,12 @@
                    server sent with the options above: a category that does not
                    involve a party (or a project) never asks for one. #}
                 <div class="hdc-field" id="txnPartyField" data-field="party">
-                    <label class="form-label" for="txnPartyInput">
-                        Party / Person <span class="hdc-req" id="txnPartyReq" hidden aria-hidden="true">*</span>
+                    {# The label is rewritten to "Owner / Client" for a project
+                       receipt: on that category the name is the project's owner
+                       and it is filled in from the project, not typed. #}
+                    <label class="form-label" for="txnPartyInput" id="txnPartyLabel">
+                        <span id="txnPartyLabelText">Party / Person</span>
+                        <span class="hdc-req" id="txnPartyReq" hidden aria-hidden="true">*</span>
                     </label>
                     <input type="text" id="txnPartyInput" class="form-control" data-combo-input
                            placeholder="Search party or person… (e.g. abd)"
@@ -260,8 +265,13 @@
                            aria-autocomplete="list">
                     <select name="project_id" id="txnProject" class="form-select">
                         <option value="">No project</option>
+                        {# data-client is the owner this project's receipts are
+                           booked against — the script shows it so the name is
+                           confirmed, never retyped.  The server derives the
+                           same value, so the two can never disagree. #}
                         {% for p in projects %}
                         <option value="{{ p.id }}"
+                                data-client="{{ (project_clients or {}).get(p.id, '') }}"
                                 {% if sel.get('project_id') == p.id %}selected{% endif %}>{{ p.name }}</option>
                         {% endfor %}
                     </select>

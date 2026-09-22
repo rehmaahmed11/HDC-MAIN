@@ -86,6 +86,8 @@ __all__ = [
     "assert_period_open",
     "reconcile_account",
     "ensure_cashflow_seed_data",
+    "PROJECT_EFFECTS",
+    "backfill_project_receipt_owner_payments",
 ]
 
 CF_DIR_IN = 'in'
@@ -130,6 +132,12 @@ LOAN_PARTY_TYPES = ('lender', 'borrower')
 
 #: The four loan movements a category can be tagged with (``loan_effect``).
 LOAN_EFFECTS = ('take', 'give', 'repay', 'recover')
+
+#: Project side-effects a category can be tagged with (``project_effect``).
+#: ``receipt`` = money received from a project's owner/client, which is mirrored
+#: into ``hdc_owner_payment`` so the project's received / outstanding figures
+#: follow the register instead of drifting away from it.
+PROJECT_EFFECTS = ('receipt',)
 
 LOAN_EFFECT_LABELS = {
     'take': 'Loan taken (money in, we owe)',
@@ -437,7 +445,7 @@ def validate_manual_cash_flow(*, direction, amount, account_id, destination_acco
     return direction, amount, account, destination
 
 
-def _cf_resolve_counterparty_account(party_name):
+def _cf_resolve_counterparty_account(party_name, *, project=None, as_client=False):
     """Resolve (or lazily create) the ledger account standing behind a party.
 
     HDC's ledger is fully double-entry — every row needs both a ``from`` and a
@@ -445,10 +453,35 @@ def _cf_resolve_counterparty_account(party_name):
     balance against.  Named parties get their own ``person`` account (the same
     convention the rest of Accounts uses); an unnamed receipt settles against
     the shared ``Credit/Debit Control`` account.
+
+    ``as_client`` (set for a project-receipt category) changes two things, and
+    both matter for the money to end up in the right place:
+
+    * the name defaults to ``project.client`` — the owner of the project being
+      paid for is a fact the system already stores, so it is never retyped and
+      cannot fork into four spellings of one person;
+    * the account is created with type ``client`` rather than ``person``.  That
+      is not cosmetic: ``_account_group_mode_for_row`` files ``client`` under
+      ``project_in_flow`` (counted by the Receivable KPI) and ``person`` under
+      ``credit_debit`` (not counted).  Booking an owner receipt against a
+      ``person`` account is what made these receipts invisible to the KPI.
+
+    This is the same resolution the Projects page has always used
+    (``_accounts_post_owner_receipt``), so both routes now name the *same*
+    ledger account for the same client.
     """
     from hdc.services.accounts import _accounts_default_external_parties, _accounts_party_account
     nm = (party_name or '').strip()
-    if nm:
+    if as_client:
+        # The project's own client wins; a typed name is only a fallback for a
+        # project whose client field was never filled in.
+        client_name = (getattr(project, 'client', '') or '').strip()
+        nm = client_name or nm
+        if nm:
+            acc = _accounts_party_account(nm, 'client')
+            if acc is not None:
+                return acc
+    elif nm:
         acc = _accounts_party_account(nm, 'person')
         if acc is not None:
             return acc
@@ -547,9 +580,10 @@ def save_manual_cash_flow_entry(*, direction, amount, account_id, destination_ac
     )
     posted = date_posted or _pkt_now_naive()
     assert_period_open(int(account.id), posted, operation='posted')
+    project_row = None
     if validate_scope:
-        project, stage = _cf_resolve_project(project_id, stage_id)
-        project_id = int(project.id) if project is not None else None
+        project_row, stage = _cf_resolve_project(project_id, stage_id)
+        project_id = int(project_row.id) if project_row is not None else None
         stage_id = int(stage.id) if stage is not None else None
 
     cat = None
@@ -559,6 +593,33 @@ def save_manual_cash_flow_entry(*, direction, amount, account_id, destination_ac
                                    required=True, create_if_missing=create_missing)
         sub = _cf_resolve_subcategory(cat, subcategory_id, subcategory_name,
                                       create_if_missing=create_missing)
+
+    # ── a project receipt is about the project, not about a typed name ───────
+    # The owner/client is derived from the project, so the same client can never
+    # arrive under four spellings and the entry can never name somebody who has
+    # nothing to do with the project being paid for.
+    is_project_receipt = bool(cat is not None and getattr(cat, 'is_project_receipt', False))
+    if is_project_receipt:
+        if not project_id:
+            raise ValueError(
+                f'"{cat.name}" is money received for a project — pick the project.')
+        if project_row is None:
+            from hdc.models.projects import Project as _Project
+            project_row = db.session.get(_Project, int(project_id))
+            if project_row is None:
+                raise ValueError('That project no longer exists. Pick another project.')
+        owner_name = (getattr(project_row, 'client', '') or '').strip()
+        typed = (party_name or '').strip()
+        if owner_name:
+            # The project's own owner always wins over whatever was typed: the
+            # contract says who owes this money.
+            party_name = owner_name
+            party_id = None
+            party_type = 'client'
+        elif typed:
+            # Project master has no client recorded — keep what was typed, but
+            # file it as the client it functionally is.
+            party_type = 'client'
 
     ptype = (party_type or 'other').strip().lower() or 'other'
     party = _cf_find_party(party_id=party_id, name=party_name, party_type=ptype)
@@ -621,7 +682,8 @@ def save_manual_cash_flow_entry(*, direction, amount, account_id, destination_ac
 
     counterparty = None
     if direction in (CF_DIR_IN, CF_DIR_OUT):
-        counterparty = _cf_resolve_counterparty_account(party_name)
+        counterparty = _cf_resolve_counterparty_account(
+            party_name, project=project_row, as_client=is_project_receipt)
         if counterparty is None:
             raise ValueError('Unable to resolve the counterparty account for this entry.')
 
@@ -659,6 +721,12 @@ def save_manual_cash_flow_entry(*, direction, amount, account_id, destination_ac
     # same transaction, so an entry can never exist without its loan movement.
     _cf_apply_loan_effect(entry, cat, actor=actor)
 
+    # The project twin of the above: an owner/client receipt mirrors into
+    # hdc_owner_payment, which is what Project.total_received and
+    # remaining_receivable are computed from.  Same transaction, so a receipt
+    # can never exist without the project knowing it was paid.
+    _cf_apply_project_effect(entry, cat, project=project_row)
+
     if commit:
         db.session.commit()
     return entry, True
@@ -673,6 +741,82 @@ def _cf_apply_loan_effect(entry, category, actor=None):
     # module-level import would be circular.
     from hdc.services.loans import apply_cash_flow_entry
     return apply_cash_flow_entry(entry, effect, actor=actor)
+
+
+def _cf_owner_payment_for_entry(entry):
+    """The ``OwnerPayment`` mirroring this register entry, if any."""
+    from hdc.models.accounts import OwnerPayment
+    if entry is None or not getattr(entry, 'id', None):
+        return None
+    return (OwnerPayment.query
+            .filter(OwnerPayment.source_entry_id == int(entry.id))
+            .first())
+
+
+def _cf_apply_project_effect(entry, category, project=None):
+    """Mirror an owner/client receipt into ``hdc_owner_payment``.
+
+    ``Project.total_received`` and ``remaining_receivable`` are derived from
+    ``OwnerPayment`` rows and from nothing else, so a receipt that does not
+    create one leaves the project reading as unpaid no matter how much cash
+    actually arrived.  This is the single line of code that connects the two.
+
+    Idempotent (a row already pointing at this entry is returned untouched) and
+    deliberately quiet about anything it is not responsible for: the money has
+    already been posted by the caller, and this mirror never re-posts it.
+    """
+    from hdc.models.accounts import OwnerPayment
+
+    if entry is None or category is None:
+        return None
+    if not getattr(category, 'is_project_receipt', False):
+        return None
+    if not entry.project_id:
+        return None
+
+    existing = _cf_owner_payment_for_entry(entry)
+    if existing is not None:
+        return existing
+
+    remarks = (entry.description or '').strip() or f'Cash flow entry #{entry.id}'
+    row = OwnerPayment(
+        project_id=int(entry.project_id),
+        amount=float(entry.amount or 0.0),
+        date=(entry.date_posted.date() if entry.date_posted else _pkt_today()),
+        # The account the money actually landed in, so the project's receipt
+        # list and the treasury agree on where it went.
+        received_to_account_id=(int(entry.account_id) if entry.account_id else None),
+        remarks=remarks[:200],
+        activity_at=_pkt_now_naive(),
+        is_void=bool(entry.is_void),
+        # The back-link that makes this mirror idempotent and lets a void on
+        # either side find the other.
+        source_entry_id=int(entry.id),
+    )
+    db.session.add(row)
+    db.session.flush()
+    return row
+
+
+def _cf_sync_project_effect_void(entry, *, make_void, reason=None):
+    """Keep the mirrored ``OwnerPayment`` in step when an entry is voided.
+
+    A voided receipt must stop counting towards "what this project has been
+    paid" — otherwise voiding money in the register would silently leave the
+    project's outstanding balance understated.
+    """
+    row = _cf_owner_payment_for_entry(entry)
+    if row is None:
+        return None
+    row.is_void = bool(make_void)
+    if make_void:
+        row.void_reason = ((reason or 'Cash flow entry voided'))[:250]
+        row.voided_at = _pkt_now_naive()
+    else:
+        row.void_reason = None
+        row.voided_at = None
+    db.session.flush()
+    return row
 
 
 def amend_manual_cash_flow_entry(entry, *, direction=None, amount=None, account_id=None,
@@ -790,6 +934,11 @@ def void_manual_cash_flow_entry(entry, reason=None, actor=None, commit=True,
     except ImportError:  # pragma: no cover - loans module always present
         pass
 
+    # Same for the project side: a voided owner receipt must stop counting
+    # towards what the project has been paid, or voiding the money would leave
+    # the client's outstanding balance understated.
+    _cf_sync_project_effect_void(entry, make_void=True, reason=reason_txt)
+
     if commit:
         db.session.commit()
     return entry
@@ -830,6 +979,8 @@ def restore_manual_cash_flow_entry(entry, actor=None, commit=True):
         restore_movement_for_entry(entry, commit=False)
     except ImportError:  # pragma: no cover - loans module always present
         pass
+
+    _cf_sync_project_effect_void(entry, make_void=False)
 
     if commit:
         db.session.commit()
@@ -992,12 +1143,18 @@ def category_field_rules(category):
             'project_mode': 'optional',
             'party_types': (),
             'loan_effect': '',
+            'project_effect': '',
         }
+    effect = category.project_effect_value
     return {
         'party_mode': category.party_mode_value,
-        'project_mode': category.project_mode_value,
+        # A project-receipt category *is* the project: the entry has no meaning
+        # without one, so the rule is forced here rather than relying on every
+        # database having been seeded with project_mode='required'.
+        'project_mode': ('required' if effect == 'receipt' else category.project_mode_value),
         'party_types': tuple(category.allowed_party_types),
         'loan_effect': (category.loan_effect or '').strip().lower(),
+        'project_effect': effect,
     }
 
 
@@ -1054,14 +1211,15 @@ def save_cf_party(name, party_type='other', phone=None, note=None):
 
 def save_cf_category(name, direction='both', notes=None, sort_order=0,
                      party_mode=None, project_mode=None, party_types=None,
-                     loan_effect=None):
+                     loan_effect=None, project_effect=None):
     """Get-or-create a category by name (case-insensitive).
 
-    ``party_mode`` / ``project_mode`` / ``party_types`` / ``loan_effect`` are the
-    field rules (see :class:`~hdc.models.cashflow.CashFlowCategory`).  They are
-    applied only on create — an existing category keeps the rules the operator
-    set in Settings, exactly like ``save_cf_party`` never downgrades a known
-    supplier to ``other``.
+    ``party_mode`` / ``project_mode`` / ``party_types`` / ``loan_effect`` /
+    ``project_effect`` are the field rules (see
+    :class:`~hdc.models.cashflow.CashFlowCategory`).  They are applied only on
+    create — an existing category keeps the rules the operator set in Settings,
+    exactly like ``save_cf_party`` never downgrades a known supplier to
+    ``other``.
     """
     nm = (name or '').strip()
     if not nm:
@@ -1080,7 +1238,8 @@ def save_cf_category(name, direction='both', notes=None, sort_order=0,
                            party_mode=_clean_field_mode(party_mode),
                            project_mode=_clean_field_mode(project_mode),
                            party_types=_clean_party_types(party_types),
-                           loan_effect=_clean_loan_effect(loan_effect))
+                           loan_effect=_clean_loan_effect(loan_effect),
+                           project_effect=_clean_project_effect(project_effect))
     db.session.add(row)
     db.session.flush()
     return row, True
@@ -1116,9 +1275,14 @@ def _clean_loan_effect(value):
     return effect if effect in LOAN_EFFECTS else None
 
 
+def _clean_project_effect(value):
+    effect = (value or '').strip().lower()
+    return effect if effect in PROJECT_EFFECTS else None
+
+
 def update_cf_category(category, *, name=None, direction=None, notes=None, sort_order=None,
                        party_mode=None, project_mode=None, party_types=None, loan_effect=None,
-                       is_active=None, commit=True):
+                       project_effect=None, is_active=None, commit=True):
     """Edit an existing category and its field rules (Settings → Cash Flow).
 
     Only the keyword arguments actually passed are touched, so the settings
@@ -1155,6 +1319,8 @@ def update_cf_category(category, *, name=None, direction=None, notes=None, sort_
         category.party_types = _clean_party_types(party_types)
     if loan_effect is not None:
         category.loan_effect = _clean_loan_effect(loan_effect)
+    if project_effect is not None:
+        category.project_effect = _clean_project_effect(project_effect)
     if is_active is not None:
         category.is_active = bool(is_active)
     db.session.flush()
@@ -1634,8 +1800,8 @@ _DEFAULT_CATEGORIES = [
 ]
 
 #: Field rules for the seeded categories: ``name -> (party_mode, project_mode,
-#: allowed party types, loan effect)``.  Only ever applied where the column is
-#: still empty — an operator's own rule (Settings → Cash Flow) always wins.
+#: allowed party types, loan effect, project effect)``.  Only ever applied where
+#: the column is still empty — an operator's own rule always wins.
 _DEFAULT_CATEGORY_RULES = {
     # The four loan movements are the only categories that *require* a party:
     # "Loan Given" to nobody is not a loan.  Everything else keeps the app's
@@ -1643,22 +1809,25 @@ _DEFAULT_CATEGORY_RULES = {
     # hidden outright where they make no sense, which is what stops the form
     # asking a question that has no answer.  An operator can tighten any of
     # these to "required" in Settings → Cash Flow without a deploy.
-    'Owner / Client Receipt': ('optional', 'optional', 'client', ''),
-    'Scrap & Salvage Sale': ('none', 'none', '', ''),
-    'Loan Received': ('required', 'none', 'lender', 'take'),
-    'Loan Recovery': ('required', 'none', 'borrower', 'recover'),
-    'Other Income': ('optional', 'none', '', ''),
-    'Material & Purchase': ('optional', 'optional', 'supplier', ''),
-    'Labour & Wages': ('optional', 'optional', 'worker', ''),
-    'Subcontractor Payment': ('optional', 'optional', 'subcontractor', ''),
-    'Fuel & Transport': ('optional', 'optional', '', ''),
-    'Equipment & Machinery': ('optional', 'optional', '', ''),
-    'Office Expense': ('none', 'none', '', ''),
-    'Staff Salary': ('optional', 'none', 'staff', ''),
-    'Personal Expense': ('none', 'none', '', ''),
-    'Loan Given': ('required', 'none', 'borrower', 'give'),
-    'Loan Repayment': ('required', 'none', 'lender', 'repay'),
-    'Miscellaneous': ('optional', 'optional', '', ''),
+    # The owner receipt is the one category whose *project* is mandatory: the
+    # money is a project's client paying for that project, so the project is
+    # the subject and the owner name is derived from it (project_effect below).
+    'Owner / Client Receipt': ('optional', 'required', 'client', '', 'receipt'),
+    'Scrap & Salvage Sale': ('none', 'none', '', '', ''),
+    'Loan Received': ('required', 'none', 'lender', 'take', ''),
+    'Loan Recovery': ('required', 'none', 'borrower', 'recover', ''),
+    'Other Income': ('optional', 'none', '', '', ''),
+    'Material & Purchase': ('optional', 'optional', 'supplier', '', ''),
+    'Labour & Wages': ('optional', 'optional', 'worker', '', ''),
+    'Subcontractor Payment': ('optional', 'optional', 'subcontractor', '', ''),
+    'Fuel & Transport': ('optional', 'optional', '', '', ''),
+    'Equipment & Machinery': ('optional', 'optional', '', '', ''),
+    'Office Expense': ('none', 'none', '', '', ''),
+    'Staff Salary': ('optional', 'none', 'staff', '', ''),
+    'Personal Expense': ('none', 'none', '', '', ''),
+    'Loan Given': ('required', 'none', 'borrower', 'give', ''),
+    'Loan Repayment': ('required', 'none', 'lender', 'repay', ''),
+    'Miscellaneous': ('optional', 'optional', '', '', ''),
 }
 
 _DEFAULT_SUBCATEGORIES = {
@@ -1719,9 +1888,11 @@ def ensure_category_field_rules(commit=True):
     touched = 0
     try:
         for row in CashFlowCategory.query.all():
-            party_mode, project_mode, party_types, loan_effect = _DEFAULT_CATEGORY_RULES.get(
-                (row.name or '').strip(), (None, None, None, None))
-            if party_mode is None and project_mode is None and party_types is None and loan_effect is None:
+            (party_mode, project_mode, party_types,
+             loan_effect, project_effect) = _DEFAULT_CATEGORY_RULES.get(
+                (row.name or '').strip(), (None, None, None, None, None))
+            if (party_mode is None and project_mode is None and party_types is None
+                    and loan_effect is None and project_effect is None):
                 continue
             dirty = False
             if party_mode is not None and (row.party_mode or '').strip() == '':
@@ -1735,6 +1906,12 @@ def ensure_category_field_rules(commit=True):
                 dirty = True
             if loan_effect is not None and not (row.loan_effect or '').strip() and loan_effect:
                 row.loan_effect = loan_effect
+                dirty = True
+            # project_effect is behaviour, not preference: an existing database
+            # whose owner-receipt category predates this column must still get
+            # it, or its receipts keep bypassing the project ledger.
+            if project_effect and not (row.project_effect or '').strip():
+                row.project_effect = project_effect
                 dirty = True
             if dirty:
                 touched += 1
@@ -1752,6 +1929,72 @@ def ensure_category_field_rules(commit=True):
 def _ensure_cashflow_seed_data():
     """Bootstrap alias (kept separate so the public name stays descriptive)."""
     return ensure_cashflow_seed_data()
+
+
+def backfill_project_receipt_owner_payments(commit=True, dry_run=False):
+    """Create the missing ``OwnerPayment`` for owner receipts posted before the fix.
+
+    Every register entry on a ``project_effect='receipt'`` category that carries
+    a project but has no mirrored payment row gets one, so projects recorded
+    through the New Transaction form stop reading as unpaid.
+
+    Safe to re-run (each entry is matched by ``source_entry_id``) and safe
+    alongside the other two entry surfaces: rows written by the Projects page /
+    Accounts quick-post have ``source_entry_id IS NULL`` and their own
+    ``owner_payment`` ledger source, so they are never touched and nothing is
+    double-counted.  Voided entries are mirrored as voided rows, which keeps the
+    two sides consistent rather than quietly resurrecting cancelled money.
+
+    Returns ``{'scanned', 'created', 'skipped'}``; ``dry_run`` reports without
+    writing.
+    """
+    from hdc.models.accounts import OwnerPayment
+
+    receipt_ids = [int(c.id) for c in CashFlowCategory.query
+                   .filter(func.lower(func.coalesce(CashFlowCategory.project_effect, '')) == 'receipt')
+                   .all()]
+    stats = {'scanned': 0, 'created': 0, 'skipped': 0}
+    if not receipt_ids:
+        return stats
+
+    entries = (CashFlowEntry.query
+               .filter(CashFlowEntry.category_id.in_(receipt_ids),
+                       CashFlowEntry.project_id.isnot(None))
+               .order_by(CashFlowEntry.id.asc())
+               .all())
+    linked = {int(r.source_entry_id) for r in OwnerPayment.query
+              .filter(OwnerPayment.source_entry_id.isnot(None)).all()}
+
+    for entry in entries:
+        stats['scanned'] += 1
+        if int(entry.id) in linked:
+            stats['skipped'] += 1
+            continue
+        if dry_run:
+            stats['created'] += 1
+            continue
+        row = OwnerPayment(
+            project_id=int(entry.project_id),
+            amount=float(entry.amount or 0.0),
+            date=(entry.date_posted.date() if entry.date_posted else _pkt_today()),
+            received_to_account_id=(int(entry.account_id) if entry.account_id else None),
+            remarks=((entry.description or '').strip()
+                     or f'Cash flow entry #{entry.id}')[:200],
+            activity_at=_pkt_now_naive(),
+            is_void=bool(entry.is_void),
+            void_reason=((entry.void_reason or 'Cash flow entry voided')[:250]
+                         if entry.is_void else None),
+            voided_at=(entry.voided_at if entry.is_void else None),
+            source_entry_id=int(entry.id),
+        )
+        db.session.add(row)
+        stats['created'] += 1
+
+    if stats['created'] and not dry_run:
+        db.session.flush()
+        if commit:
+            db.session.commit()
+    return stats
 
 
 def backfill_transaction_minor_units(batch_commit=True, limit=None):

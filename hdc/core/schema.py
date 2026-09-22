@@ -1077,6 +1077,9 @@ def _ensure_owner_payment_void_schema():
         'is_void': "is_void BOOLEAN DEFAULT 0",
         'void_reason': "void_reason VARCHAR(250)",
         'voided_at': "voided_at DATETIME",
+        # Back-link to the register entry this row mirrors, so a cash-flow
+        # owner receipt and its project-side payment stay one document.
+        'source_entry_id': "source_entry_id INTEGER REFERENCES hdc_cash_flow_entry(id)",
     })
     try:
         with db.engine.connect() as conn:
@@ -1446,6 +1449,10 @@ def _ensure_cashflow_schema():
         'project_mode': "project_mode VARCHAR(10)",
         'party_types': "party_types VARCHAR(200)",
         'loan_effect': "loan_effect VARCHAR(12)",
+        # ``receipt`` marks the owner/client receipt category, whose entries are
+        # mirrored into hdc_owner_payment so the project's received/outstanding
+        # figures follow the register.  See models.cashflow.CashFlowCategory.
+        'project_effect': "project_effect VARCHAR(12)",
     })
     _ensure_loan_schema()
 

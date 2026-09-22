@@ -36,6 +36,7 @@ from hdc.models.cashflow import (                                   # noqa: E402
     AccountReconciliation, CashDayLock, CashFlowEntry, CashFlowEntryAudit,
     CashFlowParty,
 )
+from hdc.models.projects import Project                             # noqa: E402
 from sqlalchemy import text                                          # noqa: E402
 from hdc.utils.dates import _pkt_now_naive                          # noqa: E402
 from hdc.services.cashflow_register import (                        # noqa: E402
@@ -193,8 +194,11 @@ class CashFlowRegisterTestCase(unittest.TestCase):
 
     def test_money_in_out_and_transfer_post_one_ledger_row_each(self):
         cats = self._categories()
+        # A plain income category: 'Owner / Client Receipt' is the project
+        # receipt head (project_effect='receipt') and now requires a project,
+        # which this test is not about.  See test_project_receipt_* below.
         e_in = self._entry('in', '1,25,000.50', account=self.cash,
-                           category_id=cats['Owner / Client Receipt'].id,
+                           category_id=cats['Other Income'].id,
                            party_name='Mr. Akram')
         e_out = self._entry('out', '4,500.25', account=self.cash,
                             category_id=cats['Material & Purchase'].id,
@@ -388,7 +392,7 @@ class CashFlowRegisterTestCase(unittest.TestCase):
         d = date(2026, 9, 1)
         cats = self._categories()
         save_manual_cash_flow_entry(direction='in', amount=2500, account_id=self.cash.id,
-                                    category_id=cats['Owner / Client Receipt'].id,
+                                    category_id=cats['Other Income'].id,
                                     date_posted=datetime.combine(d, datetime.min.time()),
                                     actor=self.actor)
         save_manual_cash_flow_entry(direction='out', amount=750.50, account_id=self.cash.id,
@@ -555,7 +559,7 @@ class CashFlowRegisterTestCase(unittest.TestCase):
         d = date(2026, 9, 1)
         cats = self._categories()
         save_manual_cash_flow_entry(direction='in', amount=1000, account_id=self.cash.id,
-                                    category_id=cats['Owner / Client Receipt'].id,
+                                    category_id=cats['Other Income'].id,
                                     date_posted=datetime.combine(d, datetime.min.time()),
                                     actor=self.actor)
         db.session.commit()
@@ -570,7 +574,7 @@ class CashFlowRegisterTestCase(unittest.TestCase):
         d2 = date(2026, 9, 5)
         cats = self._categories()
         save_manual_cash_flow_entry(direction='in', amount=1000, account_id=self.cash.id,
-                                    category_id=cats['Owner / Client Receipt'].id,
+                                    category_id=cats['Other Income'].id,
                                     date_posted=datetime.combine(d1, datetime.min.time()),
                                     actor=self.actor)
         save_manual_cash_flow_entry(direction='out', amount=250, account_id=self.bank.id,
@@ -720,7 +724,7 @@ class CashFlowRegisterTestCase(unittest.TestCase):
     def test_csv_export(self):
         cats = self._categories()
         self._entry('in', 5000, account=self.cash,
-                    category_id=cats['Owner / Client Receipt'].id,
+                    category_id=cats['Other Income'].id,
                     party_name='CSV Client', reference='CHQ-1')
         res = self.client.get('/hdc/accounts/cashflow/register/export')
         self.assertEqual(res.status_code, 200)
@@ -730,7 +734,7 @@ class CashFlowRegisterTestCase(unittest.TestCase):
         self.assertIn('CSV Client', text)
         # CSV amounts must NOT be comma-grouped or they break the columns.
         self.assertIn('5000.00', text)
-        self.assertIn('Owner / Client Receipt', text)
+        self.assertIn('Other Income', text)
         self.assertIn('Amount (PKR)', text)
 
     def test_pages_require_login(self):
@@ -764,6 +768,162 @@ class CashFlowRegisterTestCase(unittest.TestCase):
         self.assertEqual(backfill_transaction_minor_units(), 1)
         self.assertEqual(row.amount_minor, 9999)
         self.assertEqual(backfill_transaction_minor_units(), 0, 'must be idempotent')
+
+
+class ProjectReceiptTestCase(unittest.TestCase):
+    """A project receipt posted in the register must reach the project.
+
+    Before this behaviour existed, a payment recorded here named the project
+    but credited a ``person`` account, so the project still read as unpaid and
+    the Receivable KPI ignored it.  These tests pin the whole chain: the owner
+    comes from the project, the project is mandatory, the money lands on
+    ``Project.total_received``, and voiding takes it back off.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix='hdc-cfproj-test-')
+        self.app = create_app({'HDC_DB_PATH': os.path.join(self.tmp, 'test.db'),
+                               'HDC_INSTANCE_DIR': self.tmp})
+        self.ctx = self.app.app_context()
+        self.ctx.push()
+        db.create_all()
+        self.actor = 'admin'
+        self.cash = Account(name='Proj Cash', type='cash', opening_balance=0.0,
+                            status='active', is_void=False, created_at=_pkt_now_naive())
+        db.session.add(self.cash)
+        self.project = Project(project_code='PRJ-1', name='Hill View',
+                               client='Abdul Rehman', contract_type='lump_sum',
+                               owner_lump_sum=1000000.0, status='Active')
+        db.session.add(self.project)
+        db.session.commit()
+        self.receipt_cat = {c.name: c for c in category_options()}['Owner / Client Receipt']
+
+    def tearDown(self):
+        db.session.remove()
+        self.ctx.pop()
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _receipt(self, amount=250000, project=True, **kw):
+        entry, _ = save_manual_cash_flow_entry(
+            direction='in', amount=amount, account_id=self.cash.id,
+            category_id=self.receipt_cat.id, actor=self.actor,
+            project_id=(self.project.id if project else None), **kw)
+        db.session.commit()
+        return entry
+
+    def test_receipt_category_requires_a_project(self):
+        """Without a project the money has nowhere to land — refuse it."""
+        with self.assertRaises(ValueError) as caught:
+            self._receipt(project=False)
+        self.assertIn('project', str(caught.exception).lower())
+
+    def test_rules_force_project_required_even_on_seeded_rows(self):
+        from hdc.services.cashflow_register import category_field_rules
+        rules = category_field_rules(self.receipt_cat)
+        self.assertEqual(rules['project_effect'], 'receipt')
+        self.assertEqual(rules['project_mode'], 'required')
+
+    def test_owner_is_taken_from_the_project_not_the_typed_name(self):
+        """The project already knows its owner: a typed name cannot override it."""
+        entry = self._receipt(party_name='Someone Else', party_type='person')
+        self.assertEqual(entry.party_name, 'Abdul Rehman')
+        self.assertEqual(entry.party_type, 'client')
+
+    def test_receipt_lands_on_the_project_and_uses_a_client_account(self):
+        from hdc.models.accounts import OwnerPayment
+        from hdc.services.accounts import _account_group_mode_for_row
+        entry = self._receipt(250000)
+
+        payments = OwnerPayment.query.filter_by(source_entry_id=entry.id).all()
+        self.assertEqual(len(payments), 1, 'exactly one mirrored payment')
+        self.assertAlmostEqual(payments[0].amount, 250000.0, places=2)
+
+        db.session.expire_all()
+        project = db.session.get(Project, self.project.id)
+        self.assertAlmostEqual(project.total_received, 250000.0, places=2)
+        self.assertAlmostEqual(project.remaining_receivable, 750000.0, places=2)
+
+        # The counterparty must be a *client* account: a 'person' account is
+        # filed under credit_debit and never reaches the Receivable KPI.
+        tx = db.session.get(AccountTransaction, entry.account_tx_id)
+        counterparty = db.session.get(Account, tx.from_account_id)
+        self.assertEqual(counterparty.name, 'Abdul Rehman')
+        self.assertEqual(counterparty.type, 'client')
+        self.assertEqual(_account_group_mode_for_row(counterparty)[0], 'project_in_flow')
+
+    def test_void_and_restore_keep_the_project_in_step(self):
+        from hdc.models.accounts import OwnerPayment
+        entry = self._receipt(250000)
+        payment = OwnerPayment.query.filter_by(source_entry_id=entry.id).one()
+
+        void_manual_cash_flow_entry(entry, reason='wrong project', actor=self.actor)
+        db.session.commit()
+        db.session.expire_all()
+        self.assertTrue(db.session.get(OwnerPayment, payment.id).is_void)
+        self.assertAlmostEqual(db.session.get(Project, self.project.id).total_received,
+                               0.0, places=2)
+
+        restore_manual_cash_flow_entry(entry, actor=self.actor)
+        db.session.commit()
+        db.session.expire_all()
+        self.assertFalse(db.session.get(OwnerPayment, payment.id).is_void)
+        self.assertAlmostEqual(db.session.get(Project, self.project.id).total_received,
+                               250000.0, places=2)
+
+    def test_mirror_is_not_duplicated_when_the_entry_is_re_saved(self):
+        from hdc.models.accounts import OwnerPayment
+        entry = self._receipt(100000, idempotency_key='DUP-1')
+        again, created = save_manual_cash_flow_entry(
+            direction='in', amount=100000, account_id=self.cash.id,
+            category_id=self.receipt_cat.id, project_id=self.project.id,
+            idempotency_key='DUP-1', actor=self.actor)
+        db.session.commit()
+        self.assertFalse(created)
+        self.assertEqual(again.id, entry.id)
+        self.assertEqual(OwnerPayment.query.filter_by(source_entry_id=entry.id).count(), 1)
+
+    def test_backfill_repairs_receipts_posted_before_the_mirror_existed(self):
+        from hdc.models.accounts import OwnerPayment
+        from hdc.services.cashflow_register import (
+            backfill_project_receipt_owner_payments as backfill,
+        )
+        entry = self._receipt(400000)
+        # Simulate the historical state: the entry exists, the mirror does not.
+        OwnerPayment.query.filter_by(source_entry_id=entry.id).delete()
+        db.session.commit()
+        db.session.expire_all()
+        self.assertAlmostEqual(db.session.get(Project, self.project.id).total_received,
+                               0.0, places=2)
+
+        stats = backfill()
+        self.assertEqual(stats['created'], 1)
+        db.session.expire_all()
+        self.assertAlmostEqual(db.session.get(Project, self.project.id).total_received,
+                               400000.0, places=2)
+
+        # Re-running must not double-count.
+        self.assertEqual(backfill()['created'], 0)
+        db.session.expire_all()
+        self.assertAlmostEqual(db.session.get(Project, self.project.id).total_received,
+                               400000.0, places=2)
+
+    def test_backfill_leaves_payments_from_other_surfaces_alone(self):
+        """Rows posted by the Projects page have no entry link — never touch them."""
+        from hdc.models.accounts import OwnerPayment
+        from hdc.services.cashflow_register import (
+            backfill_project_receipt_owner_payments as backfill,
+        )
+        db.session.add(OwnerPayment(project_id=self.project.id, amount=50000.0,
+                                    date=date(2026, 3, 1), remarks='entered on the project',
+                                    activity_at=_pkt_now_naive(), is_void=False))
+        db.session.commit()
+        before = OwnerPayment.query.count()
+        stats = backfill()
+        self.assertEqual(stats['created'], 0)
+        self.assertEqual(OwnerPayment.query.count(), before)
+        db.session.expire_all()
+        self.assertAlmostEqual(db.session.get(Project, self.project.id).total_received,
+                               50000.0, places=2)
 
 
 if __name__ == '__main__':
