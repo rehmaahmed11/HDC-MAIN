@@ -150,6 +150,7 @@
         var partyTypeField = byId('txnPartyType');
         var partyReq = byId('txnPartyReq');
         var partyHint = byId('txnPartyHint');
+        var partyLabelText = byId('txnPartyLabelText');
         var projectField = byId('txnProjectField');
         var projectSelect = byId('txnProject');
         var projectInput = byId('txnProjectInput');
@@ -374,12 +375,71 @@
             }
         }
 
+        /* ── 2c. project receipt: the project names the owner ──────────────
+           On a category tagged project_effect="receipt" the money is a
+           project's owner paying for that project.  The owner is a fact the
+           project master already holds, so the form shows it read-only instead
+           of asking for it — which is what stops one client arriving as four
+           different spellings.  The server derives the same name, so what is
+           displayed here and what gets posted cannot drift. */
+
+        function selectedProjectOption() {
+            if (!projectSelect || projectSelect.selectedIndex < 0) return null;
+            var option = projectSelect.options[projectSelect.selectedIndex];
+            return (option && option.value) ? option : null;
+        }
+
+        function projectClientName() {
+            var option = selectedProjectOption();
+            return option ? (option.getAttribute('data-client') || '').trim() : '';
+        }
+
+        function isProjectReceipt() {
+            return categoryRule('project-effect', '') === 'receipt';
+        }
+
+        /* Mirror the project's owner into the (read-only) party control. */
+        function syncOwnerFromProject() {
+            if (!isProjectReceipt()) return;
+            var owner = projectClientName();
+            if (partyInput) {
+                partyInput.value = owner;
+                partyInput.readOnly = true;
+                partyInput.placeholder = projectSelect && projectSelect.value
+                    ? 'This project has no client saved — set it on the project'
+                    : 'Choose the project first';
+            }
+            if (partySelect) {
+                /* Keep the posted value in step; the server re-derives it
+                   anyway, so this is only so the page shows what will happen. */
+                var matched = Array.prototype.find.call(partySelect.options, function (o) {
+                    return o.value && o.value.toLowerCase() === owner.toLowerCase();
+                });
+                partySelect.value = matched ? matched.value : '';
+            }
+            if (partyTypeField) partyTypeField.value = 'client';
+            setFieldHint(partyHint, owner
+                ? 'Taken from the project — this receipt is booked against ' + owner + '.'
+                : (projectSelect && projectSelect.value
+                    ? 'This project has no client saved. Add one on the project so receipts are attributed.'
+                    : 'Pick the project and its owner is filled in automatically.'));
+        }
+
+        /* Undo the read-only state when the category is no longer a receipt. */
+        function releaseOwnerField() {
+            if (!partyInput) return;
+            partyInput.readOnly = false;
+            partyInput.placeholder = 'Search party or person… (e.g. abd)';
+        }
+
         function applyCategoryRules() {
             if (currentDirection() === DIRECTION_TRANSFER || !currentDirection()) {
                 setFieldVisible('party', false);
                 setFieldVisible('project', false);
                 setRequiredMark(partyReq, false);
                 setRequiredMark(projectReq, false);
+                releaseOwnerField();
+                if (partyLabelText) partyLabelText.textContent = 'Party / Person';
                 if (rulesHelp) { rulesHelp.textContent = ''; rulesHelp.hidden = true; }
                 return;
             }
@@ -401,26 +461,46 @@
             setRequiredMark(partyReq, partyRequired);
             setRequiredMark(projectReq, projectRequired);
 
-            if (showParty && allowed.length) {
-                filterPartyTypes(allowed);
-                var names = allowed.map(partyTypeLabel).join(' / ');
-                setFieldHint(partyHint, partyRequired
-                    ? 'Required for this category — pick the ' + names + '.'
-                    : 'For this category the party is usually the ' + names + '.');
-            } else {
-                filterPartyTypes([]);
-                setFieldHint(partyHint, '');
+            /* A project receipt names its own counterparty: relabel the field,
+               fill it from the project and lock it, so the owner cannot be
+               typed differently from the project master. */
+            var receipt = hasCategory && isProjectReceipt();
+            if (partyLabelText) {
+                partyLabelText.textContent = receipt ? 'Owner / Client' : 'Party / Person';
             }
-            setFieldHint(projectHint, projectRequired
-                ? 'Required for this category — the cost or receipt must land on a project.'
-                : '');
+            if (receipt) {
+                filterPartyTypes(['client']);
+                syncOwnerFromProject();
+            } else {
+                releaseOwnerField();
+                if (showParty && allowed.length) {
+                    filterPartyTypes(allowed);
+                    var names = allowed.map(partyTypeLabel).join(' / ');
+                    setFieldHint(partyHint, partyRequired
+                        ? 'Required for this category — pick the ' + names + '.'
+                        : 'For this category the party is usually the ' + names + '.');
+                } else {
+                    filterPartyTypes([]);
+                    setFieldHint(partyHint, '');
+                }
+            }
+            setFieldHint(projectHint, receipt
+                ? 'Required — this receipt is credited to the project’s account, and its owner is filled in for you.'
+                : (projectRequired
+                    ? 'Required for this category — the cost or receipt must land on a project.'
+                    : ''));
             if (rulesHelp) {
                 var explained = [];
                 if (loanEffect === 'take') explained.push('money received as a loan — the person is a Loan Giver');
                 if (loanEffect === 'give') explained.push('money given as a loan — the person is a Loan Taker');
                 if (loanEffect === 'repay') explained.push('repaying a loan we took');
                 if (loanEffect === 'recover') explained.push('a borrower paying us back');
-                if (explained.length) {
+                if (receipt) {
+                    rulesHelp.textContent = 'Project ledger: this is the owner paying for the ' +
+                        'project. It is added to that project’s Received total and reduces its ' +
+                        'remaining amount (Projects → the project).';
+                    rulesHelp.hidden = false;
+                } else if (explained.length) {
                     rulesHelp.textContent = 'Loan ledger: ' + explained.join('; ') +
                         '. The amount is tracked against that person’s loan (Accounts → Loans).';
                     rulesHelp.hidden = false;
@@ -688,10 +768,13 @@
                 if (partyTypeField) partyTypeField.value = item.party_type || 'other';
                 if (partyInput) partyInput.focus();
             } else {
-                addOption(projectSelect, item.id, item.name, {});
+                /* Carry the client across so a just-created project can fill
+                   the owner field immediately, exactly like a listed one. */
+                addOption(projectSelect, item.id, item.name, { 'data-client': item.client || '' });
                 ensureCombos();
                 selectValue(projectSelect, item.id);
                 if (combos.project && combos.project.syncFromSelect) combos.project.syncFromSelect();
+                syncOwnerFromProject();
                 if (projectInput) projectInput.focus();
             }
         }
@@ -851,6 +934,10 @@
                 filterSubcategories();
                 applyCategoryRules();
             });
+        }
+        if (projectSelect) {
+            /* Changing the project on a receipt changes who is paying. */
+            projectSelect.addEventListener('change', syncOwnerFromProject);
         }
         if (amountInput) {
             amountInput.addEventListener('blur', function () {

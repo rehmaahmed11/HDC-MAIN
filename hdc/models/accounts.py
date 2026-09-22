@@ -193,10 +193,29 @@ event.listen(AccountTransaction, 'before_update', _sync_txn_minor_units)
 
 
 class OwnerPayment(db.Model):
+    """Money received from a project's owner/client.
+
+    This table is the *only* thing ``Project.total_received`` and
+    ``Project.remaining_receivable`` are computed from, which makes it the
+    system of record for "has this client paid us?".
+
+    Two surfaces write it, and both must, or the project silently reads as
+    unpaid while the cash sits in the bank:
+
+    * the Projects page owner-payment form (``_accounts_post_owner_receipt``);
+    * the Cash Flow register / New Transaction form, whenever the category is
+      tagged ``project_effect='receipt'`` — those rows carry
+      ``source_entry_id`` so the register entry and this mirror can always find
+      each other (idempotency on create, and void/restore in both directions).
+    """
+
     __tablename__ = 'hdc_owner_payment'
     id         = db.Column(db.Integer, primary_key=True)
     project_id = db.Column(db.Integer, db.ForeignKey('hdc_project.id'), nullable=False)
     received_to_account_id = db.Column(db.Integer, db.ForeignKey('hdc_account.id'), nullable=True)
+    #: the CashFlowEntry this row mirrors (NULL for Projects-page receipts)
+    source_entry_id = db.Column(db.Integer, db.ForeignKey('hdc_cash_flow_entry.id'),
+                                nullable=True, index=True)
     amount     = db.Column(db.Float, default=0.0)
     date       = db.Column(db.Date, default=_pkt_today)
     remarks    = db.Column(db.String(200))

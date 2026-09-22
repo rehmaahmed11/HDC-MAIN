@@ -62,6 +62,21 @@ class CashFlowCategory(db.Model):
         Empty for an ordinary category.  ``take`` / ``give`` / ``repay`` /
         ``recover`` mark the four loan movements, so an entry booked on this
         category is mirrored into the loan ledger (``hdc_loan``).
+    ``project_effect``
+        Empty for an ordinary category.  ``receipt`` marks a category as *money
+        received from a project's owner/client*, which makes the project — not
+        the typed party name — the subject of the entry:
+
+        * the project becomes mandatory (it is the whole point of the entry);
+        * the owner/client name is **derived from** ``Project.client`` instead
+          of being retyped, so one client can never fork into four spellings;
+        * the entry is mirrored into ``hdc_owner_payment``, which is what
+          ``Project.total_received`` / ``remaining_receivable`` are computed
+          from — without this the money lands in the ledger but the project
+          still reads as fully unpaid.
+
+        This is the project-side twin of ``loan_effect``: same hook, same
+        "the document and its side-effect are written in one transaction" rule.
     """
 
     __tablename__ = 'hdc_cash_flow_category'
@@ -78,6 +93,7 @@ class CashFlowCategory(db.Model):
     project_mode = db.Column(db.String(10))                               # none | optional | required
     party_types = db.Column(db.String(200))                               # CSV of allowed party types
     loan_effect = db.Column(db.String(12), index=True)                    # take | give | repay | recover
+    project_effect = db.Column(db.String(12), index=True)                 # receipt
     created_at = db.Column(db.DateTime, default=_pkt_now_naive)
     updated_at = db.Column(db.DateTime, default=_pkt_now_naive, onupdate=_pkt_now_naive)
 
@@ -110,6 +126,17 @@ class CashFlowCategory(db.Model):
     @property
     def is_loan(self):
         return bool((self.loan_effect or '').strip())
+
+    @property
+    def project_effect_value(self):
+        """``receipt`` or ``''`` — normalised, so callers never re-parse it."""
+        value = (self.project_effect or '').strip().lower()
+        return value if value in ('receipt',) else ''
+
+    @property
+    def is_project_receipt(self):
+        """Is this the 'client pays for a project' category?"""
+        return self.project_effect_value == 'receipt'
 
     def __repr__(self):  # pragma: no cover - debugging aid
         return f"<CashFlowCategory {self.id}:{self.name!r}>"

@@ -67,10 +67,13 @@ __all__ = [
     "create_entry_from_form",
     "create_money_account",
     "create_project_quick",
+    "CLOSED_PROJECT_STATUSES",
     "entry_form_context",
     "entry_form_values",
     "category_rules_map",
     "money_accounts",
+    "open_projects",
+    "project_client_map",
     "party_types",
     "pop_entry_form",
     "posted_datetime_from_form_date",
@@ -220,6 +223,39 @@ def clear_entry_form():
 # pickers
 # ---------------------------------------------------------------------------
 
+#: Project statuses that can no longer receive money.
+CLOSED_PROJECT_STATUSES = ('completed', 'closed', 'cancelled', 'canceled', 'inactive')
+
+
+def open_projects():
+    """Projects that may still be booked against (the picker's list).
+
+    A finished or cancelled project accepting a payment is a data-entry
+    accident, not a workflow — the same statuses the receivable report skips.
+    A project already selected on a replayed draft is still resolved by id, so
+    correcting a rejected submission never loses it.
+    """
+    rows = Project.query.order_by(Project.name.asc(), Project.id.asc()).all()
+    return [p for p in rows
+            if str(getattr(p, 'status', '') or '').strip().lower()
+            not in CLOSED_PROJECT_STATUSES]
+
+
+def project_client_map():
+    """``{project_id: client}`` for every project that names one.
+
+    The New Transaction form uses this to *show* the owner a project receipt
+    will be booked against, so the name is confirmed rather than retyped (the
+    engine derives the same value server-side — this is only the preview).
+    """
+    out = {}
+    for p in Project.query.all():
+        name = (getattr(p, 'client', '') or '').strip()
+        if name:
+            out[int(p.id)] = name
+    return out
+
+
 def money_accounts(active_only=True):
     """Active treasury accounts (cash / bank / company) for the pickers."""
     q = Account.query.filter(
@@ -271,7 +307,12 @@ def entry_form_context(form_values=None, error=None):
         # form asks exactly what the selected category justifies.
         'category_rules': category_rules_map(),
         'parties': party_options(),
-        'projects': Project.query.order_by(Project.name.asc(), Project.id.asc()).all(),
+        # Open projects only: money cannot be booked against a project that is
+        # finished or cancelled, and offering them is how it happens by accident.
+        'projects': open_projects(),
+        # {project_id: client name} so the form can show the owner it will use
+        # for a project receipt instead of asking the user to retype it.
+        'project_clients': project_client_map(),
         'party_type_options': PARTY_TYPES,
     }
 
