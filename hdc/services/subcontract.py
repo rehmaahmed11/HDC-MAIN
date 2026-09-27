@@ -303,9 +303,14 @@ def _reconcile_subcontract_links():
             mode = 'company'
         if mode == 'subcontractor':
             if not stg.assigned_subcontractor_id:
-                stg.execution_mode = 'company'
+                members = stg.subcontractor_records
+                if members:
+                    stg.assigned_subcontractor_id = min(sub.id for sub in members)
+                else:
+                    stg.execution_mode = 'company'
+                    changed += 1
+                    continue
                 changed += 1
-                continue
             sub = Subcontractor.query.get(stg.assigned_subcontractor_id)
             if not sub:
                 stg.execution_mode = 'company'
@@ -326,7 +331,7 @@ def _reconcile_subcontract_links():
         if not sub.stage_id:
             continue
         stg = Stage.query.get(sub.stage_id)
-        if (not stg) or (stg.assigned_subcontractor_id != sub.id) or ((stg.execution_mode or 'company').strip().lower() != 'subcontractor'):
+        if (not stg) or ((stg.execution_mode or 'company').strip().lower() != 'subcontractor'):
             sub.stage_id = None
             changed += 1
     if changed:

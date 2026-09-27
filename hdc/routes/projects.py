@@ -410,15 +410,15 @@ def register(app):
         new_status = (s.status or '').strip().lower()
         auto_note = ''
         auto_sub = (request.form.get('auto_sub_complete') or '').strip() == '1'
-        if new_status in ('completed', 'complete') and s.assigned_subcontractor_id and not auto_sub:
-            sub_chk = s.assigned_subcontractor
+        if new_status in ('completed', 'complete') and s.assigned_subcontractors and not auto_sub:
+            sub_chk = next((sub for sub in s.assigned_subcontractors
+                            if float(sub.effective_progress_percentage or 0) < 100), None)
             if sub_chk and float(sub_chk.effective_progress_percentage or 0.0) < 100.0:
-                s.status = old_status or s.status
+                db.session.rollback()
                 flash(f'Cannot complete stage "{s.name}" because subcontractor "{sub_chk.name}" is at {float(sub_chk.effective_progress_percentage or 0.0):.2f}%. Update Sub Completion % to 100 or use force complete action.', 'danger')
                 return redirect(url_for('hdc_project_detail', pid=s.project_id))
-        if auto_sub and new_status in ('completed', 'complete') and s.assigned_subcontractor_id:
-            sub = s.assigned_subcontractor
-            if sub:
+        if auto_sub and new_status in ('completed', 'complete') and s.assigned_subcontractors:
+            for sub in s.assigned_subcontractors:
                 old_pct = float(sub.work_done_percentage or 0.0)
                 if old_pct < 100.0:
                     sub.work_done_percentage = 100.0
@@ -432,9 +432,9 @@ def register(app):
                         stage_id=s.id
                     )
                     auto_note = f' Subcontractor progress auto-set to 100% ({sub.name}).'
-        if old_status != new_status and s.assigned_subcontractor:
+        for member in s.assigned_subcontractors if old_status != new_status else []:
             _log_subcontract_event(
-                sub=s.assigned_subcontractor,
+                sub=member,
                 event_type='status',
                 from_value=old_status or '-',
                 to_value=new_status or '-',
@@ -452,7 +452,11 @@ def register(app):
     @_money_write_required()
     def hdc_stage_sub_progress(sid):
         s = Stage.query.get_or_404(sid)
-        sub = s.assigned_subcontractor
+        members = s.assigned_subcontractors
+        sub_id = request.form.get('subcontractor_id', type=int)
+        sub = next((member for member in members if member.id == sub_id), None)
+        if not sub_id and len(members) == 1:
+            sub = members[0]  # Legacy single-subcontractor forms remain valid.
         if not sub:
             flash('No subcontractor assigned to this stage.', 'warning')
             return redirect(url_for('hdc_project_detail', pid=s.project_id))

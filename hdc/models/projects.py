@@ -223,6 +223,17 @@ class Stage(db.Model):
     assigned_subcontractor = db.relationship('Subcontractor', foreign_keys=[assigned_subcontractor_id], post_update=True)
 
     @property
+    def assigned_subcontractors(self):
+        """Active members; include the legacy pointer during rolling upgrades."""
+        if (self.execution_mode or 'company').lower() != 'subcontractor':
+            return []
+        members = {sub.id: sub for sub in self.subcontractor_records}
+        if self.assigned_subcontractor:
+            members.setdefault(self.assigned_subcontractor.id, self.assigned_subcontractor)
+        return sorted(members.values(), key=lambda sub: sub.id)
+
+
+    @property
     def effective_rate(self):
         return (self.rate_per_sqft or 0) - (self.discount_per_sqft or 0)
 
