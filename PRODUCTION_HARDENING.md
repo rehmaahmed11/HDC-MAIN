@@ -99,3 +99,33 @@ URLs or database schema.
   reconciliation findings all zero, and voiding from either side keeps
   `hdc_account_txn.is_void == hdc_cash_flow_entry.is_void`.
 - `tests/smoke_worker.py`: 87 reads, 16 writes, **0 errors**.
+
+## 2026-09-27 verified release-gate pass
+
+The executed suite is now **383 tests, all passing** (36 added since the
+347-test baseline). Current inventory: 249 rules, 76 ORM models, 101 templates,
+76 application modules. The dated [QA report](qa/QA_HARDENING_REPORT.md) is the
+current evidence; the earlier numbers above describe historical runs.
+
+Additional verified fixes include:
+
+- Purchase V2 finite/type validation and consumed-delivery protection.
+- Payroll salary capped by canonical worker debt, including salary already
+  paid outside a payroll run; straight-time overtime/period net unchanged.
+- SQLite writer reservation before money/key/stock validation, with concurrent
+  same-key, overdraw and delivery regression tests.
+- Cross-process bootstrap coordination for cold multi-worker startup, verified
+  with three independent processes and real non-preloaded Gunicorn.
+- Restore validation **before** target replacement, WAL-aware recovery on
+  migration failure, and noncolliding backup names. **Stop/quiesce other workers
+  for restoration and restart them afterwards. This is not online multi-worker
+  restore support.** Test live-data upgrades on a copy before deployment.
+- Locally served, licensed Bootstrap/Chart.js/icons/fonts; 54 desktop/mobile
+  browser renders and seven interaction flows, including JS-disabled forms.
+- Controlled invalid report dates and JSON roots; PDF header checking.
+- Measured query reductions without changing financial semantics.
+
+CI now includes the isolated browser runner and explicit acceptance/inventory
+checks. Local gates pass; actual GitHub execution, live-data rehearsal and
+production business acceptance are not implied. See the report's scope and risk
+register before deployment. Shared proxy login throttling remains recommended.

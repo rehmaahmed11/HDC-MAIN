@@ -4,6 +4,9 @@ Moved verbatim from hdc_erp.py; each handler keeps its
 original @app.route decorator and endpoint name.
 """
 
+import math
+from functools import wraps
+
 from flask import jsonify, request
 from flask_login import current_user, login_required
 from sqlalchemy import func
@@ -13,16 +16,32 @@ from hdc.models.materials import Delivery, MaterialV2, PurchaseV2, Supplier, Sup
 from hdc.models.projects import Project, Stage
 from hdc.services.accounts import _accounts_post_supplier_credit_row, _accounts_set_void_by_source, _accounts_upsert_purchase_paid_txn
 from hdc.services.audit import log_action
-from hdc.services.purchase import _MATERIAL_V2_UNITS, _ensure_material_v2, _ensure_supplier_quick, _material_v2_available, _material_v2_delivered, _material_v2_scope_stock_rows, _material_v2_used, _purchase_v2_available_in_scope_qty, _purchase_v2_delivered_qty, _purchase_v2_delivered_to_scope_qty, _purchase_v2_scope_remaining_map, _purchase_v2_used_in_scope_qty, _supplier_balance, _sync_purchase_v2_ledger
+from hdc.services.purchase import validate_delivery_reduction, _MATERIAL_V2_UNITS, _ensure_material_v2, _ensure_supplier_quick, _material_v2_available, _material_v2_delivered, _material_v2_scope_stock_rows, _material_v2_used, _purchase_v2_available_in_scope_qty, _purchase_v2_delivered_qty, _purchase_v2_delivered_to_scope_qty, _purchase_v2_scope_remaining_map, _purchase_v2_used_in_scope_qty, _supplier_balance, _sync_purchase_v2_ledger
 from hdc.utils.dates import _pkt_now_naive
 from hdc.utils.format import _flt, _payload_int
 from hdc.utils.normalize import _normalize_name_ci
+from hdc.utils.validation import validate_purchase_payload
+
+
+def _validated_purchase_input(view):
+    @wraps(view)
+    def guarded(*args, **kwargs):
+        if request.method in ('POST', 'PUT', 'PATCH'):
+            payload = request.get_json(silent=True) if request.is_json else request.form
+            try:
+                validate_purchase_payload(payload)
+            except ValueError as exc:
+                return jsonify(ok=False, message=str(exc)), 400
+        return view(*args, **kwargs)
+    return guarded
+
 
 def register(app):
     """Register JSON API: /api/v2/purchase/*."""
     @app.route('/api/v2/purchase/suppliers', methods=['GET', 'POST'])
     @login_required
     @_money_write_required(api=True)
+    @_validated_purchase_input
     def api_v2_suppliers():
         if request.method == 'POST':
             payload = request.get_json(silent=True) or request.form
@@ -68,6 +87,7 @@ def register(app):
     @app.route('/api/v2/purchase/suppliers/<int:supplier_id>', methods=['PUT', 'DELETE'])
     @login_required
     @_money_write_required(api=True)
+    @_validated_purchase_input
     def api_v2_supplier_item(supplier_id):
         row = Supplier.query.get_or_404(supplier_id)
         if request.method == 'PUT':
@@ -108,6 +128,7 @@ def register(app):
     @app.route('/api/v2/purchase/materials', methods=['GET', 'POST'])
     @login_required
     @_money_write_required(api=True)
+    @_validated_purchase_input
     def api_v2_materials():
         if request.method == 'POST':
             payload = request.get_json(silent=True) or request.form
@@ -143,6 +164,7 @@ def register(app):
     @app.route('/api/v2/purchase/materials/<int:material_id>', methods=['PUT', 'DELETE'])
     @login_required
     @_money_write_required(api=True)
+    @_validated_purchase_input
     def api_v2_material_item(material_id):
         row = MaterialV2.query.get_or_404(material_id)
         if request.method == 'PUT':
@@ -186,6 +208,7 @@ def register(app):
     @app.route('/api/v2/purchase/purchases', methods=['GET', 'POST'])
     @login_required
     @_money_write_required(api=True)
+    @_validated_purchase_input
     def api_v2_purchases():
         if request.method == 'POST':
             payload = request.get_json(silent=True) or request.form
@@ -208,6 +231,8 @@ def register(app):
             if unit_price <= 0 or quantity <= 0:
                 return jsonify(ok=False, message='Unit price and quantity must be greater than 0.'), 400
             total_amount = float(unit_price * quantity)
+            if not math.isfinite(total_amount):
+                return jsonify(ok=False, message='Purchase total must be finite.'), 400
             row = PurchaseV2(
                 supplier_id=supplier.id,
                 material_id=material.id,
@@ -260,6 +285,7 @@ def register(app):
     @app.route('/api/v2/purchase/purchases/<int:purchase_id>', methods=['PUT', 'DELETE'])
     @login_required
     @_money_write_required(api=True)
+    @_validated_purchase_input
     def api_v2_purchase_item(purchase_id):
         row = PurchaseV2.query.get_or_404(purchase_id)
         if row.is_void:
@@ -286,6 +312,8 @@ def register(app):
                 return jsonify(ok=False, message=f'Cannot set quantity below delivered quantity ({delivered:.2f}).'), 400
             if row.material_id != material.id and delivered > 0:
                 return jsonify(ok=False, message='Cannot change material after deliveries are recorded for this purchase.'), 400
+            if not math.isfinite(unit_price * quantity):
+                return jsonify(ok=False, message='Purchase total must be finite.'), 400
             old_payment_status = (row.payment_status or 'unpaid').strip().lower()
             row.supplier_id = supplier.id
             row.material_id = material.id
@@ -328,6 +356,7 @@ def register(app):
     @app.route('/api/v2/purchase/payments', methods=['POST'])
     @login_required
     @_money_write_required(api=True)
+    @_validated_purchase_input
     def api_v2_payments():
         payload = request.get_json(silent=True) or request.form
         supplier_id = _payload_int(payload, 'supplier_id')
@@ -454,6 +483,7 @@ def register(app):
     @app.route('/api/v2/purchase/deliveries', methods=['GET', 'POST'])
     @login_required
     @_money_write_required(api=True)
+    @_validated_purchase_input
     def api_v2_deliveries():
         if request.method == 'POST':
             payload = request.get_json(silent=True) or request.form
@@ -522,10 +552,15 @@ def register(app):
     @app.route('/api/v2/purchase/deliveries/<int:delivery_id>', methods=['DELETE'])
     @login_required
     @_money_write_required(api=True)
+    @_validated_purchase_input
     def api_v2_delivery_item(delivery_id):
         row = Delivery.query.get_or_404(delivery_id)
         if row.is_void:
             return jsonify(ok=False, message='Delivery is already deleted.'), 400
+        try:
+            validate_delivery_reduction(row, 0)
+        except ValueError as exc:
+            return jsonify(ok=False, message=str(exc)), 400
         row.is_void = True
         row.void_reason = 'Deleted by user from Purchase V2'
         row.voided_at = _pkt_now_naive()
@@ -537,6 +572,7 @@ def register(app):
     @app.route('/api/v2/purchase/usage', methods=['GET', 'POST'])
     @login_required
     @_money_write_required(api=True)
+    @_validated_purchase_input
     def api_v2_usage():
         if request.method == 'POST':
             payload = request.get_json(silent=True) or request.form
@@ -568,6 +604,8 @@ def register(app):
                 return jsonify(ok=False, message=f'Usage exceeds available stock for selected purchase order in this stage ({available:.2f}).'), 400
             unit_price = float(purchase.unit_price or 0.0)
             cost = float(unit_price * quantity)
+            if not math.isfinite(cost):
+                return jsonify(ok=False, message='Usage cost must be finite.'), 400
             row = UsageLogV2(
                 purchase_id=purchase.id,
                 material_id=material.id,
@@ -614,6 +652,7 @@ def register(app):
     @app.route('/api/v2/purchase/usage/<int:usage_id>', methods=['DELETE'])
     @login_required
     @_money_write_required(api=True)
+    @_validated_purchase_input
     def api_v2_usage_item(usage_id):
         row = UsageLogV2.query.get_or_404(usage_id)
         if row.is_void:
@@ -710,6 +749,7 @@ def register(app):
     @app.route('/api/v2/purchase/recalculate-stock', methods=['POST'])
     @login_required
     @_money_write_required(api=True)
+    @_validated_purchase_input
     def api_v2_recalculate_stock():
         materials = MaterialV2.query.filter_by(is_void=False).all()
         rows = []

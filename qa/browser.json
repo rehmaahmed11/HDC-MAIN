@@ -1,0 +1,402 @@
+{
+  "pages": [
+    {
+      "path": "/hdc/",
+      "width": 1440,
+      "status": 200,
+      "milliseconds": 630,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/projects",
+      "width": 1440,
+      "status": 200,
+      "milliseconds": 614,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/workers",
+      "width": 1440,
+      "status": 200,
+      "milliseconds": 587,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/timekeeping",
+      "width": 1440,
+      "status": 200,
+      "milliseconds": 613,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/payroll/generate",
+      "width": 1440,
+      "status": 200,
+      "milliseconds": 597,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/expenses",
+      "width": 1440,
+      "status": 200,
+      "milliseconds": 590,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/subcontractors",
+      "width": 1440,
+      "status": 200,
+      "milliseconds": 589,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/purchase-v2/suppliers",
+      "width": 1440,
+      "status": 200,
+      "milliseconds": 588,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/purchase-v2/purchases",
+      "width": 1440,
+      "status": 200,
+      "milliseconds": 602,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/purchase-v2/delivered",
+      "width": 1440,
+      "status": 200,
+      "milliseconds": 619,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/purchase-v2/usage",
+      "width": 1440,
+      "status": 200,
+      "milliseconds": 598,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/purchase-v2/stock",
+      "width": 1440,
+      "status": 200,
+      "milliseconds": 599,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/accounts",
+      "width": 1440,
+      "status": 200,
+      "milliseconds": 705,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/accounts/manage",
+      "width": 1440,
+      "status": 200,
+      "milliseconds": 648,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/accounts/new-transaction",
+      "width": 1440,
+      "status": 200,
+      "milliseconds": 617,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/accounts/money-center",
+      "width": 1440,
+      "status": 200,
+      "milliseconds": 779,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/accounts/cashflow",
+      "width": 1440,
+      "status": 200,
+      "milliseconds": 601,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/accounts/cashflow/register",
+      "width": 1440,
+      "status": 200,
+      "milliseconds": 607,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/accounts/cashflow/reconciliation",
+      "width": 1440,
+      "status": 200,
+      "milliseconds": 608,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/accounts/reconciliation",
+      "width": 1440,
+      "status": 200,
+      "milliseconds": 607,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/office-management",
+      "width": 1440,
+      "status": 200,
+      "milliseconds": 595,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/tool-rental",
+      "width": 1440,
+      "status": 200,
+      "milliseconds": 619,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/project-estimation",
+      "width": 1440,
+      "status": 200,
+      "milliseconds": 592,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/reports",
+      "width": 1440,
+      "status": 200,
+      "milliseconds": 648,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/settings",
+      "width": 1440,
+      "status": 200,
+      "milliseconds": 576,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/users",
+      "width": 1440,
+      "status": 200,
+      "milliseconds": 606,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/projects/1",
+      "width": 1440,
+      "status": 200,
+      "milliseconds": 603,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/",
+      "width": 390,
+      "status": 200,
+      "milliseconds": 611,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/projects",
+      "width": 390,
+      "status": 200,
+      "milliseconds": 583,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/workers",
+      "width": 390,
+      "status": 200,
+      "milliseconds": 577,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/timekeeping",
+      "width": 390,
+      "status": 200,
+      "milliseconds": 578,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/payroll/generate",
+      "width": 390,
+      "status": 200,
+      "milliseconds": 568,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/expenses",
+      "width": 390,
+      "status": 200,
+      "milliseconds": 570,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/subcontractors",
+      "width": 390,
+      "status": 200,
+      "milliseconds": 580,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/purchase-v2/suppliers",
+      "width": 390,
+      "status": 200,
+      "milliseconds": 575,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/purchase-v2/purchases",
+      "width": 390,
+      "status": 200,
+      "milliseconds": 572,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/purchase-v2/delivered",
+      "width": 390,
+      "status": 200,
+      "milliseconds": 582,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/purchase-v2/usage",
+      "width": 390,
+      "status": 200,
+      "milliseconds": 578,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/purchase-v2/stock",
+      "width": 390,
+      "status": 200,
+      "milliseconds": 595,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/accounts",
+      "width": 390,
+      "status": 200,
+      "milliseconds": 624,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/accounts/manage",
+      "width": 390,
+      "status": 200,
+      "milliseconds": 594,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/accounts/new-transaction",
+      "width": 390,
+      "status": 200,
+      "milliseconds": 596,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/accounts/money-center",
+      "width": 390,
+      "status": 200,
+      "milliseconds": 632,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/accounts/cashflow",
+      "width": 390,
+      "status": 200,
+      "milliseconds": 580,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/accounts/cashflow/register",
+      "width": 390,
+      "status": 200,
+      "milliseconds": 600,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/accounts/cashflow/reconciliation",
+      "width": 390,
+      "status": 200,
+      "milliseconds": 577,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/accounts/reconciliation",
+      "width": 390,
+      "status": 200,
+      "milliseconds": 574,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/office-management",
+      "width": 390,
+      "status": 200,
+      "milliseconds": 587,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/tool-rental",
+      "width": 390,
+      "status": 200,
+      "milliseconds": 590,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/project-estimation",
+      "width": 390,
+      "status": 200,
+      "milliseconds": 578,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/reports",
+      "width": 390,
+      "status": 200,
+      "milliseconds": 595,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/settings",
+      "width": 390,
+      "status": 200,
+      "milliseconds": 568,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/users",
+      "width": 390,
+      "status": 200,
+      "milliseconds": 577,
+      "horizontal_overflow": false
+    },
+    {
+      "path": "/hdc/projects/1",
+      "width": 390,
+      "status": 200,
+      "milliseconds": 591,
+      "horizontal_overflow": false
+    }
+  ],
+  "flows": [
+    "login via visible form",
+    "create project; persistent Unicode and escaped HTML/XSS payload",
+    "supplier create + Bootstrap edit modal + persisted update",
+    "same-origin fetch mutation with automatic CSRF",
+    "theme toggle and persistence",
+    "profitability CSV browser download contains created project",
+    "login and create form with JavaScript disabled / server-rendered CSRF"
+  ],
+  "page_errors": [],
+  "console_errors": [],
+  "failed_requests": [],
+  "bad_responses": [],
+  "third_party_requests": [],
+  "download_navigations": [
+    {
+      "url": "http://127.0.0.1:35179/hdc/reports/export/profitability",
+      "failure": "net::ERR_ABORTED"
+    }
+  ]
+}

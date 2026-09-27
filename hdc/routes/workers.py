@@ -9,6 +9,7 @@ import re
 from flask import abort, flash, redirect, render_template, request, url_for
 from flask_login import login_required
 from sqlalchemy import func
+from sqlalchemy.orm import selectinload
 
 from hdc.extensions import _money_write_required, db
 from hdc.models.accounts import Expense
@@ -59,7 +60,10 @@ def register(app):
                 db.session.add(w); db.session.commit()
                 flash(f'Worker "{w.name}" added.', 'success')
             return redirect(url_for('hdc_workers'))
-        workers = Worker.query.order_by(Worker.created_at.desc()).all()
+        workers = (Worker.query.options(selectinload(Worker.time_entries),
+                                       selectinload(Worker.attendance),
+                                       selectinload(Worker.ledger))
+                   .order_by(Worker.created_at.desc()).all())
         return render_template('workers/workers.html', workers=workers, trade_options=_trade_options())
 
 

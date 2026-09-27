@@ -14,6 +14,7 @@ from sqlalchemy import func
 from hdc.extensions import _money_write_required, db
 from hdc.models.workforce import LabourLedger, PayrollItem, PayrollRun, TimeEntry, Worker
 from hdc.services.accounts import _accounts_post_labour_ledger_row, _accounts_set_void_by_source
+from hdc.services.ledger import _payroll_payable_balance
 from hdc.services.timekeeping import _has_recent_duplicate
 from hdc.utils.dates import _pkt_now, _pkt_now_naive, _pkt_today
 from hdc.utils.format import _flt, _parse_date
@@ -51,7 +52,7 @@ def register(app):
                                          LabourLedger.notes.ilike(f'%{note_key}%')
                                      ).scalar() or 0.0)
                 payable = float(item.net_pay or 0.0)
-                balance = max(0.0, payable - already_paid)
+                balance = _payroll_payable_balance(worker_id, payable - already_paid)
                 amount_in = _flt(request.form.get('amount'))
                 amount = amount_in if amount_in > 0 else balance
                 if amount <= 0 or balance <= 0:
@@ -112,7 +113,7 @@ def register(app):
                                              LabourLedger.notes.ilike(f'%{note_key}%')
                                          ).scalar() or 0.0)
                     payable = float(it.net_pay or 0.0)
-                    balance = max(0.0, payable - already_paid)
+                    balance = _payroll_payable_balance(wid, payable - already_paid)
                     if balance <= 0:
                         continue
                     notes = f'Payroll run #{run.id} bulk payment ({run.date_from} to {run.date_to})'
@@ -361,7 +362,7 @@ def register(app):
                            .filter_by(worker_id=wid, entry_type='payment', is_void=False)
                            .filter(LabourLedger.notes.ilike(f'%{run_note_key}%'))
                            .all())
-                balance = max(0.0, payable - paid)
+                balance = _payroll_payable_balance(wid, payable - paid)
                 status = 'Not Paid' if (payable > 0 and balance > 0.01) else 'Paid'
 
                 absent_entries = 0
@@ -568,7 +569,7 @@ def register(app):
                 LabourLedger.is_void == False,
                 LabourLedger.notes.ilike(f"%{run_note_key}%")
             ).all())
-            balance = max(0.0, payable - paid)
+            balance = _payroll_payable_balance(w.id, payable - paid)
             per_day_wage = (total_wage / worked_days) if worked_days > 0 else 0.0
             status = 'Paid' if balance <= 0.01 else 'Not Paid'
 

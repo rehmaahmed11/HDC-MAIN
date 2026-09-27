@@ -27,7 +27,7 @@ hdc/                    the application package (import here, not hdc_erp)
   config.py             env loading, paths, secret, DB URI  (12-factor)
   extensions.py         db, login_manager, pragmas, CSRF + request hooks
   utils/                pure helpers: dates, format, normalize
-  models/               61 ORM models, one file per domain (auth, projects,
+  models/               76 ORM models, one file per domain (auth, projects,
                         workforce, office, subcontract, materials, accounts,
                         cashflow)
   services/             business engines: accounts, accounts_manage (account
@@ -51,7 +51,7 @@ deploy_hook.py          standalone stdlib-only WSGI app: GitHub push webhook ->
                         on PythonAnywhere, see wsgi_dispatch_snippet.py)
 ops/pythonanywhere/     install_deploy_hook.py: one command that writes the
                         secret + WSGI file and prints the webhook values
-templates/hdc/<domain>/ 89 Jinja pages, one folder per feature
+templates/hdc/<domain>/ 101 Jinja templates, one folder per feature
 static/hdc/             css/hdc.css, css/accounts.css (Accounts section look,
                         ported from the AMS accounts UI), img/, js/core/*.js,
                         js/pages/*.js
@@ -73,10 +73,13 @@ tests/                  differential smoke test vs the pre-split baseline
 ```
 
 **Dependency rule:** `routes → services/core → models → utils`, never
-upwards. `scripts/check_layers.py` enforces it (acyclic, 70 modules).
+upwards. `scripts/check_layers.py` enforces it (acyclic, 76 modules).
 
-**Scale (keep these honest — the audits check them):** 98 templates,
-73 models, 70 modules.
+**Scale (runtime/source inventory, 2026-09-27):** 101 templates,
+76 ORM models, 76 application modules, 249 registered URL rules. See
+[`qa/QA_HARDENING_REPORT.md`](qa/QA_HARDENING_REPORT.md) for current test
+evidence, fixes and explicitly unverified release scope. Regenerate the
+machine-readable inventory with `python scripts/qa_inventory.py --output qa/inventory.json`.
 
 ## Accounts &amp; Cash
 

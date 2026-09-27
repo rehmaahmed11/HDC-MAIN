@@ -127,7 +127,16 @@ def _is_pdf_upload(file_obj):
     if not file_obj:
         return False
     filename = (file_obj.filename or '').strip().lower()
-    return filename.endswith('.pdf')
+    if not filename.endswith('.pdf'):
+        return False
+    # Do not trust extension or client-supplied MIME. Leave the stream exactly
+    # where it was so the subsequent save includes the complete PDF header.
+    stream = file_obj.stream
+    position = stream.tell()
+    try:
+        return stream.read(5) == b'%PDF-'
+    finally:
+        stream.seek(position)
 
 
 def _quote_ident(name):

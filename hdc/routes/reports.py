@@ -9,7 +9,7 @@ import io
 from datetime import datetime, timedelta
 
 import openpyxl
-from flask import Response, render_template, request
+from flask import Response, abort, render_template, request
 from flask_login import login_required
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
@@ -36,6 +36,17 @@ def register(app):
     @app.route('/hdc/reports')
     @login_required
     def hdc_reports():
+        # Validate bounds before constructing queries. End bounds add a day,
+        # so even a syntactically valid maximum date can overflow.
+        for field in ('worker_date_from', 'worker_date_to', 'time_date_from', 'time_date_to'):
+            raw = request.args.get(field)
+            if raw:
+                try:
+                    parsed = datetime.strptime(raw, '%Y-%m-%d')
+                    if field.endswith('_to'):
+                        parsed + timedelta(days=1)
+                except (ValueError, OverflowError):
+                    abort(400, description=f'{field} must be a valid YYYY-MM-DD date within the supported range.')
         projects = Project.query.all()
         _apply_aggregated_project_costs(projects)
         workers = Worker.query.order_by(Worker.name).all()

@@ -239,9 +239,9 @@ def _apply_aggregated_project_costs(projects):
         p._agg_total_expense_cost = expense
         p._agg_total_subcontract_cost = subcontract
         p._agg_total_cost = total
+        p._agg_stage_contract_value = float(m.get('stage_contract', 0.0) or 0.0)
         p._agg_net_profit = float((p.owner_contract_value or 0.0) - total)
         p._agg_remaining_receivable = float((p.owner_contract_value or 0.0) - received)
-        p._agg_stage_contract_value = float(m.get('stage_contract', 0.0) or 0.0)
     return metrics
 
 

@@ -6,6 +6,7 @@ method and alias in the operational finance modules, not just sampled POSTs.
 """
 
 import os
+from datetime import datetime, timedelta
 import sqlite3
 import tempfile
 import unittest
@@ -24,7 +25,7 @@ from hdc.models.office import OfficeExpenseCategory, OfficeStaff, OfficeStaffLed
 from hdc.models.projects import Project, Stage
 from hdc.models.subcontract import Subcontractor, SubcontractPayment
 from hdc.models.tool_rental import Tool
-from hdc.models.workforce import LabourLedger, PayrollItem, PayrollRun, Worker
+from hdc.models.workforce import LabourLedger, PayrollItem, PayrollRun, TimeEntry, Worker
 from hdc.utils.dates import _pkt_today
 
 
@@ -80,6 +81,14 @@ class MoneyPermissionsTestCase(unittest.TestCase):
             sub = Subcontractor(name='Permission Contractor', subcontractor_code='PERM-S',
                                 project_id=project.id, contract_type='lump_sum', lump_sum_amount=10000)
             db.session.add_all([stage, sub, PayrollItem(run_id=run.id, worker_id=worker.id, net_pay=10000)])
+            # Authorization fixtures must have real wage debt: payroll now caps
+            # salary by the canonical worker ledger, rather than paying an
+            # unsupported synthetic PayrollItem in an otherwise empty ledger.
+            start = datetime.combine(_pkt_today(), datetime.min.time())
+            db.session.add(TimeEntry(worker_id=worker.id, project_id=project.id,
+                                     stage_id=stage.id, check_in=start,
+                                     check_out=start + timedelta(hours=8), hours=8,
+                                     wage_calculated=10000, is_void=False))
             db.session.commit()
             self.ids = {key: row.id for key, row in {
                 'cash': cash, 'project': project, 'worker': worker, 'staff': staff,

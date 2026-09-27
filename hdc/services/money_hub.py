@@ -43,7 +43,7 @@ from hdc.services.accounts import (
     _list_accounts_with_balances,
 )
 from hdc.services.cashflow_register import day_positions, day_totals
-from hdc.services.ledger import _office_staff_ledger_snapshot, _worker_payable_snapshot
+from hdc.services.ledger import _worker_payable_snapshots, _office_staff_ledger_snapshot, _worker_payable_snapshot
 from hdc.services.subcontract import _subcontract_stage_snapshot
 from hdc.utils.dates import _pkt_today
 from hdc.utils.money import from_minor, to_minor
@@ -563,8 +563,9 @@ def get_pending_payables_detailed():
     workers_pending = []
     try:
         workers = Worker.query.filter(Worker.active_status == True).order_by(Worker.name.asc()).all()
+        worker_snapshots = _worker_payable_snapshots([w.id for w in workers])
         for w in workers:
-            snap = _worker_payable_snapshot(w.id)
+            snap = worker_snapshots[w.id]
             pending = float(snap.get("payable") or 0.0)
             if pending > 0.01:
                 workers_pending.append({

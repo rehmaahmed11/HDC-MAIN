@@ -154,10 +154,22 @@ history.
 
 ### 2.5 Idempotency keys — **taken**
 
-`CashFlowEntry.idempotency_key` (unique, indexed). A retried request or a
-double-clicked form returns the existing entry instead of posting twice. Cheap,
-and it removes a whole class of duplicate-money bugs that AMS guards against
-with a much more elaborate duplicate-detection service.
+`CashFlowEntry.idempotency_key` is persisted and indexed. Contrary to the
+historical description, the model does **not** declare a database UNIQUE
+constraint on this column. The 2026-09-27 concurrency test reproduced two
+committed rows for one key when two workers both validated before writing.
+
+The canonical service now reserves SQLite's writer with `BEGIN IMMEDIATE`
+**before** looking up the key or validating balance. A second concurrent caller
+then sees the committed entry and returns it with `created=False`; distinct keys
+remain legitimate distinct transactions. The same reservation protects balance
+validation and guarded operational writes. Tests cover same-key retries,
+concurrent overdraft attempts and legitimate repeated distinct-key payments.
+
+This is an application transaction guarantee for the protected entrypoints,
+not permission to insert directly into the tables. Existing historic duplicate
+keys are not deleted or silently reconciled. Legacy forms without a submitted
+key do not acquire universal retry idempotency from this change.
 
 ### 2.6 Period locks — **taken**
 

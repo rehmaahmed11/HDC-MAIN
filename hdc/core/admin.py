@@ -6,12 +6,13 @@ See MODULARIZATION_PLAN.md for the module map.
 import os
 import shutil
 import sqlite3
+import tempfile
+from pathlib import Path
 import zipfile
-from uuid import uuid4
 
 from sqlalchemy import text
 
-from hdc.config import BASE_DIR, get_runtime_settings
+from hdc.config import get_runtime_settings
 from hdc.core.bootstrap import _bootstrap_hdc, _ensure_bootstrap_once
 from hdc.extensions import db
 from hdc.models.workforce import TimeEntry
@@ -19,34 +20,71 @@ from hdc.services.audit import _audit_paused
 from hdc.services.subcontract import _reconcile_subcontract_links
 from hdc.services.timekeeping import _reconcile_worker_time_entries, _repair_worker_work_ledger_links
 
+def _validate_restore_database(path):
+    """Read-only checks must finish before any target file/session is touched."""
+    if not os.path.isfile(path):
+        raise ValueError('Backup database is missing.')
+    try:
+        with sqlite3.connect(Path(path).resolve().as_uri() + '?mode=ro', uri=True) as con:
+            if con.execute('PRAGMA integrity_check').fetchall() != [('ok',)]:
+                raise ValueError('Backup database failed integrity checking.')
+            tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            required = {'hdc_user', 'hdc_project', 'hdc_account', 'hdc_account_txn'}
+            if not required.issubset(tables):
+                raise ValueError('Backup database is missing required HDC tables.')
+            if con.execute('PRAGMA foreign_key_check').fetchone() is not None:
+                raise ValueError('Backup database contains broken foreign keys.')
+    except sqlite3.Error as exc:
+        raise ValueError('Backup database is invalid or unreadable.') from exc
+
+
 def _restore_from_paths(db_path, estimation_path=None):
+    # Both raw .db uploads and ZIPs take this path. An extension is not proof
+    # that an upload is a database. Never replace live data before validation.
+    _validate_restore_database(db_path)
     settings = get_runtime_settings()
     target_db = settings.db_path
     db.session.remove()
     db.engine.dispose()
-    # If SQLite WAL sidecar files from an older DB remain, they can override
-    # pages after restore and make imported data appear missing.
-    try:
-        for sidecar in (f"{target_db}-wal", f"{target_db}-shm"):
-            if os.path.exists(sidecar):
-                os.remove(sidecar)
-    except Exception:
-        pass
-    tmp_target = f"{target_db}.restore-{uuid4().hex}.tmp"
-    shutil.copy2(db_path, tmp_target)
-    os.replace(tmp_target, target_db)
-    if estimation_path and os.path.exists(estimation_path):
-        tmp_estimation = f"{settings.estimation_store}.restore-{uuid4().hex}.tmp"
-        shutil.copy2(estimation_path, tmp_estimation)
-        os.replace(tmp_estimation, settings.estimation_store)
-    # Restored backups can be from older schema versions.
-    # Force bootstrap/migrations so new columns (e.g. purchase_v2 usage links) exist immediately.
-    _ensure_bootstrap_once(force=True)
+    # Keep an independent WAL-aware recovery snapshot until migrations succeed.
+    # Operators must quiesce other workers for a restore (see hardening guide).
+    # Atomic replacement requires snapshots on the database's filesystem,
+    # which need not be the same mount as HDC_INSTANCE_DIR.
+    with tempfile.TemporaryDirectory(prefix='restore-', dir=os.path.dirname(target_db)) as tmp:
+        recovery = os.path.join(tmp, 'previous.db')
+        candidate = os.path.join(tmp, 'candidate.db')
+        for source, destination in ((target_db, recovery), (db_path, candidate)):
+            with sqlite3.connect(Path(source).resolve().as_uri() + '?mode=ro', uri=True) as src:
+                with sqlite3.connect(destination) as dst:
+                    src.backup(dst)
+        old_estimation = None
+        if os.path.exists(settings.estimation_store):
+            old_estimation = Path(settings.estimation_store).read_bytes()
+
+        def replace_database(source):
+            db.session.remove()
+            db.engine.dispose()
+            for sidecar in (target_db + '-wal', target_db + '-shm'):
+                if os.path.exists(sidecar):
+                    os.remove(sidecar)
+            os.replace(source, target_db)
+
+        try:
+            replace_database(candidate)
+            if estimation_path and os.path.exists(estimation_path):
+                shutil.copy2(estimation_path, settings.estimation_store)
+            _ensure_bootstrap_once(force=True)
+        except Exception:
+            replace_database(recovery)
+            if old_estimation is not None:
+                Path(settings.estimation_store).write_bytes(old_estimation)
+            elif os.path.exists(settings.estimation_store):
+                os.remove(settings.estimation_store)
+            raise
 
 
 def _restore_from_backup_zip(zip_path):
-    tmpdir = os.path.join(BASE_DIR, f'_restore_extract_{uuid4().hex}')
-    os.makedirs(tmpdir, exist_ok=True)
+    tmpdir = tempfile.mkdtemp(prefix='restore-extract-', dir=get_runtime_settings().instance_dir)
     try:
         with zipfile.ZipFile(zip_path, 'r') as zf:
             for member in zf.infolist():

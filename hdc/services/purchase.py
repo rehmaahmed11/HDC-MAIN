@@ -495,3 +495,19 @@ def _repair_supplier_purchase_v2_ledger(supplier_id):
                  .all())
     for p in purchases:
         _sync_purchase_v2_ledger(p)
+
+
+def validate_delivery_reduction(delivery, new_quantity):
+    """Keep already-consumed stock backed by its active delivery.
+
+    Use the canonical remaining map, including legacy unlinked FIFO usage,
+    instead of duplicating stock accounting in the HTML and JSON handlers.
+    Raises before callers modify the delivery or its audit metadata.
+    """
+    reduction = float(delivery.quantity or 0.0) - float(new_quantity)
+    if reduction <= 0:
+        return
+    available = _purchase_v2_available_in_scope_qty(
+        delivery.purchase_id, delivery.project_id, delivery.stage_id)
+    if reduction > available + 1e-9:
+        raise ValueError('Cannot reduce or void delivery: stock has already been used. Void the usage first.')

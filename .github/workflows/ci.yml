@@ -58,3 +58,30 @@ jobs:
             "$RUNNER_TEMP/hdc-ci.db" \
             "$RUNNER_TEMP/hdc-ci-instance" \
             "$RUNNER_TEMP/hdc-ci-smoke.json"
+
+      - name: Verify runtime inventory and financial acceptance
+        run: |
+          python scripts/qa_inventory.py --output "$RUNNER_TEMP/hdc-inventory.json"
+          python scripts/audit_acceptance.py --json "$RUNNER_TEMP/hdc-acceptance.json"
+          python -c "import json, os; r=json.load(open(os.environ['RUNNER_TEMP']+'/hdc-ci-smoke.json')); assert not r['errors'], r['errors']; assert all(v < 500 for v in r['reads'].values()), r['reads']"
+
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install test browser and application
+        run: |
+          python -m pip install -r requirements.txt playwright==1.63.0
+          python -m playwright install --with-deps chromium
+      - name: Real browser release checks (owns disposable server and database)
+        run: python scripts/qa_browser.py --output browser-evidence.json
+      - name: Preserve browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-evidence
+          path: browser-evidence.json

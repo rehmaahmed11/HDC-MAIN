@@ -707,3 +707,20 @@ What reconciles cleanly: all 6,413 `work` ledger rows match their time entries
 New checks added for this run (also covered by
 `tests/test_labour_audit_fixes.py`): `CASH_DUPLICATE_SAME_DAY`,
 `TIP_LEDGER_WRONG_WORKER`, `CASH_BEFORE_WORKER_RECORD`.
+
+## 2026-09-27 — cross-surface payroll overpayment regression
+
+The full business acceptance test found that run-key-only payment counting let
+Pay All pay salary already recorded through the worker screen. For earned 1,250,
+advance 200 and manual salary 500, a run's net is still 1,050, but actual worker
+debt is only 550. Before the fix Pay All paid 1,050 and left debt at -500.
+
+`_payroll_payable_balance` now caps a payment at both the run's remaining balance
+and the canonical all-time worker debt. Summary/card balance and button amounts
+use the same cap; **period gross/net and overtime policy are not changed**.
+Extra cash belongs in explicit advance/tip flows. The business acceptance test
+verifies the correct 550 posting and prevents a subsequent duplicate salary.
+
+Canonical worker payable reads also have a grouped-list implementation now.
+All 38 prior labour regression tests pass, including voided migration and tip
+semantics. See `qa/QA_HARDENING_REPORT.md` for the complete current evidence.
