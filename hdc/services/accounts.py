@@ -19,7 +19,7 @@ from hdc.models.office import OfficeExpense, OfficeStaff, OfficeStaffLedger
 from hdc.models.projects import Project, Stage
 from hdc.models.subcontract import SubcontractPayment, Subcontractor
 from hdc.models.workforce import LabourLedger, Worker
-from hdc.services.ledger import _is_linked_office_salary_expense, _office_staff_ledger_snapshot, _remove_office_salary_expense_for_ledger, _sync_office_staff_expense_from_ledger, _worker_payable_snapshot
+from hdc.services.ledger import _worker_payable_snapshots, _is_linked_office_salary_expense, _office_staff_ledger_snapshot, _remove_office_salary_expense_for_ledger, _sync_office_staff_expense_from_ledger, _worker_payable_snapshot
 from hdc.services.lookups import _ensure_expense_category, _ensure_expense_category_by_id
 from hdc.services.purchase import _sync_purchase_v2_ledger
 from hdc.services.subcontract import _log_subcontract_event, _subcontract_stage_snapshot
@@ -968,6 +968,8 @@ def _build_account_txn_rows(norm):
 
 
 def _create_account_transaction(payload, commit=True):
+    from hdc.utils.sqlite import begin_sqlite_write
+    begin_sqlite_write(db.session.connection())
     norm = _normalize_account_txn_payload(payload)
     ok, msg = _validate_account_transaction_payload(norm)
     if not ok:
@@ -2921,8 +2923,9 @@ def _accounts_payable_breakdown_rows():
                .filter(Worker.active_status == True)
                .order_by(Worker.name.asc(), Worker.id.asc())
                .all())
+    worker_snapshots = _worker_payable_snapshots([w.id for w in workers])
     for w in workers:
-        snap = _worker_payable_snapshot(w.id)
+        snap = worker_snapshots[w.id]
         pending = float(snap.get('payable') or 0.0)
         if pending <= 1e-6:
             continue

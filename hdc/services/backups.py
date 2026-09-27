@@ -9,6 +9,7 @@ import sqlite3
 import tempfile
 import zipfile
 from datetime import datetime
+from uuid import uuid4
 
 import openpyxl
 
@@ -17,7 +18,7 @@ from hdc.utils.dates import PKT_ZONE, _pkt_now_naive
 from hdc.utils.format import _quote_ident, _safe_sheet_name
 
 def _backup_filename():
-    return f"hdc_backup_{_pkt_now_naive().strftime('%Y%m%d_%H%M%S')}.zip"
+    return f"hdc_backup_{_pkt_now_naive().strftime('%Y%m%d_%H%M%S')}_{uuid4().hex[:12]}.zip"
 
 
 def _create_backup_xlsx(dst_path):

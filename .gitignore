@@ -45,3 +45,6 @@ node_modules/
 .DS_Store
 *.log
 instance/
+
+# Runtime bootstrap coordination (same directory as the SQLite database)
+*.bootstrap.lock

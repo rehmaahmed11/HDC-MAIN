@@ -565,6 +565,8 @@ def save_manual_cash_flow_entry(*, direction, amount, account_id, destination_ac
     refused.  The form hides those fields for a reason; this is the same rule
     enforced where it counts.
     """
+    from hdc.utils.sqlite import begin_sqlite_write
+    begin_sqlite_write(db.session.connection())
     key = (idempotency_key or '').strip() or None
     if key:
         existing = CashFlowEntry.query.filter(CashFlowEntry.idempotency_key == key).first()

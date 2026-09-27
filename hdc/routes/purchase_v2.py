@@ -15,7 +15,7 @@ from hdc.models.materials import Delivery, MaterialV2, PurchaseV2, Supplier, Sup
 from hdc.models.projects import Project, Stage
 from hdc.services.accounts import _accounts_post_supplier_credit_row, _accounts_set_void_by_source, _accounts_upsert_purchase_paid_txn
 from hdc.services.audit import log_action
-from hdc.services.purchase import _MATERIAL_V2_UNITS, _ensure_material_v2, _ensure_supplier_quick, _material_v2_available, _material_v2_delivered, _material_v2_used, _material_v2_weighted_cost, _purchase_v2_available_in_scope_qty, _purchase_v2_delivered_qty, _purchase_v2_integrity_report, _repair_supplier_purchase_v2_ledger, _sync_purchase_v2_ledger, _sync_supplier_po_payment_status, _transfer_v2_material_between_scopes
+from hdc.services.purchase import validate_delivery_reduction, _MATERIAL_V2_UNITS, _ensure_material_v2, _ensure_supplier_quick, _material_v2_available, _material_v2_delivered, _material_v2_used, _material_v2_weighted_cost, _purchase_v2_available_in_scope_qty, _purchase_v2_delivered_qty, _purchase_v2_integrity_report, _repair_supplier_purchase_v2_ledger, _sync_purchase_v2_ledger, _sync_supplier_po_payment_status, _transfer_v2_material_between_scopes
 from hdc.services.timekeeping import _has_recent_duplicate
 from hdc.utils.dates import _pkt_now_naive, _pkt_today
 from hdc.utils.format import _flt
@@ -1133,6 +1133,11 @@ def register(app):
         if row.is_void:
             flash('Delivery already voided.', 'warning')
             return redirect(url_for('hdc_purchase_v2_delivered'))
+        try:
+            validate_delivery_reduction(row, 0)
+        except ValueError as exc:
+            flash(str(exc), 'danger')
+            return redirect(url_for('hdc_purchase_v2_delivered'))
         reason = (request.form.get('void_reason') or '').strip() or 'Voided by user'
         row.is_void = True
         row.void_reason = reason
@@ -1168,6 +1173,11 @@ def register(app):
             if qty > remaining + 1e-9:
                 flash(f'Quantity exceeds remaining purchase qty ({remaining:,.2f}).', 'danger')
                 return redirect(url_for('hdc_purchase_v2_delivered'))
+        try:
+            validate_delivery_reduction(row, qty)
+        except ValueError as exc:
+            flash(str(exc), 'danger')
+            return redirect(url_for('hdc_purchase_v2_delivered'))
         row.date = _date
         row.quantity = qty
         row.delivery_person = (request.form.get('delivery_person') or row.delivery_person or '').strip()

@@ -139,6 +139,10 @@ def call_app(app, path='/hdc/login', method='GET', body=b'', signature=None):
 
 class TempCaseMixin:
     def setUp(self):
+        # WSGI fixtures import a fake hdc package. Preserve real modules so
+        # subsequent tests and mock.patch resolve the same functions/models.
+        self.original_modules = {name: module for name, module in sys.modules.items()
+                                 if name.startswith(('hdc', 'deploy_hook', 'generated_wsgi'))}
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.addCleanup(self.drop_modules)
@@ -155,6 +159,7 @@ class TempCaseMixin:
         for name in list(sys.modules):
             if name.startswith(('generated_wsgi', 'deploy_hook', 'hdc')):
                 del sys.modules[name]
+        sys.modules.update(self.original_modules)
         repo = getattr(self, 'repo', None)
         for entry in [repo, repo and os.path.join(repo, 'hdc')]:
             while entry and entry in sys.path:

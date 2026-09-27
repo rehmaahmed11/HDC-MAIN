@@ -86,6 +86,10 @@ def _csrf_protect():
     tok = (session.get('_csrf_token') or '').strip()
     if (not sent) or (not tok) or (sent != tok):
         abort(400, description='CSRF token missing or invalid.')
+    # Every current JSON mutation contract expects an object. Reject malformed
+    # JSON/scalars centrally instead of letting handlers fail on .get().
+    if request.is_json and not isinstance(request.get_json(silent=True), dict):
+        return jsonify(ok=False, message='Request body must be a JSON object.'), 400
     return None
 
 
@@ -123,6 +127,9 @@ def _money_write_required(*, api=False):
                 if api:
                     return jsonify(ok=False, message=_MONEY_ACCESS_MESSAGE), 403
                 return redirect(url_for('hdc_dashboard'))
+            if request.method not in ('GET', 'HEAD', 'OPTIONS'):
+                from hdc.utils.sqlite import begin_sqlite_write
+                begin_sqlite_write(db.session.connection())
             return view(*args, **kwargs)
         return guarded
     return decorate

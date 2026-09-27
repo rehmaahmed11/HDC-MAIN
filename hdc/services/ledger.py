@@ -262,58 +262,47 @@ def _worker_legacy_earned(worker_id):
     return float(q.scalar() or 0.0)
 
 
+def _worker_payable_snapshots(worker_ids):
+    """Canonical payable arithmetic, grouped for list screens (three queries).
+
+    A correlated NOT EXISTS keeps legacy wages when the only migrated entry
+    was voided, exactly like _worker_legacy_earned. Tips remain informational.
+    """
+    ids = list(dict.fromkeys(int(wid) for wid in worker_ids))
+    if not ids:
+        return {}
+    time_totals = dict(db.session.query(TimeEntry.worker_id,
+        func.coalesce(func.sum(TimeEntry.wage_calculated), 0.0))
+        .filter(TimeEntry.worker_id.in_(ids), TimeEntry.is_void == False)
+        .group_by(TimeEntry.worker_id).all())
+    migrated = db.session.query(TimeEntry.id).filter(
+        TimeEntry.worker_id == Attendance.worker_id,
+        TimeEntry.attendance_id == Attendance.id, TimeEntry.is_void == False).exists()
+    legacy_totals = dict(db.session.query(Attendance.worker_id,
+        func.coalesce(func.sum(Attendance.total_wage), 0.0))
+        .filter(Attendance.worker_id.in_(ids), ~migrated)
+        .group_by(Attendance.worker_id).all())
+    ledger_totals = {(wid, kind): float(amount) for wid, kind, amount in
+        db.session.query(LabourLedger.worker_id, LabourLedger.entry_type,
+            func.coalesce(func.sum(LabourLedger.amount), 0.0))
+        .filter(LabourLedger.worker_id.in_(ids), LabourLedger.is_void == False)
+        .group_by(LabourLedger.worker_id, LabourLedger.entry_type).all()}
+    result = {}
+    for wid in ids:
+        earned = float(time_totals.get(wid, 0)) + float(legacy_totals.get(wid, 0))
+        advanced = ledger_totals.get((wid, 'advance'), 0.0)
+        salary_paid = ledger_totals.get((wid, 'payment'), 0.0)
+        tip_paid = ledger_totals.get((wid, 'tip'), 0.0)
+        settled = ledger_totals.get((wid, 'settlement'), 0.0)
+        balance = earned - advanced - salary_paid - settled
+        result[wid] = dict(earned=earned, advanced=advanced, paid=salary_paid,
+                           salary_paid=salary_paid, tip_paid=tip_paid,
+                           settled=settled, balance=balance, payable=max(0.0, balance))
+    return result
+
+
 def _worker_payable_snapshot(worker_id):
-    earned = float(db.session.query(func.coalesce(func.sum(TimeEntry.wage_calculated), 0.0))
-                   .filter(TimeEntry.worker_id == worker_id, TimeEntry.is_void == False)
-                   .scalar() or 0.0)
-    earned += _worker_legacy_earned(worker_id)
-    advanced = float(db.session.query(func.coalesce(func.sum(LabourLedger.amount), 0.0))
-                     .filter(
-                         LabourLedger.worker_id == worker_id,
-                         LabourLedger.entry_type == 'advance',
-                         LabourLedger.is_void == False
-                     )
-                     .scalar() or 0.0)
-    salary_paid = float(db.session.query(func.coalesce(func.sum(LabourLedger.amount), 0.0))
-                 .filter(
-                     LabourLedger.worker_id == worker_id,
-                     LabourLedger.entry_type == 'payment',
-                     LabourLedger.is_void == False
-                 )
-                 .scalar() or 0.0)
-    tip_paid = float(db.session.query(func.coalesce(func.sum(LabourLedger.amount), 0.0))
-                .filter(
-                    LabourLedger.worker_id == worker_id,
-                    LabourLedger.entry_type == 'tip',
-                    LabourLedger.is_void == False
-                )
-                .scalar() or 0.0)
-    settled = float(db.session.query(func.coalesce(func.sum(LabourLedger.amount), 0.0))
-               .filter(
-                   LabourLedger.worker_id == worker_id,
-                   LabourLedger.entry_type == 'settlement',
-                   LabourLedger.is_void == False
-               )
-               .scalar() or 0.0)
-    # Bug fix (2026-04-25): tip is gratis cash given on top of what the worker
-    # earned, so it MUST NOT subtract from the worker's owed balance. The cash
-    # outflow is still tracked (Expense + AccountTransaction); it just stays
-    # informational in the worker ledger. Previously a worker with due 667
-    # paid 700 (= 667 payment + 33 tip) ended up at balance -33 even though
-    # the user's intent was "settle 667 and give 33 as a thank-you" -> 0.
-    paid = salary_paid  # what the worker was paid against earnings
-    balance = earned - advanced - salary_paid - settled
-    payable = balance if balance > 0 else 0.0
-    return {
-        'earned': earned,
-        'advanced': advanced,
-        'paid': paid,
-        'salary_paid': salary_paid,
-        'tip_paid': tip_paid,
-        'settled': settled,
-        'balance': balance,
-        'payable': payable
-    }
+    return _worker_payable_snapshots([worker_id])[int(worker_id)]
 
 
 def _worker_tip_expenses(worker):
@@ -489,3 +478,14 @@ def _get_all_office_expense_category_rows():
         }
         for r in OfficeExpenseCategory.query.order_by(OfficeExpenseCategory.name.asc()).all()
     ]
+
+
+def _payroll_payable_balance(worker_id, period_remaining):
+    """A payroll run may never pay more salary than the canonical worker debt.
+
+    Run totals remain period-scoped; payments/advances/settlements made outside
+    that run still reduce actual debt. Extra cash belongs in the explicit
+    advance/tip flow, not a duplicate salary payment.
+    """
+    owed = float(_worker_payable_snapshot(worker_id).get('balance') or 0.0)
+    return max(0.0, min(float(period_remaining or 0.0), owed))

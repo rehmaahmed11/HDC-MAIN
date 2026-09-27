@@ -5,6 +5,7 @@ See MODULARIZATION_PLAN.md for the module map.
 
 import os
 import threading
+from contextlib import contextmanager
 
 from flask import current_app
 from sqlalchemy import func, inspect as sa_inspect
@@ -136,6 +137,33 @@ def _bootstrap_state(app_obj):
     )
 
 
+@contextmanager
+def _bootstrap_process_lock():
+    """Serialize schema healing/seeds across POSIX Gunicorn/PA workers.
+
+    The thread lock below cannot coordinate independent worker processes.
+    Keep the advisory-lock inode (never unlink it after release); all workers
+    opening the same database must lock that same file. OS releases on crash.
+    """
+    path = db.engine.url.database
+    if db.engine.dialect.name != 'sqlite' or not path or path == ':memory:':
+        yield
+        return
+    # Gunicorn and PythonAnywhere deployment targets are POSIX. Development
+    # platforms without flock retain the existing single-process behavior.
+    if os.name != 'posix':
+        yield
+        return
+    import fcntl
+    lock_path = os.path.realpath(path) + '.bootstrap.lock'
+    with open(lock_path, 'a') as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
 def _ensure_bootstrap_once(app=None, force=False):
     """Bootstrap the active app/database once, independently per app.
 
@@ -152,7 +180,7 @@ def _ensure_bootstrap_once(app=None, force=False):
     with _HDC_BOOTSTRAP_LOCK:
         if state['done'] and not force:
             return
-        with _app_obj.app_context():
+        with _app_obj.app_context(), _bootstrap_process_lock():
             _bootstrap_hdc()
             if not sa_inspect(db.engine).has_table('hdc_user'):
                 raise RuntimeError('Database bootstrap did not create the hdc_user table.')
