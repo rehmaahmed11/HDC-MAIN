@@ -5,6 +5,7 @@ original @app.route decorator and endpoint name.
 """
 
 from datetime import datetime
+import math
 
 from flask import abort, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
@@ -1590,24 +1591,26 @@ def register(app):
         if not sub:
             flash('Selected subcontractor is invalid.', 'danger')
             return redirect(url_for('hdc_project_detail', pid=stg.project_id))
-        from_desc = 'unassigned'
-        if stg.assigned_subcontractor:
-            prev = stg.assigned_subcontractor
-            from_desc = f'{prev.subcontractor_code or ("SUB-" + str(prev.id))} {prev.name}'
         if sub.stage_id and sub.stage_id != stg.id:
-            prev_stage = Stage.query.get(sub.stage_id)
-            if prev_stage and prev_stage.assigned_subcontractor_id == sub.id:
-                prev_stage.execution_mode = 'company'
-                prev_stage.assigned_subcontractor_id = None
-                _log_subcontract_event(
-                    sub=sub,
-                    event_type='unassign',
-                    from_value=prev_stage.name,
-                    to_value='company',
-                    notes='Auto-unassigned from previous stage due to reassignment',
-                    project_id=prev_stage.project_id,
-                    stage_id=prev_stage.id
-                )
+            flash('Subcontractor is already assigned to another stage. Remove that assignment explicitly first.', 'danger')
+            return redirect(url_for('hdc_project_detail', pid=stg.project_id))
+        if (stg.status or '').lower() in ('complete', 'completed'):
+            flash('Reopen the stage before adding or changing subcontractors.', 'warning')
+            return redirect(url_for('hdc_project_detail', pid=stg.project_id))
+        from_desc = 'assigned' if sub.stage_id == stg.id else 'unassigned'
+
+        # Validate all submitted terms before changing any assignment or money fields.
+        for field in ('rate_per_sqft', 'total_sqft', 'lump_sum_amount', 'retention_pct'):
+            raw = (request.form.get(field) or '').strip()
+            if not raw:
+                continue
+            try:
+                value = float(raw)
+                if not math.isfinite(value) or value < 0 or (field == 'retention_pct' and value > 100):
+                    raise ValueError()
+            except ValueError:
+                flash('Pricing must be finite and non-negative; retention must be between 0 and 100.', 'danger')
+                return redirect(url_for('hdc_project_detail', pid=stg.project_id))
 
         # Optional subcontract pricing overrides while shifting.
         old_terms = f'{sub.contract_type}|R{float(sub.rate_per_sqft or 0):.2f}|Q{float(sub.total_sqft or 0):.2f}|L{float(sub.lump_sum_amount or 0):.2f}|Ret{float(sub.retention_percentage or 0):.2f}%'
@@ -1630,27 +1633,13 @@ def register(app):
         if sub.contract_type == 'sqft' and (sub.total_sqft or 0) <= 0 and (stg.qty_sqft or 0) > 0:
             sub.total_sqft = float(stg.qty_sqft or 0.0)
 
-        prev_assigned = stg.assigned_subcontractor
-        prev_assigned_id = stg.assigned_subcontractor_id
-        if prev_assigned and prev_assigned.id != sub.id and prev_assigned.stage_id == stg.id:
-            prev_assigned.stage_id = None
-            _log_subcontract_event(
-                sub=prev_assigned,
-                event_type='unassign',
-                from_value=stg.name,
-                to_value='reassigned',
-                notes=f'Stage reassigned to {sub.subcontractor_code or ("SUB-" + str(sub.id))} {sub.name}',
-                project_id=stg.project_id,
-                stage_id=stg.id
-            )
-
         stg.execution_mode = 'subcontractor'
-        stg.assigned_subcontractor_id = sub.id
+        # Retain the legacy primary pointer for compatibility, not membership.
+        if not stg.assigned_subcontractor_id:
+            stg.assigned_subcontractor_id = sub.id
         sub.project_id = stg.project_id
         sub.stage_id = stg.id
         ev_type = 'shift'
-        if prev_assigned_id and prev_assigned_id != sub.id:
-            ev_type = 'reassign'
         _log_subcontract_event(
             sub=sub,
             event_type=ev_type,
@@ -1691,22 +1680,23 @@ def register(app):
     @_money_write_required()
     def hdc_stage_shift_to_company(sid):
         stg = Stage.query.get_or_404(sid)
-        prev_sub = stg.assigned_subcontractor
-        stg.execution_mode = 'company'
-        stg.assigned_subcontractor_id = None
-        if prev_sub and prev_sub.stage_id == stg.id:
-            prev_sub.stage_id = None
+        members = stg.assigned_subcontractors
+        remove_id = request.form.get('subcontractor_id', type=int)
+        if remove_id and not any(sub.id == remove_id for sub in members):
+            flash('Subcontractor is not assigned to this stage.', 'danger')
+            return redirect(url_for('hdc_project_detail', pid=stg.project_id))
+        removed = [sub for sub in members if not remove_id or sub.id == remove_id]
+        remaining = [sub for sub in members if remove_id and sub.id != remove_id]
+        for sub in removed:
+            sub.stage_id = None
             _log_subcontract_event(
-                sub=prev_sub,
-                event_type='unassign',
-                from_value=stg.name,
-                to_value='company',
-                notes='Shifted back to company execution',
-                project_id=stg.project_id,
-                stage_id=stg.id
-            )
+                sub=sub, event_type='unassign', from_value=stg.name,
+                to_value='unassigned', notes='Explicitly removed stage assignment',
+                project_id=stg.project_id, stage_id=stg.id)
+        stg.assigned_subcontractor_id = remaining[0].id if remaining else None
+        stg.execution_mode = 'subcontractor' if remaining else 'company'
         db.session.commit()
-        flash(f'Stage "{stg.name}" shifted to company execution.', 'success')
+        flash('Stage assignments updated. Existing financial history was retained.', 'success')
         return redirect(url_for('hdc_project_detail', pid=stg.project_id))
 
 

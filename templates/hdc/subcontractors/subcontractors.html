@@ -74,7 +74,7 @@
             </thead>
             <tbody>
             {% for s in subcontractors %}
-                {% set is_assigned = s.stage_rel and (s.stage_rel.execution_mode or 'company') == 'subcontractor' and s.stage_rel.assigned_subcontractor_id == s.id %}
+                {% set is_assigned = s.stage_rel and (s.stage_rel.execution_mode or 'company') == 'subcontractor' %}
                 <tr {{ s|hdc_row_attrs }}>
                     <td><span class="badge bg-secondary">{{ s.subcontractor_code or ('SUB-' ~ s.id) }}</span></td>
                     <td><a class="text-decoration-none fw-bold" href="{{ url_for('hdc_subcontractor_ledger', sid=s.id) }}">{{ s.name }}</a></td>

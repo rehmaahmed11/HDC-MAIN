@@ -200,13 +200,9 @@
                     <span class="badge bg-warning text-dark" title="{{ s.assigned_subcontractor.name if s.assigned_subcontractor else 'Subcontractor' }}">
                         <i class="fas fa-hard-hat me-1"></i>Sub
                     </span>
-                    {% if s.assigned_subcontractor %}
-                    <div>
-                        <small class="{% if s.status in ['completed','Complete'] and (s.assigned_subcontractor.effective_progress_percentage or 0) < 100 %}text-danger fw-bold{% else %}text-muted{% endif %}">
-                            Sub %: {{ "{:,.2f}".format(s.assigned_subcontractor.effective_progress_percentage or 0) }}
-                        </small>
-                    </div>
-                    {% endif %}
+                    {% for member in s.assigned_subcontractors %}
+                    <div class="small">{{ member.name }}: {{ "%.2f"|format(member.effective_progress_percentage or 0) }}%</div>
+                    {% endfor %}
                     {% else %}
                     <span class="badge bg-secondary"><i class="fas fa-building me-1"></i>Own</span>
                     {% endif %}
@@ -278,7 +274,7 @@
                         <i class="fas fa-percent"></i>
                     </button>
                     <form method="POST" action="{{ url_for('hdc_stage_shift_to_company', sid=s.id) }}" class="d-inline ms-1"
-                          onsubmit="return confirm('Shift stage {{ s.name }} back to company?')">
+                          onsubmit="return confirm('Remove ALL subcontractor assignments and return to company execution? Financial history will be retained.')">
                         <button type="submit" class="btn btn-xs btn-outline-secondary btn-sm" title="Shift to Company">
                             <i class="fas fa-building"></i>
                         </button>
@@ -287,23 +283,25 @@
             </tr>
             <tr {{ s|hdc_row_attrs }} class="collapse" id="sub-comp-{{ s.id }}">
                 <td colspan="18" class="bg-light-subtle">
+                    {% for member in s.assigned_subcontractors %}
                     <form method="POST" action="{{ url_for('hdc_stage_sub_progress', sid=s.id) }}" class="d-flex flex-wrap gap-2 align-items-center py-2">
-                        <span class="small text-muted fw-bold">Subcontractor completion:</span>
-                        <input type="number" step="0.01" min="0" max="100" name="work_done_percentage" class="form-control form-control-sm" style="width:160px"
-                               value="{% if s.assigned_subcontractor %}{{ "{:.2f}".format(s.assigned_subcontractor.work_done_percentage or 0) }}{% else %}0{% endif %}">
-                        <button type="submit" class="btn btn-sm btn-primary" {% if not s.assigned_subcontractor %}disabled{% endif %}>Update</button>
-                        {% if not s.assigned_subcontractor %}
-                        <small class="text-muted">Assign stage to subcontractor first.</small>
-                        {% else %}
-                        <small class="text-muted">{{ s.assigned_subcontractor.name }} | {{ s.assigned_subcontractor.subcontractor_code or ('SUB-' ~ s.assigned_subcontractor.id) }}</small>
-                        {% endif %}
+                        <input type="hidden" name="subcontractor_id" value="{{ member.id }}">
+                        <span>{{ member.name }} completion:</span>
+                        <input type="number" step="0.01" min="0" max="100" name="work_done_percentage" class="form-control form-control-sm" style="width:160px" value="{{ member.work_done_percentage or 0 }}">
+                        <button class="btn btn-sm btn-primary">Update</button>
                     </form>
+                    <form method="POST" action="{{ url_for('hdc_stage_shift_to_company', sid=s.id) }}" onsubmit="return confirm('Remove this assignment? Financial history will be retained.');">
+                        <input type="hidden" name="subcontractor_id" value="{{ member.id }}">
+                        <button class="btn btn-sm btn-outline-danger">Remove {{ member.name }}</button>
+                    </form>
+                    {% endfor %}
+
                 </td>
             </tr>
             <tr {{ s|hdc_row_attrs }} class="collapse" id="shift-sub-{{ s.id }}">
                 <td colspan="18" class="bg-light-subtle">
                     <form method="POST" action="{{ url_for('hdc_stage_shift_to_subcontractor', sid=s.id) }}" class="d-flex flex-wrap gap-2 align-items-center py-2">
-                        <span class="small text-muted fw-bold">Assign to subcontractor:</span>
+                        <span class="small text-muted fw-bold">Add subcontractor (existing assignments retained):</span>
                         <input type="text" id="shiftSubInput{{ s.id }}" class="form-control form-control-sm" style="max-width:300px" placeholder="Search subcontractor">
                         <select name="subcontractor_id" id="shiftSubSelect{{ s.id }}" class="form-select form-select-sm" style="max-width:300px" required>
                             <option value="">Select Subcontractor</option>
@@ -321,7 +319,7 @@
                         <input type="number" step="0.01" name="total_sqft" class="form-control form-control-sm" style="width:110px" placeholder="Sqft" value="{{ "{:.2f}".format(s.qty_sqft or 0) if s.qty_sqft else '' }}">
                         <input type="number" step="0.01" name="lump_sum_amount" class="form-control form-control-sm" style="width:120px" placeholder="Sub Lump">
                         <input type="number" step="0.01" name="retention_pct" class="form-control form-control-sm" style="width:95px" placeholder="Ret %">
-                        <button type="submit" class="btn btn-sm btn-warning" {% if not subcontractor_pool %}disabled{% endif %}>Shift</button>
+                        <button type="submit" class="btn btn-sm btn-warning" {% if not subcontractor_pool %}disabled{% endif %}>Add / update subcontractor</button>
                         <small class="text-muted">Owner: {{ "{:,.0f}".format(s.contract_value or 0) }}{% if (s.contract_basis or '') == 'Per Sq Ft' %} ({{ "{:,.0f}".format(s.effective_rate or 0) }}/sqft){% endif %}</small>
                         {% if not subcontractor_pool %}
                         <small class="text-muted">Create subcontractor first in the section below.</small>
