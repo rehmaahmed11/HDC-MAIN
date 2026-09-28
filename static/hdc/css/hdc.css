@@ -1102,3 +1102,76 @@ tr[data-hdc-void="1"] > td .text-warning {
     padding: 8px 10px;
     background: var(--card-header-bg);
 }
+
+/* Stage subcontractors: shrinkable fields and readable, bounded text. */
+.stage-sub-panel,
+.stage-form-card {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+.stage-sub-panel .badge,
+.stage-form-card .badge,
+.stage-sub-picker .badge,
+.stage-sqft-summary .badge {
+    max-width: 100%;
+    white-space: normal;
+    text-align: left;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+}
+.stage-sub-picker .stage-sub-count {
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+.stage-sub-search { min-width: 0; }
+.stage-sub-option { flex-wrap: wrap; }
+.stage-sub-option > span { min-width: 0; overflow-wrap: anywhere; }
+.stage-sub-option .form-check-input { flex: 0 0 auto; }
+.stage-sub-name { flex: 1 1 10rem; }
+.stage-sqft-summary > span { min-width: 0; }
+.stage-terms-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr));
+    gap: .5rem;
+    align-items: start;
+}
+.stage-term-field {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    margin: 0;
+    gap: .25rem;
+}
+.stage-term-field .form-label {
+    line-height: 1.3;
+    min-height: 2.6em; /* same control baseline even when a label wraps */
+    display: flex;
+    align-items: flex-end;
+}
+.stage-terms-grid .form-control,
+.stage-terms-grid .form-select,
+.stage-form-card .form-control,
+.stage-form-card .form-select {
+    min-width: 0;
+    width: 100%;
+    min-height: 32px;
+    font-size: .8rem;
+    border-radius: 6px;
+}
+.stage-terms-help { font-size: .75rem; line-height: 1.5; margin-top: .5rem; }
+.stage-terms-heading { grid-column: 1 / -1; }
+.stage-terms-submit { align-self: end; min-height: 32px; }
+.stage-fields-row > div > .form-label {
+    min-height: 2.6em;
+    display: flex;
+    align-items: flex-end;
+    line-height: 1.3;
+}
+.stage-sub-panel .table-responsive { max-width: 100%; }
+
+/* Keep expanded editors inside the visible card, even when the 18-column
+   stage ledger itself needs horizontal scrolling. */
+.stage-table-viewport { container-type: inline-size; }
+@supports (width: 1cqw) {
+    .stage-sub-panel { width: calc(100cqw - 2rem); max-width: 100%; }
+}

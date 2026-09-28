@@ -8,7 +8,7 @@
 {% block content %}
 <div class="row justify-content-center mt-2">
 <div class="col-md-8">
-<div class="card hdc-card">
+<div class="card hdc-card stage-form-card">
     <div class="card-header hdc-card-header">
         <i class="fas fa-layer-group me-2"></i>
         {% if mode == 'add' %}New Stage for {{ p.name }}{% else %}Edit: {{ stage.name }}{% endif %}
@@ -18,7 +18,7 @@
             {% if mode == 'add' and defs %}
             <div class="mb-3">
                 <label class="form-label">Pick from Stage Library <small class="text-muted">(or type custom name below)</small></label>
-                <select name="definition_id" class="form-select" id="defSelect">
+                <select name="definition_id" class="form-select form-select-sm" id="defSelect">
                     <option value="">— Custom Stage Name —</option>
                     {% for d in defs %}
                     <option value="{{ d.id }}">{{ d.name }}</option>
@@ -29,14 +29,14 @@
 
             <div class="mb-3">
                 <label class="form-label">Stage Name *</label>
-                <input type="text" name="name" class="form-control" id="stageNameInput"
+                <input type="text" name="name" class="form-control form-control-sm" id="stageNameInput"
                     value="{{ stage.name if stage else '' }}" placeholder="e.g. Foundation, Brickwork, Plastering">
             </div>
 
-            <div class="row g-3 mb-3">
+            <div class="row g-2 mb-3 stage-fields-row">
                 <div class="col-md-4">
                     <label class="form-label">Status</label>
-                    <select name="status" class="form-select">
+                    <select name="status" class="form-select form-select-sm">
                         {% for opt in ['planned', 'active', 'paused', 'completed', 'Active', 'On Hold', 'Complete'] %}
                         <option value="{{ opt }}" {% if (stage and stage.status == opt) or (not stage and opt == 'Active') %}selected{% endif %}>{{ opt }}</option>
                         {% endfor %}
@@ -44,7 +44,7 @@
                 </div>
                 <div class="col-md-8">
                     <label class="form-label">Contract Basis</label>
-                    <select name="contract_basis" class="form-select" id="basisSelect">
+                    <select name="contract_basis" class="form-select form-select-sm" id="basisSelect">
                         <option value="">— Not Set —</option>
                         <option value="Per Sq Ft" {% if stage and stage.contract_basis == 'Per Sq Ft' %}selected{% endif %}>Per Sq Ft</option>
                         <option value="Lump Sum" {% if stage and stage.contract_basis == 'Lump Sum' %}selected{% endif %}>Lump Sum</option>
@@ -52,46 +52,46 @@
                 </div>
             </div>
 
-            <div class="row g-3 mb-3">
+            <div class="row g-2 mb-3 stage-fields-row">
                 <div class="col-md-4">
                     <label class="form-label">Estimated Cost (PKR)</label>
-                    <input type="number" step="0.01" name="estimated_cost" class="form-control"
+                    <input type="number" step="0.01" name="estimated_cost" class="form-control form-control-sm"
                         value="{{ stage.estimated_cost if stage else '' }}" placeholder="0.00">
                 </div>
                 <div class="col-md-4">
                     <label class="form-label">Progress (%)</label>
-                    <input type="number" step="1" min="0" max="100" name="progress" class="form-control"
+                    <input type="number" step="1" min="0" max="100" name="progress" class="form-control form-control-sm"
                         value="{{ stage.progress if stage else '' }}" placeholder="0">
                 </div>
                 <div class="col-md-4">
                     <label class="form-label">Start Date</label>
-                    <input type="date" name="start_date" class="form-control"
+                    <input type="date" name="start_date" class="form-control form-control-sm"
                         value="{{ stage.start_date if stage else '' }}">
                 </div>
                 <div class="col-md-4">
                     <label class="form-label">End Date</label>
-                    <input type="date" name="end_date" class="form-control"
+                    <input type="date" name="end_date" class="form-control form-control-sm"
                         value="{{ stage.end_date if stage else '' }}">
                 </div>
             </div>
 
             <!-- Per Sq Ft fields -->
             <div id="sqftFields" style="display:none">
-                <div class="row g-3 mb-3">
+                <div class="row g-2 mb-3 stage-fields-row">
                     <div class="col-md-4">
                         <label class="form-label">Rate / Sq Ft (PKR)</label>
-                        <input type="number" step="0.01" name="rate_per_sqft" class="form-control"
+                        <input type="number" step="0.01" name="rate_per_sqft" class="form-control form-control-sm"
                             value="{{ stage.rate_per_sqft if stage else '' }}" placeholder="0.00">
                     </div>
                     <div class="col-md-4">
                         <label class="form-label">Discount / Sq Ft (PKR)</label>
-                        <input type="number" step="0.01" name="discount_per_sqft" class="form-control"
+                        <input type="number" step="0.01" name="discount_per_sqft" class="form-control form-control-sm"
                             value="{{ stage.discount_per_sqft if stage else '' }}" placeholder="0.00">
                         <div class="form-text text-muted">Reduces effective rate</div>
                     </div>
                     <div class="col-md-4">
                         <label class="form-label">Quantity (Sq Ft)</label>
-                        <input type="number" step="0.01" name="qty_sqft" class="form-control"
+                        <input type="number" step="0.01" name="qty_sqft" class="form-control form-control-sm"
                             value="{{ stage.qty_sqft if stage else '' }}" placeholder="0.00">
                     </div>
                 </div>
@@ -101,7 +101,7 @@
             <div id="lumpFields" style="display:none">
                 <div class="mb-3">
                     <label class="form-label">Lump Sum Value (PKR)</label>
-                    <input type="number" step="0.01" name="lump_sum_value" class="form-control"
+                    <input type="number" step="0.01" name="lump_sum_value" class="form-control form-control-sm"
                         value="{{ stage.lump_sum_value if stage else '' }}" placeholder="0.00">
                 </div>
             </div>
@@ -109,7 +109,7 @@
             {% if mode == 'edit' %}
             <div class="mb-3">
                 <label class="form-label">Reason for Rate Change <small class="text-muted">(optional — logged in history)</small></label>
-                <input type="text" name="reason" class="form-control" placeholder="e.g. Client revised scope">
+                <input type="text" name="reason" class="form-control form-control-sm" placeholder="e.g. Client revised scope">
             </div>
             {% if stage.rate_history %}
             <div class="mb-3">
@@ -139,7 +139,7 @@
             <div class="card border-warning-subtle mb-3">
                 <div class="card-header bg-warning-subtle py-2 small fw-bold">
                     <i class="fas fa-hard-hat me-1"></i>Subcontractors
-                    <span class="fw-normal text-muted">— optional; you can assign more than one to this stage, remaining sqft shown to others</span>
+                    <span class="fw-normal text-muted">— optional; select one or more</span>
                 </div>
                 <div class="card-body py-2">
                     {% set members = stage.assigned_subcontractors if stage else [] %}
