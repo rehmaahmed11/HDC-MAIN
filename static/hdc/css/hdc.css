@@ -1169,12 +1169,10 @@ tr[data-hdc-void="1"] > td .text-warning {
 }
 .stage-sub-panel .table-responsive { max-width: 100%; }
 
-/* Keep expanded editors inside the visible card, even when the 18-column
-   stage ledger itself needs horizontal scrolling. */
-.stage-table-viewport { container-type: inline-size; }
-@supports (width: 1cqw) {
-    .stage-sub-panel { width: calc(100cqw - 2rem); max-width: 100%; }
-}
+/* The panel is rendered under the stages table now, so it simply fills the
+   card: the container-query width hack that compensated for the table scroller
+   (and left the panel hanging past the card edge) is gone. */
+.stage-table-viewport { -webkit-overflow-scrolling: touch; }
 
 /* Stage expand/collapse: one arrow next to the stage name opens everything
    inside the stage (terms, subcontractors, drawings) in a single panel. */
@@ -1225,4 +1223,127 @@ tr[data-hdc-void="1"] > td .text-warning {
     font-weight: 700;
     font-size: .83rem;
     margin-bottom: .4rem;
+}
+
+/* ---------------------------------------------------------------------------
+   Stage detail panel layout.
+   The panel is rendered UNDER the stages table (inside the same card): an
+   18-column table is a horizontal scroller, so a panel inside it was stretched
+   past the card edge and clipped its fields.  From here the panel always has
+   the card width and the term fields share one aligned grid.
+   --------------------------------------------------------------------------- */
+.stage-panel-wrap { border-top: 1px solid var(--card-border); }
+.stage-panel-wrap + .stage-panel-wrap { border-top-style: dashed; }
+
+.stage-panel-wrap > .stage-sub-panel {
+    margin: 10px 12px 12px;
+    padding: 12px 14px;
+    min-width: 0;
+}
+
+/* Compact single-line sqft strip: stage / allocated / remaining + fill bar. */
+.stage-sqft-strip {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 12px;
+    padding: 7px 10px;
+    margin-bottom: 10px;
+    border: 1px solid var(--card-border);
+    border-radius: 8px;
+    background: var(--card-bg);
+    font-size: .78rem;
+}
+
+.stage-sqft-icon { color: var(--accent); }
+.stage-sqft-item { display: inline-flex; align-items: baseline; gap: 5px; }
+
+.stage-sqft-label {
+    font-size: .66rem;
+    font-weight: 700;
+    letter-spacing: .5px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.stage-sqft-value { font-weight: 700; }
+
+.stage-sqft-bar {
+    flex: 1 1 90px;
+    min-width: 60px;
+    max-width: 240px;
+    height: 6px;
+    border-radius: 999px;
+    background: rgba(148, 163, 184, .35);
+    overflow: hidden;
+}
+
+.stage-sqft-bar-fill {
+    display: block;
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent), var(--accent-strong));
+}
+
+.stage-sqft-badge { font-weight: 600; }
+
+/* Subcontractor picker: compact rows, wrapping-safe names. */
+.stage-sub-picker { overflow: hidden; }
+
+.stage-sub-picker-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    border-bottom: 1px solid var(--card-border);
+}
+
+.stage-sub-list { max-height: 220px; overflow-y: auto; }
+
+.stage-sub-option {
+    display: flex;
+    align-items: center;
+    gap: 4px 8px;
+    margin: 0;
+    padding: 5px 10px;
+    border-bottom: 1px solid var(--card-border);
+    font-size: .82rem;
+    cursor: pointer;
+}
+
+.stage-sub-option:hover { background: var(--table-hover); }
+.stage-sub-option .form-check-input { flex: 0 0 auto; }
+.stage-sub-code { white-space: nowrap; }
+.stage-sub-phone { display: none; }
+.stage-sub-empty { padding: 8px 10px; font-size: .8rem; color: var(--text-muted); }
+
+/* Member table: scroll sideways on narrow screens instead of squeezing the
+   columns until every header letter wraps onto its own line. */
+.stage-panel-table { -webkit-overflow-scrolling: touch; }
+.stage-panel-table > table { min-width: 880px; }
+.stage-panel-table thead th { white-space: nowrap; }
+.stage-panel-table tbody td:first-child { min-width: 190px; }
+
+@media (min-width: 768px) {
+    .stage-sub-phone { display: inline; }
+}
+
+/* "Currently assigned" chips on the stage form. */
+.stage-member-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 2px; }
+
+.stage-member-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+    padding: 3px 9px;
+    border: 1px solid rgba(245, 158, 11, .45);
+    border-radius: 999px;
+    background: rgba(245, 158, 11, .16);
+    font-size: .76rem;
+}
+
+.stage-member-chip > .fw-semibold {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }

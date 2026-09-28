@@ -8,33 +8,33 @@
 {% macro stage_sub_picker(pool, stage=None, uid='new', selected=[]) %}
 {% set ns = namespace(available=0) %}
 <div class="stage-sub-picker border rounded bg-body" data-picker="{{ uid }}">
-    <div class="p-2 border-bottom d-flex gap-2 align-items-center">
+    <div class="stage-sub-picker-head">
         <i class="fas fa-search text-muted"></i>
         <input type="text" class="form-control form-control-sm stage-sub-search" placeholder="Search by name, code, phone or work type"
                aria-label="Search subcontractors">
-        <span class="badge bg-warning text-dark text-nowrap stage-sub-count">0 selected</span>
+        <span class="badge bg-light text-dark border text-nowrap stage-sub-count">0 selected</span>
     </div>
-    <div class="stage-sub-list" style="max-height:220px; overflow-y:auto">
+    <div class="stage-sub-list">
         {% for sub in pool %}
         {% if not (stage and sub.stage_id == stage.id) %}
         {% set busy = sub.stage_id and (not stage or sub.stage_id != stage.id) %}
         {% if not busy %}{% set ns.available = ns.available + 1 %}{% endif %}
-        <label class="d-flex align-items-center gap-2 px-2 py-1 border-bottom small stage-sub-option {% if busy %}text-muted{% endif %}"
+        <label class="stage-sub-option {% if busy %}text-muted{% endif %}"
                data-search="{{ ((sub.subcontractor_code or '') ~ ' ' ~ sub.name ~ ' ' ~ (sub.phone or '') ~ ' ' ~ (sub.work_type or '')) | lower }}"
                {% if busy %}title="Already assigned to {{ sub.stage_rel.name if sub.stage_rel else 'another stage' }}{% if sub.stage_rel and sub.stage_rel.project %} ({{ sub.stage_rel.project.name }}){% endif %}. Remove it there first."{% endif %}>
             <input type="checkbox" class="form-check-input m-0" name="subcontractor_ids" value="{{ sub.id }}"
                    {% if busy %}disabled{% elif sub.id|string in selected or sub.id in selected %}checked{% endif %}>
             <span class="fw-semibold stage-sub-name">{{ sub.name }}</span>
-            <span class="text-muted">{{ sub.subcontractor_code or ('SUB-' ~ sub.id) }}</span>
+            <span class="text-muted stage-sub-code">{{ sub.subcontractor_code or ('SUB-' ~ sub.id) }}</span>
             {% if sub.work_type %}<span class="badge bg-light text-dark border">{{ sub.work_type }}</span>{% endif %}
-            {% if sub.phone %}<span class="text-muted d-none d-md-inline">{{ sub.phone }}</span>{% endif %}
+            {% if sub.phone %}<span class="text-muted stage-sub-phone">{{ sub.phone }}</span>{% endif %}
             {% if busy %}
-            <span class="ms-auto badge bg-secondary">On: {{ sub.stage_rel.name if sub.stage_rel else 'other stage' }}</span>
+            <span class="ms-auto badge bg-secondary text-wrap">On: {{ sub.stage_rel.name if sub.stage_rel else 'other stage' }}</span>
             {% endif %}
         </label>
         {% endif %}
         {% endfor %}
-        <div class="px-2 py-2 small text-muted stage-sub-empty" {% if ns.available %}style="display:none"{% endif %}>
+        <div class="stage-sub-empty" {% if ns.available %}style="display:none"{% endif %}>
             {% if pool %}No available subcontractors match.{% else %}No subcontractors yet — create one on the
             <a href="{{ url_for('hdc_subcontractors') }}">Subcontractors page</a> first.{% endif %}
         </div>
@@ -42,61 +42,79 @@
 </div>
 {% endmacro %}
 
+{#- Compact, single-line sqft allocation strip.
+    summary : dict like Stage.sqft_allocation_summary
+              ({'total', 'allocated', 'remaining', 'has_cap'}) or None. -#}
+{% macro stage_sqft_strip(summary) %}
+{% set total = (summary.total if summary else 0) or 0 %}
+{% set allocated = (summary.allocated if summary else 0) or 0 %}
+{% set remaining = summary.remaining if (summary and summary.remaining is not none) else none %}
+{% set free = remaining or 0 %}
+{% set pct = [ (allocated / total * 100) if total else 0, 100 ] | min %}
+<div class="stage-sqft-summary stage-sqft-strip">
+    <span class="stage-sqft-icon"><i class="fas fa-ruler-combined"></i></span>
+    <span class="stage-sqft-item"><span class="stage-sqft-label">Stage</span>
+        <span class="stage-sqft-value">{{ "{:,.0f}".format(total) }} sqft</span></span>
+    <span class="stage-sqft-item"><span class="stage-sqft-label">Allocated</span>
+        <span class="stage-sqft-value">{{ "{:,.0f}".format(allocated) }} sqft</span></span>
+    <span class="stage-sqft-item"><span class="stage-sqft-label">Remaining</span>
+        <span class="stage-sqft-value {% if free <= 0 %}text-danger{% else %}text-success{% endif %}">{{ "{:,.0f}".format(free) }} sqft</span></span>
+    <span class="stage-sqft-bar" role="img" aria-label="{{ '{:,.0f}'.format(pct) }}% of the stage sqft is allocated"
+          title="{{ '{:,.0f}'.format(pct) }}% of the stage sqft is already allocated to subcontractors">
+        <span class="stage-sqft-bar-fill" style="width: {{ pct }}%"></span>
+    </span>
+    {% if free <= 0 %}
+    <span class="badge bg-danger stage-sqft-badge" title="No sqft is left for another per-sqft subcontractor on this stage.">No sqft left</span>
+    {% else %}
+    <span class="badge bg-success stage-sqft-badge" title="This is the maximum a new per-sqft subcontractor can take; it is the remaining sqft shown to 2nd/3rd/4th contractors.">{{ "{:,.0f}".format(free) }} sqft free</span>
+    {% endif %}
+</div>
+{% endmacro %}
+
 {#- Optional terms applied to each subcontractor selected in the picker.
-    Shows remaining sqft so user knows how much is available for others.
--#}
+    One grid row of equal-width fields, so the horizontal fields line up:
+    every label sits directly above its own input and the help text comes
+    after the whole grid, never under a single input. -#}
 {% macro stage_sub_terms(stage=None, form={}, prefix='', sqft_summary=None) %}
 {% set summary = sqft_summary or (stage.sqft_allocation_summary if stage else None) %}
 {% set has_cap = summary and summary.has_cap %}
-{% set total = summary.total if summary else (stage.qty_sqft if stage else 0) %}
-{% set allocated = summary.allocated if summary else (stage.subcontracted_sqft if stage else 0) %}
-{% set remaining = summary.remaining if summary else (stage.remaining_sqft if stage else None) %}
-
-{% if has_cap %}
-<div class="stage-sqft-summary alert alert-info py-2 px-2 small mb-2 d-flex flex-wrap gap-2 align-items-center">
-    <span><i class="fas fa-ruler-combined me-1"></i>Stage sqft: <strong>{{ "{:,.0f}".format(total or 0) }}</strong></span>
-    <span class="vr"></span>
-    <span>Allocated: <strong>{{ "{:,.0f}".format(allocated or 0) }}</strong></span>
-    <span class="vr"></span>
-    <span>Remaining: <strong class="{% if (remaining or 0) <= 0 %}text-danger{% else %}text-success{% endif %}">{{ "{:,.0f}".format(remaining or 0) }}</strong></span>
-    {% if (remaining or 0) <= 0 %}
-    <span class="badge bg-danger">Full — no sqft remaining</span>
-    {% else %}
-    <span class="badge bg-success">Only {{ "{:,.0f}".format(remaining or 0) }} sqft available</span>
-    {% endif %}
-</div>
-{% endif %}
-
+{% set remaining = (summary.remaining if (summary and summary.remaining is not none) else none) %}
+{% if has_cap %}{{ stage_sqft_strip(summary) }}{% endif %}
 <div class="stage-terms-grid mt-2">
-    <div class="stage-term-field">
-        <label class="form-label small mb-0">Contract type</label>
+    <label class="stage-term-field">
+        <span class="form-label small mb-0">Contract type</span>
         <select name="{{ prefix }}contract_type" class="form-select form-select-sm stage-sub-ctype">
             <option value="">Keep existing</option>
             <option value="sqft" {% if form.get(prefix ~ 'contract_type') == 'sqft' %}selected{% endif %}>Per sqft</option>
             <option value="lump_sum" {% if form.get(prefix ~ 'contract_type') == 'lump_sum' %}selected{% endif %}>Lump sum</option>
         </select>
-    </div>
-    <div class="stage-term-field">
-        <label class="form-label small mb-0">Sub rate / sqft</label>
-        <input type="number" step="0.01" min="0" name="{{ prefix }}rate_per_sqft" class="form-control form-control-sm" value="{{ form.get(prefix ~ 'rate_per_sqft', '') }}">
-    </div>
-    <div class="stage-term-field">
-        <label class="form-label small mb-0">Sqft</label>
-        <input type="number" step="0.01" min="0" {% if has_cap and remaining is not none %}max="{{ remaining }}"{% endif %} name="{{ prefix }}total_sqft" class="form-control form-control-sm stage-sub-sqft-input"
+    </label>
+    <label class="stage-term-field">
+        <span class="form-label small mb-0">Sub rate / sqft</span>
+        <input type="number" step="0.01" min="0" name="{{ prefix }}rate_per_sqft" class="form-control form-control-sm"
+               value="{{ form.get(prefix ~ 'rate_per_sqft', '') }}">
+    </label>
+    <label class="stage-term-field">
+        <span class="form-label small mb-0">Sqft{% if has_cap and remaining is not none %} (max {{ "{:,.0f}".format(remaining) }}){% endif %}</span>
+        <input type="number" step="0.01" min="0" {% if has_cap and remaining is not none %}max="{{ remaining }}"{% endif %}
+               name="{{ prefix }}total_sqft" class="form-control form-control-sm stage-sub-sqft-input"
                placeholder="{% if has_cap and remaining is not none %}{{ "{:,.0f}".format(remaining) }} remaining{% else %}Sqft{% endif %}"
-               value="{{ form.get(prefix ~ 'total_sqft') or ('' if has_cap else ('{:.2f}'.format(stage.qty_sqft) if stage and stage.qty_sqft else '')) }}">
-    </div>
-    <div class="stage-term-field">
-        <label class="form-label small mb-0">Lump sum</label>
-        <input type="number" step="0.01" min="0" name="{{ prefix }}lump_sum_amount" class="form-control form-control-sm" value="{{ form.get(prefix ~ 'lump_sum_amount', '') }}">
-    </div>
-    <div class="stage-term-field">
-        <label class="form-label small mb-0">Retention %</label>
-        <input type="number" step="0.01" min="0" max="100" name="{{ prefix }}retention_pct" class="form-control form-control-sm" value="{{ form.get(prefix ~ 'retention_pct', '') }}">
-    </div>
+               value="{{ form.get(prefix ~ 'total_sqft') or '' }}">
+    </label>
+    <label class="stage-term-field">
+        <span class="form-label small mb-0">Lump sum</span>
+        <input type="number" step="0.01" min="0" name="{{ prefix }}lump_sum_amount" class="form-control form-control-sm"
+               value="{{ form.get(prefix ~ 'lump_sum_amount', '') }}">
+    </label>
+    <label class="stage-term-field">
+        <span class="form-label small mb-0">Retention %</span>
+        <input type="number" step="0.01" min="0" max="100" name="{{ prefix }}retention_pct" class="form-control form-control-sm"
+               value="{{ form.get(prefix ~ 'retention_pct', '') }}">
+    </label>
 </div>
-<div class="form-text stage-terms-help">Terms apply to <strong>each</strong> selected subcontractor. Blank fields keep existing values.
-    {% if has_cap %}Blank sqft auto-assigns the remaining area (currently {{ "{:,.0f}".format(remaining or 0) }} sqft).{% endif %}
+<div class="form-text stage-terms-help">Terms apply to <strong>each</strong> selected subcontractor — blank fields keep
+    existing values.{% if has_cap and remaining is not none %} Blank sqft auto-assigns the remaining area (currently
+    <strong>{{ "{:,.0f}".format(remaining) }}</strong> sqft).{% endif %}
     You can edit individual terms after adding.</div>
 {% endmacro %}
 
@@ -114,13 +132,14 @@ document.addEventListener('DOMContentLoaded', function () {
             count.textContent = n + ' selected';
             count.classList.toggle('bg-warning', n > 0);
             count.classList.toggle('bg-light', n === 0);
+            count.classList.toggle('text-dark', true);
         }
         function filter() {
             var q = (search.value || '').trim().toLowerCase();
             var shown = 0;
             options.forEach(function (row) {
                 var match = !q || row.getAttribute('data-search').indexOf(q) !== -1;
-                row.style.setProperty('display', match ? '' : 'none', match ? '' : 'important');
+                row.style.setProperty('display', match ? 'flex' : 'none', match ? '' : 'important');
                 if (match && !row.querySelector('input').disabled) shown += 1;
             });
             if (empty) empty.style.display = shown ? 'none' : '';
@@ -131,20 +150,21 @@ document.addEventListener('DOMContentLoaded', function () {
         refreshCount();
     });
 
-    // Remaining sqft client-side guard
-    document.querySelectorAll('.stage-sub-add-form, form').forEach(function(form){
+    // Remaining sqft client-side guard: the picker cannot submit more sqft than
+    // the stage still has free, so the server-side guard is never a surprise.
+    document.querySelectorAll('form').forEach(function (form) {
         var sqftInput = form.querySelector('.stage-sub-sqft-input');
-        if(!sqftInput) return;
+        if (!sqftInput) return;
         var max = parseFloat(sqftInput.getAttribute('max'));
-        if(isNaN(max)) return;
-        form.addEventListener('submit', function(e){
-            var ctypeSel = form.querySelector('.stage-sub-ctype');
-            var ctype = ctypeSel ? ctypeSel.value : '';
-            // Only validate if sqft type is selected or if no type filter (assume sqft)
+        if (isNaN(max)) return;
+        form.addEventListener('submit', function (e) {
+            var ctype = form.querySelector('.stage-sub-ctype');
+            if (ctype && ctype.value && ctype.value !== 'sqft') return;
             var val = parseFloat(sqftInput.value);
-            if(!isNaN(val) && val > max + 0.001){
+            if (!isNaN(val) && val > max + 0.001) {
                 e.preventDefault();
-                alert('Sqft exceeds remaining (' + max.toLocaleString() + '). Only ' + max.toLocaleString() + ' sqft is available to others.\\n\\nExample: Stage 2000 sqft, 1st took 100, remaining 1900. 2nd/3rd/4th can only take from remaining.');
+                alert('Only ' + max.toLocaleString() + ' sqft is left on this stage. '
+                    + 'A sqft subcontractor can take at most the remaining sqft.');
                 sqftInput.focus();
             }
         });

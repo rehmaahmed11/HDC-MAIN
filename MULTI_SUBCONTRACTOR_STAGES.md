@@ -69,15 +69,36 @@ Assignment guard:
 - Lump-sum subcontractors do not consume sqft and are not limited by this cap.
 
 UI:
-- Project page stage panel shows: Stage 2000 sqft — Allocated 100 sqft — Remaining 1900 sqft
-  with badge "Only 1900 sqft available to 2nd/3rd/4th contractors".
-- Add-subcontractor terms form shows remaining as max attribute, placeholder,
-  and info alert. Client-side JS prevents submitting more than remaining.
-- Member edit row shows remaining excluding that member and max allowed.
-- Add/Edit Stage form also shows allocation summary.
-
-This fixes the missed approach from the last PR where 1st contractor could take
-100 sqft but 2nd/3rd/4th still saw full 2000 sqft as available.
+- Project page: one chevron beside each stage name (added in a later PR) opens
+  a single "Inside <stage>" panel with the contract facts, the subcontractor
+  manager and the drawings manager.
+- That panel is rendered **under** the stages table (`.stage-panel-wrap`),
+  inside the same card. An 18-column table is a horizontal scroller, so a panel
+  rendered inside it was stretched past the card edge: the fields were clipped
+  and the sqft input was pushed onto its own line. The panel now always has the
+  card width.
+- The sqft allocation is a compact single-line strip:
+  `STAGE 2,000 sqft · ALLOCATED 1,100 sqft · REMAINING 900 sqft` plus a fill bar
+  and a badge (`900 sqft free` / `No sqft left`). Same strip next to the
+  add-subcontractor terms and on the Add/Edit Stage form.
+- Term fields (contract type, rate, sqft, lump sum, retention) use one shared
+  grid (`.stage-terms-grid` of equal `.stage-term-field` columns, plus the
+  submit button in the member row), so every label sits directly above its own
+  input and the whole row shares one baseline. The help text is printed once,
+  after the grid, never under a single input.
+- The sqft box keeps `max` = remaining and its placeholder shows the remaining
+  sqft; client-side JS blocks submitting more than the stage still has free.
+- The per-member terms editor (pen button) uses the same grid and states the
+  maximum that member can be set to (remaining excluding it + its own sqft).
+- Narrow screens: the member table scrolls inside its own `.table-responsive`
+  instead of squeezing the columns until every header letter wraps; the terms
+  grid collapses to two columns.
+- Regression guard: `python scripts/qa_browser.py` asserts in a real browser
+  that the panel is not inside the stages table, its five term fields share one
+  row, no child crosses the card edge and the page has no horizontal overflow;
+  `tests/test_multi_subcontractors.py` pins the same structure server-side.
+- "Currently assigned" subcontractors render as chips instead of long badge
+  lines on the Add/Edit Stage form.
 
 ## Deployment
 Back up the database and deploy all changed modules/templates together. Do not run
@@ -91,5 +112,9 @@ code requires reviewing stages with multiple members first.
 - Manual: create stage 2000 sqft, assign 1st sub 100 sqft, verify 2nd sees 1900 remaining,
   try assign 2000 to 2nd (should fail), assign 1900 (should succeed), try 3rd (should fail),
   blank assign (should auto-fill remaining), edit 1st to 1500 (should fail if would exceed).
+- `python scripts/qa_browser.py --output qa/browser.json` in a real browser asserts
+  the stage panel is not inside the scrolling stages table, its five term fields
+  share one row, the fields never cross the card edge and the page has no
+  horizontal overflow.
 
 These are targeted regression tests, not a full production acceptance audit.

@@ -175,3 +175,54 @@ class MultiSubcontractorSelectionTests(MultiSubcontractorTests):
         self.assertEqual([s.id for s in self.stage.assigned_subcontractors], [self.sub.id, self.third.id])
         page = self.client.get(f'/hdc/stage/{self.stage.id}/edit').get_data(as_text=True)
         self.assertIn('Currently assigned', page)
+
+
+class StageSqftPanelLayoutTests(MultiSubcontractorTests):
+    """The sqft panel must not live inside the horizontally scrolling table.
+
+    It used to be a ``<tr>`` inside the 18-column stages table, so the wide
+    table column stretched the panel past the card edge: the sqft fields were
+    clipped and the horizontal fields no longer lined up.
+    """
+
+    def setUp(self):
+        MultiSubcontractorTests.setUp(self)
+        self.stage.qty_sqft = 2000
+        self.sub.contract_type = 'sqft'
+        self.sub.rate_per_sqft = 20
+        self.sub.total_sqft = 100
+        db.session.commit()
+
+    def test_panel_renders_outside_the_stages_table(self):
+        page = self.client.get(f'/hdc/projects/{self.project.id}').get_data(as_text=True)
+        marker = f'class="collapse stage-details-row stage-panel-wrap" id="stage-details-{self.stage.id}"'
+        self.assertIn(marker, page)
+        head = page[:page.index(marker)]
+        self.assertEqual(
+            head.count('<table'), head.count('</table>'),
+            'stage panel must render outside the stages table, which clips its fields')
+        # The panel is still the collapse target and keeps both anchors.
+        panel = page[page.index(marker):]
+        panel = panel[:panel.index('<!-- FINANCIAL BREAKDOWN')]
+        self.assertIn(f'id="stage-subs-{self.stage.id}"', panel)
+        self.assertIn(f'id="drawings-{self.stage.id}"', panel)
+        self.assertIn('stage-details-section', panel)
+        # The old row-based panel is gone.
+        self.assertNotIn('stage-details-row"><td', page)
+
+    def test_allocated_remaining_strip_and_shared_terms_grid(self):
+        page = self.client.get(f'/hdc/projects/{self.project.id}').get_data(as_text=True)
+        self.assertIn('stage-sqft-strip', page)
+        for expected in ('2,000 sqft', '100 sqft', '1,900 sqft'):
+            self.assertIn(expected, page)
+        # Five equally sized fields in one grid keep the horizontal fields aligned.
+        self.assertIn('stage-terms-grid', page)
+        self.assertGreaterEqual(page.count('class="stage-term-field"'), 5)
+        fields = page.count('<span class="form-label small mb-0">')
+        self.assertGreaterEqual(fields, 5)
+
+    def test_blank_sqft_still_auto_assigns_only_the_remaining(self):
+        self.post('shift/subcontractor', subcontractor_ids=[str(self.second.id)],
+                  contract_type='sqft', rate_per_sqft='25')
+        self.assertEqual(self.second.contract_type, 'sqft')
+        self.assertEqual(self.second.total_sqft, 1900)

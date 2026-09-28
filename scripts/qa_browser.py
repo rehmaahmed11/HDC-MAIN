@@ -39,8 +39,9 @@ def main():
                           HDC_INSTANCE_DIR=tmp,HDC_DB_PATH=tmp+'/qa.db')
         from hdc.app import create_app
         from hdc.extensions import db
-        from hdc.models.projects import Project
+        from hdc.models.projects import Project, Stage
         from hdc.models.materials import Supplier
+        from hdc.models.subcontract import Subcontractor
         app=create_app({'TESTING':True})
         server=make_server('0.0.0.0',0,app,threaded=True)
         thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
@@ -88,6 +89,54 @@ def main():
                 page.locator('#supplierEditForm button[type=submit]').click();page.wait_for_load_state('networkidle')
                 with app.app_context():assert db.session.get(Supplier,supplier_id).name=='Browser Supplier Edited'
                 result['flows'].append('supplier create + Bootstrap edit modal + persisted update')
+                # Stage sqft panel: it must render inside the card (not rowed
+                # into the 18-column stages table, which clipped the fields)
+                # and its horizontal term fields must share one line.
+                with app.app_context():
+                    stage=Stage(project_id=pid,name='QA Sqft Stage',status='Active',
+                                execution_mode='subcontractor',contract_basis='Per Sq Ft',
+                                rate_per_sqft=100,qty_sqft=2000)
+                    db.session.add(stage);db.session.flush()
+                    member=Subcontractor(name='QA Sqft Sub',contract_type='sqft',rate_per_sqft=20,
+                                         total_sqft=100,project_id=pid,stage_id=stage.id)
+                    db.session.add(member);db.session.flush()
+                    stage.assigned_subcontractor_id=member.id
+                    db.session.commit();stage_id=stage.id
+                page.goto(base+f'/hdc/projects/{pid}')
+                page.evaluate("document.querySelectorAll('#stage-details-%d').forEach(e=>e.classList.remove('collapse'))" % stage_id)
+                page.wait_for_timeout(200)
+                layout=page.evaluate('''(sid) => {
+                    const wrap=document.getElementById('stage-details-'+sid);
+                    const panel=wrap.querySelector('.stage-details-panel');
+                    const card=wrap.parentElement;
+                    const form=panel.querySelector('.stage-sub-add-form');
+                    const fields=Array.from(form.querySelectorAll('.stage-terms-grid .stage-term-field'));
+                    const boxes=fields.map(c=>c.querySelector('input,select')||c);
+                    const tops=boxes.map(b=>Math.round(b.getBoundingClientRect().top));
+                    const strip=panel.querySelector('.stage-sqft-strip');
+                    let overflow=0;
+                    panel.querySelectorAll('*').forEach(el=>{
+                        const r=el.getBoundingClientRect();
+                        if(r.width && r.right > card.getBoundingClientRect().right + 1) overflow+=1;
+                    });
+                    return {fields:fields.length,
+                        distinct_field_tops:new Set(tops).size,
+                        field_right:Math.max.apply(null,boxes.map(b=>Math.round(b.getBoundingClientRect().right))),
+                        card_right:Math.round(card.getBoundingClientRect().right),
+                        overflow_children:overflow,
+                        strip_text:strip?strip.textContent.replace(/\\s+/g,' ').trim():'',
+                        inside_table:!!wrap.closest('table'),
+                        horizontal_overflow:document.documentElement.scrollWidth>innerWidth+1};
+                }''',stage_id)
+                assert layout['fields']==5,layout
+                assert layout['distinct_field_tops']==1,layout
+                assert layout['field_right']<=layout['card_right']+1,layout
+                assert not layout['overflow_children'],layout
+                assert not layout['inside_table'],layout
+                assert not layout['horizontal_overflow'],layout
+                assert '2,000' in layout['strip_text'] and '100' in layout['strip_text'],layout
+                result['stage_panel_layout']=layout
+                result['flows'].append('stage sqft panel stays inside its card with aligned term fields')
                 # Actual fetch wrapper must automatically attach CSRF.
                 answer=page.evaluate('''async () => { const r=await fetch('/api/v2/purchase/materials', {
                     method:'POST', headers:{'Content-Type':'application/json'},
