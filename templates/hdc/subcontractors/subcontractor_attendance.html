@@ -232,7 +232,14 @@
 </div>
 
 <div class="card hdc-card mt-2 mb-3">
-    <div class="card-header hdc-card-header"><i class="fas fa-users me-2"></i>Workers (Earned vs Paid vs Payable)</div>
+    <div class="card-header hdc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span><i class="fas fa-users me-2"></i>Workers (Earned vs Paid vs Payable)</span>
+        <button type="button" class="btn btn-sm btn-outline-secondary"
+                data-hdc-collapse-group=".worker-editor-collapse" data-expand-label="Expand all" data-collapse-label="Collapse all">
+            <i class="fas fa-chevrons-down me-1" data-hdc-collapse-icon aria-hidden="true"></i>
+            <span data-hdc-collapse-label>Expand all</span>
+        </button>
+    </div>
     <div class="table-responsive">
         <table class="table hdc-table table-sm mb-0">
             <thead><tr><th>Name</th><th>Phone</th><th>Trade</th><th>Status</th><th class="text-end">Daily Wage</th><th class="text-end">Earned</th><th class="text-end">Paid</th><th class="text-end">Payable</th><th></th></tr></thead>
@@ -255,10 +262,10 @@
                             <i class="fas {% if w.active_status %}fa-pause{% else %}fa-play{% endif %}"></i>
                         </button>
                     </form>
-                    <button type="button" class="btn btn-xs btn-outline-primary btn-sm" data-bs-toggle="collapse" data-bs-target="#editWorker{{ w.id }}" title="Edit Worker"><i class="fas fa-edit"></i></button>
+                    <button type="button" class="btn btn-xs btn-outline-primary btn-sm" data-bs-toggle="collapse" data-bs-target="#editWorker{{ w.id }}" aria-expanded="false" aria-controls="editWorker{{ w.id }}" title="Edit Worker"><i class="fas fa-edit"></i><span class="visually-hidden">Edit {{ w.name }}</span></button>
                 </td>
             </tr>
-            <tr {{ row|hdc_row_attrs }} class="collapse" id="editWorker{{ w.id }}">
+            <tr {{ row|hdc_row_attrs }} class="collapse worker-editor-collapse" id="editWorker{{ w.id }}">
                 <td colspan="9" class="bg-light">
                     <form method="POST" action="{{ url_for('hdc_subcontractor_worker_edit', sid=sub.id, wid=w.id) }}" class="d-flex gap-2 align-items-center flex-wrap py-1">
                         <input type="text" name="name" class="form-control form-control-sm" style="max-width:220px" value="{{ w.name }}" required>
