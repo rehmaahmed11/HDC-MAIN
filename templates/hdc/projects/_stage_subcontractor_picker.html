@@ -1,0 +1,110 @@
+{#- Multi-select subcontractor picker for a stage.
+    pool     : all Subcontractor rows
+    stage    : the Stage being edited (None when adding a new stage)
+    uid      : unique suffix for element ids
+    selected : list of ids to pre-tick (e.g. after a validation error)
+    Subcontractors already on another stage are listed but disabled; members
+    of this stage are listed separately by the caller, so they are skipped. -#}
+{% macro stage_sub_picker(pool, stage=None, uid='new', selected=[]) %}
+{% set ns = namespace(available=0) %}
+<div class="stage-sub-picker border rounded bg-body" data-picker="{{ uid }}">
+    <div class="p-2 border-bottom d-flex gap-2 align-items-center">
+        <i class="fas fa-search text-muted"></i>
+        <input type="text" class="form-control form-control-sm stage-sub-search" placeholder="Search by name, code, phone or work type"
+               aria-label="Search subcontractors">
+        <span class="badge bg-warning text-dark text-nowrap stage-sub-count">0 selected</span>
+    </div>
+    <div class="stage-sub-list" style="max-height:220px; overflow-y:auto">
+        {% for sub in pool %}
+        {% if not (stage and sub.stage_id == stage.id) %}
+        {% set busy = sub.stage_id and (not stage or sub.stage_id != stage.id) %}
+        {% if not busy %}{% set ns.available = ns.available + 1 %}{% endif %}
+        <label class="d-flex align-items-center gap-2 px-2 py-1 border-bottom small stage-sub-option {% if busy %}text-muted{% endif %}"
+               data-search="{{ ((sub.subcontractor_code or '') ~ ' ' ~ sub.name ~ ' ' ~ (sub.phone or '') ~ ' ' ~ (sub.work_type or '')) | lower }}"
+               {% if busy %}title="Already assigned to {{ sub.stage_rel.name if sub.stage_rel else 'another stage' }}{% if sub.stage_rel and sub.stage_rel.project %} ({{ sub.stage_rel.project.name }}){% endif %}. Remove it there first."{% endif %}>
+            <input type="checkbox" class="form-check-input m-0" name="subcontractor_ids" value="{{ sub.id }}"
+                   {% if busy %}disabled{% elif sub.id|string in selected or sub.id in selected %}checked{% endif %}>
+            <span class="fw-semibold">{{ sub.name }}</span>
+            <span class="text-muted">{{ sub.subcontractor_code or ('SUB-' ~ sub.id) }}</span>
+            {% if sub.work_type %}<span class="badge bg-light text-dark border">{{ sub.work_type }}</span>{% endif %}
+            {% if sub.phone %}<span class="text-muted d-none d-md-inline">{{ sub.phone }}</span>{% endif %}
+            {% if busy %}
+            <span class="ms-auto badge bg-secondary">On: {{ sub.stage_rel.name if sub.stage_rel else 'other stage' }}</span>
+            {% endif %}
+        </label>
+        {% endif %}
+        {% endfor %}
+        <div class="px-2 py-2 small text-muted stage-sub-empty" {% if ns.available %}style="display:none"{% endif %}>
+            {% if pool %}No available subcontractors match.{% else %}No subcontractors yet — create one on the
+            <a href="{{ url_for('hdc_subcontractors') }}">Subcontractors page</a> first.{% endif %}
+        </div>
+    </div>
+</div>
+{% endmacro %}
+
+{#- Optional terms applied to each subcontractor selected in the picker. -#}
+{% macro stage_sub_terms(stage=None, form={}, prefix='') %}
+<div class="row g-2 mt-1 align-items-end">
+    <div class="col-6 col-md-2">
+        <label class="form-label small mb-0">Contract type</label>
+        <select name="{{ prefix }}contract_type" class="form-select form-select-sm">
+            <option value="">Keep existing</option>
+            <option value="sqft" {% if form.get(prefix ~ 'contract_type') == 'sqft' %}selected{% endif %}>Per sqft</option>
+            <option value="lump_sum" {% if form.get(prefix ~ 'contract_type') == 'lump_sum' %}selected{% endif %}>Lump sum</option>
+        </select>
+    </div>
+    <div class="col-6 col-md-2">
+        <label class="form-label small mb-0">Sub rate / sqft</label>
+        <input type="number" step="0.01" min="0" name="{{ prefix }}rate_per_sqft" class="form-control form-control-sm" value="{{ form.get(prefix ~ 'rate_per_sqft', '') }}">
+    </div>
+    <div class="col-6 col-md-2">
+        <label class="form-label small mb-0">Sqft</label>
+        <input type="number" step="0.01" min="0" name="{{ prefix }}total_sqft" class="form-control form-control-sm"
+               value="{{ form.get(prefix ~ 'total_sqft') or ('{:.2f}'.format(stage.qty_sqft) if stage and stage.qty_sqft else '') }}">
+    </div>
+    <div class="col-6 col-md-3">
+        <label class="form-label small mb-0">Lump sum</label>
+        <input type="number" step="0.01" min="0" name="{{ prefix }}lump_sum_amount" class="form-control form-control-sm" value="{{ form.get(prefix ~ 'lump_sum_amount', '') }}">
+    </div>
+    <div class="col-6 col-md-2">
+        <label class="form-label small mb-0">Retention %</label>
+        <input type="number" step="0.01" min="0" max="100" name="{{ prefix }}retention_pct" class="form-control form-control-sm" value="{{ form.get(prefix ~ 'retention_pct', '') }}">
+    </div>
+</div>
+<div class="form-text">Terms apply to <strong>each</strong> selected subcontractor. Leave a field blank to keep that
+    subcontractor's current value. You can fine-tune each one's terms after adding.</div>
+{% endmacro %}
+
+{#- Wire search + selected counter for every picker on the page. -#}
+{% macro stage_sub_picker_js() %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    document.querySelectorAll('.stage-sub-picker').forEach(function (picker) {
+        var search = picker.querySelector('.stage-sub-search');
+        var count = picker.querySelector('.stage-sub-count');
+        var empty = picker.querySelector('.stage-sub-empty');
+        var options = Array.prototype.slice.call(picker.querySelectorAll('.stage-sub-option'));
+        function refreshCount() {
+            var n = picker.querySelectorAll('input[name="subcontractor_ids"]:checked').length;
+            count.textContent = n + ' selected';
+            count.classList.toggle('bg-warning', n > 0);
+            count.classList.toggle('bg-light', n === 0);
+        }
+        function filter() {
+            var q = (search.value || '').trim().toLowerCase();
+            var shown = 0;
+            options.forEach(function (row) {
+                var match = !q || row.getAttribute('data-search').indexOf(q) !== -1;
+                row.style.setProperty('display', match ? '' : 'none', match ? '' : 'important');
+                if (match && !row.querySelector('input').disabled) shown += 1;
+            });
+            if (empty) empty.style.display = shown ? 'none' : '';
+        }
+        search.addEventListener('input', filter);
+        search.addEventListener('keydown', function (e) { if (e.key === 'Enter') e.preventDefault(); });
+        picker.addEventListener('change', refreshCount);
+        refreshCount();
+    });
+});
+</script>
+{% endmacro %}

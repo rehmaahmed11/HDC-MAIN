@@ -363,3 +363,134 @@ def _ensure_subcontract_payment_void_schema():
             db.session.rollback()
         except Exception:
             pass
+
+
+# ---------------------------------------------------------------------------
+# Stage membership (several subcontractors per stage)
+# ---------------------------------------------------------------------------
+STAGE_TERM_FIELDS = ('rate_per_sqft', 'total_sqft', 'lump_sum_amount', 'retention_pct')
+
+
+def parse_stage_assignment_terms(form, prefix=''):
+    """Validate optional subcontract terms submitted with a stage assignment.
+
+    Returns ``(terms, error)``.  ``terms`` only holds fields the user actually
+    filled in (blank = keep the subcontractor's existing value).  Nothing is
+    written here, so callers can reject the whole request before any change.
+    """
+    import math
+    terms = {}
+    for field in STAGE_TERM_FIELDS:
+        raw = (form.get(prefix + field) or '').strip()
+        if not raw:
+            continue
+        try:
+            value = float(raw)
+            if not math.isfinite(value) or value < 0 or (field == 'retention_pct' and value > 100):
+                raise ValueError()
+        except ValueError:
+            return None, 'Pricing must be finite and non-negative; retention must be between 0 and 100.'
+        terms[field] = value
+    ctype = (form.get(prefix + 'contract_type') or '').strip().lower()
+    if ctype in ('lump_sum', 'sqft'):
+        terms['contract_type'] = ctype
+    return terms, None
+
+
+def stage_assignment_blocker(stg, sub):
+    """Return a user-facing reason ``sub`` cannot be added to ``stg`` (or None)."""
+    if not sub:
+        return 'Selected subcontractor is invalid.'
+    if sub.stage_id and sub.stage_id != stg.id:
+        other = sub.stage_rel.name if sub.stage_rel else f'Stage #{sub.stage_id}'
+        return (f'"{sub.name}" is already assigned to stage "{other}". '
+                f'Remove that assignment explicitly first.')
+    if (stg.status or '').strip().lower() in ('complete', 'completed'):
+        return 'Reopen the stage before adding or changing subcontractors.'
+    return None
+
+
+def assign_subcontractor_to_stage(stg, sub, terms=None):
+    """Add ``sub`` as a member of ``stg`` (or update its terms if already one).
+
+    Existing members are never replaced.  The caller must have checked
+    :func:`stage_assignment_blocker` and is responsible for committing.
+    """
+    terms = terms or {}
+    from_desc = 'assigned' if sub.stage_id == stg.id else 'unassigned'
+    old_terms = (f'{sub.contract_type}|R{float(sub.rate_per_sqft or 0):.2f}'
+                 f'|Q{float(sub.total_sqft or 0):.2f}|L{float(sub.lump_sum_amount or 0):.2f}'
+                 f'|Ret{float(sub.retention_percentage or 0):.2f}%')
+    ctype = terms.get('contract_type') or (sub.contract_type or 'lump_sum').strip().lower()
+    sub.contract_type = ctype if ctype in ('lump_sum', 'sqft') else 'lump_sum'
+    if 'rate_per_sqft' in terms:
+        sub.rate_per_sqft = terms['rate_per_sqft']
+    if 'total_sqft' in terms:
+        sub.total_sqft = terms['total_sqft']
+    if 'lump_sum_amount' in terms:
+        sub.lump_sum_amount = terms['lump_sum_amount']
+    if 'retention_pct' in terms:
+        sub.retention_percentage = terms['retention_pct']
+    if sub.contract_type == 'sqft' and (sub.total_sqft or 0) <= 0 and (stg.qty_sqft or 0) > 0:
+        sub.total_sqft = float(stg.qty_sqft or 0.0)
+
+    stg.execution_mode = 'subcontractor'
+    # Legacy primary pointer is kept for compatibility only; membership is
+    # Subcontractor.stage_id, so adding a member never replaces another.
+    if not stg.assigned_subcontractor_id:
+        stg.assigned_subcontractor_id = sub.id
+    sub.project_id = stg.project_id
+    sub.stage_id = stg.id
+    _log_subcontract_event(
+        sub=sub, event_type='shift', from_value=from_desc, to_value=f'{stg.name}',
+        notes=(f'Assigned to stage | type={sub.contract_type} rate={float(sub.rate_per_sqft or 0):.2f} '
+               f'sqft={float(sub.total_sqft or 0):.2f} lump={float(sub.lump_sum_amount or 0):.2f}'),
+        project_id=stg.project_id, stage_id=stg.id)
+    _log_subcontract_event(
+        sub=sub, event_type='price_update', from_value=old_terms, to_value=f'{sub.contract_type}',
+        amount=float(sub.contract_value or 0.0),
+        notes=(f'Rate {float(sub.rate_per_sqft or 0):.2f} | Sqft {float(sub.total_sqft or 0):.2f} | '
+               f'Lump {float(sub.lump_sum_amount or 0):.2f} | Ret {float(sub.retention_percentage or 0):.2f}%'),
+        project_id=stg.project_id, stage_id=stg.id)
+    return sub
+
+
+def selected_subcontractor_ids(form):
+    """Collect subcontractor ids from ``subcontractor_ids`` (multi) and the
+    legacy single ``subcontractor_id`` field, de-duplicated, order kept."""
+    raw = list(form.getlist('subcontractor_ids')) if hasattr(form, 'getlist') else []
+    single = form.get('subcontractor_id')
+    if single:
+        raw.append(single)
+    out = []
+    for value in raw:
+        try:
+            sid = int(value)
+        except (TypeError, ValueError):
+            continue
+        if sid > 0 and sid not in out:
+            out.append(sid)
+    return out
+
+
+def assign_subcontractors_from_form(stg, form, prefix=''):
+    """Assign every selected subcontractor to ``stg``.
+
+    Returns ``(assigned, skipped, error)``: ``error`` means nothing changed;
+    ``skipped`` is a list of human-readable reasons for rejected picks.
+    """
+    ids = selected_subcontractor_ids(form)
+    if not ids:
+        return [], [], None
+    terms, error = parse_stage_assignment_terms(form, prefix)
+    if error:
+        return [], [], error
+    assigned, skipped = [], []
+    for sid in ids:
+        sub = Subcontractor.query.get(sid)
+        reason = stage_assignment_blocker(stg, sub)
+        if reason:
+            skipped.append(reason)
+            continue
+        assigned.append(assign_subcontractor_to_stage(stg, sub, terms))
+    return assigned, skipped, None

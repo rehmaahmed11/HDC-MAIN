@@ -13,7 +13,7 @@ from sqlalchemy import func
 from werkzeug.utils import secure_filename
 
 from hdc.config import get_runtime_settings
-from hdc.extensions import _money_write_required, db
+from hdc.extensions import _money_only, _money_write_required, db
 from hdc.models.accounts import Account, OwnerPayment
 from hdc.models.materials import Material
 from hdc.models.projects import Project, Stage, StageDefinition, StageDrawing, StageRateHistory
@@ -24,13 +24,37 @@ from hdc.services.aggregation import _apply_aggregated_project_costs, _apply_agg
 from hdc.services.lookups import _next_project_code
 from hdc.services.receipts import _owner_payment_recent_entries, _receipt_company_profile
 from hdc.services.reporting import _build_stage_event_ledger
-from hdc.services.subcontract import _log_subcontract_event
+from hdc.services.subcontract import _log_subcontract_event, assign_subcontractors_from_form, selected_subcontractor_ids
 from hdc.services.timekeeping import _has_recent_duplicate
 from hdc.utils.dates import _pkt_now_naive, _pkt_today
 from hdc.utils.format import _activity_at_for, _amount_to_words, _flt, _is_pdf_upload, _parse_date
 
 def register(app):
     """Register Projects, stages, drawings, stage library, owner payments."""
+    def _stage_form_subcontractor_pool():
+        return Subcontractor.query.order_by(Subcontractor.name.asc(), Subcontractor.id.asc()).all()
+
+    def _stage_form_assign_subs(stage):
+        """Assign subcontractors picked on the Add/Edit Stage form.
+
+        Returns False when the submitted terms are invalid; in that case no
+        subcontractor is touched, so the stage edit itself can still be saved.
+        """
+        if not selected_subcontractor_ids(request.form):
+            return True
+        if _money_only():
+            flash('Your role cannot assign subcontractors; stage saved without them.', 'warning')
+            return True
+        assigned, skipped, error = assign_subcontractors_from_form(stage, request.form, prefix='sub_')
+        if error:
+            flash(error, 'danger')
+            return False
+        for reason in skipped:
+            flash(reason, 'warning')
+        if assigned:
+            flash('Subcontractors assigned: ' + ', '.join(sub.name for sub in assigned) + '.', 'success')
+        return True
+
     # --- Projects --------------------------------------------------------------
     @app.route('/hdc/projects')
     @login_required
@@ -348,10 +372,16 @@ def register(app):
                 original_contract_basis=basis, original_rate_per_sqft=rate,
                 original_discount_per_sqft=disc, original_qty_sqft=qty,
                 original_lump_sum_value=lump)
-            db.session.add(s); db.session.commit()
+            db.session.add(s); db.session.flush()
+            subs_ok = _stage_form_assign_subs(s)
+            db.session.commit()
             flash(f'Stage "{s.name}" added.', 'success')
+            if not subs_ok:
+                flash('Subcontractors were not assigned because of the error above — add them from the stage\'s Subcontractors panel.', 'warning')
+                return redirect(url_for('hdc_project_detail', pid=pid) + f'#stage-subs-{s.id}')
             return redirect(url_for('hdc_project_detail', pid=pid))
-        return render_template('projects/stage_form.html', p=p, stage=None, defs=defs, mode='add')
+        return render_template('projects/stage_form.html', p=p, stage=None, defs=defs, mode='add',
+                               subcontractor_pool=_stage_form_subcontractor_pool(), form={})
 
 
     @app.route('/hdc/stage/<int:sid>/edit', methods=['GET', 'POST'])
@@ -384,10 +414,15 @@ def register(app):
             s.end_date       = _parse_date(request.form.get('end_date')) if request.form.get('end_date') else None
             s.contract_basis = new_basis; s.rate_per_sqft = new_rate
             s.discount_per_sqft = new_disc; s.qty_sqft = new_qty; s.lump_sum_value = new_lump
+            subs_ok = _stage_form_assign_subs(s)  # invalid terms change nothing
             db.session.commit()
             flash('Stage updated.', 'success')
+            if not subs_ok:
+                flash('New subcontractors were not assigned because of the error above.', 'warning')
+                return redirect(url_for('hdc_edit_stage', sid=s.id))
             return redirect(url_for('hdc_project_detail', pid=p.id))
-        return render_template('projects/stage_form.html', p=p, stage=s, defs=[], mode='edit')
+        return render_template('projects/stage_form.html', p=p, stage=s, defs=[], mode='edit',
+                               subcontractor_pool=_stage_form_subcontractor_pool(), form={})
 
 
     @app.route('/hdc/stage/<int:sid>/delete', methods=['POST'])
