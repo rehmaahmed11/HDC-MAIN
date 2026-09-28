@@ -1,4 +1,5 @@
 {% extends "shared/base.html" %}
+{% from "projects/_stage_subcontractor_picker.html" import stage_sub_picker, stage_sub_terms, stage_sub_picker_js %}
 {% block title %}{% if mode == 'add' %}Add Stage{% else %}Edit Stage{% endif %}{% endblock %}
 {% block page_heading %}
     {% if mode == 'add' %}Add Stage — {{ p.name }}{% else %}Edit Stage — {{ stage.name }}{% endif %}
@@ -134,6 +135,34 @@
             {% endif %}
             {% endif %}
 
+            <!-- Subcontractors (a stage can have several) -->
+            <div class="card border-warning-subtle mb-3">
+                <div class="card-header bg-warning-subtle py-2 small fw-bold">
+                    <i class="fas fa-hard-hat me-1"></i>Subcontractors
+                    <span class="fw-normal text-muted">— optional; you can assign more than one to this stage</span>
+                </div>
+                <div class="card-body py-2">
+                    {% set members = stage.assigned_subcontractors if stage else [] %}
+                    {% if members %}
+                    <div class="mb-2 small">
+                        <span class="text-muted">Currently assigned:</span>
+                        {% for member in members %}
+                        <span class="badge bg-warning text-dark me-1">{{ member.name }} · {{ "{:,.0f}".format(member.contract_value or 0) }} · {{ "%.0f"|format(member.effective_progress_percentage or 0) }}%</span>
+                        {% endfor %}
+                        <div class="form-text">To change terms, completion % or remove one, use the
+                            <a href="{{ url_for('hdc_project_detail', pid=p.id) }}#stage-subs-{{ stage.id }}">Subcontractors panel on the project page</a>.</div>
+                    </div>
+                    {% endif %}
+                    {% if stage and (stage.status or '')|lower in ['completed', 'complete'] %}
+                    <div class="small text-muted">Stage is completed — reopen it to add subcontractors.</div>
+                    {% else %}
+                    <div class="small mb-1">{% if members %}Add more subcontractors:{% else %}Tick the subcontractors who will execute this stage (leave empty for company execution):{% endif %}</div>
+                    {{ stage_sub_picker(subcontractor_pool or [], stage, 'form', (form.getlist('subcontractor_ids') if form and form.getlist else [])) }}
+                    {{ stage_sub_terms(stage, form or {}, 'sub_') }}
+                    {% endif %}
+                </div>
+            </div>
+
             <div class="d-flex gap-2 mt-3">
                 <button type="submit" class="btn btn-mint"><i class="fas fa-save me-1"></i>
                     {% if mode == 'add' %}Add Stage{% else %}Save Changes{% endif %}
@@ -148,6 +177,7 @@
 {% endblock %}
 
 {% block extra_js %}
+{{ stage_sub_picker_js() }}
 <script>
 const basisSelect = document.getElementById('basisSelect');
 const sqftFields  = document.getElementById('sqftFields');

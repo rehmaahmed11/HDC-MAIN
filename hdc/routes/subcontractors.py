@@ -5,7 +5,6 @@ original @app.route decorator and endpoint name.
 """
 
 from datetime import datetime
-import math
 
 from flask import abort, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
@@ -20,7 +19,7 @@ from hdc.models.workforce import WorkerTrade
 from hdc.services.accounts import _accounts_post_subcontract_labour_payment_row, _accounts_post_subcontract_payment_row
 from hdc.services.lookups import _ensure_expense_category
 from hdc.services.receipts import _receipt_company_profile
-from hdc.services.subcontract import _ensure_subcontract_baseline_events, _ensure_subcontract_labour_attendance_schema, _log_subcontract_event, _next_subcontractor_code, _subcontract_scope_stages, _subcontract_stage_snapshot, sub_labour_rollup, subcontract_scope_ids
+from hdc.services.subcontract import assign_subcontractors_from_form, selected_subcontractor_ids, _ensure_subcontract_baseline_events, _ensure_subcontract_labour_attendance_schema, _log_subcontract_event, _next_subcontractor_code, _subcontract_scope_stages, _subcontract_stage_snapshot, sub_labour_rollup, subcontract_scope_ids
 from hdc.services.timekeeping import _has_recent_duplicate
 from hdc.utils.dates import _pkt_now_naive, _pkt_today
 from hdc.utils.format import _activity_at_for, _amount_to_words, _flt, _parse_date
@@ -1582,97 +1581,42 @@ def register(app):
     @login_required
     @_money_write_required()
     def hdc_stage_shift_to_subcontractor(sid):
+        """Add one or more subcontractors to a stage (existing members kept).
+
+        Accepts ``subcontractor_ids`` (multi-select) and the legacy single
+        ``subcontractor_id``.  Re-submitting an existing member updates that
+        member's terms only.
+        """
         stg = Stage.query.get_or_404(sid)
-        sub_id = request.form.get('subcontractor_id', type=int)
-        if not sub_id:
-            flash('Please select a subcontractor.', 'warning')
-            return redirect(url_for('hdc_project_detail', pid=stg.project_id))
-        sub = Subcontractor.query.get(sub_id)
-        if not sub:
-            flash('Selected subcontractor is invalid.', 'danger')
-            return redirect(url_for('hdc_project_detail', pid=stg.project_id))
-        if sub.stage_id and sub.stage_id != stg.id:
-            flash('Subcontractor is already assigned to another stage. Remove that assignment explicitly first.', 'danger')
-            return redirect(url_for('hdc_project_detail', pid=stg.project_id))
-        if (stg.status or '').lower() in ('complete', 'completed'):
-            flash('Reopen the stage before adding or changing subcontractors.', 'warning')
-            return redirect(url_for('hdc_project_detail', pid=stg.project_id))
-        from_desc = 'assigned' if sub.stage_id == stg.id else 'unassigned'
-
-        # Validate all submitted terms before changing any assignment or money fields.
-        for field in ('rate_per_sqft', 'total_sqft', 'lump_sum_amount', 'retention_pct'):
-            raw = (request.form.get(field) or '').strip()
-            if not raw:
-                continue
-            try:
-                value = float(raw)
-                if not math.isfinite(value) or value < 0 or (field == 'retention_pct' and value > 100):
-                    raise ValueError()
-            except ValueError:
-                flash('Pricing must be finite and non-negative; retention must be between 0 and 100.', 'danger')
-                return redirect(url_for('hdc_project_detail', pid=stg.project_id))
-
-        # Optional subcontract pricing overrides while shifting.
-        old_terms = f'{sub.contract_type}|R{float(sub.rate_per_sqft or 0):.2f}|Q{float(sub.total_sqft or 0):.2f}|L{float(sub.lump_sum_amount or 0):.2f}|Ret{float(sub.retention_percentage or 0):.2f}%'
-        ctype = (request.form.get('contract_type') or sub.contract_type or 'lump_sum').strip().lower()
-        if ctype not in ('lump_sum', 'sqft'):
-            ctype = 'lump_sum'
-        sub.contract_type = ctype
-        raw_rate = (request.form.get('rate_per_sqft') or '').strip()
-        raw_qty = (request.form.get('total_sqft') or '').strip()
-        raw_lump = (request.form.get('lump_sum_amount') or '').strip()
-        raw_ret = (request.form.get('retention_pct') or '').strip()
-        if raw_rate:
-            sub.rate_per_sqft = _flt(raw_rate)
-        if raw_qty:
-            sub.total_sqft = _flt(raw_qty)
-        if raw_lump:
-            sub.lump_sum_amount = _flt(raw_lump)
-        if raw_ret:
-            sub.retention_percentage = _flt(raw_ret)
-        if sub.contract_type == 'sqft' and (sub.total_sqft or 0) <= 0 and (stg.qty_sqft or 0) > 0:
-            sub.total_sqft = float(stg.qty_sqft or 0.0)
-
-        stg.execution_mode = 'subcontractor'
-        # Retain the legacy primary pointer for compatibility, not membership.
-        if not stg.assigned_subcontractor_id:
-            stg.assigned_subcontractor_id = sub.id
-        sub.project_id = stg.project_id
-        sub.stage_id = stg.id
-        ev_type = 'shift'
-        _log_subcontract_event(
-            sub=sub,
-            event_type=ev_type,
-            from_value=from_desc,
-            to_value=f'{stg.name}',
-            notes=f'Shifted stage to subcontractor | type={sub.contract_type} rate={float(sub.rate_per_sqft or 0):.2f} sqft={float(sub.total_sqft or 0):.2f} lump={float(sub.lump_sum_amount or 0):.2f}',
-            project_id=stg.project_id,
-            stage_id=stg.id
-        )
-        _log_subcontract_event(
-            sub=sub,
-            event_type='price_update',
-            from_value=old_terms,
-            to_value=f'{sub.contract_type}',
-            amount=float(sub.contract_value or 0.0),
-            notes=f'Rate {float(sub.rate_per_sqft or 0):.2f} | Sqft {float(sub.total_sqft or 0):.2f} | Lump {float(sub.lump_sum_amount or 0):.2f} | Ret {float(sub.retention_percentage or 0):.2f}%',
-            project_id=stg.project_id,
-            stage_id=stg.id
-        )
+        back = redirect(url_for('hdc_project_detail', pid=stg.project_id) + f'#stage-subs-{stg.id}')
+        if not selected_subcontractor_ids(request.form):
+            flash('Please select at least one subcontractor.', 'warning')
+            return back
+        assigned, skipped, error = assign_subcontractors_from_form(stg, request.form)
+        if error:
+            db.session.rollback()
+            flash(error, 'danger')
+            return back
+        for reason in skipped:
+            flash(reason, 'danger' if not assigned else 'warning')
+        if not assigned:
+            db.session.rollback()
+            return back
         db.session.commit()
         owner_rate = float(stg.effective_rate or 0.0) if (stg.contract_basis or '') == 'Per Sq Ft' else 0.0
-        sub_rate = float(sub.rate_per_sqft or 0.0) if (sub.contract_type or '') == 'sqft' else 0.0
-        margin_note = ''
-        if owner_rate > 0 and sub_rate > 0:
-            margin_note = f' Owner/Sub rate spread: {owner_rate - sub_rate:,.2f} per sqft.'
-            if sub_rate > owner_rate:
+        for sub in assigned:
+            sub_rate = float(sub.rate_per_sqft or 0.0) if (sub.contract_type or '') == 'sqft' else 0.0
+            if owner_rate > 0 and sub_rate > owner_rate:
                 flash(
-                    f'Warning: subcontract rate ({sub_rate:,.2f}) is higher than owner rate ({owner_rate:,.2f}). '
-                    f'This stage may run at a loss.',
+                    f'Warning: {sub.name} subcontract rate ({sub_rate:,.2f}) is higher than owner rate '
+                    f'({owner_rate:,.2f}). This stage may run at a loss.',
                     'warning'
                 )
-        flash(f'Stage "{stg.name}" shifted to subcontractor {sub.name}.{margin_note}', 'success')
-        return redirect(url_for('hdc_project_detail', pid=stg.project_id))
+        names = ', '.join(sub.name for sub in assigned)
+        total = len(stg.assigned_subcontractors)
+        flash(f'Stage "{stg.name}": added/updated {names}. '
+              f'{total} subcontractor{"s" if total != 1 else ""} now assigned.', 'success')
+        return back
 
 
     @app.route('/hdc/stage/<int:sid>/shift/company', methods=['POST'])
@@ -1697,7 +1641,7 @@ def register(app):
         stg.execution_mode = 'subcontractor' if remaining else 'company'
         db.session.commit()
         flash('Stage assignments updated. Existing financial history was retained.', 'success')
-        return redirect(url_for('hdc_project_detail', pid=stg.project_id))
+        return redirect(url_for('hdc_project_detail', pid=stg.project_id) + (f'#stage-subs-{stg.id}' if remaining else ''))
 
 
     @app.route('/hdc/subcontractors', methods=['GET', 'POST'])
