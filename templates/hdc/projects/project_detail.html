@@ -206,6 +206,14 @@
                     {% else %}
                     <span class="badge bg-secondary"><i class="fas fa-building me-1"></i>Own</span>
                     {% endif %}
+                    {% if s.status not in ['completed','Complete'] %}
+                    <div class="mt-1">
+                        <button type="button" class="btn btn-sm btn-outline-warning py-0 px-1 text-nowrap"
+                            data-bs-toggle="collapse" data-bs-target="#shift-sub-{{ s.id }}" title="Assign one or more subcontractors to this stage">
+                            <i class="fas fa-plus me-1"></i>Add Subcontractor
+                        </button>
+                    </div>
+                    {% endif %}
                 </td>
                 <td><small class="text-muted">{{ s.contract_basis or '—' }}</small></td>
                 <td>{{ "{:,.0f}".format(s.rate_per_sqft) if s.rate_per_sqft else '—' }}</td>
@@ -266,11 +274,11 @@
                     </form>
                     {% endif %}
                     <button type="button" class="btn btn-xs btn-outline-warning btn-sm ms-1"
-                        data-bs-toggle="collapse" data-bs-target="#shift-sub-{{ s.id }}" title="Shift to Subcontractor">
+                        data-bs-toggle="collapse" data-bs-target="#shift-sub-{{ s.id }}" title="Add Subcontractor(s) to Stage">
                         <i class="fas fa-right-left"></i>
                     </button>
                     <button type="button" class="btn btn-xs btn-outline-primary btn-sm ms-1"
-                        data-bs-toggle="collapse" data-bs-target="#sub-comp-{{ s.id }}" title="Sub Completion %">
+                        data-bs-toggle="collapse" data-bs-target="#sub-comp-{{ s.id }}" title="Subcontractors: Completion % / Remove">
                         <i class="fas fa-percent"></i>
                     </button>
                     <form method="POST" action="{{ url_for('hdc_stage_shift_to_company', sid=s.id) }}" class="d-inline ms-1"
@@ -301,12 +309,21 @@
             <tr {{ s|hdc_row_attrs }} class="collapse" id="shift-sub-{{ s.id }}">
                 <td colspan="18" class="bg-light-subtle">
                     <form method="POST" action="{{ url_for('hdc_stage_shift_to_subcontractor', sid=s.id) }}" class="d-flex flex-wrap gap-2 align-items-center py-2">
+                        <div class="w-100 small">
+                            <span class="fw-bold">Subcontractors on this stage ({{ s.assigned_subcontractors|length }}):</span>
+                            {% for member in s.assigned_subcontractors %}
+                            <span class="badge bg-warning text-dark me-1">{{ member.name }}</span>
+                            {% else %}
+                            <span class="text-muted">none yet</span>
+                            {% endfor %}
+                            <span class="text-muted ms-2">— add as many as needed; each keeps its own rate, progress and payments.</span>
+                        </div>
                         <span class="small text-muted fw-bold">Add subcontractor (existing assignments retained):</span>
                         <input type="text" id="shiftSubInput{{ s.id }}" class="form-control form-control-sm" style="max-width:300px" placeholder="Search subcontractor">
                         <select name="subcontractor_id" id="shiftSubSelect{{ s.id }}" class="form-select form-select-sm" style="max-width:300px" required>
                             <option value="">Select Subcontractor</option>
                             {% for sub in subcontractor_pool %}
-                            <option value="{{ sub.id }}" {% if s.assigned_subcontractor_id == sub.id %}selected{% endif %}>
+                            <option value="{{ sub.id }}">
                                 {{ sub.subcontractor_code or ('SUB-' ~ sub.id) }} | {{ sub.name }} | {{ sub.phone or '-' }}
                             </option>
                             {% endfor %}
