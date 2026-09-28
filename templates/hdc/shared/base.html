@@ -263,6 +263,26 @@ document.addEventListener('DOMContentLoaded', function() {
     }, { passive: false });
 });
 </script>
+<script>
+// Jump-to-page field used by the shared pagination component (and any page
+// that renders an equivalent <input name="page"> form). Keeps every current
+// filter in the query string and only replaces the `page` param.
+function hdcJumpToPage(event) {
+    event.preventDefault();
+    var form = event.target;
+    var input = form.querySelector('input[name="page"]');
+    if (!input) return false;
+    var max = parseInt(input.max, 10) || 1;
+    var page = parseInt(input.value, 10);
+    if (!page || page < 1) page = 1;
+    if (max && page > max) page = max;
+    var url = new URL(window.location.href);
+    if (url.searchParams.get('page') === String(page)) return false;
+    url.searchParams.set('page', String(page));
+    window.location.assign(url.pathname + url.search + url.hash);
+    return false;
+}
+</script>
 {% block extra_js %}{% endblock %}
 </body>
 </html>

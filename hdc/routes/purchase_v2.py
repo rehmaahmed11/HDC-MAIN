@@ -246,10 +246,16 @@ def register(app):
             flash(f'{len(created)} purchase item(s) recorded successfully.', 'success')
             return redirect(url_for('hdc_purchase_v2_purchases'))
         supplier_id = request.args.get('supplier_id', type=int)
+        page = max(1, request.args.get('page', type=int) or 1)
+        per_page = 25
         q = PurchaseV2.query.filter(PurchaseV2.is_void == False)
         if supplier_id:
             q = q.filter(PurchaseV2.supplier_id == supplier_id)
-        rows = q.order_by(PurchaseV2.created_at.asc(), PurchaseV2.id.asc()).all()
+        pg_total_items = q.count()
+        pg_total_pages = max(1, (pg_total_items + per_page - 1) // per_page)
+        page = min(page, pg_total_pages)
+        rows = (q.order_by(PurchaseV2.created_at.asc(), PurchaseV2.id.asc())
+                 .offset((page - 1) * per_page).limit(per_page).all())
         suppliers = Supplier.query.filter(Supplier.is_void == False).order_by(Supplier.name.asc()).all()
         materials = MaterialV2.query.filter(MaterialV2.is_void == False).order_by(MaterialV2.name.asc()).all()
         purchase_ids = [int(r.id) for r in rows]
@@ -264,7 +270,8 @@ def register(app):
                     Delivery.purchase_id.in_(purchase_ids)
                 ).group_by(Delivery.purchase_id).all()
             )
-        total = float(sum(float(r.total_amount or 0.0) for r in rows))
+        # Grand total spans every row matching the filters, not just this page.
+        total = float(q.with_entities(func.coalesce(func.sum(PurchaseV2.total_amount), 0.0)).scalar() or 0.0)
         return render_template('purchase/purchase_v2_purchases.html',
             rows=rows,
             suppliers=suppliers,
@@ -272,7 +279,15 @@ def register(app):
             delivered_map=delivered_map,
             total=total,
             selected_supplier_id=supplier_id,
-            today=_pkt_today().isoformat()
+            today=_pkt_today().isoformat(),
+            pg_page=page,
+            pg_total_pages=pg_total_pages,
+            pg_total_items=pg_total_items,
+            pg_per_page=per_page,
+            pg_endpoint='hdc_purchase_v2_purchases',
+            pg_url_kwargs={},
+            pg_query=({'supplier_id': supplier_id} if supplier_id else {}),
+            pg_label='purchase rows'
         )
 
 

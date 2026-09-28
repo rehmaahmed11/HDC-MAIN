@@ -22,7 +22,7 @@
             {% if selected_project %}
             <a href="{{ url_for('hdc_stage_overview') }}" class="btn btn-sm btn-outline-secondary">Clear</a>
             {% endif %}
-            <span class="badge bg-secondary ms-auto">Stages: {{ stages|length }}</span>
+            <span class="badge bg-secondary ms-auto">Stages: {{ pg_total_items }}</span>
         </form>
     </div>
 </div>
@@ -55,5 +55,6 @@
             </tbody>
         </table>
     </div>
+    {% include 'shared/_pagination.html' %}
 </div>
 {% endblock %}

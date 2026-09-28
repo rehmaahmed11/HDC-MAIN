@@ -59,9 +59,24 @@ def register(app):
     @app.route('/hdc/projects')
     @login_required
     def hdc_projects():
-        projects = Project.query.order_by(Project.created_at.desc()).all()
+        page = max(1, request.args.get('page', type=int) or 1)
+        per_page = 25
+        q = Project.query.order_by(Project.created_at.desc(), Project.id.desc())
+        pg_total_items = q.count()
+        pg_total_pages = max(1, (pg_total_items + per_page - 1) // per_page)
+        page = min(page, pg_total_pages)
+        projects = q.offset((page - 1) * per_page).limit(per_page).all()
         _apply_aggregated_project_costs(projects)
-        return render_template('projects/projects.html', projects=projects)
+        return render_template('projects/projects.html',
+                               projects=projects,
+                               pg_page=page,
+                               pg_total_pages=pg_total_pages,
+                               pg_total_items=pg_total_items,
+                               pg_per_page=per_page,
+                               pg_endpoint='hdc_projects',
+                               pg_url_kwargs={},
+                               pg_query={},
+                               pg_label='projects')
 
 
     @app.route('/hdc/projects/add', methods=['GET', 'POST'])
@@ -720,15 +735,28 @@ def register(app):
     def hdc_stage_overview():
         projects = Project.query.order_by(Project.name).all()
         project_id = request.args.get('project_id', type=int)
+        page = max(1, request.args.get('page', type=int) or 1)
+        per_page = 25
         q = Stage.query
         if project_id:
             q = q.filter(Stage.project_id == project_id)
-        stages = q.order_by(Stage.id.desc()).all()
+        pg_total_items = q.count()
+        pg_total_pages = max(1, (pg_total_items + per_page - 1) // per_page)
+        page = min(page, pg_total_pages)
+        stages = q.order_by(Stage.id.desc()).offset((page - 1) * per_page).limit(per_page).all()
         _apply_aggregated_stage_costs(stages)
         return render_template('projects/stage_overview.html',
             stages=stages,
             projects=projects,
-            selected_project=project_id
+            selected_project=project_id,
+            pg_page=page,
+            pg_total_pages=pg_total_pages,
+            pg_total_items=pg_total_items,
+            pg_per_page=per_page,
+            pg_endpoint='hdc_stage_overview',
+            pg_url_kwargs={},
+            pg_query=({'project_id': project_id} if project_id else {}),
+            pg_label='stages'
         )
 
 

@@ -105,9 +105,23 @@ def register(app):
     @login_required
     def hdc_project_estimation():
         stage_defs = []
-        estimations = Estimation.query.order_by(Estimation.created_at.desc()).all()
+        page = max(1, request.args.get('page', type=int) or 1)
+        per_page = 25
+        q = Estimation.query.order_by(Estimation.created_at.desc(), Estimation.id.desc())
+        pg_total_items = q.count()
+        pg_total_pages = max(1, (pg_total_items + per_page - 1) // per_page)
+        page = min(page, pg_total_pages)
+        estimations = q.offset((page - 1) * per_page).limit(per_page).all()
         return render_template('estimation/project_estimation.html',
-            stage_defs=stage_defs, estimations=estimations)
+            stage_defs=stage_defs, estimations=estimations,
+            pg_page=page,
+            pg_total_pages=pg_total_pages,
+            pg_total_items=pg_total_items,
+            pg_per_page=per_page,
+            pg_endpoint='hdc_project_estimation',
+            pg_url_kwargs={},
+            pg_query={},
+            pg_label='estimations')
 
 
     @app.route('/project-estimation/save', methods=['POST'])
