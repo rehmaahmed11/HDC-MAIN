@@ -1172,6 +1172,7 @@ tr[data-hdc-void="1"] > td .text-warning {
 /* The panel is rendered under the stages table now, so it simply fills the
    card: the container-query width hack that compensated for the table scroller
    (and left the panel hanging past the card edge) is gone. */
+.stage-table-viewport { -webkit-overflow-scrolling: touch; }
 
 /* Stage expand/collapse: one arrow next to the stage name opens everything
    inside the stage (terms, subcontractors, drawings) in a single panel. */
