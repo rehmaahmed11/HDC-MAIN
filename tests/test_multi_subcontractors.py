@@ -30,6 +30,32 @@ class MultiSubcontractorTests(unittest.TestCase):
     def assign(self):
         self.post('shift/subcontractor', subcontractor_id=self.second.id)
 
+    def test_stage_forms_use_bounded_compact_terms_layout(self):
+        self.stage.qty_sqft = 2000
+        self.second.name = 'Long subcontractor name ' * 8
+        db.session.commit()
+        for path in (f'/hdc/projects/{self.project.id}',
+                     f'/hdc/stage/{self.stage.id}/edit',
+                     f'/hdc/projects/{self.project.id}/stage/add'):
+            with self.subTest(path=path):
+                response = self.client.get(path)
+                self.assertEqual(response.status_code, 200)
+                html = response.get_data(as_text=True)
+                self.assertIn('stage-terms-grid', html)
+                self.assertIn('stage-terms-help', html)
+                self.assertIn('stage-sub-name', html)
+                self.assertNotIn('row g-2 mt-1 align-items-end', html)
+                # Help is after the field grid, never underneath just one input.
+                terms = html.split('class="stage-terms-grid mt-2"', 1)[1]
+                fields, help_text = terms.split('stage-terms-help', 1)
+                self.assertNotIn('auto-assign', fields)
+                if '/stage/add' not in path:
+                    self.assertIn('Blank sqft auto-assigns', help_text)
+        html = self.client.get(f'/hdc/projects/{self.project.id}').get_data(as_text=True)
+        self.assertIn('stage-table-viewport', html)
+        self.assertIn('stage-member-terms stage-terms-grid', html)
+        self.assertIn('<span class="form-label small mb-0">Retention %</span>', html)
+
     def test_members_survive_assignment_and_reconciliation(self):
         self.assign()
         self.assign()
