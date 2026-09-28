@@ -3,73 +3,232 @@
 {% block page_heading %}Expenses{% endblock %}
 
 {% block content %}
+<style>
+    /* Batch expense entry: shared site fields + one compact line per expense. */
+    .exp-items-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin: 14px 0 8px;
+    }
+
+    .exp-items-title {
+        font-size: 0.78rem;
+        font-weight: 800;
+        letter-spacing: 0.4px;
+        text-transform: uppercase;
+        color: var(--text-muted);
+    }
+
+    .exp-item {
+        border: 1px solid var(--card-border);
+        border-radius: 12px;
+        background: var(--input-bg);
+        padding: 8px 10px;
+        margin-bottom: 8px;
+        transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .exp-item:hover {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px var(--accent-soft);
+    }
+
+    .exp-item.exp-item-invalid {
+        border-color: #dc2626;
+        box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.12);
+    }
+
+    .exp-item-idx {
+        width: 28px;
+        height: 28px;
+        border-radius: 9px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--accent-soft);
+        color: var(--accent-strong);
+        font-size: 0.76rem;
+        font-weight: 800;
+        flex: 0 0 auto;
+    }
+
+    [data-theme="dark"] .exp-item-idx { color: var(--accent); }
+
+    .exp-item-cat {
+        position: relative;
+        min-width: 210px;
+        max-width: 330px;
+        flex: 1 1 210px;
+    }
+
+    .exp-item-amount {
+        width: 135px;
+        flex: 0 0 135px;
+        font-weight: 700;
+    }
+
+    .exp-item-remarks {
+        min-width: 150px;
+        max-width: 330px;
+        flex: 1 1 150px;
+    }
+
+    .btn-exp-icon {
+        width: 32px;
+        height: 32px;
+        padding: 0;
+        border-radius: 9px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex: 0 0 auto;
+    }
+
+    .exp-add-row {
+        border: 1px dashed var(--accent);
+        color: var(--accent-strong);
+        background: transparent;
+        border-radius: 12px;
+        font-weight: 700;
+        font-size: 0.84rem;
+        padding: 7px 16px;
+    }
+
+    .exp-add-row:hover,
+    .exp-add-row:focus {
+        background: var(--accent-soft);
+        color: var(--accent-strong);
+    }
+
+    [data-theme="dark"] .exp-add-row { color: var(--accent); }
+
+    .exp-batch-footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        flex-wrap: wrap;
+        border-top: 1px solid var(--card-border);
+        margin-top: 10px;
+        padding-top: 12px;
+    }
+
+    .exp-batch-total {
+        background: var(--accent-soft);
+        color: var(--accent-strong);
+        border-radius: 999px;
+        padding: 5px 14px;
+        font-size: 0.84rem;
+        font-weight: 800;
+    }
+
+    [data-theme="dark"] .exp-batch-total { color: var(--accent); }
+</style>
+
+{% macro expense_item_line(row_no) %}
+<div class="exp-item d-flex align-items-center gap-2 flex-wrap" data-exp-item>
+    <span class="exp-item-idx js-item-idx">{{ row_no }}</span>
+    <div class="exp-item-cat">
+        <input type="text" class="form-control form-control-sm js-cat-filter"
+               placeholder="Type to search category..." aria-label="Expense category"
+               autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+        <select name="item_category_id" class="form-select form-select-sm js-cat-select" aria-label="Expense category">
+            <option value="">Select Category</option>
+            {% for cat in categories %}
+            <option value="{{ cat.id }}">{{ cat.name }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <input type="number" step="0.01" min="0" name="item_amount"
+           class="form-control form-control-sm exp-item-amount js-item-amount"
+           placeholder="Amount (PKR)" aria-label="Amount in PKR" onwheel="this.blur();">
+    <input type="text" name="item_remarks" maxlength="200"
+           class="form-control form-control-sm exp-item-remarks js-item-remarks"
+           placeholder="Remarks (optional)" aria-label="Remarks">
+    <button type="button" class="btn btn-outline-danger btn-sm btn-exp-icon js-item-remove" title="Remove this line">
+        <i class="fas fa-xmark"></i>
+    </button>
+</div>
+{% endmacro %}
+
 <div class="row g-3 mt-1">
-    <!-- FORM -->
-    <div class="col-md-4">
-        <div class="card hdc-card">
-            <div class="card-header hdc-card-header"><i class="fas fa-plus-circle me-2"></i>Record Expense</div>
+    <!-- BATCH ENTRY FORM -->
+    <div class="col-12">
+        <div class="card hdc-card mb-3">
+            <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-plus-circle me-2"></i>Record Expenses</span>
+                <span class="badge bg-success-subtle text-success d-none d-md-inline">Fill the site once, add many expense lines</span>
+            </div>
             <div class="card-body">
-                <form method="POST">
-                    <div class="mb-3">
-                        <label class="form-label">Date</label>
-                        <input type="date" name="date" class="form-control" value="{{ today }}">
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Project *</label>
-                        <select name="project_id" class="form-select" id="projSelect" required>
-                            <option value="">- Select Project -</option>
-                            {% for proj in projects %}
-                            <option value="{{ proj.id }}" {% if selected_project == proj.id %}selected{% endif %}>{{ proj.name }} | {{ proj.project_code }} | {{ proj.client or 'No Owner' }} | {{ proj.location or 'No Location' }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Stage *</label>
-                        <select name="stage_id" class="form-select" id="stageSelect" required>
-                            <option value="">Select Stage</option>
-                            {% for proj in projects %}
-                            {% for s in proj.stages %}
-                            <option value="{{ s.id }}" data-project="{{ proj.id }}">{{ s.name }}</option>
-                            {% endfor %}
-                            {% endfor %}
-                        </select>
-                    </div>
-                    <div class="mb-3">
-                        <div class="d-flex justify-content-between align-items-center mb-1">
-                            <label class="form-label mb-0">Category *</label>
-                            <a href="{{ url_for('hdc_expense_categories') }}" class="small text-decoration-none">Manage Categories</a>
+                <div id="expFormAlert" class="alert alert-danger d-none" role="alert"></div>
+                <form method="POST" id="expenseBatchForm">
+                    <div class="row g-3 align-items-end">
+                        <div class="col-md-3 col-6">
+                            <label class="form-label">Date</label>
+                            <input type="date" name="date" class="form-control form-control-sm" value="{{ today }}">
                         </div>
-                        <input type="text" class="form-control form-control-sm mb-1" id="expenseCategoryFilter" placeholder="Type to search category..." autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" required>
-                        <select name="category_id" class="form-select" id="expenseCategorySelect" required>
-                            <option value="">Select Category</option>
-                            {% for cat in categories %}
-                            <option value="{{ cat.id }}">{{ cat.name }}</option>
-                            {% endfor %}
-                        </select>
+                        <div class="col-md-5 col-6">
+                            <label class="form-label">Project / Site *</label>
+                            <select name="project_id" class="form-select form-select-sm" id="projSelect" required>
+                                <option value="">- Select Project -</option>
+                                {% for proj in projects %}
+                                <option value="{{ proj.id }}" {% if selected_project == proj.id %}selected{% endif %}>{{ proj.name }} | {{ proj.project_code }} | {{ proj.client or 'No Owner' }} | {{ proj.location or 'No Location' }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Stage *</label>
+                            <select name="stage_id" class="form-select form-select-sm" id="stageSelect" required>
+                                <option value="">Select Stage</option>
+                                {% for proj in projects %}
+                                {% for s in proj.stages %}
+                                <option value="{{ s.id }}" data-project="{{ proj.id }}">{{ s.name }}</option>
+                                {% endfor %}
+                                {% endfor %}
+                            </select>
+                        </div>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label">Amount (PKR) *</label>
-                        <input type="number" step="0.01" name="amount" class="form-control" onwheel="this.blur();" required>
+
+                    <div class="exp-items-head">
+                        <span class="exp-items-title"><i class="fas fa-list-check me-1 text-mint"></i>Expense Lines</span>
+                        <div class="d-flex align-items-center gap-2">
+                            <a href="{{ url_for('hdc_expense_categories') }}" class="small text-decoration-none">Manage Categories</a>
+                            <button type="button" id="expAddRowBtn" class="btn exp-add-row btn-sm">
+                                <i class="fas fa-plus me-1"></i>Add Expense Line
+                            </button>
+                        </div>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label">Remarks</label>
-                        <textarea name="remarks" class="form-control" rows="2"></textarea>
+
+                    <div id="expItems">
+                        {{ expense_item_line(1) }}
+                        {{ expense_item_line(2) }}
+                        {{ expense_item_line(3) }}
                     </div>
-                    <button type="submit" class="btn btn-mint w-100"><i class="fas fa-save me-1"></i>Save</button>
+
+                    <div class="exp-batch-footer">
+                        <div class="d-flex align-items-center gap-2 flex-wrap">
+                            <span class="small text-muted" id="expBatchCount">0 filled lines</span>
+                            <span class="exp-batch-total" id="expBatchTotal">Total: 0 PKR</span>
+                        </div>
+                        <button type="submit" class="btn btn-mint px-4"><i class="fas fa-save me-1"></i>Save All Expenses</button>
+                    </div>
                 </form>
             </div>
         </div>
     </div>
 
     <!-- LIST -->
-    <div class="col-md-8">
+    <div class="col-12">
         <div class="card hdc-card">
             <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
                 <span><i class="fas fa-list me-2"></i>Expense Records</span>
                 <span class="badge bg-danger fs-6">Total: {{ "{:,.0f}".format(total) }} PKR</span>
             </div>
             <div class="px-3 pt-3">
-                <form method="GET" class="d-flex gap-2 mb-2">
+                <form method="GET" class="d-flex gap-2 mb-2" style="max-width: 520px;">
                     <select name="project_id" class="form-select form-select-sm" onchange="this.form.submit()">
                         <option value="">All Projects</option>
                         {% for proj in projects %}
@@ -110,7 +269,7 @@
                         </td>
                     </tr>
                     {% else %}
-                    <tr {{ record|hdc_row_attrs }}><td colspan="7" class="text-center text-muted py-4">No expenses found.</td></tr>
+                    <tr><td colspan="7" class="text-center text-muted py-4">No expenses found.</td></tr>
                     {% endfor %}
                     </tbody>
                 </table>
@@ -118,6 +277,8 @@
         </div>
     </div>
 </div>
+
+<template id="expItemTpl">{{ expense_item_line(0) }}</template>
 {% endblock %}
 
 {% block extra_js %}
@@ -138,10 +299,141 @@ function filterStages() {
 }
 if (projSel) { projSel.addEventListener('change', filterStages); filterStages(); }
 
-if (window.HDCComboList) {
-    window.HDCComboList.attach('expenseCategoryFilter', 'expenseCategorySelect', {
-        includeEmpty: false
+(function () {
+    const form = document.getElementById('expenseBatchForm');
+    const container = document.getElementById('expItems');
+    const tpl = document.getElementById('expItemTpl');
+    const addBtn = document.getElementById('expAddRowBtn');
+    const alertBox = document.getElementById('expFormAlert');
+    const totalEl = document.getElementById('expBatchTotal');
+    const countEl = document.getElementById('expBatchCount');
+    if (!form || !container || !tpl) return;
+
+    function itemRows() {
+        return Array.prototype.slice.call(container.querySelectorAll('[data-exp-item]'));
+    }
+
+    function attachCategoryCombo(row) {
+        const filter = row.querySelector('.js-cat-filter');
+        const select = row.querySelector('.js-cat-select');
+        if (!filter || !select || !window.HDCComboList) return;
+        window.HDCComboList.attach(filter, select, { includeEmpty: false });
+    }
+
+    function renumber() {
+        itemRows().forEach(function (row, i) {
+            const idx = row.querySelector('.js-item-idx');
+            if (idx) idx.textContent = String(i + 1);
+        });
+    }
+
+    function rowFilled(row) {
+        const sel = row.querySelector('.js-cat-select');
+        const amt = row.querySelector('.js-item-amount');
+        const rem = row.querySelector('.js-item-remarks');
+        return !!((sel && sel.value) || (amt && String(amt.value).trim()) || (rem && String(rem.value).trim()));
+    }
+
+    function updateSummary() {
+        let total = 0;
+        let filled = 0;
+        itemRows().forEach(function (row) {
+            const amt = row.querySelector('.js-item-amount');
+            const val = amt ? parseFloat(amt.value) : NaN;
+            const has = rowFilled(row);
+            if (has) filled++;
+            if (!isNaN(val) && val > 0) total += val;
+        });
+        if (totalEl) totalEl.textContent = 'Total: ' + Math.round(total).toLocaleString() + ' PKR';
+        if (countEl) countEl.textContent = filled + (filled === 1 ? ' filled line' : ' filled lines');
+    }
+
+    function setRowDisabled(row, disabled) {
+        row.querySelectorAll('input, select, textarea, button').forEach(function (el) {
+            if (disabled) { el.disabled = true; } else { el.disabled = false; }
+        });
+    }
+
+    itemRows().forEach(attachCategoryCombo);
+    renumber();
+    updateSummary();
+
+    if (addBtn) {
+        addBtn.addEventListener('click', function () {
+            const frag = tpl.content.cloneNode(true);
+            const row = frag.querySelector('[data-exp-item]');
+            container.appendChild(frag);
+            if (row) {
+                attachCategoryCombo(row);
+                const filter = row.querySelector('.js-cat-filter');
+                if (filter) filter.focus();
+            }
+            renumber();
+            updateSummary();
+        });
+    }
+
+    container.addEventListener('click', function (e) {
+        const btn = e.target.closest ? e.target.closest('.js-item-remove') : null;
+        if (!btn) return;
+        const row = btn.closest('[data-exp-item]');
+        if (!row) return;
+        const rows = itemRows();
+        if (rows.length <= 1) {
+            // Keep one line always available — just clear it.
+            const sel = row.querySelector('.js-cat-select');
+            const amt = row.querySelector('.js-item-amount');
+            const rem = row.querySelector('.js-item-remarks');
+            const filter = row.querySelector('.js-cat-filter');
+            if (sel) sel.value = '';
+            if (amt) amt.value = '';
+            if (rem) rem.value = '';
+            if (filter) filter.value = '';
+            row.classList.remove('exp-item-invalid');
+        } else {
+            row.remove();
+        }
+        renumber();
+        updateSummary();
     });
-}
+
+    container.addEventListener('input', updateSummary);
+    container.addEventListener('change', updateSummary);
+
+    form.addEventListener('submit', function (e) {
+        const problems = [];
+        let filled = 0;
+        itemRows().forEach(function (row, i) {
+            setRowDisabled(row, false);
+            row.classList.remove('exp-item-invalid');
+            if (!rowFilled(row)) {
+                // Blank lines are ignored — silence them so they don't post.
+                setRowDisabled(row, true);
+                return;
+            }
+            filled++;
+            const sel = row.querySelector('.js-cat-select');
+            const amt = row.querySelector('.js-item-amount');
+            const val = amt ? parseFloat(amt.value) : NaN;
+            const bad = !(sel && sel.value) || isNaN(val) || val <= 0;
+            if (bad) {
+                row.classList.add('exp-item-invalid');
+                problems.push('Row ' + (i + 1) + ': choose a category and enter an amount greater than zero.');
+            }
+        });
+        if (!filled) problems.unshift('Add at least one expense line (category + amount) before saving.');
+        if (problems.length) {
+            e.preventDefault();
+            itemRows().forEach(function (row) { setRowDisabled(row, false); });
+            if (alertBox) {
+                alertBox.textContent = problems.join(' ');
+                alertBox.classList.remove('d-none');
+                alertBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+            return;
+        }
+        if (alertBox) alertBox.classList.add('d-none');
+    });
+})();
 </script>
 {% endblock %}

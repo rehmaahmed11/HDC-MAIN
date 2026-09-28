@@ -120,56 +120,100 @@ def register(app):
             if (not stage) or (stage.project_id != pid):
                 flash('Selected stage does not belong to selected project.', 'danger')
                 return redirect(url_for('hdc_expenses'))
-            category_id = request.form.get('category_id', type=int)
-            if not category_id:
-                flash('Expense category is required.', 'danger')
-                return redirect(url_for('hdc_expenses'))
-            valid_category = _ensure_expense_category_by_id(category_id)
-            if not valid_category:
-                flash('Please select a valid active expense category.', 'danger')
-                return redirect(url_for('hdc_expenses'))
             exp_date = _parse_date(request.form.get('date'))
-            amount = _flt(request.form.get('amount'))
-            if amount <= 0:
-                flash('Expense amount must be greater than zero.', 'danger')
+
+            # One submission can carry many expense lines for the same site
+            # (food, petrol, ...) as repeated item_* fields, so the operator
+            # fills the shared date/project/stage once and saves the whole
+            # batch together. Legacy single-field payloads
+            # (category_id/amount/remarks) are still accepted unchanged.
+            cat_raw = request.form.getlist('item_category_id')
+            amt_raw = request.form.getlist('item_amount')
+            rem_raw = request.form.getlist('item_remarks')
+            if not cat_raw and not amt_raw and not rem_raw:
+                cat_raw = [request.form.get('category_id') or '']
+                amt_raw = [request.form.get('amount') or '']
+                rem_raw = [request.form.get('remarks') or '']
+
+            row_count = max(len(cat_raw), len(amt_raw), len(rem_raw))
+            problems = []
+            items = []
+            for idx in range(row_count):
+                c_raw = str(cat_raw[idx] if idx < len(cat_raw) else '').strip()
+                a_raw = str(amt_raw[idx] if idx < len(amt_raw) else '').strip()
+                r_raw = str(rem_raw[idx] if idx < len(rem_raw) else '').strip()
+                if not c_raw and not a_raw and not r_raw:
+                    continue  # untouched blank line
+                label = f'Row {idx + 1}'
+                valid_category = None
+                try:
+                    if c_raw:
+                        valid_category = _ensure_expense_category_by_id(int(c_raw))
+                except (TypeError, ValueError):
+                    valid_category = None
+                if not valid_category:
+                    problems.append(f'{label}: please select a valid active expense category.')
+                    continue
+                amount = _flt(a_raw)
+                if not a_raw or amount <= 0:
+                    problems.append(f'{label}: expense amount must be greater than zero.')
+                    continue
+                items.append((valid_category, amount, r_raw))
+
+            if problems:
+                for msg in problems:
+                    flash(msg, 'danger')
                 return redirect(url_for('hdc_expenses'))
-            remarks = (request.form.get('remarks','') or '').strip()
-            if _has_recent_duplicate(
-                Expense,
-                project_id=pid,
-                stage_id=sid,
-                category_id=category_id,
-                amount=amount,
-                date=exp_date,
-                remarks=remarks
-            ):
-                flash('Duplicate expense prevented (same values submitted too quickly).', 'warning')
+            if not items:
+                flash('Add at least one expense line (category + amount) before saving.', 'warning')
                 return redirect(url_for('hdc_expenses'))
-            exp = Expense(
-                project_id=pid, stage_id=sid,
-                category_id=category_id,
-                amount=amount,
-                date=exp_date,
-                activity_at=_activity_at_for(exp_date),
-                remarks=remarks,
-                is_void=False
-            )
-            db.session.add(exp)
-            db.session.flush()
-            ok_txn, msg_txn, _ = _accounts_post_expense_row(exp, commit=False)
-            if not ok_txn:
-                db.session.rollback()
-                flash(msg_txn or 'Unable to post expense in unified accounts.', 'danger')
-                return redirect(url_for('hdc_expenses'))
-            log_action(
-                current_user,
-                'create',
-                f'{current_user.username.title()} created expense: {valid_category.name}, {amount:,.2f} PKR, {stage.project.name} -> {stage.name} on {exp_date.isoformat()}',
-                'expense',
-                exp.id or ''
-            )
+
+            saved = 0
+            skipped = 0
+            to_create = []
+            for valid_category, amount, remarks in items:
+                if _has_recent_duplicate(
+                    Expense,
+                    project_id=pid,
+                    stage_id=sid,
+                    category_id=valid_category.id,
+                    amount=amount,
+                    date=exp_date,
+                    remarks=remarks
+                ):
+                    skipped += 1
+                    continue
+                to_create.append((valid_category, amount, remarks))
+            for valid_category, amount, remarks in to_create:
+                exp = Expense(
+                    project_id=pid, stage_id=sid,
+                    category_id=valid_category.id,
+                    amount=amount,
+                    date=exp_date,
+                    activity_at=_activity_at_for(exp_date),
+                    remarks=remarks,
+                    is_void=False
+                )
+                db.session.add(exp)
+                db.session.flush()
+                ok_txn, msg_txn, _ = _accounts_post_expense_row(exp, commit=False)
+                if not ok_txn:
+                    db.session.rollback()
+                    flash(msg_txn or 'Unable to post expense in unified accounts.', 'danger')
+                    return redirect(url_for('hdc_expenses'))
+                log_action(
+                    current_user,
+                    'create',
+                    f'{current_user.username.title()} created expense: {valid_category.name}, {amount:,.2f} PKR, {stage.project.name} -> {stage.name} on {exp_date.isoformat()}',
+                    'expense',
+                    exp.id or ''
+                )
+                saved += 1
             db.session.commit()
-            flash('Expense added.', 'success')
+            if saved:
+                flash('Expense added.' if saved == 1 else f'{saved} expenses added in one batch.', 'success')
+            if skipped:
+                flash(f'{skipped} duplicate expense row(s) skipped (same values submitted too quickly).', 'warning')
             return redirect(url_for('hdc_expenses'))
 
         projects    = Project.query.all()
