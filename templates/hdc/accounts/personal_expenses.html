@@ -131,6 +131,14 @@
                 {% endif %}
             </ul>
         </nav>
+        <form class="d-flex justify-content-center align-items-center gap-2 mt-2" method="get"
+              onsubmit="return hdcJumpToPage(event);">
+            <label class="small text-muted mb-0">Jump to page</label>
+            <input type="number" name="page" class="form-control form-control-sm"
+                   style="width:4.75rem;" min="1" max="{{ rows.pages }}"
+                   value="{{ rows.page }}" inputmode="numeric" aria-label="Page number">
+            <button type="submit" class="btn btn-sm btn-outline-primary">Go</button>
+        </form>
         {% endif %}
         {% else %}
         <div class="alert alert-info">

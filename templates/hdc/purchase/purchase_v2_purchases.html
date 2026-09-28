@@ -8,7 +8,7 @@
     <a href="{{ url_for('hdc_purchase_v2_page') }}" class="btn btn-sm btn-outline-secondary">
         <i class="fas fa-arrow-left me-1"></i>Back
     </a>
-    <span class="badge bg-secondary">{{ rows|length }} rows</span>
+    <span class="badge bg-secondary">{{ pg_total_items }} rows</span>
     <span class="badge bg-success">Rs {{ "{:,.0f}".format(total or 0) }} total</span>
     <span class="badge bg-info text-dark">Qty Delivered = Delivered to Projects (All)</span>
     <div class="ms-auto d-flex gap-2 flex-wrap">
@@ -158,6 +158,7 @@
             </tbody>
         </table>
     </div>
+    {% include 'shared/_pagination.html' %}
 </div>
 
 <!-- Edit Purchase Modal -->

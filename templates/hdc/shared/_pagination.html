@@ -19,6 +19,15 @@
         <strong>{{ ((pg_page - 1) * pg_per_page) + 1 }}</strong>–<strong>{{ [pg_page * pg_per_page, pg_total_items] | min }}</strong>
         of <strong>{{ pg_total_items }}</strong> {{ pg_label or 'entries' }}
     </div>
+    <form class="hdc-jump-page d-flex align-items-center gap-1" method="get"
+          onsubmit="return hdcJumpToPage(event);">
+        <label class="small text-muted text-nowrap mb-0">Jump to page</label>
+        <input type="number" name="page" class="form-control form-control-sm"
+               style="width:4.75rem;" min="1" max="{{ pg_total_pages }}"
+               value="{{ pg_page }}" inputmode="numeric"
+               aria-label="Page number">
+        <button type="submit" class="btn btn-sm btn-outline-primary">Go</button>
+    </form>
     <ul class="pagination pagination-sm mb-0">
         {% set first_kwargs = pg_url_kwargs.copy() %}{% set _ = first_kwargs.update(pg_query) %}{% set _ = first_kwargs.update({'page': 1}) %}
         {% set prev_kwargs = pg_url_kwargs.copy() %}{% set _ = prev_kwargs.update(pg_query) %}{% set _ = prev_kwargs.update({'page': [pg_page - 1, 1] | max}) %}
