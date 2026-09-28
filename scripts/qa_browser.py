@@ -103,21 +103,27 @@ def main():
                     stage.assigned_subcontractor_id=member.id
                     db.session.commit();stage_id=stage.id
                 page.goto(base+f'/hdc/projects/{pid}')
-                page.evaluate("document.querySelectorAll('#stage-subs-%d').forEach(e=>e.classList.remove('collapse'))" % stage_id)
+                page.evaluate("document.querySelectorAll('#stage-details-%d').forEach(e=>e.classList.remove('collapse'))" % stage_id)
                 page.wait_for_timeout(200)
                 layout=page.evaluate('''(sid) => {
-                    const wrap=document.getElementById('stage-subs-'+sid);
-                    const panel=wrap.querySelector('.stage-panel');
-                    const card=panel.parentElement;
-                    const fields=Array.from(panel.querySelectorAll('.stage-terms-grid [class*="col-"]'));
+                    const wrap=document.getElementById('stage-details-'+sid);
+                    const panel=wrap.querySelector('.stage-details-panel');
+                    const card=wrap.parentElement;
+                    const form=panel.querySelector('.stage-sub-add-form');
+                    const fields=Array.from(form.querySelectorAll('.stage-terms-grid .stage-term-field'));
                     const boxes=fields.map(c=>c.querySelector('input,select')||c);
                     const tops=boxes.map(b=>Math.round(b.getBoundingClientRect().top));
                     const strip=panel.querySelector('.stage-sqft-strip');
+                    let overflow=0;
+                    panel.querySelectorAll('*').forEach(el=>{
+                        const r=el.getBoundingClientRect();
+                        if(r.width && r.right > card.getBoundingClientRect().right + 1) overflow+=1;
+                    });
                     return {fields:fields.length,
                         distinct_field_tops:new Set(tops).size,
-                        panel_right:Math.round(panel.getBoundingClientRect().right),
-                        card_right:Math.round(card.getBoundingClientRect().right),
                         field_right:Math.max.apply(null,boxes.map(b=>Math.round(b.getBoundingClientRect().right))),
+                        card_right:Math.round(card.getBoundingClientRect().right),
+                        overflow_children:overflow,
                         strip_text:strip?strip.textContent.replace(/\\s+/g,' ').trim():'',
                         inside_table:!!wrap.closest('table'),
                         horizontal_overflow:document.documentElement.scrollWidth>innerWidth+1};
@@ -125,6 +131,7 @@ def main():
                 assert layout['fields']==5,layout
                 assert layout['distinct_field_tops']==1,layout
                 assert layout['field_right']<=layout['card_right']+1,layout
+                assert not layout['overflow_children'],layout
                 assert not layout['inside_table'],layout
                 assert not layout['horizontal_overflow'],layout
                 assert '2,000' in layout['strip_text'] and '100' in layout['strip_text'],layout

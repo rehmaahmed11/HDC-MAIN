@@ -69,29 +69,36 @@ Assignment guard:
 - Lump-sum subcontractors do not consume sqft and are not limited by this cap.
 
 UI:
-- Project page stage panel shows one compact allocation strip:
+- Project page: one chevron beside each stage name (added in a later PR) opens
+  a single "Inside <stage>" panel with the contract facts, the subcontractor
+  manager and the drawings manager.
+- That panel is rendered **under** the stages table (`.stage-panel-wrap`),
+  inside the same card. An 18-column table is a horizontal scroller, so a panel
+  rendered inside it was stretched past the card edge: the fields were clipped
+  and the sqft input was pushed onto its own line. The panel now always has the
+  card width.
+- The sqft allocation is a compact single-line strip:
   `STAGE 2,000 sqft · ALLOCATED 1,100 sqft · REMAINING 900 sqft` plus a fill bar
-  and a badge (`900 sqft free` / `No sqft left`). The same strip is repeated next
-  to the add-subcontractor terms so the free sqft is visible where it is used.
-- The Subcontractors and Drawings panels are rendered **under** the stages table
-  (`.stage-panel-wrap`), not inside it. An 18-column table is horizontally
-  scrollable, so rows inside it used to stretch past the card edge and clip the
-  terms fields; the panels now share the card width.
-- Terms fields (contract type, rate, sqft, lump sum, retention) use one
-  `row g-2` grid with equal `col-lg` widths and a trailing button, so everything
-  in a row lines up on its own label + input pair and never wraps mid-field.
-  The sqft input keeps `max` = remaining and the placeholder shows the remaining
-  sqft; client-side JS blocks submitting more than remaining.
-- Member terms editor (the pen button) uses the same grid and states the maximum
-  that member can be set to (`remaining excluding member + its own sqft`).
-- Add/Edit Stage form: "currently assigned" subcontractors render as chips and
-  the allocation strip summarises total/allocated/remaining.
-- On narrow screens (< lg) the terms grid becomes two columns and the member
-  table scrolls inside its own `.table-responsive` instead of squashing
-  headers letter by letter.
-
-This fixes the missed approach from the last PR where 1st contractor could take
-100 sqft but 2nd/3rd/4th still saw full 2000 sqft as available.
+  and a badge (`900 sqft free` / `No sqft left`). Same strip next to the
+  add-subcontractor terms and on the Add/Edit Stage form.
+- Term fields (contract type, rate, sqft, lump sum, retention) use one shared
+  grid (`.stage-terms-grid` of equal `.stage-term-field` columns, plus the
+  submit button in the member row), so every label sits directly above its own
+  input and the whole row shares one baseline. The help text is printed once,
+  after the grid, never under a single input.
+- The sqft box keeps `max` = remaining and its placeholder shows the remaining
+  sqft; client-side JS blocks submitting more than the stage still has free.
+- The per-member terms editor (pen button) uses the same grid and states the
+  maximum that member can be set to (remaining excluding it + its own sqft).
+- Narrow screens: the member table scrolls inside its own `.table-responsive`
+  instead of squeezing the columns until every header letter wraps; the terms
+  grid collapses to two columns.
+- Regression guard: `python scripts/qa_browser.py` asserts in a real browser
+  that the panel is not inside the stages table, its five term fields share one
+  row, no child crosses the card edge and the page has no horizontal overflow;
+  `tests/test_multi_subcontractors.py` pins the same structure server-side.
+- "Currently assigned" subcontractors render as chips instead of long badge
+  lines on the Add/Edit Stage form.
 
 ## Deployment
 Back up the database and deploy all changed modules/templates together. Do not run

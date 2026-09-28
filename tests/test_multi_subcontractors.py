@@ -30,6 +30,32 @@ class MultiSubcontractorTests(unittest.TestCase):
     def assign(self):
         self.post('shift/subcontractor', subcontractor_id=self.second.id)
 
+    def test_stage_forms_use_bounded_compact_terms_layout(self):
+        self.stage.qty_sqft = 2000
+        self.second.name = 'Long subcontractor name ' * 8
+        db.session.commit()
+        for path in (f'/hdc/projects/{self.project.id}',
+                     f'/hdc/stage/{self.stage.id}/edit',
+                     f'/hdc/projects/{self.project.id}/stage/add'):
+            with self.subTest(path=path):
+                response = self.client.get(path)
+                self.assertEqual(response.status_code, 200)
+                html = response.get_data(as_text=True)
+                self.assertIn('stage-terms-grid', html)
+                self.assertIn('stage-terms-help', html)
+                self.assertIn('stage-sub-name', html)
+                self.assertNotIn('row g-2 mt-1 align-items-end', html)
+                # Help is after the field grid, never underneath just one input.
+                terms = html.split('class="stage-terms-grid mt-2"', 1)[1]
+                fields, help_text = terms.split('stage-terms-help', 1)
+                self.assertNotIn('auto-assign', fields)
+                if '/stage/add' not in path:
+                    self.assertIn('Blank sqft auto-assigns', help_text)
+        html = self.client.get(f'/hdc/projects/{self.project.id}').get_data(as_text=True)
+        self.assertIn('stage-table-viewport', html)
+        self.assertIn('stage-member-terms stage-terms-grid', html)
+        self.assertIn('<span class="form-label small mb-0">Retention %</span>', html)
+
     def test_members_survive_assignment_and_reconciliation(self):
         self.assign()
         self.assign()
@@ -169,26 +195,31 @@ class StageSqftPanelLayoutTests(MultiSubcontractorTests):
 
     def test_panel_renders_outside_the_stages_table(self):
         page = self.client.get(f'/hdc/projects/{self.project.id}').get_data(as_text=True)
-        marker = f'class="collapse stage-panel-wrap" id="stage-subs-{self.stage.id}"'
+        marker = f'class="collapse stage-details-row stage-panel-wrap" id="stage-details-{self.stage.id}"'
         self.assertIn(marker, page)
         head = page[:page.index(marker)]
         self.assertEqual(
             head.count('<table'), head.count('</table>'),
             'stage panel must render outside the stages table, which clips its fields')
+        # The panel is still the collapse target and keeps both anchors.
+        panel = page[page.index(marker):]
+        panel = panel[:panel.index('<!-- FINANCIAL BREAKDOWN')]
+        self.assertIn(f'id="stage-subs-{self.stage.id}"', panel)
+        self.assertIn(f'id="drawings-{self.stage.id}"', panel)
+        self.assertIn('stage-details-section', panel)
         # The old row-based panel is gone.
-        self.assertNotIn('stage-subs-row', page)
+        self.assertNotIn('stage-details-row"><td', page)
 
     def test_allocated_remaining_strip_and_shared_terms_grid(self):
         page = self.client.get(f'/hdc/projects/{self.project.id}').get_data(as_text=True)
         self.assertIn('stage-sqft-strip', page)
         for expected in ('2,000 sqft', '100 sqft', '1,900 sqft'):
             self.assertIn(expected, page)
-        # Five equally sized fields in one grid row keep horizontal fields aligned.
+        # Five equally sized fields in one grid keep the horizontal fields aligned.
         self.assertIn('stage-terms-grid', page)
-        field_class = page.count('class="col-6 col-lg"')
-        self.assertGreaterEqual(field_class, 5)
-        self.assertEqual(field_class % 5, 0,
-                         'every terms grid must hold five equally sized fields')
+        self.assertGreaterEqual(page.count('class="stage-term-field"'), 5)
+        fields = page.count('<span class="form-label small mb-0">')
+        self.assertGreaterEqual(fields, 5)
 
     def test_blank_sqft_still_auto_assigns_only_the_remaining(self):
         self.post('shift/subcontractor', subcontractor_ids=[str(self.second.id)],

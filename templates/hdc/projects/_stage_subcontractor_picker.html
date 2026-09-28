@@ -7,7 +7,7 @@
     of this stage are listed separately by the caller, so they are skipped. -#}
 {% macro stage_sub_picker(pool, stage=None, uid='new', selected=[]) %}
 {% set ns = namespace(available=0) %}
-<div class="stage-sub-picker" data-picker="{{ uid }}">
+<div class="stage-sub-picker border rounded bg-body" data-picker="{{ uid }}">
     <div class="stage-sub-picker-head">
         <i class="fas fa-search text-muted"></i>
         <input type="text" class="form-control form-control-sm stage-sub-search" placeholder="Search by name, code, phone or work type"
@@ -19,16 +19,17 @@
         {% if not (stage and sub.stage_id == stage.id) %}
         {% set busy = sub.stage_id and (not stage or sub.stage_id != stage.id) %}
         {% if not busy %}{% set ns.available = ns.available + 1 %}{% endif %}
-        <label class="stage-sub-option" data-search="{{ ((sub.subcontractor_code or '') ~ ' ' ~ sub.name ~ ' ' ~ (sub.phone or '') ~ ' ' ~ (sub.work_type or '')) | lower }}"
+        <label class="stage-sub-option {% if busy %}text-muted{% endif %}"
+               data-search="{{ ((sub.subcontractor_code or '') ~ ' ' ~ sub.name ~ ' ' ~ (sub.phone or '') ~ ' ' ~ (sub.work_type or '')) | lower }}"
                {% if busy %}title="Already assigned to {{ sub.stage_rel.name if sub.stage_rel else 'another stage' }}{% if sub.stage_rel and sub.stage_rel.project %} ({{ sub.stage_rel.project.name }}){% endif %}. Remove it there first."{% endif %}>
             <input type="checkbox" class="form-check-input m-0" name="subcontractor_ids" value="{{ sub.id }}"
                    {% if busy %}disabled{% elif sub.id|string in selected or sub.id in selected %}checked{% endif %}>
-            <span class="stage-sub-name">{{ sub.name }}</span>
-            <span class="stage-sub-code">{{ sub.subcontractor_code or ('SUB-' ~ sub.id) }}</span>
+            <span class="fw-semibold stage-sub-name">{{ sub.name }}</span>
+            <span class="text-muted stage-sub-code">{{ sub.subcontractor_code or ('SUB-' ~ sub.id) }}</span>
             {% if sub.work_type %}<span class="badge bg-light text-dark border">{{ sub.work_type }}</span>{% endif %}
-            {% if sub.phone %}<span class="stage-sub-phone">{{ sub.phone }}</span>{% endif %}
+            {% if sub.phone %}<span class="text-muted stage-sub-phone">{{ sub.phone }}</span>{% endif %}
             {% if busy %}
-            <span class="badge bg-secondary ms-auto stage-sub-busy">On: {{ sub.stage_rel.name if sub.stage_rel else 'other stage' }}</span>
+            <span class="ms-auto badge bg-secondary text-wrap">On: {{ sub.stage_rel.name if sub.stage_rel else 'other stage' }}</span>
             {% endif %}
         </label>
         {% endif %}
@@ -50,7 +51,7 @@
 {% set remaining = summary.remaining if (summary and summary.remaining is not none) else none %}
 {% set free = remaining or 0 %}
 {% set pct = [ (allocated / total * 100) if total else 0, 100 ] | min %}
-<div class="stage-sqft-strip">
+<div class="stage-sqft-summary stage-sqft-strip">
     <span class="stage-sqft-icon"><i class="fas fa-ruler-combined"></i></span>
     <span class="stage-sqft-item"><span class="stage-sqft-label">Stage</span>
         <span class="stage-sqft-value">{{ "{:,.0f}".format(total) }} sqft</span></span>
@@ -71,48 +72,50 @@
 {% endmacro %}
 
 {#- Optional terms applied to each subcontractor selected in the picker.
-    Fields are equal width and share one label/input grid so the row stays
-    aligned; a blank value keeps that subcontractor's current terms. -#}
+    One grid row of equal-width fields, so the horizontal fields line up:
+    every label sits directly above its own input and the help text comes
+    after the whole grid, never under a single input. -#}
 {% macro stage_sub_terms(stage=None, form={}, prefix='', sqft_summary=None) %}
 {% set summary = sqft_summary or (stage.sqft_allocation_summary if stage else None) %}
 {% set has_cap = summary and summary.has_cap %}
-{% if has_cap %}{{ stage_sqft_strip(summary) }}{% endif %}
 {% set remaining = (summary.remaining if (summary and summary.remaining is not none) else none) %}
-<div class="row g-2 align-items-end stage-terms-grid">
-    <div class="col-6 col-lg">
-        <label class="form-label small mb-0" for="{{ prefix }}contract_type">Contract type</label>
-        <select name="{{ prefix }}contract_type" id="{{ prefix }}contract_type" class="form-select form-select-sm stage-sub-ctype">
+{% if has_cap %}{{ stage_sqft_strip(summary) }}{% endif %}
+<div class="stage-terms-grid mt-2">
+    <label class="stage-term-field">
+        <span class="form-label small mb-0">Contract type</span>
+        <select name="{{ prefix }}contract_type" class="form-select form-select-sm stage-sub-ctype">
             <option value="">Keep existing</option>
             <option value="sqft" {% if form.get(prefix ~ 'contract_type') == 'sqft' %}selected{% endif %}>Per sqft</option>
             <option value="lump_sum" {% if form.get(prefix ~ 'contract_type') == 'lump_sum' %}selected{% endif %}>Lump sum</option>
         </select>
-    </div>
-    <div class="col-6 col-lg">
-        <label class="form-label small mb-0" for="{{ prefix }}rate_per_sqft">Sub rate / sqft</label>
-        <input type="number" step="0.01" min="0" name="{{ prefix }}rate_per_sqft" id="{{ prefix }}rate_per_sqft"
-               class="form-control form-control-sm" value="{{ form.get(prefix ~ 'rate_per_sqft', '') }}">
-    </div>
-    <div class="col-6 col-lg">
-        <label class="form-label small mb-0 text-nowrap" for="{{ prefix }}total_sqft">Sqft{% if has_cap and remaining is not none %} (max {{ "{:,.0f}".format(remaining) }}){% endif %}</label>
+    </label>
+    <label class="stage-term-field">
+        <span class="form-label small mb-0">Sub rate / sqft</span>
+        <input type="number" step="0.01" min="0" name="{{ prefix }}rate_per_sqft" class="form-control form-control-sm"
+               value="{{ form.get(prefix ~ 'rate_per_sqft', '') }}">
+    </label>
+    <label class="stage-term-field">
+        <span class="form-label small mb-0">Sqft{% if has_cap and remaining is not none %} (max {{ "{:,.0f}".format(remaining) }}){% endif %}</span>
         <input type="number" step="0.01" min="0" {% if has_cap and remaining is not none %}max="{{ remaining }}"{% endif %}
-               name="{{ prefix }}total_sqft" id="{{ prefix }}total_sqft" class="form-control form-control-sm stage-sub-sqft-input"
+               name="{{ prefix }}total_sqft" class="form-control form-control-sm stage-sub-sqft-input"
                placeholder="{% if has_cap and remaining is not none %}{{ "{:,.0f}".format(remaining) }} remaining{% else %}Sqft{% endif %}"
                value="{{ form.get(prefix ~ 'total_sqft') or '' }}">
-    </div>
-    <div class="col-6 col-lg">
-        <label class="form-label small mb-0" for="{{ prefix }}lump_sum_amount">Lump sum</label>
-        <input type="number" step="0.01" min="0" name="{{ prefix }}lump_sum_amount" id="{{ prefix }}lump_sum_amount"
-               class="form-control form-control-sm" value="{{ form.get(prefix ~ 'lump_sum_amount', '') }}">
-    </div>
-    <div class="col-6 col-lg">
-        <label class="form-label small mb-0 text-nowrap" for="{{ prefix }}retention_pct">Retention %</label>
-        <input type="number" step="0.01" min="0" max="100" name="{{ prefix }}retention_pct" id="{{ prefix }}retention_pct"
-               class="form-control form-control-sm" value="{{ form.get(prefix ~ 'retention_pct', '') }}">
-    </div>
+    </label>
+    <label class="stage-term-field">
+        <span class="form-label small mb-0">Lump sum</span>
+        <input type="number" step="0.01" min="0" name="{{ prefix }}lump_sum_amount" class="form-control form-control-sm"
+               value="{{ form.get(prefix ~ 'lump_sum_amount', '') }}">
+    </label>
+    <label class="stage-term-field">
+        <span class="form-label small mb-0">Retention %</span>
+        <input type="number" step="0.01" min="0" max="100" name="{{ prefix }}retention_pct" class="form-control form-control-sm"
+               value="{{ form.get(prefix ~ 'retention_pct', '') }}">
+    </label>
 </div>
-<div class="stage-terms-hint">Terms apply to <strong>each</strong> selected subcontractor — leave a field blank to keep
-    that subcontractor's current value.{% if has_cap and remaining is not none %} A blank sqft auto-assigns the
-    remaining <strong>{{ "{:,.0f}".format(remaining) }}</strong> sqft.{% endif %}</div>
+<div class="form-text stage-terms-help">Terms apply to <strong>each</strong> selected subcontractor — blank fields keep
+    existing values.{% if has_cap and remaining is not none %} Blank sqft auto-assigns the remaining area (currently
+    <strong>{{ "{:,.0f}".format(remaining) }}</strong> sqft).{% endif %}
+    You can edit individual terms after adding.</div>
 {% endmacro %}
 
 {#- Wire search + selected counter for every picker on the page. -#}
@@ -147,7 +150,7 @@ document.addEventListener('DOMContentLoaded', function () {
         refreshCount();
     });
 
-    // Remaining sqft client-side guard: a picker cannot submit more sqft than
+    // Remaining sqft client-side guard: the picker cannot submit more sqft than
     // the stage still has free, so the server-side guard is never a surprise.
     document.querySelectorAll('form').forEach(function (form) {
         var sqftInput = form.querySelector('.stage-sub-sqft-input');

@@ -163,6 +163,10 @@
             <span class="badge bg-secondary ms-1">{{ stages|length }}</span>
         </span>
         <div class="d-flex gap-2">
+            <button type="button" id="stage-expand-all" class="btn btn-sm btn-outline-secondary"
+                    title="Open or close every stage panel">
+                <i class="fas fa-chevrons-down me-1"></i>Expand all
+            </button>
             <a href="{{ url_for('hdc_stage_library', project_id=p.id) }}" class="btn btn-sm btn-outline-secondary" title="Manage stage library">
                 <i class="fas fa-book me-1"></i>Stage Library
             </a>
@@ -172,7 +176,7 @@
         </div>
     </div>
 
-    <div class="table-responsive">
+    <div class="table-responsive stage-table-viewport">
         <table class="table hdc-table table-sm mb-0">
             <thead><tr>
                 <th>Stage</th><th>Status</th><th>Exec</th><th>Basis</th>
@@ -185,11 +189,22 @@
             <tbody>
             {% for s in stages %}
             <tr {{ s|hdc_row_attrs }}>
-                <td>
-                    <a href="{{ url_for('hdc_stage_ledger', sid=s.id) }}" class="text-decoration-none fw-bold">
-                        {{ s.name }}
-                    </a>
-                    <div><small><a href="{{ url_for('hdc_stage_ledger', sid=s.id) }}" class="text-muted">View Stage Ledger</a></small></div>
+                <td class="stage-name-cell">
+                    <div class="d-flex align-items-start gap-2">
+                        <button type="button" class="stage-expand-btn" data-bs-toggle="collapse"
+                                data-bs-target="#stage-details-{{ s.id }}" aria-expanded="false"
+                                aria-controls="stage-details-{{ s.id }}"
+                                title="Show what's inside “{{ s.name }}”">
+                            <i class="fas fa-chevron-right" aria-hidden="true"></i>
+                            <span class="visually-hidden">Expand or collapse {{ s.name }}</span>
+                        </button>
+                        <div class="min-w-0">
+                            <a href="{{ url_for('hdc_stage_ledger', sid=s.id) }}" class="text-decoration-none fw-bold">
+                                {{ s.name }}
+                            </a>
+                            <div><small><a href="{{ url_for('hdc_stage_ledger', sid=s.id) }}" class="text-muted">View Stage Ledger</a></small></div>
+                        </div>
+                    </div>
                 </td>
                 <td>
                     <span class="badge {% if s.status in ['completed','Complete'] %}bg-success{% elif s.status in ['paused','On Hold'] %}bg-warning text-dark{% else %}bg-primary{% endif %}">
@@ -199,21 +214,13 @@
                 <td class="text-nowrap">
                     {% set members = s.assigned_subcontractors %}
                     {% if members %}
-                    <span class="badge bg-warning text-dark"><i class="fas fa-hard-hat me-1"></i>Sub</span>
-                    {% for member in members %}
-                    <div class="small">{{ member.name }}: {{ "%.2f"|format(member.effective_progress_percentage or 0) }}%</div>
-                    {% endfor %}
+                    <span class="badge bg-warning text-dark"
+                          title="{{ members|map(attribute='name')|join(', ') }} — click the arrow next to the stage name for details">
+                        <i class="fas fa-hard-hat me-1"></i>Sub ×{{ members|length }}
+                    </span>
                     {% else %}
                     <span class="badge bg-secondary"><i class="fas fa-building me-1"></i>Own</span>
                     {% endif %}
-                    <div class="mt-1">
-                        <button type="button" class="btn btn-sm {% if members %}btn-outline-warning{% else %}btn-outline-secondary{% endif %} py-0 px-2"
-                                data-bs-toggle="collapse" data-bs-target="#stage-subs-{{ s.id }}" aria-controls="stage-subs-{{ s.id }}"
-                                title="Assign / manage subcontractors for this stage">
-                            <i class="fas fa-users-gear me-1"></i>Subcontractors
-                            <span class="badge {% if members %}bg-warning text-dark{% else %}bg-light text-dark border{% endif %} ms-1">{{ members|length }}</span>
-                        </button>
-                    </div>
                 </td>
                 <td><small class="text-muted">{{ s.contract_basis or '—' }}</small></td>
                 <td>{{ "{:,.0f}".format(s.rate_per_sqft) if s.rate_per_sqft else '—' }}</td>
@@ -235,10 +242,10 @@
                 <td class="fw-bold {% if s.stage_profit >= 0 %}text-success{% else %}text-danger{% endif %}">
                     {{ "{:,.0f}".format(s.stage_profit) }}
                 </td>
-                <td>
-                    <button class="btn btn-xs btn-outline-secondary btn-sm" data-bs-toggle="collapse" data-bs-target="#drawings-{{ s.id }}">
-                        <i class="fas fa-file-pdf me-1"></i>{{ s.drawings|length }}
-                    </button>
+                <td class="text-nowrap">
+                    <span class="badge bg-light text-dark border" title="Drawings — click the arrow next to the stage name to manage">
+                        <i class="fas fa-file-pdf me-1 text-danger"></i>{{ s.drawings|length }}
+                    </span>
                 </td>
                 <td class="text-nowrap">
                     <a href="{{ url_for('hdc_edit_stage', sid=s.id) }}" class="btn btn-xs btn-outline-primary btn-sm" title="Edit Stage">
@@ -308,32 +315,41 @@
             {% endif %}
         </table>
     </div>
-
-    {#- Stage detail panels live OUTSIDE the (horizontally scrollable) stages
-        table: an 18-column table would force them wider than the card, which
-        clipped the fields and pushed them out of view. -#}
+    {#- Stage detail panels are rendered under the stages table: inside an
+        18-column horizontal scroller the panel would be stretched past the
+        card edge, which clipped the fields and broke their alignment. -#}
     {% for s in stages %}
     {% set members = s.assigned_subcontractors %}
     {% set stage_done = (s.status or '')|lower in ['completed', 'complete'] %}
-    <div class="collapse stage-panel-wrap" id="stage-subs-{{ s.id }}">
-        <div class="stage-panel">
-            <div class="stage-panel-head">
-                <div class="stage-panel-title">
-                    <i class="fas fa-hard-hat text-warning"></i>
-                    Subcontractors on &ldquo;{{ s.name }}&rdquo;
-                    <span class="badge bg-secondary ms-1">{{ members|length }}</span>
-                    {% if stage_done %}<span class="badge bg-success ms-1">Completed</span>{% endif %}
+    <div class="collapse stage-details-row stage-panel-wrap" id="stage-details-{{ s.id }}">
+        <div class="stage-sub-panel stage-details-panel p-2 my-1">
+            <div class="d-flex flex-wrap justify-content-between align-items-center mb-2 gap-2">
+                <div class="fw-bold">
+                    <i class="fas fa-folder-open me-1 text-primary"></i>Inside “{{ s.name }}”
+                    <span class="badge {% if s.status in ['completed','Complete'] %}bg-success{% elif s.status in ['paused','On Hold'] %}bg-warning text-dark{% else %}bg-primary{% endif %} ms-1">{{ s.status }}</span>
+                    {% if members %}
+                    <span class="badge bg-warning text-dark ms-1"><i class="fas fa-hard-hat me-1"></i>{{ members|length }} subcontractor{{ 's' if members|length != 1 }}</span>
+                    {% else %}
+                    <span class="badge bg-secondary ms-1"><i class="fas fa-building me-1"></i>Company executed</span>
+                    {% endif %}
                 </div>
-                <div class="stage-panel-meta">
-                    Owner value {{ "{:,.0f}".format(s.contract_value or 0) }}{% if (s.contract_basis or '') == 'Per Sq Ft' %} ({{ "{:,.0f}".format(s.effective_rate or 0) }}/sqft){% endif %}
-                    {%- if members %} · Sub contracts {{ "{:,.0f}".format(members|sum(attribute='contract_value')) }}{% endif %}
+                <div class="stage-details-facts small text-muted d-flex flex-wrap gap-2 align-items-center">
+                    <span>Basis: <strong>{{ s.contract_basis or '—' }}</strong></span>
+                    {% if s.rate_per_sqft %}<span class="vr"></span><span>Rate/sqft: <strong>{{ "{:,.0f}".format(s.rate_per_sqft) }}</strong></span>{% endif %}
+                    {% if s.discount_per_sqft %}<span class="vr"></span><span>Disc/sqft: <strong class="text-danger">{{ "{:,.0f}".format(s.discount_per_sqft) }}</strong></span>{% endif %}
+                    {% if s.qty_sqft %}<span class="vr"></span><span>Sqft: <strong>{{ "{:,.0f}".format(s.qty_sqft) }}</strong></span>{% endif %}
+                    {% if s.lump_sum_value %}<span class="vr"></span><span>Lump sum: <strong>{{ "{:,.0f}".format(s.lump_sum_value) }}</strong></span>{% endif %}
+                    <span class="vr"></span><span>Owner value: <strong class="text-success">{{ "{:,.0f}".format(s.contract_value or 0) }}</strong></span>
+                    {% if members %}<span class="vr"></span><span>Sub contracts: <strong>{{ "{:,.0f}".format(members|sum(attribute='contract_value')) }}</strong></span>{% endif %}
                 </div>
             </div>
-
             {% if (s.qty_sqft or 0) > 0 %}{{ stage_sqft_strip(s.sqft_allocation_summary) }}{% endif %}
 
+            <div class="stage-details-section" id="stage-subs-{{ s.id }}">
+                <div class="stage-details-section-title"><i class="fas fa-users-gear me-1 text-warning"></i>Subcontractors on this stage
+                    <span class="badge bg-secondary ms-1">{{ members|length }}</span></div>
             {% if members %}
-            <div class="table-responsive stage-panel-table">
+            <div class="table-responsive stage-panel-table mb-3">
                 <table class="table table-sm table-bordered align-middle mb-0 bg-body">
                     <thead class="table-light"><tr>
                         <th>Subcontractor</th><th>Type</th><th>Rate/sqft</th><th>Sqft</th><th>Lump sum</th><th>Ret %</th>
@@ -346,19 +362,19 @@
                             <a href="{{ url_for('hdc_subcontractor_ledger', sid=member.id) }}" class="fw-semibold text-decoration-none">{{ member.name }}</a>
                             <div class="small text-muted">{{ member.subcontractor_code or ('SUB-' ~ member.id) }}{% if member.work_type %} · {{ member.work_type }}{% endif %}</div>
                         </td>
-                        <td class="small text-nowrap">{{ 'Per sqft' if member.contract_type == 'sqft' else 'Lump sum' }}</td>
-                        <td class="small text-nowrap">{{ "{:,.2f}".format(member.rate_per_sqft or 0) if member.contract_type == 'sqft' else '—' }}</td>
-                        <td class="small text-nowrap">{{ "{:,.0f}".format(member.total_sqft or 0) if member.contract_type == 'sqft' else '—' }}</td>
-                        <td class="small text-nowrap">{{ "{:,.0f}".format(member.lump_sum_amount or 0) if member.contract_type != 'sqft' else '—' }}</td>
+                        <td class="small">{{ 'Per sqft' if member.contract_type == 'sqft' else 'Lump sum' }}</td>
+                        <td class="small">{{ "{:,.2f}".format(member.rate_per_sqft or 0) if member.contract_type == 'sqft' else '—' }}</td>
+                        <td class="small">{{ "{:,.0f}".format(member.total_sqft or 0) if member.contract_type == 'sqft' else '—' }}</td>
+                        <td class="small">{{ "{:,.0f}".format(member.lump_sum_amount or 0) if member.contract_type != 'sqft' else '—' }}</td>
                         <td class="small">{{ "%.1f"|format(member.retention_percentage or 0) }}</td>
-                        <td class="fw-semibold text-nowrap">{{ "{:,.0f}".format(member.contract_value or 0) }}</td>
-                        <td class="small text-nowrap">{{ "{:,.0f}".format(member.total_paid or 0) }}</td>
-                        <td>
+                        <td class="fw-semibold">{{ "{:,.0f}".format(member.contract_value or 0) }}</td>
+                        <td class="small">{{ "{:,.0f}".format(member.total_paid or 0) }}</td>
+                        <td style="min-width:190px">
                             <form method="POST" action="{{ url_for('hdc_stage_sub_progress', sid=s.id) }}" class="d-flex gap-1">
                                 <input type="hidden" name="subcontractor_id" value="{{ member.id }}">
-                                <input type="number" step="0.01" min="0" max="100" name="work_done_percentage" class="form-control form-control-sm stage-panel-progress"
-                                       value="{{ member.work_done_percentage or 0 }}" aria-label="{{ member.name }} completion %">
-                                <button class="btn btn-sm btn-primary text-nowrap">Save</button>
+                                <input type="number" step="0.01" min="0" max="100" name="work_done_percentage" class="form-control form-control-sm"
+                                       style="width:90px" value="{{ member.work_done_percentage or 0 }}" aria-label="{{ member.name }} completion %">
+                                <button class="btn btn-sm btn-primary">Save</button>
                             </form>
                         </td>
                         <td class="text-end text-nowrap">
@@ -376,50 +392,25 @@
                         </td>
                     </tr>
                     {% if not stage_done %}
-                    {% set rem_excl = s.remaining_sqft_excluding(member.id) %}
                     <tr class="collapse" id="member-terms-{{ s.id }}-{{ member.id }}">
-                        <td colspan="10" class="stage-terms-cell">
-                            <div class="stage-terms-box">
-                                {% if (s.qty_sqft or 0) > 0 %}
-                                <div class="stage-terms-note">Excluding {{ member.name }}, the stage has
-                                    <strong>{{ "{:,.0f}".format(rem_excl or 0) }} sqft</strong> free — this member can be set to at most
-                                    <strong>{{ "{:,.0f}".format((rem_excl or 0) + (member.total_sqft or 0)) }} sqft</strong>.</div>
-                                {% endif %}
-                                <form method="POST" action="{{ url_for('hdc_stage_shift_to_subcontractor', sid=s.id) }}" class="row g-2 align-items-end">
-                                    <input type="hidden" name="subcontractor_id" value="{{ member.id }}">
-                                    <div class="col-12"><span class="small fw-bold">Terms for {{ member.name }}</span></div>
-                                    <div class="col-6 col-lg">
-                                        <label class="form-label small mb-0">Contract type</label>
-                                        <select name="contract_type" class="form-select form-select-sm">
-                                            <option value="sqft" {% if member.contract_type == 'sqft' %}selected{% endif %}>Per sqft</option>
-                                            <option value="lump_sum" {% if member.contract_type != 'sqft' %}selected{% endif %}>Lump sum</option>
-                                        </select>
-                                    </div>
-                                    <div class="col-6 col-lg">
-                                        <label class="form-label small mb-0">Sub rate / sqft</label>
-                                        <input type="number" step="0.01" min="0" name="rate_per_sqft" class="form-control form-control-sm"
-                                               placeholder="Rate" value="{{ member.rate_per_sqft or '' }}">
-                                    </div>
-                                    <div class="col-6 col-lg">
-                                        <label class="form-label small mb-0 text-nowrap">Sqft{% if (s.qty_sqft or 0) > 0 %} (max {{ "{:,.0f}".format((rem_excl or 0) + (member.total_sqft or 0)) }}){% endif %}</label>
-                                        <input type="number" step="0.01" min="0" {% if (s.qty_sqft or 0) > 0 %}max="{{ (rem_excl or 0) + (member.total_sqft or 0) }}"{% endif %}
-                                               name="total_sqft" class="form-control form-control-sm" placeholder="Sqft" value="{{ member.total_sqft or '' }}">
-                                    </div>
-                                    <div class="col-6 col-lg">
-                                        <label class="form-label small mb-0">Lump sum</label>
-                                        <input type="number" step="0.01" min="0" name="lump_sum_amount" class="form-control form-control-sm"
-                                               placeholder="Lump" value="{{ member.lump_sum_amount or '' }}">
-                                    </div>
-                                    <div class="col-6 col-lg">
-                                        <label class="form-label small mb-0 text-nowrap">Retention %</label>
-                                        <input type="number" step="0.01" min="0" max="100" name="retention_pct" class="form-control form-control-sm"
-                                               placeholder="Ret %" value="{{ member.retention_percentage or '' }}">
-                                    </div>
-                                    <div class="col-12 col-lg-auto">
-                                        <button class="btn btn-sm btn-primary w-100" type="submit">Update terms</button>
-                                    </div>
-                                </form>
-                            </div>
+                        <td colspan="10" class="bg-light-subtle">
+                            {% set rem_excl = s.remaining_sqft_excluding(member.id) %}
+                            {% if (s.qty_sqft or 0) > 0 and member.contract_type == 'sqft' %}
+                            <div class="small text-muted mb-1">Remaining if you exclude {{ member.name }}: <strong>{{ "{:,.0f}".format(rem_excl or 0) }} sqft</strong> (stage {{ "{:,.0f}".format(s.qty_sqft or 0) }} - others {{ "{:,.0f}".format((s.subcontracted_sqft or 0) - (member.total_sqft or 0)) }}) — max you can set for this member is {{ "{:,.0f}".format((rem_excl or 0) + (member.total_sqft or 0)) }} sqft if you include its current.</div>
+                            {% endif %}
+                            <form method="POST" action="{{ url_for('hdc_stage_shift_to_subcontractor', sid=s.id) }}" class="stage-member-terms stage-terms-grid">
+                                <input type="hidden" name="subcontractor_id" value="{{ member.id }}">
+                                <span class="small fw-bold stage-terms-heading">Terms for {{ member.name }}:</span>
+                                <label class="stage-term-field"><span class="form-label small mb-0">Contract type</span><select name="contract_type" class="form-select form-select-sm">
+                                    <option value="sqft" {% if member.contract_type == 'sqft' %}selected{% endif %}>Per sqft</option>
+                                    <option value="lump_sum" {% if member.contract_type != 'sqft' %}selected{% endif %}>Lump sum</option>
+                                </select></label>
+                                <label class="stage-term-field"><span class="form-label small mb-0">Rate / sqft</span><input type="number" step="0.01" min="0" name="rate_per_sqft" class="form-control form-control-sm" placeholder="Rate" value="{{ member.rate_per_sqft or '' }}"></label>
+                                <label class="stage-term-field"><span class="form-label small mb-0">Sqft</span><input type="number" step="0.01" min="0" {% if (s.qty_sqft or 0) > 0 %}max="{{ (rem_excl or 0) + (member.total_sqft or 0) }}"{% endif %} name="total_sqft" class="form-control form-control-sm" placeholder="Sqft (max {{ "{:,.0f}".format((rem_excl or 0) + (member.total_sqft or 0)) if (s.qty_sqft or 0) > 0 else '' }})" value="{{ member.total_sqft or '' }}"></label>
+                                <label class="stage-term-field"><span class="form-label small mb-0">Lump sum</span><input type="number" step="0.01" min="0" name="lump_sum_amount" class="form-control form-control-sm" placeholder="Lump" value="{{ member.lump_sum_amount or '' }}"></label>
+                                <label class="stage-term-field"><span class="form-label small mb-0">Retention %</span><input type="number" step="0.01" min="0" max="100" name="retention_pct" class="form-control form-control-sm" placeholder="Ret %" value="{{ member.retention_percentage or '' }}"></label>
+                                <button class="btn btn-sm btn-primary stage-terms-submit">Update terms</button>
+                            </form>
                         </td>
                     </tr>
                     {% endif %}
@@ -428,71 +419,62 @@
                 </table>
             </div>
             {% else %}
-            <div class="stage-panel-empty">No subcontractors on this stage yet — it is executed by the company. Add one or more below.</div>
+            <div class="small text-muted mb-2">No subcontractors on this stage yet — it is executed by the company. Add one or more below.</div>
             {% endif %}
 
             {% if stage_done %}
-            <div class="alert alert-secondary py-2 small mb-0 mt-2">This stage is completed. Reopen it (<i class="fas fa-undo"></i>) to add subcontractors or change terms.</div>
+            <div class="alert alert-secondary py-2 small mb-0">This stage is completed. Reopen it (<i class="fas fa-undo"></i>) to add subcontractors or change terms.</div>
             {% else %}
-            <div class="stage-panel-add">
-                <div class="stage-panel-subtitle"><i class="fas fa-user-plus me-1"></i>Add subcontractors to this stage
-                    <span class="text-muted fw-normal">(tick one or more — existing assignments are kept)</span></div>
-                <form method="POST" action="{{ url_for('hdc_stage_shift_to_subcontractor', sid=s.id) }}" class="stage-sub-add-form">
-                    {{ stage_sub_picker(subcontractor_pool, s, 's' ~ s.id) }}
-                    {{ stage_sub_terms(s, {}, '', s.sqft_allocation_summary) }}
-                    <div class="mt-2">
-                        <button type="submit" class="btn btn-sm btn-warning"><i class="fas fa-user-plus me-1"></i>Add selected subcontractors</button>
-                    </div>
-                </form>
-            </div>
-            {% endif %}
-        </div>
-    </div>
-
-    <div class="collapse stage-panel-wrap" id="drawings-{{ s.id }}">
-        <div class="stage-panel stage-panel-drawings">
-            <div class="stage-panel-head">
-                <div class="stage-panel-title"><i class="fas fa-file-pdf text-danger"></i> Drawings for &ldquo;{{ s.name }}&rdquo;
-                    <span class="badge bg-secondary ms-1">{{ s.drawings|length }}</span></div>
-            </div>
-            <div class="d-flex flex-column gap-2">
-                <form method="POST" action="{{ url_for('hdc_stage_drawings_upload', sid=s.id) }}" enctype="multipart/form-data" class="row g-2 align-items-center">
-                    <div class="col-12 col-md-auto"><span class="small text-muted fw-bold">Upload PDF Drawings:</span></div>
-                    <div class="col-12 col-md-5">
-                        <input type="file" name="drawings" accept="application/pdf,.pdf" multiple required class="form-control form-control-sm">
-                    </div>
-                    <div class="col-12 col-md-auto">
-                        <button type="submit" class="btn btn-sm btn-mint"><i class="fas fa-upload me-1"></i>Upload</button>
-                    </div>
-                </form>
-                {% if s.drawings %}
-                <div class="table-responsive">
-                    <table class="table table-sm mb-0">
-                        <thead><tr><th>File</th><th>Uploaded</th><th></th></tr></thead>
-                        <tbody>
-                            {% for d in s.drawings | sort(attribute='created_at', reverse=True) %}
-                            <tr {{ d|hdc_row_attrs }}>
-                                <td><a href="{{ url_for('hdc_stage_drawing_view', did=d.id) }}" target="_blank" class="text-decoration-none"><i class="fas fa-file-pdf text-danger me-1"></i>{{ d.original_name }}</a></td>
-                                <td class="small text-muted text-nowrap">{{ fmt_pkt(d.updated_at or d.created_at) }}</td>
-                                <td class="text-nowrap">
-                                    <form method="POST" action="{{ url_for('hdc_stage_drawing_replace', did=d.id) }}" enctype="multipart/form-data" class="d-inline-flex gap-1 align-items-center">
-                                        <input type="file" name="drawing_file" accept="application/pdf,.pdf" required class="form-control form-control-sm stage-panel-file">
-                                        <button type="submit" class="btn btn-xs btn-outline-primary btn-sm">Replace</button>
-                                    </form>
-                                    <form method="POST" action="{{ url_for('hdc_stage_drawing_delete', did=d.id) }}" class="d-inline" onsubmit="return confirm('Delete this drawing?')">
-                                        <button type="submit" class="btn btn-xs btn-outline-danger btn-sm ms-1">Delete</button>
-                                    </form>
-                                </td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
+            <form method="POST" action="{{ url_for('hdc_stage_shift_to_subcontractor', sid=s.id) }}" class="stage-sub-add-form">
+                <div class="small fw-bold mb-1"><i class="fas fa-user-plus me-1"></i>Add subcontractors to this stage
+                    <span class="fw-normal text-muted">(select one or more; existing assignments stay)</span></div>
+                {{ stage_sub_picker(subcontractor_pool, s, 's' ~ s.id) }}
+                {{ stage_sub_terms(s, {}, '', s.sqft_allocation_summary) }}
+                <div class="mt-2">
+                    <button type="submit" class="btn btn-sm btn-warning"><i class="fas fa-user-plus me-1"></i>Add selected subcontractors</button>
                 </div>
-                {% else %}
-                <div class="small text-muted">No drawings uploaded for this stage yet.</div>
-                {% endif %}
+            </form>
+            {% endif %}
+            </div>
+            <div class="stage-details-section" id="drawings-{{ s.id }}">
+                <div class="stage-details-section-title"><i class="fas fa-file-pdf me-1 text-danger"></i>Drawings
+                    <span class="badge bg-secondary ms-1">{{ s.drawings|length }}</span></div>
+                <div class="d-flex flex-column gap-2">
+            <form method="POST" action="{{ url_for('hdc_stage_drawings_upload', sid=s.id) }}" enctype="multipart/form-data" class="d-flex flex-wrap gap-2 align-items-center">
+                <span class="small text-muted fw-bold">Upload PDF Drawings:</span>
+                <input type="file" name="drawings" accept="application/pdf,.pdf" multiple required class="form-control form-control-sm" style="max-width:320px">
+                <button type="submit" class="btn btn-sm btn-mint"><i class="fas fa-upload me-1"></i>Upload</button>
+            </form>
+            {% if s.drawings %}
+            <div class="table-responsive">
+                <table class="table table-sm mb-0">
+                    <thead><tr><th>File</th><th>Uploaded</th><th></th></tr></thead>
+                    <tbody>
+                        {% for d in s.drawings | sort(attribute='created_at', reverse=True) %}
+                        <tr {{ d|hdc_row_attrs }}>
+                            <td><a href="{{ url_for('hdc_stage_drawing_view', did=d.id) }}" target="_blank" class="text-decoration-none"><i class="fas fa-file-pdf text-danger me-1"></i>{{ d.original_name }}</a></td>
+                            <td class="small text-muted">{{ fmt_pkt(d.updated_at or d.created_at) }}</td>
+                            <td class="text-nowrap">
+                                <form method="POST" action="{{ url_for('hdc_stage_drawing_replace', did=d.id) }}" enctype="multipart/form-data" class="d-inline-flex gap-1 align-items-center">
+                                    <input type="file" name="drawing_file" accept="application/pdf,.pdf" required class="form-control form-control-sm" style="max-width:180px">
+                                    <button type="submit" class="btn btn-xs btn-outline-primary btn-sm">Replace</button>
+                                </form>
+                                <form method="POST" action="{{ url_for('hdc_stage_drawing_delete', did=d.id) }}" class="d-inline" onsubmit="return confirm('Delete this drawing?')">
+                                    <button type="submit" class="btn btn-xs btn-outline-danger btn-sm ms-1">Delete</button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="small text-muted">No drawings uploaded for this stage yet.</div>
+            {% endif %}
+                </div>
             </div>
         </div>
+
     </div>
     {% endfor %}
 </div>
@@ -763,17 +745,73 @@
 {{ stage_sub_picker_js() }}
 <script>
 document.addEventListener('DOMContentLoaded', function () {
-    // Re-open the stage's subcontractor panel after an add/remove/update.
-    var m = (window.location.hash || '').match(/^#stage-subs-(\d+)$/);
+    var OPEN_KEY = 'hdc-open-stage-details:' + window.location.pathname;
+
+    function readOpenSet() {
+        try { return new Set(JSON.parse(sessionStorage.getItem(OPEN_KEY) || '[]')); }
+        catch (e) { return new Set(); }
+    }
+    function writeOpenSet(set) {
+        try { sessionStorage.setItem(OPEN_KEY, JSON.stringify(Array.from(set))); } catch (e) {}
+    }
+
+    function detailRows() {
+        return Array.prototype.slice.call(document.querySelectorAll('.stage-details-row'));
+    }
+
+    // Remember which stage panels are open so they survive form reloads.
+    var restore = readOpenSet();
+    detailRows().forEach(function (row) {
+        row.addEventListener('shown.bs.collapse', function () {
+            var s = readOpenSet(); s.add(row.id); writeOpenSet(s);
+        });
+        row.addEventListener('hidden.bs.collapse', function () {
+            var s = readOpenSet(); s.delete(row.id); writeOpenSet(s);
+        });
+        if (restore.has(row.id) && window.bootstrap && window.bootstrap.Collapse) {
+            new window.bootstrap.Collapse(row, { toggle: false }).show();
+        }
+    });
+
+    // Re-open the stage's detail panel after an add/remove/update
+    // (#stage-details-N or the older #stage-subs-N anchor).
+    var m = (window.location.hash || '').match(/^#(?:stage-details|stage-subs)-(\d+)$/);
     if (m) {
-        var row = document.getElementById('stage-subs-' + m[1]);
+        var row = document.getElementById('stage-details-' + m[1]);
+        var anchor = document.getElementById('stage-subs-' + m[1]) || row;
         if (row && window.bootstrap && window.bootstrap.Collapse) {
             new window.bootstrap.Collapse(row, { toggle: false }).show();
-            row.scrollIntoView({ block: 'center' });
+            anchor.scrollIntoView({ block: 'center' });
         } else if (row) {
             row.classList.add('show');
         }
     }
+
+    // Expand all / Collapse all stage panels.
+    var allBtn = document.getElementById('stage-expand-all');
+    function syncAllBtn() {
+        if (!allBtn) return;
+        var rows = detailRows();
+        var open = rows.filter(function (r) { return r.classList.contains('show'); }).length;
+        var allOpen = rows.length > 0 && open === rows.length;
+        allBtn.innerHTML = allOpen
+            ? '<i class="fas fa-chevrons-up me-1"></i>Collapse all'
+            : '<i class="fas fa-chevrons-down me-1"></i>Expand all';
+    }
+    if (allBtn && window.bootstrap && window.bootstrap.Collapse) {
+        allBtn.addEventListener('click', function () {
+            var rows = detailRows();
+            if (!rows.length) return;
+            var anyClosed = rows.some(function (r) { return !r.classList.contains('show'); });
+            rows.forEach(function (r) {
+                window.bootstrap.Collapse.getOrCreateInstance(r, { toggle: false })[anyClosed ? 'show' : 'hide']();
+            });
+        });
+        document.addEventListener('shown.bs.collapse', syncAllBtn);
+        document.addEventListener('hidden.bs.collapse', syncAllBtn);
+    }
+    syncAllBtn();
+
     document.querySelectorAll('.stage-sub-add-form').forEach(function (form) {
         form.addEventListener('submit', function (e) {
             if (!form.querySelector('input[name="subcontractor_ids"]:checked')) {
