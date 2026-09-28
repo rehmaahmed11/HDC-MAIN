@@ -380,8 +380,10 @@ def register(app):
                 flash('Subcontractors were not assigned because of the error above — add them from the stage\'s Subcontractors panel.', 'warning')
                 return redirect(url_for('hdc_project_detail', pid=pid) + f'#stage-subs-{s.id}')
             return redirect(url_for('hdc_project_detail', pid=pid))
+        # For add form, no allocation yet
         return render_template('projects/stage_form.html', p=p, stage=None, defs=defs, mode='add',
-                               subcontractor_pool=_stage_form_subcontractor_pool(), form={})
+                               subcontractor_pool=_stage_form_subcontractor_pool(), form={},
+                               sqft_summary={'total': 0, 'allocated': 0, 'remaining': None, 'has_cap': False})
 
 
     @app.route('/hdc/stage/<int:sid>/edit', methods=['GET', 'POST'])
@@ -395,6 +397,15 @@ def register(app):
             new_disc  = _flt(request.form.get('discount_per_sqft'))
             new_qty   = _flt(request.form.get('qty_sqft'))
             new_lump  = _flt(request.form.get('lump_sum_value'))
+            # Validate sqft reduction against already allocated
+            if new_qty and new_qty > 0:
+                try:
+                    allocated = float(s.subcontracted_sqft or 0.0)
+                except Exception:
+                    allocated = 0.0
+                if allocated > 0 and new_qty < allocated - 1e-6:
+                    flash(f'Cannot reduce stage sqft to {new_qty:,.0f} because {allocated:,.0f} sqft is already allocated to subcontractors. Remove or reduce subcontractor sqft first.', 'danger')
+                    return redirect(url_for('hdc_edit_stage', sid=s.id))
             changed   = (new_basis != s.contract_basis or new_rate != s.rate_per_sqft or
                          new_disc != s.discount_per_sqft or new_qty != s.qty_sqft or new_lump != s.lump_sum_value)
             if changed:
@@ -421,8 +432,14 @@ def register(app):
                 flash('New subcontractors were not assigned because of the error above.', 'warning')
                 return redirect(url_for('hdc_edit_stage', sid=s.id))
             return redirect(url_for('hdc_project_detail', pid=p.id))
+        # Provide sqft summary for edit form
+        try:
+            sqft_summary = s.sqft_allocation_summary
+        except Exception:
+            sqft_summary = {'total': float(s.qty_sqft or 0), 'allocated': 0, 'remaining': None, 'has_cap': False}
         return render_template('projects/stage_form.html', p=p, stage=s, defs=[], mode='edit',
-                               subcontractor_pool=_stage_form_subcontractor_pool(), form={})
+                               subcontractor_pool=_stage_form_subcontractor_pool(), form={},
+                               sqft_summary=sqft_summary)
 
 
     @app.route('/hdc/stage/<int:sid>/delete', methods=['POST'])
