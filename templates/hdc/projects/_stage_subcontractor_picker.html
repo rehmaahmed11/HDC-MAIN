@@ -42,12 +42,35 @@
 </div>
 {% endmacro %}
 
-{#- Optional terms applied to each subcontractor selected in the picker. -#}
-{% macro stage_sub_terms(stage=None, form={}, prefix='') %}
+{#- Optional terms applied to each subcontractor selected in the picker.
+    Shows remaining sqft so user knows how much is available for others.
+-#}
+{% macro stage_sub_terms(stage=None, form={}, prefix='', sqft_summary=None) %}
+{% set summary = sqft_summary or (stage.sqft_allocation_summary if stage else None) %}
+{% set has_cap = summary and summary.has_cap %}
+{% set total = summary.total if summary else (stage.qty_sqft if stage else 0) %}
+{% set allocated = summary.allocated if summary else (stage.subcontracted_sqft if stage else 0) %}
+{% set remaining = summary.remaining if summary else (stage.remaining_sqft if stage else None) %}
+
+{% if has_cap %}
+<div class="alert alert-info py-2 px-2 small mb-2 d-flex flex-wrap gap-2 align-items-center">
+    <span><i class="fas fa-ruler-combined me-1"></i>Stage sqft: <strong>{{ "{:,.0f}".format(total or 0) }}</strong></span>
+    <span class="vr"></span>
+    <span>Allocated: <strong>{{ "{:,.0f}".format(allocated or 0) }}</strong></span>
+    <span class="vr"></span>
+    <span>Remaining: <strong class="{% if (remaining or 0) <= 0 %}text-danger{% else %}text-success{% endif %}">{{ "{:,.0f}".format(remaining or 0) }}</strong></span>
+    {% if (remaining or 0) <= 0 %}
+    <span class="badge bg-danger">Full — no sqft left for new sqft-type subcontractors</span>
+    {% else %}
+    <span class="badge bg-success">Only {{ "{:,.0f}".format(remaining or 0) }} sqft shown as available to others</span>
+    {% endif %}
+</div>
+{% endif %}
+
 <div class="row g-2 mt-1 align-items-end">
     <div class="col-6 col-md-2">
         <label class="form-label small mb-0">Contract type</label>
-        <select name="{{ prefix }}contract_type" class="form-select form-select-sm">
+        <select name="{{ prefix }}contract_type" class="form-select form-select-sm stage-sub-ctype">
             <option value="">Keep existing</option>
             <option value="sqft" {% if form.get(prefix ~ 'contract_type') == 'sqft' %}selected{% endif %}>Per sqft</option>
             <option value="lump_sum" {% if form.get(prefix ~ 'contract_type') == 'lump_sum' %}selected{% endif %}>Lump sum</option>
@@ -58,9 +81,17 @@
         <input type="number" step="0.01" min="0" name="{{ prefix }}rate_per_sqft" class="form-control form-control-sm" value="{{ form.get(prefix ~ 'rate_per_sqft', '') }}">
     </div>
     <div class="col-6 col-md-2">
-        <label class="form-label small mb-0">Sqft</label>
-        <input type="number" step="0.01" min="0" name="{{ prefix }}total_sqft" class="form-control form-control-sm"
-               value="{{ form.get(prefix ~ 'total_sqft') or ('{:.2f}'.format(stage.qty_sqft) if stage and stage.qty_sqft else '') }}">
+        <label class="form-label small mb-0">Sqft
+            {% if has_cap and remaining is not none %}
+            <span class="text-muted">(max {{ "{:,.0f}".format(remaining or 0) }})</span>
+            {% endif %}
+        </label>
+        <input type="number" step="0.01" min="0" {% if has_cap and remaining is not none %}max="{{ remaining }}"{% endif %} name="{{ prefix }}total_sqft" class="form-control form-control-sm stage-sub-sqft-input"
+               placeholder="{% if has_cap and remaining is not none %}{{ "{:,.0f}".format(remaining) }} remaining{% else %}Sqft{% endif %}"
+               value="{{ form.get(prefix ~ 'total_sqft') or ('' if has_cap else ('{:.2f}'.format(stage.qty_sqft) if stage and stage.qty_sqft else '')) }}">
+        {% if has_cap %}
+        <div class="form-text small">Leave blank to auto-assign remaining ({{ "{:,.0f}".format(remaining or 0) }})</div>
+        {% endif %}
     </div>
     <div class="col-6 col-md-3">
         <label class="form-label small mb-0">Lump sum</label>
@@ -72,7 +103,7 @@
     </div>
 </div>
 <div class="form-text">Terms apply to <strong>each</strong> selected subcontractor. Leave a field blank to keep that
-    subcontractor's current value. You can fine-tune each one's terms after adding.</div>
+    subcontractor's current value. You can fine-tune each one's terms after adding. When stage is 2000 sqft and 1st contractor took 100, only <strong>{{ "{:,.0f}".format(remaining or 0) if has_cap else 'remaining' }}</strong> sqft is available for 2nd/3rd/4th.</div>
 {% endmacro %}
 
 {#- Wire search + selected counter for every picker on the page. -#}
@@ -104,6 +135,25 @@ document.addEventListener('DOMContentLoaded', function () {
         search.addEventListener('keydown', function (e) { if (e.key === 'Enter') e.preventDefault(); });
         picker.addEventListener('change', refreshCount);
         refreshCount();
+    });
+
+    // Remaining sqft client-side guard
+    document.querySelectorAll('.stage-sub-add-form, form').forEach(function(form){
+        var sqftInput = form.querySelector('.stage-sub-sqft-input');
+        if(!sqftInput) return;
+        var max = parseFloat(sqftInput.getAttribute('max'));
+        if(isNaN(max)) return;
+        form.addEventListener('submit', function(e){
+            var ctypeSel = form.querySelector('.stage-sub-ctype');
+            var ctype = ctypeSel ? ctypeSel.value : '';
+            // Only validate if sqft type is selected or if no type filter (assume sqft)
+            var val = parseFloat(sqftInput.value);
+            if(!isNaN(val) && val > max + 0.001){
+                e.preventDefault();
+                alert('Sqft exceeds remaining (' + max.toLocaleString() + '). Only ' + max.toLocaleString() + ' sqft is available to others.\\n\\nExample: Stage 2000 sqft, 1st took 100, remaining 1900. 2nd/3rd/4th can only take from remaining.');
+                sqftInput.focus();
+            }
+        });
     });
 });
 </script>

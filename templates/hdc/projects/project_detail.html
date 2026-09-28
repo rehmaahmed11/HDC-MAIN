@@ -294,6 +294,21 @@
                             <small class="text-muted">Owner value: {{ "{:,.0f}".format(s.contract_value or 0) }}{% if (s.contract_basis or '') == 'Per Sq Ft' %} ({{ "{:,.0f}".format(s.effective_rate or 0) }}/sqft){% endif %}
                                 {% if members %} · Sub contracts total: {{ "{:,.0f}".format(members|sum(attribute='contract_value')) }}{% endif %}</small>
                         </div>
+                        {% if (s.qty_sqft or 0) > 0 %}
+                        <div class="alert alert-info py-2 px-2 small mb-2 d-flex flex-wrap gap-2 align-items-center">
+                            <span><i class="fas fa-ruler-combined me-1"></i>Stage: <strong>{{ "{:,.0f}".format(s.qty_sqft or 0) }} sqft</strong></span>
+                            <span class="vr"></span>
+                            <span>Allocated: <strong>{{ "{:,.0f}".format(s.subcontracted_sqft or 0) }} sqft</strong></span>
+                            <span class="vr"></span>
+                            <span>Remaining: <strong class="{% if (s.remaining_sqft or 0) <= 0 %}text-danger{% else %}text-success{% endif %}">{{ "{:,.0f}".format(s.remaining_sqft or 0) }} sqft</strong></span>
+                            {% if (s.remaining_sqft or 0) <= 0 %}
+                            <span class="badge bg-danger">No sqft left</span>
+                            {% else %}
+                            <span class="badge bg-success">Only {{ "{:,.0f}".format(s.remaining_sqft or 0) }} sqft available to 2nd/3rd/4th contractors</span>
+                            {% endif %}
+                            <span class="text-muted">— e.g. if stage 2000 sqft and 1st took 100, 2nd sees 1900 remaining.</span>
+                        </div>
+                        {% endif %}
 
                         {% if members %}
                         <div class="table-responsive mb-3">
@@ -341,6 +356,10 @@
                                 {% if not stage_done %}
                                 <tr class="collapse" id="member-terms-{{ s.id }}-{{ member.id }}">
                                     <td colspan="10" class="bg-light-subtle">
+                                        {% set rem_excl = s.remaining_sqft_excluding(member.id) %}
+                                        {% if (s.qty_sqft or 0) > 0 and member.contract_type == 'sqft' %}
+                                        <div class="small text-muted mb-1">Remaining if you exclude {{ member.name }}: <strong>{{ "{:,.0f}".format(rem_excl or 0) }} sqft</strong> (stage {{ "{:,.0f}".format(s.qty_sqft or 0) }} - others {{ "{:,.0f}".format((s.subcontracted_sqft or 0) - (member.total_sqft or 0)) }}) — max you can set for this member is {{ "{:,.0f}".format((rem_excl or 0) + (member.total_sqft or 0)) }} sqft if you include its current.</div>
+                                        {% endif %}
                                         <form method="POST" action="{{ url_for('hdc_stage_shift_to_subcontractor', sid=s.id) }}" class="d-flex flex-wrap gap-2 align-items-center">
                                             <input type="hidden" name="subcontractor_id" value="{{ member.id }}">
                                             <span class="small fw-bold">Terms for {{ member.name }}:</span>
@@ -349,7 +368,7 @@
                                                 <option value="lump_sum" {% if member.contract_type != 'sqft' %}selected{% endif %}>Lump sum</option>
                                             </select>
                                             <input type="number" step="0.01" min="0" name="rate_per_sqft" class="form-control form-control-sm" style="width:110px" placeholder="Rate" value="{{ member.rate_per_sqft or '' }}">
-                                            <input type="number" step="0.01" min="0" name="total_sqft" class="form-control form-control-sm" style="width:110px" placeholder="Sqft" value="{{ member.total_sqft or '' }}">
+                                            <input type="number" step="0.01" min="0" {% if (s.qty_sqft or 0) > 0 %}max="{{ (rem_excl or 0) + (member.total_sqft or 0) }}"{% endif %} name="total_sqft" class="form-control form-control-sm" style="width:110px" placeholder="Sqft (max {{ "{:,.0f}".format((rem_excl or 0) + (member.total_sqft or 0)) if (s.qty_sqft or 0) > 0 else '' }})" value="{{ member.total_sqft or '' }}">
                                             <input type="number" step="0.01" min="0" name="lump_sum_amount" class="form-control form-control-sm" style="width:120px" placeholder="Lump" value="{{ member.lump_sum_amount or '' }}">
                                             <input type="number" step="0.01" min="0" max="100" name="retention_pct" class="form-control form-control-sm" style="width:95px" placeholder="Ret %" value="{{ member.retention_percentage or '' }}">
                                             <button class="btn btn-sm btn-primary">Update terms</button>
@@ -370,9 +389,9 @@
                         {% else %}
                         <form method="POST" action="{{ url_for('hdc_stage_shift_to_subcontractor', sid=s.id) }}" class="stage-sub-add-form">
                             <div class="small fw-bold mb-1"><i class="fas fa-user-plus me-1"></i>Add subcontractors to this stage
-                                <span class="fw-normal text-muted">(tick one or more — existing assignments are kept)</span></div>
+                                <span class="fw-normal text-muted">(tick one or more — existing assignments are kept, only remaining sqft shown to others)</span></div>
                             {{ stage_sub_picker(subcontractor_pool, s, 's' ~ s.id) }}
-                            {{ stage_sub_terms(s) }}
+                            {{ stage_sub_terms(s, {}, '', s.sqft_allocation_summary) }}
                             <div class="mt-2">
                                 <button type="submit" class="btn btn-sm btn-warning"><i class="fas fa-user-plus me-1"></i>Add selected subcontractors</button>
                             </div>

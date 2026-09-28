@@ -366,7 +366,7 @@ def _ensure_subcontract_payment_void_schema():
 
 
 # ---------------------------------------------------------------------------
-# Stage membership (several subcontractors per stage)
+# Stage membership (several subcontractors per stage) + remaining sqft logic
 # ---------------------------------------------------------------------------
 STAGE_TERM_FIELDS = ('rate_per_sqft', 'total_sqft', 'lump_sum_amount', 'retention_pct')
 
@@ -397,6 +397,37 @@ def parse_stage_assignment_terms(form, prefix=''):
     return terms, None
 
 
+def stage_sqft_allocated(stg, exclude_sub_id=None):
+    """Return total sqft already allocated to sqft-type members."""
+    total = 0.0
+    try:
+        members = stg.assigned_subcontractors
+    except Exception:
+        members = getattr(stg, 'subcontractor_records', []) or []
+    for m in members:
+        if exclude_sub_id is not None and int(getattr(m, 'id', 0)) == int(exclude_sub_id):
+            continue
+        if (getattr(m, 'contract_type', '') or '').strip().lower() == 'sqft':
+            try:
+                total += float(getattr(m, 'total_sqft', 0) or 0.0)
+            except Exception:
+                continue
+    return total
+
+
+def stage_remaining_sqft(stg, exclude_sub_id=None):
+    """Return remaining sqft that can still be assigned, or None if no cap."""
+    qty = 0.0
+    try:
+        qty = float(getattr(stg, 'qty_sqft', 0) or 0.0)
+    except Exception:
+        qty = 0.0
+    if qty <= 0:
+        return None
+    allocated = stage_sqft_allocated(stg, exclude_sub_id=exclude_sub_id)
+    return max(0.0, qty - allocated)
+
+
 def stage_assignment_blocker(stg, sub):
     """Return a user-facing reason ``sub`` cannot be added to ``stg`` (or None)."""
     if not sub:
@@ -410,13 +441,44 @@ def stage_assignment_blocker(stg, sub):
     return None
 
 
+def _check_sqft_fit(stg, sub, terms, exclude_sub_id=None):
+    """Validate that the subcontractor's sqft fits into remaining."""
+    qty = float(getattr(stg, 'qty_sqft', 0) or 0.0)
+    if qty <= 0:
+        return None
+    eff_ctype = (terms.get('contract_type') if terms else None) or (sub.contract_type or 'lump_sum')
+    eff_ctype = str(eff_ctype).strip().lower()
+    if eff_ctype not in ('sqft', 'lump_sum'):
+        eff_ctype = 'lump_sum'
+    if eff_ctype != 'sqft':
+        return None
+    if terms and 'total_sqft' in terms:
+        eff_sqft = float(terms['total_sqft'] or 0.0)
+    else:
+        eff_sqft = float(getattr(sub, 'total_sqft', 0) or 0.0)
+    if eff_sqft <= 0:
+        return None
+    remaining = stage_remaining_sqft(stg, exclude_sub_id=exclude_sub_id)
+    if remaining is None:
+        return None
+    if eff_sqft > remaining + 1e-6:
+        allocated = stage_sqft_allocated(stg, exclude_sub_id=exclude_sub_id)
+        return (f'"{sub.name}" needs {eff_sqft:,.0f} sqft but only {remaining:,.0f} sqft remains '
+                f'in stage "{stg.name}" (total {qty:,.0f}, allocated {allocated:,.0f}).')
+    return None
+
+
 def assign_subcontractor_to_stage(stg, sub, terms=None):
     """Add ``sub`` as a member of ``stg`` (or update its terms if already one).
 
-    Existing members are never replaced.  The caller must have checked
-    :func:`stage_assignment_blocker` and is responsible for committing.
+    Remaining-sqft logic:
+    - If stage has qty_sqft > 0 and contract_type is sqft, we never auto-assign
+      the full stage qty when adding a second member. We assign only the
+      remaining sqft (or keep existing value).
+    - If total_sqft is blank and sub already has a value, keep it.
+    - If total_sqft is blank and sub has 0, assign remaining, not full stage qty.
     """
-    terms = terms or {}
+    terms = dict(terms or {})
     from_desc = 'assigned' if sub.stage_id == stg.id else 'unassigned'
     old_terms = (f'{sub.contract_type}|R{float(sub.rate_per_sqft or 0):.2f}'
                  f'|Q{float(sub.total_sqft or 0):.2f}|L{float(sub.lump_sum_amount or 0):.2f}'
@@ -431,12 +493,17 @@ def assign_subcontractor_to_stage(stg, sub, terms=None):
         sub.lump_sum_amount = terms['lump_sum_amount']
     if 'retention_pct' in terms:
         sub.retention_percentage = terms['retention_pct']
-    if sub.contract_type == 'sqft' and (sub.total_sqft or 0) <= 0 and (stg.qty_sqft or 0) > 0:
-        sub.total_sqft = float(stg.qty_sqft or 0.0)
+
+    # Remaining-sqft auto-fill: if sqft type and still 0, give remaining, not full stage qty.
+    if sub.contract_type == 'sqft' and float(sub.total_sqft or 0) <= 0:
+        qty = float(stg.qty_sqft or 0.0)
+        if qty > 0:
+            exclude = sub.id if sub.stage_id == stg.id else None
+            remaining = stage_remaining_sqft(stg, exclude_sub_id=exclude)
+            if remaining is not None and remaining > 0:
+                sub.total_sqft = float(remaining)
 
     stg.execution_mode = 'subcontractor'
-    # Legacy primary pointer is kept for compatibility only; membership is
-    # Subcontractor.stage_id, so adding a member never replaces another.
     if not stg.assigned_subcontractor_id:
         stg.assigned_subcontractor_id = sub.id
     sub.project_id = stg.project_id
@@ -474,10 +541,13 @@ def selected_subcontractor_ids(form):
 
 
 def assign_subcontractors_from_form(stg, form, prefix=''):
-    """Assign every selected subcontractor to ``stg``.
+    """Assign every selected subcontractor to ``stg`` with remaining-sqft guard.
 
     Returns ``(assigned, skipped, error)``: ``error`` means nothing changed;
     ``skipped`` is a list of human-readable reasons for rejected picks.
+    The function tracks remaining sqft sequentially so that a batch like
+    2000 total, 100 already taken, 2 new subs each 1000 will allocate first
+    and skip second with a clear message, and the UI can show remaining.
     """
     ids = selected_subcontractor_ids(form)
     if not ids:
@@ -485,12 +555,132 @@ def assign_subcontractors_from_form(stg, form, prefix=''):
     terms, error = parse_stage_assignment_terms(form, prefix)
     if error:
         return [], [], error
+
     assigned, skipped = [], []
+    qty = float(getattr(stg, 'qty_sqft', 0) or 0.0)
+
+    # Build lookup of current members and their sqft for running allocation tracking
+    current_members = {int(m.id): m for m in (stg.assigned_subcontractors or [])}
+    running_allocated = stage_sqft_allocated(stg)  # total currently allocated
+
     for sid in ids:
         sub = Subcontractor.query.get(sid)
         reason = stage_assignment_blocker(stg, sub)
         if reason:
             skipped.append(reason)
             continue
-        assigned.append(assign_subcontractor_to_stage(stg, sub, terms))
+
+        eff_terms = dict(terms)
+        is_existing = int(sid) in current_members
+        old_alloc = 0.0
+        if is_existing:
+            old_member = current_members[int(sid)]
+            if (getattr(old_member, 'contract_type', '') or '').strip().lower() == 'sqft':
+                try:
+                    old_alloc = float(getattr(old_member, 'total_sqft', 0) or 0.0)
+                except Exception:
+                    old_alloc = 0.0
+
+        # Effective contract type after applying terms
+        eff_ctype = eff_terms.get('contract_type') or (sub.contract_type or 'lump_sum')
+        eff_ctype = str(eff_ctype).strip().lower()
+        if eff_ctype not in ('lump_sum', 'sqft'):
+            eff_ctype = 'lump_sum'
+
+        if eff_ctype == 'sqft' and qty > 0:
+            if 'total_sqft' in eff_terms:
+                eff_sqft = float(eff_terms['total_sqft'] or 0.0)
+            else:
+                eff_sqft = float(getattr(sub, 'total_sqft', 0) or 0.0)
+                if eff_sqft <= 0:
+                    # Auto-assign remaining if no explicit value
+                    remaining_for_auto = qty - running_allocated + old_alloc
+                    remaining_for_auto = max(0.0, remaining_for_auto)
+                    if remaining_for_auto > 0:
+                        eff_sqft = remaining_for_auto
+                        eff_terms['total_sqft'] = remaining_for_auto
+                    else:
+                        # No remaining left
+                        skipped.append(
+                            f'"{sub.name}" cannot be assigned as sqft type because no sqft remains '
+                            f'in stage "{stg.name}" (total {qty:,.0f}, allocated {running_allocated:,.0f}). '
+                            f'Only 0 sqft is available to others.'
+                        )
+                        continue
+
+            if eff_sqft > 0:
+                remaining = qty - running_allocated + old_alloc
+                remaining = max(0.0, remaining)
+                if eff_sqft > remaining + 1e-6:
+                    allocated_excl = running_allocated - old_alloc
+                    skipped.append(
+                        f'"{sub.name}" needs {eff_sqft:,.0f} sqft but only {remaining:,.0f} sqft remains '
+                        f'in stage "{stg.name}" (total {qty:,.0f}, allocated {allocated_excl:,.0f}). '
+                        f'Only {remaining:,.0f} sqft is shown as available to others.'
+                    )
+                    continue
+            # Update running_allocated for next iteration
+            if eff_ctype == 'sqft':
+                # Determine final sqft that will be saved (eff_terms may have been auto-filled)
+                final_sqft = eff_terms.get('total_sqft')
+                if final_sqft is None:
+                    # Keep old or 0
+                    final_sqft = eff_sqft
+                running_allocated = running_allocated - old_alloc + float(final_sqft or 0.0)
+                # Update current_members dict to reflect new allocation for subsequent checks
+                # Create a lightweight shadow member for tracking
+                class _Shadow:
+                    pass
+                shadow = _Shadow()
+                shadow.contract_type = 'sqft'
+                shadow.total_sqft = float(final_sqft or 0.0)
+                current_members[int(sid)] = shadow
+        else:
+            # If changing from sqft to lump_sum, free up its old allocation
+            if is_existing and old_alloc > 0:
+                running_allocated = max(0.0, running_allocated - old_alloc)
+                # Update shadow to lump_sum so future calcs don't count it
+                class _Shadow2:
+                    pass
+                shadow2 = _Shadow2()
+                shadow2.contract_type = eff_ctype
+                shadow2.total_sqft = 0.0
+                current_members[int(sid)] = shadow2
+
+        try:
+            assigned.append(assign_subcontractor_to_stage(stg, sub, eff_terms))
+        except Exception as ex:
+            skipped.append(f'"{getattr(sub, "name", sid)}" could not be assigned: {ex}')
+            # Roll back running_allocated change for this failed assignment
+            # Recompute from DB to be safe, or revert using old logic
+            running_allocated = stage_sqft_allocated(stg)
+            # Rebuild current_members from DB state plus already assigned in this batch
+            # For simplicity, rebuild from stage's current DB state plus assigned list
+            current_members = {int(m.id): m for m in (stg.assigned_subcontractors or [])}
+            for a in assigned:
+                # a is already assigned, include its new allocation
+                if int(a.id) not in current_members:
+                    current_members[int(a.id)] = a
+            running_allocated = 0.0
+            for m in current_members.values():
+                if (getattr(m, 'contract_type', '') or '').strip().lower() == 'sqft':
+                    try:
+                        running_allocated += float(getattr(m, 'total_sqft', 0) or 0.0)
+                    except Exception:
+                        pass
+            continue
+
     return assigned, skipped, None
+
+
+def stage_sqft_summary(stg):
+    """Public helper for templates/routes: total/allocated/remaining."""
+    qty = float(getattr(stg, 'qty_sqft', 0) or 0.0)
+    allocated = stage_sqft_allocated(stg)
+    remaining = stage_remaining_sqft(stg)
+    return {
+        'total': qty,
+        'allocated': allocated,
+        'remaining': remaining,
+        'has_cap': qty > 0,
+    }

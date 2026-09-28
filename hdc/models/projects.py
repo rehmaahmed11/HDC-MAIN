@@ -232,6 +232,54 @@ class Stage(db.Model):
             members.setdefault(self.assigned_subcontractor.id, self.assigned_subcontractor)
         return sorted(members.values(), key=lambda sub: sub.id)
 
+    @property
+    def subcontracted_sqft(self):
+        """Total sqft already taken by sqft-type subcontractors on this stage."""
+        total = 0.0
+        for sub in self.assigned_subcontractors:
+            if (sub.contract_type or '').strip().lower() == 'sqft':
+                try:
+                    total += float(sub.total_sqft or 0.0)
+                except Exception:
+                    continue
+        return total
+
+    @property
+    def remaining_sqft(self):
+        """Remaining sqft that can still be assigned. None if stage has no sqft cap."""
+        qty = float(self.qty_sqft or 0.0)
+        if qty <= 0:
+            return None
+        return max(0.0, qty - self.subcontracted_sqft)
+
+    def remaining_sqft_excluding(self, exclude_sub_id=None):
+        """Remaining sqft excluding a specific subcontractor (useful for edits)."""
+        qty = float(self.qty_sqft or 0.0)
+        if qty <= 0:
+            return None
+        allocated = 0.0
+        for sub in self.assigned_subcontractors:
+            if exclude_sub_id and int(sub.id) == int(exclude_sub_id):
+                continue
+            if (sub.contract_type or '').strip().lower() == 'sqft':
+                try:
+                    allocated += float(sub.total_sqft or 0.0)
+                except Exception:
+                    continue
+        return max(0.0, qty - allocated)
+
+    @property
+    def sqft_allocation_summary(self):
+        qty = float(self.qty_sqft or 0.0)
+        allocated = self.subcontracted_sqft
+        remaining = self.remaining_sqft
+        return {
+            'total': qty,
+            'allocated': allocated,
+            'remaining': remaining,
+            'has_cap': qty > 0,
+        }
+
 
     @property
     def effective_rate(self):
