@@ -164,8 +164,9 @@
         </span>
         <div class="d-flex gap-2">
             <button type="button" id="stage-expand-all" class="btn btn-sm btn-outline-secondary"
-                    title="Open or close every stage panel">
-                <i class="fas fa-chevrons-down me-1"></i>Expand all
+                    data-hdc-collapse-group=".stage-details-row" data-expand-label="Expand all" data-collapse-label="Collapse all">
+                <i class="fas fa-chevrons-down me-1" data-hdc-collapse-icon aria-hidden="true"></i>
+                <span data-hdc-collapse-label>Expand all</span>
             </button>
             <a href="{{ url_for('hdc_stage_library', project_id=p.id) }}" class="btn btn-sm btn-outline-secondary" title="Manage stage library">
                 <i class="fas fa-book me-1"></i>Stage Library
@@ -786,31 +787,6 @@ document.addEventListener('DOMContentLoaded', function () {
             row.classList.add('show');
         }
     }
-
-    // Expand all / Collapse all stage panels.
-    var allBtn = document.getElementById('stage-expand-all');
-    function syncAllBtn() {
-        if (!allBtn) return;
-        var rows = detailRows();
-        var open = rows.filter(function (r) { return r.classList.contains('show'); }).length;
-        var allOpen = rows.length > 0 && open === rows.length;
-        allBtn.innerHTML = allOpen
-            ? '<i class="fas fa-chevrons-up me-1"></i>Collapse all'
-            : '<i class="fas fa-chevrons-down me-1"></i>Expand all';
-    }
-    if (allBtn && window.bootstrap && window.bootstrap.Collapse) {
-        allBtn.addEventListener('click', function () {
-            var rows = detailRows();
-            if (!rows.length) return;
-            var anyClosed = rows.some(function (r) { return !r.classList.contains('show'); });
-            rows.forEach(function (r) {
-                window.bootstrap.Collapse.getOrCreateInstance(r, { toggle: false })[anyClosed ? 'show' : 'hide']();
-            });
-        });
-        document.addEventListener('shown.bs.collapse', syncAllBtn);
-        document.addEventListener('hidden.bs.collapse', syncAllBtn);
-    }
-    syncAllBtn();
 
     document.querySelectorAll('.stage-sub-add-form').forEach(function (form) {
         form.addEventListener('submit', function (e) {
