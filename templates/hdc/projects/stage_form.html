@@ -139,35 +139,30 @@
             <div class="card border-warning-subtle mb-3">
                 <div class="card-header bg-warning-subtle py-2 small fw-bold">
                     <i class="fas fa-hard-hat me-1"></i>Subcontractors
-                    <span class="fw-normal text-muted">— optional; you can assign more than one to this stage, remaining sqft shown to others</span>
+                    <span class="fw-normal text-muted">— optional; a stage can have several</span>
                 </div>
                 <div class="card-body py-2">
                     {% set members = stage.assigned_subcontractors if stage else [] %}
                     {% if members %}
-                    <div class="mb-2 small">
-                        <span class="text-muted">Currently assigned:</span>
-                        {% for member in members %}
-                        <span class="badge bg-warning text-dark me-1">{{ member.name }} · {{ "{:,.0f}".format(member.contract_value or 0) }} · {{ "%.0f"|format(member.effective_progress_percentage or 0) }}%{% if member.contract_type == 'sqft' %} · {{ "{:,.0f}".format(member.total_sqft or 0) }} sqft{% endif %}</span>
-                        {% endfor %}
-                        {% if stage and (stage.qty_sqft or 0) > 0 %}
-                        <div class="mt-2 alert alert-info py-1 px-2 small mb-1">
-                            Stage {{ "{:,.0f}".format(stage.qty_sqft or 0) }} sqft — Allocated {{ "{:,.0f}".format(stage.subcontracted_sqft or 0) }} sqft — Remaining <strong>{{ "{:,.0f}".format(stage.remaining_sqft or 0) }} sqft</strong> shown to next contractors.
-                            {% if sqft_summary and sqft_summary.remaining is not none and sqft_summary.remaining <= 0 %}
-                            <span class="badge bg-danger ms-1">No sqft left</span>
-                            {% endif %}
+                    <div class="mb-2">
+                        <div class="small text-muted">Currently assigned:</div>
+                        <div class="stage-member-chips">
+                            {% for member in members %}
+                            <span class="stage-member-chip">
+                                <span class="fw-semibold">{{ member.name }}</span>
+                                <span class="text-muted">{% if member.contract_type == 'sqft' %}{{ "{:,.0f}".format(member.total_sqft or 0) }} sqft{% else %}Lump {{ "{:,.0f}".format(member.lump_sum_amount or 0) }}{% endif %}</span>
+                                <span class="badge bg-light text-dark border">{{ "%.0f"|format(member.effective_progress_percentage or 0) }}%</span>
+                            </span>
+                            {% endfor %}
                         </div>
-                        {% endif %}
-                        <div class="form-text">To change terms, completion % or remove one, use the
+                        <div class="form-text mb-1">To change terms, completion % or remove one, use the
                             <a href="{{ url_for('hdc_project_detail', pid=p.id) }}#stage-subs-{{ stage.id }}">Subcontractors panel on the project page</a>.</div>
                     </div>
                     {% endif %}
                     {% if stage and (stage.status or '')|lower in ['completed', 'complete'] %}
                     <div class="small text-muted">Stage is completed — reopen it to add subcontractors.</div>
                     {% else %}
-                    <div class="small mb-1">{% if members %}Add more subcontractors (only remaining sqft will be available):{% else %}Tick the subcontractors who will execute this stage (leave empty for company execution):{% endif %}</div>
-                    {% if stage and (stage.qty_sqft or 0) > 0 and not members %}
-                    <div class="small text-muted mb-2">Stage has {{ "{:,.0f}".format(stage.qty_sqft or 0) }} sqft total. If 1st takes 100, 2nd/3rd/4th will only see {{ "{:,.0f}".format((stage.qty_sqft or 0) - (stage.subcontracted_sqft or 0)) }} sqft remaining.</div>
-                    {% endif %}
+                    <div class="small mb-1">{% if members %}Add more subcontractors (only the remaining sqft can be given to a per-sqft subcontractor):{% else %}Tick the subcontractors who will execute this stage (leave empty for company execution):{% endif %}</div>
                     {{ stage_sub_picker(subcontractor_pool or [], stage, 'form', (form.getlist('subcontractor_ids') if form and form.getlist else [])) }}
                     {{ stage_sub_terms(stage, form or {}, 'sub_', sqft_summary) }}
                     {% endif %}

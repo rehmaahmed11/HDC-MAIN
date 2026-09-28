@@ -1102,3 +1102,186 @@ tr[data-hdc-void="1"] > td .text-warning {
     padding: 8px 10px;
     background: var(--card-header-bg);
 }
+
+/* ---------------------------------------------------------------------------
+   Stage subcontractor / drawings panels.
+   These panels used to render inside the 18-column stages table, so the wide
+   table column stretched them past the card edge: fields ran off the right
+   side and the sqft inputs no longer lined up.  They are now rendered under
+   the table, inside the card, with one shared grid for the term fields.
+   --------------------------------------------------------------------------- */
+.stage-panel-wrap { border-top: 1px solid var(--card-border); }
+.stage-panel-wrap + .stage-panel-wrap { border-top-style: dashed; }
+
+.stage-panel {
+    padding: 12px 14px;
+    background: var(--card-header-bg);
+    overflow-wrap: anywhere;
+}
+
+.stage-panel-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 4px 14px;
+    margin-bottom: 10px;
+}
+
+.stage-panel-title { font-weight: 700; font-size: 0.9rem; }
+.stage-panel-meta { font-size: 0.78rem; color: var(--text-muted); }
+
+.stage-panel-table {
+    margin-bottom: 10px;
+    -webkit-overflow-scrolling: touch;
+}
+
+/* Scroll the member table sideways instead of squeezing columns: without a
+   minimum width the narrow viewport wraps every header letter by letter. */
+.stage-panel-table > table { min-width: 880px; }
+.stage-panel-table thead th { white-space: nowrap; }
+.stage-panel-table tbody td:first-child { min-width: 190px; }
+
+.stage-panel-progress { width: 88px; flex: 0 0 auto; }
+.stage-panel-file { max-width: 190px; }
+
+.stage-panel-empty { font-size: 0.82rem; color: var(--text-muted); margin-bottom: 8px; }
+
+.stage-panel-add {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px dashed var(--card-border);
+}
+
+.stage-panel-subtitle { font-size: 0.83rem; font-weight: 600; margin-bottom: 6px; }
+
+/* Per-member terms editor: padded box so the grid gutters stay inside the cell. */
+.stage-terms-cell { padding: 0 !important; }
+
+.stage-terms-box {
+    padding: 10px 14px 12px;
+    background: var(--card-bg);
+    border-left: 3px solid var(--accent);
+}
+
+.stage-terms-note { font-size: 0.78rem; color: var(--text-muted); margin-bottom: 8px; }
+.stage-terms-hint { font-size: 0.76rem; color: var(--text-muted); margin-top: 8px; }
+
+.stage-terms-grid .form-label { white-space: nowrap; }
+
+/* Compact single-line sqft allocation strip (stage / allocated / remaining). */
+.stage-sqft-strip {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 12px;
+    padding: 7px 10px;
+    margin-bottom: 10px;
+    border: 1px solid var(--card-border);
+    border-radius: 8px;
+    background: var(--card-bg);
+    font-size: 0.78rem;
+}
+
+.stage-sqft-icon { color: var(--accent); }
+.stage-sqft-item { display: inline-flex; align-items: baseline; gap: 5px; }
+
+.stage-sqft-label {
+    font-size: 0.66rem;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.stage-sqft-value { font-weight: 700; }
+
+.stage-sqft-bar {
+    flex: 1 1 90px;
+    min-width: 60px;
+    max-width: 240px;
+    height: 6px;
+    border-radius: 999px;
+    background: rgba(148, 163, 184, 0.35);
+    overflow: hidden;
+}
+
+.stage-sqft-bar-fill {
+    display: block;
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent), var(--accent-strong));
+}
+
+.stage-sqft-badge { font-weight: 600; }
+
+/* Subcontractor picker. */
+.stage-sub-picker {
+    border: 1px solid var(--card-border);
+    border-radius: 10px;
+    background: var(--card-bg);
+    overflow: hidden;
+}
+
+.stage-sub-picker-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    border-bottom: 1px solid var(--card-border);
+}
+
+.stage-sub-search { flex: 1 1 auto; min-width: 0; }
+.stage-sub-count { flex: 0 0 auto; }
+.stage-sub-list { max-height: 220px; overflow-y: auto; }
+
+.stage-sub-option {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 8px;
+    margin: 0;
+    padding: 5px 10px;
+    border-bottom: 1px solid var(--card-border);
+    font-size: 0.82rem;
+    cursor: pointer;
+}
+
+.stage-sub-option:hover { background: var(--table-hover); }
+.stage-sub-option.is-busy { color: var(--text-muted); cursor: not-allowed; }
+
+.stage-sub-name {
+    font-weight: 600;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.stage-sub-code { color: var(--text-muted); white-space: nowrap; }
+.stage-sub-phone { color: var(--text-muted); display: none; }
+.stage-sub-empty { padding: 8px 10px; font-size: 0.8rem; color: var(--text-muted); }
+
+@media (min-width: 768px) {
+    .stage-sub-phone { display: inline; }
+}
+
+/* "Currently assigned" chips on the stage form. */
+.stage-member-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 2px; }
+
+.stage-member-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+    padding: 3px 9px;
+    border: 1px solid rgba(245, 158, 11, 0.45);
+    border-radius: 999px;
+    background: rgba(245, 158, 11, 0.16);
+    font-size: 0.76rem;
+}
+
+.stage-member-chip > .fw-semibold {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}

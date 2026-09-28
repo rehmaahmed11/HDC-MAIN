@@ -69,12 +69,26 @@ Assignment guard:
 - Lump-sum subcontractors do not consume sqft and are not limited by this cap.
 
 UI:
-- Project page stage panel shows: Stage 2000 sqft — Allocated 100 sqft — Remaining 1900 sqft
-  with badge "Only 1900 sqft available to 2nd/3rd/4th contractors".
-- Add-subcontractor terms form shows remaining as max attribute, placeholder,
-  and info alert. Client-side JS prevents submitting more than remaining.
-- Member edit row shows remaining excluding that member and max allowed.
-- Add/Edit Stage form also shows allocation summary.
+- Project page stage panel shows one compact allocation strip:
+  `STAGE 2,000 sqft · ALLOCATED 1,100 sqft · REMAINING 900 sqft` plus a fill bar
+  and a badge (`900 sqft free` / `No sqft left`). The same strip is repeated next
+  to the add-subcontractor terms so the free sqft is visible where it is used.
+- The Subcontractors and Drawings panels are rendered **under** the stages table
+  (`.stage-panel-wrap`), not inside it. An 18-column table is horizontally
+  scrollable, so rows inside it used to stretch past the card edge and clip the
+  terms fields; the panels now share the card width.
+- Terms fields (contract type, rate, sqft, lump sum, retention) use one
+  `row g-2` grid with equal `col-lg` widths and a trailing button, so everything
+  in a row lines up on its own label + input pair and never wraps mid-field.
+  The sqft input keeps `max` = remaining and the placeholder shows the remaining
+  sqft; client-side JS blocks submitting more than remaining.
+- Member terms editor (the pen button) uses the same grid and states the maximum
+  that member can be set to (`remaining excluding member + its own sqft`).
+- Add/Edit Stage form: "currently assigned" subcontractors render as chips and
+  the allocation strip summarises total/allocated/remaining.
+- On narrow screens (< lg) the terms grid becomes two columns and the member
+  table scrolls inside its own `.table-responsive` instead of squashing
+  headers letter by letter.
 
 This fixes the missed approach from the last PR where 1st contractor could take
 100 sqft but 2nd/3rd/4th still saw full 2000 sqft as available.
@@ -91,5 +105,9 @@ code requires reviewing stages with multiple members first.
 - Manual: create stage 2000 sqft, assign 1st sub 100 sqft, verify 2nd sees 1900 remaining,
   try assign 2000 to 2nd (should fail), assign 1900 (should succeed), try 3rd (should fail),
   blank assign (should auto-fill remaining), edit 1st to 1500 (should fail if would exceed).
+- `python scripts/qa_browser.py --output qa/browser.json` in a real browser asserts
+  the stage panel is not inside the scrolling stages table, its five term fields
+  share one row, the fields never cross the card edge and the page has no
+  horizontal overflow.
 
 These are targeted regression tests, not a full production acceptance audit.
