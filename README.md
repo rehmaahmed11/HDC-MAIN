@@ -81,6 +81,10 @@ upwards. `scripts/check_layers.py` enforces it (acyclic, 76 modules).
 evidence, fixes and explicitly unverified release scope. Regenerate the
 machine-readable inventory with `python scripts/qa_inventory.py --output qa/inventory.json`.
 
+**Operator training:** [`DATA_ENTRY_OPERATOR_TRAINING.md`](DATA_ENTRY_OPERATOR_TRAINING.md)
+contains the end-to-end workflow chart, one-by-one sample data-entry sequence,
+manual checks, safety notes, and operator sign-off list.
+
 ## Accounts &amp; Cash
 
 The money side of the app is one section with a single ledger
