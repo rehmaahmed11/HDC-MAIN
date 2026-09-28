@@ -4,8 +4,8 @@
 
 {% block content %}
 <div class="row g-3 mt-1">
-    <div class="col-md-6">
-        <a href="{{ url_for('hdc_office_staff_home') }}" class="text-decoration-none text-reset d-flex h-100">
+    <div class="col-12 col-sm-6 col-xl-3 d-flex">
+        <a href="{{ url_for('hdc_office_staff_home') }}" class="text-decoration-none text-reset d-flex h-100 w-100">
             <div class="kpi-card kpi-teal h-100 w-100 d-flex flex-column">
                 <div class="kpi-icon"><i class="fas fa-user-tie"></i></div>
                 <div class="kpi-value">{{ active_staff_count }}<span class="kpi-sub"> / {{ staff_count }}</span></div>
@@ -14,24 +14,21 @@
             </div>
         </a>
     </div>
-    <div class="col-md-6">
-        <a href="{{ url_for('hdc_office_expenses') }}" class="text-decoration-none text-reset d-flex h-100">
+    <div class="col-12 col-sm-6 col-xl-3 d-flex">
+        <a href="{{ url_for('hdc_office_expenses') }}" class="text-decoration-none text-reset d-flex h-100 w-100">
             <div class="kpi-card kpi-red h-100 w-100 d-flex flex-column">
                 <div class="kpi-icon"><i class="fas fa-building-circle-exclamation"></i></div>
-                <div class="kpi-value">{{ "{:,.0f}".format(office_expense_total or 0) }}</div>
+                <div class="kpi-value small">{{ "{:,.0f}".format(office_expense_total or 0) }}</div>
                 <div class="kpi-label">Office Expenses (Company Burden)</div>
                 <div class="small mt-auto text-white-50">This month: {{ "{:,.0f}".format(office_expense_month or 0) }} PKR</div>
             </div>
         </a>
     </div>
-</div>
-
-<div class="row g-3 mt-3">
-    <div class="col-md-6">
-        <div class="kpi-card kpi-purple h-100 d-flex flex-column">
+    <div class="col-12 col-sm-6 col-xl-3 d-flex">
+        <div class="kpi-card kpi-purple h-100 w-100 d-flex flex-column">
             <div class="kpi-icon"><i class="fas fa-tags"></i></div>
             <div class="kpi-value">
-                <button class="btn btn-link text-white p-0 text-decoration-none" data-bs-toggle="modal" data-bs-target="#allowanceCategoriesModal">
+                <button class="btn btn-link text-white p-0 text-decoration-none" data-bs-toggle="modal" data-bs-target="#allowanceCategoriesModal" aria-label="Add allowance category">
                     <i class="fas fa-plus-circle me-2"></i>
                 </button>
             </div>
@@ -39,8 +36,8 @@
             <div class="small mt-auto text-white-50">Create and manage allowance types for staff.</div>
         </div>
     </div>
-    <div class="col-md-6">
-        <a href="{{ url_for('hdc_allowance_categories') }}" class="text-decoration-none text-reset d-flex h-100">
+    <div class="col-12 col-sm-6 col-xl-3 d-flex">
+        <a href="{{ url_for('hdc_allowance_categories') }}" class="text-decoration-none text-reset d-flex h-100 w-100">
             <div class="kpi-card kpi-indigo h-100 w-100 d-flex flex-column">
                 <div class="kpi-icon"><i class="fas fa-list-check"></i></div>
                 <div class="kpi-value">{{ allowance_categories_count or 0 }}</div>
