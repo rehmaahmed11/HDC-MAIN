@@ -15,6 +15,7 @@ from hdc.models.tool_rental import (
     ToolRentalItem, ToolRentalPayment, ToolRentalReturn, ToolRentalReturnItem,
     ToolRentalTransfer, ToolRentalTransferItem
 )
+from hdc.services.cashflow_register import ensure_party
 from hdc.services.tool_rental import (
     _ensure_tool_category, _next_rental_code, _next_tool_code,
     _parse_date, create_movement_log, get_rental_tracking_chain,
@@ -661,6 +662,11 @@ def register(app):
                 qty=qty,
                 notes=f'Rental {rental_code} out'
             )
+        if renter_type == 'external' and customer_name:
+            # The customer lands in the Parties module (sidebar → Parties)
+            # under External Customers the moment the rental is booked, so
+            # every HDC Tools transaction shows up there.
+            ensure_party(customer_name, party_type='rental', phone=customer_phone)
         db.session.commit()
         flash(f'Rental {rental_code} created: {total_rented_qty} tools.', 'success')
         return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))

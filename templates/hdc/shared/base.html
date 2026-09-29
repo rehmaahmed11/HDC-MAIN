@@ -122,6 +122,10 @@
                 {'label': 'HDC Tools', 'icon': 'fa-screwdriver-wrench', 'href': url_for('hdc_tool_rental_dashboard'),
                  'match': ['/hdc/tool-rental']},
             ]},
+            {'id': 'parties', 'label': 'Parties', 'icon': 'fa-user-group', 'roles': [], 'links': [
+                {'label': 'All Parties', 'icon': 'fa-address-book', 'href': url_for('hdc_parties'),
+                 'note': 'loan & rental', 'match': ['/hdc/parties']},
+            ]},
             {'id': 'reports', 'label': 'Reports', 'icon': 'fa-chart-line', 'roles': [], 'links': [
                 {'label': 'Reports', 'icon': 'fa-chart-bar', 'href': url_for('hdc_reports'),
                  'match': ['/hdc/reports']},

@@ -62,6 +62,7 @@ EXPECTED_GROUPS = (
       '/hdc/personal-management')),
     ('materials', 'Materials & Tools',
      ('/hdc/purchase-v2', '/hdc/tool-rental/dashboard')),
+    ('parties', 'Parties', ('/hdc/parties',)),
     ('reports', 'Reports', ('/hdc/reports', '/hdc/reports/glance')),
     ('accounts', 'Accounts & Cash',
      ('/hdc/accounts/hub', '/hdc/accounts/manage', '/hdc/accounts/entries',
@@ -70,7 +71,7 @@ EXPECTED_GROUPS = (
      ('/hdc/users', '/hdc/event-recorder', '/hdc/settings')),
 )
 # Groups every signed-in role sees; the rest are gated.
-COMMON_GROUP_COUNT = 6
+COMMON_GROUP_COUNT = 7
 GATED_GROUPS = {
     'admin': ('accounts', 'administration'),
     'accountant': ('accounts',),
@@ -97,6 +98,7 @@ HIGHLIGHT_CASES = (
     ('/hdc/personal-management', '/hdc/personal-management', 'costs'),
     ('/hdc/purchase-v2', '/hdc/purchase-v2', 'materials'),
     ('/hdc/tool-rental/inventory', '/hdc/tool-rental/dashboard', 'materials'),
+    ('/hdc/parties', '/hdc/parties', 'parties'),
     ('/hdc/reports', '/hdc/reports', 'reports'),
     ('/hdc/reports/glance', '/hdc/reports/glance', 'reports'),
     ('/hdc/accounts/hub', '/hdc/accounts/hub', 'accounts'),

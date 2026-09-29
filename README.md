@@ -41,7 +41,8 @@ hdc/                    the application package (import here, not hdc_erp)
                         bootstrap, admin ops (restore/wipe/maintenance)
   routes/               one file per page group; register(app) each
                         (auth, dashboard, projects, subcontractors, workers,
-                        timekeeping, payroll, expenses, office, materials,
+                        timekeeping, payroll, expenses, office, parties,
+                        materials,
                         purchase_v2, estimation, reports, users, accounts,
                         accounts_manage, cashflow, cashflow_register,
                         shared_expenses, settings, api_purchase, api_accounts,

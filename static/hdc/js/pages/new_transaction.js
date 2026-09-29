@@ -351,6 +351,7 @@
                 subcontractor: 'Subcontractor',
                 lender: 'Loan Giver / Financier',
                 borrower: 'Loan Taker / Borrower',
+                rental: 'External Customer (HDC Tools)',
                 other: 'Other'
             };
             return labels[value] || value;
