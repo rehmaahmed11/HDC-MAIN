@@ -18,6 +18,7 @@ from hdc.routes.projects import register as _register_projects
 from hdc.routes.purchase_v2 import register as _register_purchase_v2
 from hdc.routes.reports import register as _register_reports
 from hdc.routes.settings import register as _register_settings
+from hdc.routes.shared_expenses import register as _register_shared_expenses
 from hdc.routes.subcontractors import register as _register_subcontractors
 from hdc.routes.timekeeping import register as _register_timekeeping
 from hdc.routes.users import register as _register_users
@@ -47,6 +48,7 @@ def register_all(app):
     _register_purchase_v2(app)
     _register_reports(app)
     _register_settings(app)
+    _register_shared_expenses(app)
     _register_subcontractors(app)
     _register_timekeeping(app)
     _register_users(app)

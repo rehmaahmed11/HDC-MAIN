@@ -1,0 +1,264 @@
+{% extends "shared/base.html" %}
+{% block title %}Sharing Parties — Shared Expenses{% endblock %}
+{% block page_heading %}Sharing Parties{% endblock %}
+
+{% block content %}
+{#
+  The heads a shared expense can be divided between.
+
+  FBM / HDC / Home are seeded on first use so the module works on day one;
+  anything else (a fourth head, a site, a person) is added here in one line.
+  A head that has already been used on an expense is never deleted — it is
+  deactivated, so the ledgers behind it keep their name.
+
+  Linking a head to an account is optional but useful: it pre-fills both sides
+  of a settlement transfer, which is what turns "FBM paid HDC back" into a real
+  movement in the accounts ledger.
+#}
+{% set se_page = 'parties' %}
+{% include 'shared_expenses/_nav.html' %}
+
+<div class="acc-page-header">
+    <div>
+        <h2><i class="fas fa-users me-2"></i>Sharing Parties</h2>
+        <div class="acc-subtitle">
+            Who a shared cost can be divided between — three heads, four, or as many as the bill really involves.
+            Each head keeps its own derived ledger.
+        </div>
+    </div>
+    <div class="acc-toolbar">
+        <a href="{{ url_for('hdc_shared_expenses') }}" class="btn btn-outline-secondary btn-sm">
+            <i class="fas fa-book-open me-1"></i>Ledgers
+        </a>
+        <a href="{{ url_for('hdc_shared_expense_new') }}" class="btn btn-mint btn-sm">
+            <i class="fas fa-plus-lg me-1"></i>New Shared Expense
+        </a>
+    </div>
+</div>
+
+<div class="row g-3">
+    <div class="col-12 col-xl-4">
+        <div class="acc-section">
+            <div class="acc-section-head">
+                <h5><i class="fas fa-user-plus me-2" style="color:#10b981;"></i>Add a sharing party</h5>
+            </div>
+            <div class="acc-section-body">
+                <form method="post" action="{{ url_for('hdc_shared_parties') }}">
+                    <input type="hidden" name="action" value="create">
+                    <div class="mb-2">
+                        <label class="form-label" for="name">Name <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="name" name="name" required maxlength="80"
+                               placeholder="FBM / HDC / Home / Factory">
+                    </div>
+                    <div class="row g-2">
+                        <div class="col-6">
+                            <label class="form-label" for="short_code">Short code</label>
+                            <input type="text" class="form-control" id="short_code" name="short_code" maxlength="20" placeholder="FBM">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label" for="kind">Type</label>
+                            <select class="form-select" id="kind" name="kind">
+                                <option value="business">Business</option>
+                                <option value="home">Home</option>
+                                <option value="person">Person</option>
+                                <option value="other">Other</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="mt-2">
+                        <label class="form-label" for="account_id">Linked Accounts account (optional)</label>
+                        <select class="form-select" id="account_id" name="account_id">
+                            <option value="">Create one automatically (recommended)</option>
+                            {% for a in accounts %}
+                            <option value="{{ a.id }}">{{ a.name }} ({{ a.type }})</option>
+                            {% endfor %}
+                        </select>
+                        <div class="form-text">
+                            Used to pre-fill both sides of a settlement transfer.
+                        </div>
+                    </div>
+                    <div class="form-check mt-2">
+                        <input class="form-check-input" type="checkbox" name="is_default" id="is_default" value="1" checked>
+                        <label class="form-check-label" for="is_default">
+                            Tick by default on a new shared expense
+                        </label>
+                    </div>
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" name="create_account" id="create_account" value="1" checked>
+                        <label class="form-check-label" for="create_account">
+                            Create / link its own account in the accounts ledger
+                        </label>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label" for="note">Note</label>
+                        <input type="text" class="form-control" id="note" name="note" maxlength="250">
+                    </div>
+                    <button class="btn btn-mint w-100" type="submit">
+                        <i class="fas fa-plus me-1"></i>Add party
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-12 col-xl-8">
+        <div class="acc-section">
+            <div class="acc-section-head">
+                <h5><i class="fas fa-list me-2" style="color:#8b5cf6;"></i>{{ parties|length }} sharing part{{ 'y' if parties|length == 1 else 'ies' }}</h5>
+                <span class="small text-muted">Tick order on the form follows this list</span>
+            </div>
+            <div class="acc-section-body flush">
+                <div class="table-responsive">
+                    <table class="table acc-table mb-0">
+                        <thead>
+                            <tr>
+                                <th>Party</th>
+                                <th>Linked Account</th>
+                                <th class="text-end">Share</th>
+                                <th class="text-end">Balance</th>
+                                <th class="text-center">On New</th>
+                                <th class="text-center">Status</th>
+                                <th class="text-end">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for p in parties %}
+                            {% set b = balances.get(p.id) %}
+                            <tr {{ p|hdc_row_attrs }}>
+                                <td>
+                                    <span class="acc-name">{{ p.name }}</span>
+                                    <span class="acc-group-path d-block">
+                                        {{ p.kind|title }}{% if p.short_code %} · {{ p.short_code }}{% endif %}
+                                        {% if p.note %} · {{ p.note|truncate(40) }}{% endif %}
+                                    </span>
+                                </td>
+                                <td>
+                                    {% if p.account %}
+                                    <a href="{{ url_for('hdc_account_ledger', account_id=p.account_id) }}"
+                                       class="text-decoration-none">{{ p.account.name }}</a>
+                                    {% else %}<span class="text-muted">—</span>{% endif %}
+                                </td>
+                                <td class="text-end acc-muted-amount">
+                                    {{ '{:,.2f}'.format(b.share_amount if b else 0) }}
+                                </td>
+                                <td class="text-end">
+                                    {% if b %}<span class="se-balance se-{{ b.balance.tone }}">{{ b.balance.text }}</span>
+                                    {% else %}—{% endif %}
+                                </td>
+                                <td class="text-center">
+                                    {% if p.is_default %}<i class="fas fa-check text-success"></i>{% else %}<span class="text-muted">—</span>{% endif %}
+                                </td>
+                                <td class="text-center">
+                                    <span class="badge {{ 'bg-success-subtle text-success' if p.is_active else 'bg-secondary' }}">
+                                        {{ p.status|title }}
+                                    </span>
+                                </td>
+                                <td class="text-end acc-actions">
+                                    <button class="btn btn-outline-primary" type="button" data-bs-toggle="collapse"
+                                            data-bs-target="#editParty{{ p.id }}" title="Edit">
+                                        <i class="fas fa-pen"></i>
+                                    </button>
+                                    <form method="post" action="{{ url_for('hdc_shared_parties') }}" class="d-inline">
+                                        <input type="hidden" name="action" value="status">
+                                        <input type="hidden" name="party_id" value="{{ p.id }}">
+                                        <input type="hidden" name="status" value="{{ 'inactive' if p.is_active else 'active' }}">
+                                        <button class="btn btn-outline-secondary" type="submit"
+                                                title="{{ 'Deactivate (history stays)' if p.is_active else 'Activate' }}">
+                                            <i class="fas fa-{{ 'pause' if p.is_active else 'play' }}"></i>
+                                        </button>
+                                    </form>
+                                    {% set used = usage.get(p.id, {}) %}
+                                    {% if not (used.get('shares') or used.get('as_payer') or used.get('settlements')) %}
+                                    <form method="post" action="{{ url_for('hdc_shared_parties') }}" class="d-inline"
+                                          onsubmit="return confirm('Delete party {{ p.name }}? It has never been used.');">
+                                        <input type="hidden" name="action" value="delete">
+                                        <input type="hidden" name="party_id" value="{{ p.id }}">
+                                        <button class="btn btn-outline-danger" type="submit" title="Delete (never used)">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </form>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            <tr class="collapse" id="editParty{{ p.id }}">
+                                <td colspan="7">
+                                    <form method="post" action="{{ url_for('hdc_shared_parties') }}" class="se-inline-edit">
+                                        <input type="hidden" name="action" value="update">
+                                        <input type="hidden" name="party_id" value="{{ p.id }}">
+                                        <div class="row g-2 align-items-end">
+                                            <div class="col-6 col-md-3">
+                                                <label class="form-label small">Name</label>
+                                                <input type="text" class="form-control form-control-sm" name="name"
+                                                       value="{{ p.name }}" maxlength="80">
+                                            </div>
+                                            <div class="col-6 col-md-2">
+                                                <label class="form-label small">Short code</label>
+                                                <input type="text" class="form-control form-control-sm" name="short_code"
+                                                       value="{{ p.short_code or '' }}" maxlength="20">
+                                            </div>
+                                            <div class="col-6 col-md-2">
+                                                <label class="form-label small">Type</label>
+                                                <select class="form-select form-select-sm" name="kind">
+                                                    {% for k, label in [('business','Business'),('home','Home'),('person','Person'),('other','Other')] %}
+                                                    <option value="{{ k }}" {% if p.kind == k %}selected{% endif %}>{{ label }}</option>
+                                                    {% endfor %}
+                                                </select>
+                                            </div>
+                                            <div class="col-6 col-md-3">
+                                                <label class="form-label small">Linked account</label>
+                                                <select class="form-select form-select-sm" name="account_id">
+                                                    <option value="">— none —</option>
+                                                    {% for a in accounts %}
+                                                    <option value="{{ a.id }}" {% if p.account_id == a.id %}selected{% endif %}>{{ a.name }}</option>
+                                                    {% endfor %}
+                                                </select>
+                                            </div>
+                                            <div class="col-6 col-md-2">
+                                                <label class="form-label small">Sort order</label>
+                                                <input type="number" class="form-control form-control-sm" name="sort_order"
+                                                       value="{{ p.sort_order or 0 }}">
+                                            </div>
+                                            <div class="col-12 col-md-4">
+                                                <label class="form-label small">Note</label>
+                                                <input type="text" class="form-control form-control-sm" name="note"
+                                                       value="{{ p.note or '' }}" maxlength="250">
+                                            </div>
+                                            <div class="col-6 col-md-2">
+                                                <div class="form-check">
+                                                    <input class="form-check-input" type="checkbox" name="is_default"
+                                                           id="def{{ p.id }}" value="1" {% if p.is_default %}checked{% endif %}>
+                                                    <label class="form-check-label small" for="def{{ p.id }}">On by default</label>
+                                                </div>
+                                            </div>
+                                            <div class="col-6 col-md-2">
+                                                <button class="btn btn-primary btn-sm w-100" type="submit">
+                                                    <i class="fas fa-floppy-disk me-1"></i>Save
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </form>
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr><td colspan="7">
+                                <div class="acc-empty">
+                                    <i class="fas fa-users"></i>
+                                    <div class="mt-2">No sharing parties yet.</div>
+                                </div>
+                            </td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="acc-section-body">
+                <p class="small text-muted mb-0">
+                    <strong>Used parties are deactivated, never deleted.</strong> A head that already appears on a
+                    share or a settlement keeps its name in the old ledgers — press
+                    <i class="fas fa-pause"></i> to stop offering it on new expenses.
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

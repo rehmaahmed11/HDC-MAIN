@@ -68,6 +68,11 @@ grey), stage ledger 765 (481 grey), expenses 261, office expenses 125,
 timekeeping 169, purchase-v2 stock 244, accounts 28, subcontractor ledgers and
 payments, payroll, office staff, personal expenses.
 
+The Shared Expenses lists tag their rows too — the expense list, the heads list
+and the settlement register all pipe their loop variable through
+`{{ row|hdc_row_attrs }}`, so a voided bill is greyed and "who entered this?"
+works there like everywhere else.
+
 `GET /hdc/api/row_actors` answers a 600-row page in ~0.01 s, and
 `tests/test_row_traceability.py` (15 tests) pins the filter shapes, the void
 flag, the endpoint, the ledger derivation, and the exact nested timekeeping

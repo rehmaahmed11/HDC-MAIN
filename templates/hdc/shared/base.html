@@ -138,6 +138,11 @@
             <li class="nav-item {% if request.endpoint in ['hdc_accounts_entries', 'hdc_account_transaction_edit', 'hdc_account_transaction_receipt'] %}active{% endif %}">
                 <a href="{{ url_for('hdc_accounts_entries') }}"><i class="fas fa-receipt"></i><span>All Entries</span><span class="small text-muted ms-1" style="font-size:0.6rem;">audit</span></a>
             </li>
+            {# Shared Expenses: one cost split between heads (FBM / HDC / Home / …).
+               The ledgers live here; the money itself is always posted in Accounts. #}
+            <li class="nav-item {% if request.endpoint in ['hdc_shared_expenses', 'hdc_shared_expense_list', 'hdc_shared_expense_new', 'hdc_shared_expense_detail', 'hdc_shared_expense_edit', 'hdc_shared_report', 'hdc_shared_settlements', 'hdc_shared_parties', 'hdc_shared_expenses_export', 'hdc_shared_report_export'] %}active{% endif %}">
+                <a href="{{ url_for('hdc_shared_expenses') }}"><i class="fas fa-users-rectangle"></i><span>Shared Expenses</span></a>
+            </li>
         </ul>
         <div class="sidebar-divider"></div>
         {% endif %}

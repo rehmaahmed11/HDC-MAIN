@@ -1861,3 +1861,104 @@ def _ensure_tool_rental_schema():
             print("[HDC ERP] Tool Rental schema migrated: received_to_account_id + is_void + account_txn link ready")
         except Exception:
             pass
+
+
+def _ensure_shared_expense_schema():
+    """Create the Shared Expenses tables on legacy DB files.
+
+    ``db.create_all()`` already builds these from the models; this keeps a
+    database that was created before the module existed consistent too, and
+    adds ``hdc_shared_expense.idempotency_key`` where the table predates the
+    double-submit guard.  Idempotent: safe on every boot.
+    """
+    tables = [
+        """
+        CREATE TABLE IF NOT EXISTS hdc_shared_party (
+            id INTEGER PRIMARY KEY,
+            name VARCHAR(80) NOT NULL UNIQUE,
+            short_code VARCHAR(20),
+            kind VARCHAR(20) DEFAULT 'business',
+            account_id INTEGER REFERENCES hdc_account(id),
+            is_default BOOLEAN DEFAULT 1,
+            sort_order INTEGER DEFAULT 0,
+            status VARCHAR(20) DEFAULT 'active',
+            note VARCHAR(250),
+            created_by VARCHAR(80),
+            created_at DATETIME,
+            updated_at DATETIME
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS hdc_shared_expense (
+            id INTEGER PRIMARY KEY,
+            date DATE,
+            title VARCHAR(160) NOT NULL,
+            category VARCHAR(80),
+            total_amount FLOAT DEFAULT 0,
+            total_amount_minor BIGINT,
+            payer_party_id INTEGER REFERENCES hdc_shared_party(id),
+            paid_from_account_id INTEGER REFERENCES hdc_account(id),
+            cf_entry_id INTEGER REFERENCES hdc_cash_flow_entry(id),
+            txn_id INTEGER REFERENCES hdc_account_txn(id),
+            split_mode VARCHAR(12) DEFAULT 'equal',
+            reference VARCHAR(120),
+            idempotency_key VARCHAR(64),
+            note VARCHAR(400),
+            is_void BOOLEAN DEFAULT 0,
+            void_reason VARCHAR(300),
+            voided_by VARCHAR(80),
+            voided_at DATETIME,
+            created_by VARCHAR(80),
+            created_at DATETIME,
+            updated_at DATETIME
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS hdc_shared_share (
+            id INTEGER PRIMARY KEY,
+            expense_id INTEGER NOT NULL REFERENCES hdc_shared_expense(id),
+            party_id INTEGER NOT NULL REFERENCES hdc_shared_party(id),
+            amount FLOAT DEFAULT 0,
+            amount_minor BIGINT,
+            percent_bp INTEGER,
+            position INTEGER DEFAULT 0,
+            created_at DATETIME,
+            CONSTRAINT uq_shared_share_expense_party UNIQUE (expense_id, party_id)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS hdc_shared_settlement (
+            id INTEGER PRIMARY KEY,
+            date DATE,
+            from_party_id INTEGER NOT NULL REFERENCES hdc_shared_party(id),
+            to_party_id INTEGER REFERENCES hdc_shared_party(id),
+            to_account_id INTEGER REFERENCES hdc_account(id),
+            amount FLOAT DEFAULT 0,
+            amount_minor BIGINT,
+            note VARCHAR(300),
+            cf_entry_id INTEGER REFERENCES hdc_cash_flow_entry(id),
+            txn_id INTEGER REFERENCES hdc_account_txn(id),
+            is_void BOOLEAN DEFAULT 0,
+            void_reason VARCHAR(300),
+            voided_by VARCHAR(80),
+            voided_at DATETIME,
+            created_by VARCHAR(80),
+            created_at DATETIME,
+            updated_at DATETIME
+        )
+        """,
+    ]
+    with db.engine.connect() as conn:
+        for ddl in tables:
+            try:
+                conn.execute(text(ddl))
+                conn.commit()
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+    # Columns added after the first release of the module.
+    _ensure_table_columns_sqlite('hdc_shared_expense', {
+        'idempotency_key': 'idempotency_key VARCHAR(64)',
+    })

@@ -315,7 +315,15 @@ def _cf_resolve_category(direction, category_id=None, category_name=None,
             func.lower(func.trim(CashFlowCategory.name)) == nm.lower()
         ).first()
         if cat is None and create_if_missing:
-            cat = save_cf_category(nm, direction=direction if direction != CF_DIR_TRANSFER else 'both')
+            # ``save_cf_category`` answers ``(row, created)``; returning that
+            # tuple here (as this used to) handed the caller a tuple where a
+            # category was promised, so anything resolving a *new* category by
+            # name — a typed head on the entry form, a module posting its own
+            # category — blew up on ``cat.id``.  Both callers of this helper
+            # already re-query before this point, which is why it only showed on
+            # the first use of a brand-new category name.
+            cat, _created = save_cf_category(
+                nm, direction=direction if direction != CF_DIR_TRANSFER else 'both')
     if cat is None and required:
         raise ValueError('Select a cash flow category.')
     if cat is not None:

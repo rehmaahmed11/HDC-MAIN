@@ -1,0 +1,313 @@
+{% extends "shared/base.html" %}
+{% block title %}Shared Expenses — Share Report{% endblock %}
+{% block page_heading %}Shared Expenses — Share Report{% endblock %}
+
+{% block content %}
+{#
+  The clean report: one line per bill, one column per sharing head.
+
+  This is the page to print or export when somebody asks "the fuel was five
+  thousand — how much of it is mine?".  Read it three ways:
+
+    * the matrix      — every bill and each head's exact slice of it;
+    * the totals      — column totals per head and the grand total;
+    * where each head stands — share vs paid vs settled, and who owes whom.
+
+  Same filters as the ledgers, so the numbers always match the pages they came
+  from; nothing is cached or stored.
+#}
+{% set se_page = 'report' %}
+{% include 'shared_expenses/_nav.html' %}
+
+<div class="acc-page-header">
+    <div>
+        <h2><i class="fas fa-table-columns me-2"></i>Share Report</h2>
+        <div class="acc-subtitle">
+            Every shared expense and each head's share of it
+            {% if flt.date_from or flt.date_to %}
+            · {{ flt.date_from.isoformat() if flt.date_from else 'start' }} → {{ flt.date_to.isoformat() if flt.date_to else 'today' }}
+            {% endif %}
+        </div>
+    </div>
+    <div class="acc-toolbar">
+        <a href="{{ url_for('hdc_shared_report_export', **filter_qs) }}" class="btn btn-outline-dark btn-sm">
+            <i class="fas fa-file-csv me-1"></i>CSV
+        </a>
+        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="window.print()">
+            <i class="fas fa-print me-1"></i>Print
+        </button>
+        <a href="{{ url_for('hdc_shared_expenses') }}" class="btn btn-outline-secondary btn-sm">
+            <i class="fas fa-book-open me-1"></i>Ledgers
+        </a>
+        <a href="{{ url_for('hdc_shared_expense_new') }}" class="btn btn-mint btn-sm">
+            <i class="fas fa-plus-lg me-1"></i>New Shared Expense
+        </a>
+    </div>
+</div>
+
+<form method="get" class="acc-filter-bar">
+    <div>
+        <label for="date_from">From</label>
+        <input type="date" class="form-control form-control-sm" id="date_from" name="date_from"
+               value="{{ flt.date_from.isoformat() if flt.date_from else '' }}">
+    </div>
+    <div>
+        <label for="date_to">To</label>
+        <input type="date" class="form-control form-control-sm" id="date_to" name="date_to"
+               value="{{ flt.date_to.isoformat() if flt.date_to else '' }}">
+    </div>
+    <div>
+        <label for="category">Category</label>
+        <select class="form-select form-select-sm" id="category" name="category">
+            <option value="">All categories</option>
+            {% for c in categories %}
+            <option value="{{ c }}" {% if flt.category == c %}selected{% endif %}>{{ c }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div>
+        <label for="party_id">Sharing Party</label>
+        <select class="form-select form-select-sm" id="party_id" name="party_id">
+            <option value="">All</option>
+            {% for p in parties_all %}
+            <option value="{{ p.id }}" {% if flt.party_id == p.id %}selected{% endif %}>{{ p.name }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div>
+        <label for="status">Status</label>
+        <select class="form-select form-select-sm" id="status" name="status">
+            <option value="active" {% if flt.status == 'active' %}selected{% endif %}>Active</option>
+            <option value="void" {% if flt.status == 'void' %}selected{% endif %}>Voided</option>
+            <option value="all" {% if flt.status == 'all' %}selected{% endif %}>All</option>
+        </select>
+    </div>
+    <div class="d-flex align-items-end gap-2">
+        <button type="submit" class="btn btn-success btn-sm"><i class="fas fa-filter me-1"></i>Apply</button>
+        <a href="{{ url_for('hdc_shared_report') }}" class="btn btn-outline-secondary btn-sm">Reset</a>
+    </div>
+</form>
+
+<div class="row g-3 mb-4">
+    <div class="col-6 col-xl-3">
+        <div class="acc-stat acc-emerald">
+            <div class="acc-stat-label"><i class="fas fa-coins me-1"></i>Total Shared</div>
+            <div class="acc-stat-value"><small>Rs.</small> {{ '{:,.0f}'.format(totals.total_amount) }}</div>
+            <div class="acc-stat-sub">{{ totals.row_count }} expense(s)</div>
+            <i class="fas fa-coins acc-stat-icon"></i>
+        </div>
+    </div>
+    {% for p in parties %}
+    <div class="col-6 col-xl-3">
+        <div class="acc-stat acc-{{ 'blue' if loop.index % 2 else 'violet' }}">
+            <div class="acc-stat-label"><i class="fas fa-user-tag me-1"></i>{{ p.name }} share</div>
+            <div class="acc-stat-value"><small>Rs.</small> {{ '{:,.0f}'.format(totals.cell_amounts.get(p.id, 0)) }}</div>
+            <div class="acc-stat-sub">
+                {% set b = balances|selectattr('party_id', 'equalto', p.id)|first %}
+                {% if b %}{{ b.balance.text }}{% endif %}
+            </div>
+            <i class="fas fa-user-tag acc-stat-icon"></i>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+{# ── The matrix ──────────────────────────────────────────────────────────── #}
+<div class="acc-section se-print-block">
+    <div class="acc-section-head">
+        <h5><i class="fas fa-table me-2" style="color:#f59e0b;"></i>Who Shares What</h5>
+        <span class="small text-muted">Rs. per head, per bill</span>
+    </div>
+    <div class="acc-section-body flush">
+        <div class="table-responsive">
+            <table class="table acc-table table-bordered mb-0 se-matrix">
+                <thead>
+                    <tr>
+                        <th style="width:96px;">Date</th>
+                        <th>Expense</th>
+                        <th>Category</th>
+                        <th class="text-end">Total</th>
+                        <th>Paid By</th>
+                        {% for p in parties %}
+                        <th class="text-end">{{ p.name }}</th>
+                        {% endfor %}
+                        <th class="text-center">Accounts</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rows %}
+                    <tr class="{% if row.is_void %}se-void-row{% endif %}">
+                        <td>{{ row.date.strftime('%d %b %y') if row.date else '—' }}</td>
+                        <td>
+                            <a href="{{ url_for('hdc_shared_expense_detail', expense_id=row.id) }}"
+                               class="text-decoration-none">{{ row.title }}</a>
+                            {% if row.is_void %}<span class="badge bg-secondary ms-1">void</span>{% endif %}
+                            {% if row.reference %}<span class="d-block small text-muted">{{ row.reference }}</span>{% endif %}
+                        </td>
+                        <td>{{ row.category or '—' }}</td>
+                        <td class="text-end acc-amount">{{ '{:,.2f}'.format(row.total_amount) }}</td>
+                        <td>{{ row.payer_name }}</td>
+                        {% for p in parties %}
+                        {% set cell = row.cell_amounts.get(p.id, 0) %}
+                        <td class="text-end {% if cell %}acc-amount{% else %}text-muted{% endif %}">
+                            {{ '{:,.2f}'.format(cell) if cell else '—' }}
+                        </td>
+                        {% endfor %}
+                        <td class="text-center">
+                            {% if row.linked %}
+                            <i class="fas fa-link text-success" title="Linked to an Accounts entry"></i>
+                            {% else %}
+                            <i class="fas fa-triangle-exclamation text-warning" title="No Accounts entry yet"></i>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="{{ 6 + parties|length }}">
+                        <div class="acc-empty">
+                            <i class="fas fa-table"></i>
+                            <div class="mt-2">Nothing to report for this filter yet.</div>
+                        </div>
+                    </td></tr>
+                    {% endfor %}
+                </tbody>
+                <tfoot>
+                    <tr class="fw-bold">
+                        <td colspan="3">Total</td>
+                        <td class="text-end">{{ '{:,.2f}'.format(totals.total_amount) }}</td>
+                        <td></td>
+                        {% for p in parties %}
+                        <td class="text-end">{{ '{:,.2f}'.format(totals.cell_amounts.get(p.id, 0)) }}</td>
+                        {% endfor %}
+                        <td></td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    </div>
+</div>
+
+{# ── Where each head stands ──────────────────────────────────────────────── #}
+<div class="acc-section se-print-block">
+    <div class="acc-section-head">
+        <h5><i class="fas fa-scale-balanced me-2" style="color:#10b981;"></i>Position of Each Head</h5>
+        <span class="small text-muted">Within the same filter</span>
+    </div>
+    <div class="acc-section-body flush">
+        <div class="table-responsive">
+            <table class="table acc-table mb-0">
+                <thead>
+                    <tr>
+                        <th>Sharing Party</th>
+                        <th class="text-end">Share</th>
+                        <th class="text-end">Paid</th>
+                        <th class="text-end">Settled Out</th>
+                        <th class="text-end">Settled In</th>
+                        <th class="text-end">Balance</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for b in balances %}
+                    <tr>
+                        <td class="acc-name">{{ b.party_name }}</td>
+                        <td class="text-end acc-muted-amount">{{ '{:,.2f}'.format(b.share_amount) }}</td>
+                        <td class="text-end acc-muted-amount">{{ '{:,.2f}'.format(b.paid_amount) }}</td>
+                        <td class="text-end acc-muted-amount">{{ '{:,.2f}'.format(b.settled_out_amount) }}</td>
+                        <td class="text-end acc-muted-amount">{{ '{:,.2f}'.format(b.settled_in_amount) }}</td>
+                        <td class="text-end"><span class="se-balance se-{{ b.balance.tone }}">{{ b.balance.text }}</span></td>
+                    </tr>
+                    {% endfor %}
+                    {% if outside.unattributed_minor %}
+                    <tr class="se-outside-row">
+                        <td>{{ outside.party_name }}</td>
+                        <td class="text-end">—</td>
+                        <td class="text-end acc-muted-amount">{{ '{:,.2f}'.format(outside.unattributed_amount) }}</td>
+                        <td class="text-end">—</td>
+                        <td class="text-end">—</td>
+                        <td class="text-end"><span class="se-balance se-{{ outside.balance.tone }}">{{ outside.balance.text }}</span></td>
+                    </tr>
+                    {% endif %}
+                </tbody>
+                {% if balance_totals %}
+                <tfoot>
+                    <tr class="fw-bold">
+                        <td>Total</td>
+                        <td class="text-end">{{ '{:,.2f}'.format(balance_totals.share_amount) }}</td>
+                        <td class="text-end">{{ '{:,.2f}'.format(balance_totals.paid_amount) }}</td>
+                        <td class="text-end">{{ '{:,.2f}'.format(balance_totals.settled_out_amount) }}</td>
+                        <td class="text-end">{{ '{:,.2f}'.format(balance_totals.settled_in_amount) }}</td>
+                        <td class="text-end">
+                            {% if balance_totals.balanced %}
+                            <span class="se-balance se-slate">Balanced</span>
+                            {% else %}
+                            <span class="se-balance se-amber">{{ '{:,.2f}'.format(balance_totals.balances|abs) }}</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                </tfoot>
+                {% endif %}
+            </table>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3">
+    {# ── By category ──────────────────────────────────────────────────────── #}
+    <div class="col-12 col-lg-6">
+        <div class="acc-section se-print-block">
+            <div class="acc-section-head">
+                <h5><i class="fas fa-tags me-2" style="color:#8b5cf6;"></i>By Category</h5>
+            </div>
+            <div class="acc-section-body flush">
+                <table class="table acc-table mb-0">
+                    <thead><tr><th>Category</th><th class="text-center">Bills</th><th class="text-end">Total</th></tr></thead>
+                    <tbody>
+                        {% for c in category_totals %}
+                        <tr>
+                            <td>{{ c.category }}</td>
+                            <td class="text-center">{{ c.count }}</td>
+                            <td class="text-end acc-amount">{{ '{:,.2f}'.format(c.total_amount) }}</td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="3" class="text-muted">No expenses in this filter.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    {# ── By month ─────────────────────────────────────────────────────────── #}
+    <div class="col-12 col-lg-6">
+        <div class="acc-section se-print-block">
+            <div class="acc-section-head">
+                <h5><i class="fas fa-calendar-days me-2" style="color:#06b6d4;"></i>By Month</h5>
+            </div>
+            <div class="acc-section-body flush">
+                <table class="table acc-table mb-0">
+                    <thead><tr><th>Month</th><th class="text-center">Bills</th><th class="text-end">Total</th></tr></thead>
+                    <tbody>
+                        {% for m in month_totals %}
+                        <tr>
+                            <td>{{ m.label }}</td>
+                            <td class="text-center">{{ m.count }}</td>
+                            <td class="text-end acc-amount">{{ '{:,.2f}'.format(m.total_amount) }}</td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="3" class="text-muted">No expenses in this filter.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<p class="small text-muted">
+    Printed by HDC ERP on {{ today }}. Figures are derived from the shared-expense records and their
+    settlements at the moment this page was rendered; the money side of every linked expense lives in the
+    accounts ledger (<code>hdc_account_txn</code>) and is never duplicated here.
+    {% if summary.unlinked_count %}
+    <strong>{{ summary.unlinked_count }} expense(s) totalling Rs. {{ '{:,.2f}'.format(summary.unlinked_amount) }}
+    have no Accounts entry yet.</strong>
+    {% endif %}
+</p>
+{% endblock %}

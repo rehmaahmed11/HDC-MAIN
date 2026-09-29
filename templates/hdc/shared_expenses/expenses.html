@@ -1,0 +1,199 @@
+{% extends "shared/base.html" %}
+{% block title %}Shared Expenses — All Expenses{% endblock %}
+{% block page_heading %}Shared Expenses — All Expenses{% endblock %}
+
+{% block content %}
+{#
+  Every shared expense with its split shown inline.
+
+  The list answers "what did we share, with whom, and is the money side in
+  Accounts?" at a glance: one row per bill, the heads and their slices, who
+  paid, the split mode, and whether an Accounts entry backs it.  Voided rows
+  stay in the list (greyed) so history is never rewritten — filter to
+  Status = Voided to see only those.
+#}
+{% set se_page = 'expenses' %}
+{% include 'shared_expenses/_nav.html' %}
+
+<div class="acc-page-header">
+    <div>
+        <h2><i class="fas fa-receipt me-2"></i>Shared Expenses</h2>
+        <div class="acc-subtitle">
+            One cost, divided between however many heads share it. Each row keeps its split,
+            its payer and its link to the Accounts entry that moved the money.
+        </div>
+    </div>
+    <div class="acc-toolbar">
+        <a href="{{ url_for('hdc_shared_expense_new') }}" class="btn btn-mint btn-sm">
+            <i class="fas fa-plus-lg me-1"></i>New Shared Expense
+        </a>
+        <a href="{{ url_for('hdc_shared_expenses_export', **filter_qs) }}" class="btn btn-outline-dark btn-sm">
+            <i class="fas fa-file-csv me-1"></i>CSV
+        </a>
+        <a href="{{ url_for('hdc_shared_expenses') }}" class="btn btn-outline-secondary btn-sm">
+            <i class="fas fa-book-open me-1"></i>Ledgers
+        </a>
+    </div>
+</div>
+
+<form method="get" class="acc-filter-bar">
+    <div>
+        <label for="date_from">From</label>
+        <input type="date" class="form-control form-control-sm" id="date_from" name="date_from"
+               value="{{ flt.date_from.isoformat() if flt.date_from else '' }}">
+    </div>
+    <div>
+        <label for="date_to">To</label>
+        <input type="date" class="form-control form-control-sm" id="date_to" name="date_to"
+               value="{{ flt.date_to.isoformat() if flt.date_to else '' }}">
+    </div>
+    <div>
+        <label for="party_id">Sharing Party</label>
+        <select class="form-select form-select-sm" id="party_id" name="party_id">
+            <option value="">All</option>
+            {% for p in parties %}
+            <option value="{{ p.id }}" {% if flt.party_id == p.id %}selected{% endif %}>{{ p.name }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div>
+        <label for="category">Category</label>
+        <select class="form-select form-select-sm" id="category" name="category">
+            <option value="">All</option>
+            {% for c in categories %}
+            <option value="{{ c }}" {% if flt.category == c %}selected{% endif %}>{{ c }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div>
+        <label for="money">Accounts</label>
+        <select class="form-select form-select-sm" id="money" name="money">
+            <option value="">Any</option>
+            <option value="linked" {% if flt.money == 'linked' %}selected{% endif %}>Linked</option>
+            <option value="unlinked" {% if flt.money == 'unlinked' %}selected{% endif %}>Not yet</option>
+        </select>
+    </div>
+    <div>
+        <label for="status">Status</label>
+        <select class="form-select form-select-sm" id="status" name="status">
+            <option value="active" {% if flt.status == 'active' %}selected{% endif %}>Active</option>
+            <option value="void" {% if flt.status == 'void' %}selected{% endif %}>Voided</option>
+            <option value="all" {% if flt.status == 'all' %}selected{% endif %}>All</option>
+        </select>
+    </div>
+    <div style="min-width:200px;flex:1 1 200px;">
+        <label for="q">Search</label>
+        <input type="text" class="form-control form-control-sm" id="q" name="q"
+               placeholder="Title, category, note…" value="{{ flt.search or '' }}">
+    </div>
+    <div class="d-flex align-items-end gap-2">
+        <button type="submit" class="btn btn-success btn-sm"><i class="fas fa-filter me-1"></i>Apply</button>
+        <a href="{{ url_for('hdc_shared_expense_list') }}" class="btn btn-outline-secondary btn-sm">Reset</a>
+    </div>
+</form>
+
+<div class="acc-section">
+    <div class="acc-section-head">
+        <h5><i class="fas fa-list me-2" style="color:#8b5cf6;"></i>
+            {{ rows|length }} expense(s) · Rs. {{ '{:,.2f}'.format(summary.total_amount) }}
+        </h5>
+        <span class="small text-muted">
+            {{ summary.linked_count }} linked to Accounts · {{ summary.unlinked_count }} not in Accounts yet
+        </span>
+    </div>
+    <div class="acc-section-body flush">
+        <div class="table-responsive">
+            <table class="table acc-table mb-0">
+                <thead>
+                    <tr>
+                        <th style="width:104px;">Date</th>
+                        <th>Expense</th>
+                        <th>Category</th>
+                        <th class="text-end">Total</th>
+                        <th>Paid By</th>
+                        <th>Split Between</th>
+                        <th>Mode</th>
+                        <th class="text-center">Accounts</th>
+                        <th class="text-end">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rows %}
+                    {% set e = row.expense %}
+                    <tr {{ e|hdc_row_attrs }}>
+                        <td>{{ e.date.strftime('%d %b %Y') if e.date else '—' }}</td>
+                        <td>
+                            <a class="acc-name text-decoration-none"
+                               href="{{ url_for('hdc_shared_expense_detail', expense_id=e.id) }}">
+                                {{ e.title }}
+                            </a>
+                            <span class="acc-group-path d-block">
+                                #{{ e.id }}{% if e.reference %} · ref {{ e.reference }}{% endif %}
+                                {% if e.note %} · {{ e.note|truncate(48) }}{% endif %}
+                            </span>
+                        </td>
+                        <td>{{ e.category or '—' }}</td>
+                        <td class="text-end acc-amount">{{ '{:,.2f}'.format(row.total) }}</td>
+                        <td>
+                            {% if e.payer_party %}{{ e.payer_party.name }}
+                            {% elif e.paid_from_account %}<span class="text-muted">{{ e.paid_from_account.name }}</span>
+                            {% else %}<span class="text-warning">— not set —</span>{% endif %}
+                        </td>
+                        <td>
+                            {% for s in row.shares %}
+                            <span class="se-share-chip" title="{{ '{:,.2f}'.format(s.amount) }} PKR{% if s.percent %} ({{ '{:.2f}'.format(s.percent) }}%){% endif %}">
+                                {{ s.party_name }} <strong>{{ '{:,.0f}'.format(s.amount) }}</strong>
+                            </span>
+                            {% else %}
+                            <span class="text-muted">no shares</span>
+                            {% endfor %}
+                        </td>
+                        <td class="small">{{ e.split_mode|title }}</td>
+                        <td class="text-center">
+                            {% if e.cf_entry_id %}
+                            <a class="badge bg-success-subtle text-success text-decoration-none"
+                               href="{{ url_for('hdc_cashflow_register', q=e.description or '') }}"
+                               title="Cash Flow register entry #{{ e.cf_entry_id }} / ledger txn #{{ e.txn_id or '—' }}">
+                                <i class="fas fa-link me-1"></i>#{{ e.cf_entry_id }}
+                            </a>
+                            {% elif e.txn_id %}
+                            <span class="badge bg-success-subtle text-success" title="Linked to ledger txn #{{ e.txn_id }}">
+                                <i class="fas fa-link"></i>
+                            </span>
+                            {% else %}
+                            <span class="badge bg-warning-subtle text-warning"
+                                  title="No Accounts entry yet — the money side is not recorded">
+                                <i class="fas fa-triangle-exclamation"></i> not in Accounts
+                            </span>
+                            {% endif %}
+                        </td>
+                        <td class="text-end acc-actions">
+                            <a class="btn btn-outline-secondary" href="{{ url_for('hdc_shared_expense_detail', expense_id=e.id) }}">
+                                <i class="fas fa-eye"></i>
+                            </a>
+                            {% if not e.is_void %}
+                            <a class="btn btn-outline-primary" href="{{ url_for('hdc_shared_expense_edit', expense_id=e.id) }}">
+                                <i class="fas fa-pen"></i>
+                            </a>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="9">
+                            <div class="acc-empty">
+                                <i class="fas fa-receipt"></i>
+                                <div class="mt-2">No shared expenses match these filters.</div>
+                                <a href="{{ url_for('hdc_shared_expense_new') }}" class="btn btn-sm btn-mint mt-2">
+                                    <i class="fas fa-plus me-1"></i>Record a shared expense
+                                </a>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
