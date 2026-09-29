@@ -524,6 +524,17 @@ a .kpi-card:hover,
     color: var(--text);
 }
 
+/* Clickable row-name links (e.g. project name -> project detail) */
+.hdc-name-link {
+    color: var(--accent);
+    transition: color 0.16s ease;
+}
+
+.hdc-name-link:hover {
+    color: var(--accent-strong);
+    text-decoration: underline !important;
+}
+
 .hdc-table.table-sm tbody td {
     font-size: 0.84rem;
 }
