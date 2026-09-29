@@ -346,6 +346,11 @@ def compute_split(mode, total_minor, participants):
       + 33.34 still lands on the rupee;
     * ``custom``  — the figures as typed, refused when they do not add up.
 
+    Either column may stand in for the other: a row with no percentage is read
+    from its amount, and a row with no amount is read from its percentage.  The
+    form shows both columns live, so refusing the one the operator did not touch
+    would lose work for nothing — what is typed is what is saved.
+
     Raises ``ValueError`` with a message written for the operator.
     """
     rows = list(participants or [])
@@ -381,12 +386,23 @@ def compute_split(mode, total_minor, participants):
         for row in rows:
             raw = row.get('percent')
             if raw in (None, ''):
-                raise ValueError('Give every party a percentage.')
-            try:
-                # basis points keep "33.33%" exact; 2 decimals of a percent
-                bp = to_minor(raw, field='Percentage')
-            except ValueError as exc:
-                raise ValueError(f'Percentage is not a number ({raw}).') from exc
+                # No percentage typed — the amount column is a fair stand-in:
+                # the page works percentages out from amounts, so accept what
+                # the operator actually filled in rather than refusing it.
+                amount_raw = row.get('amount')
+                if amount_raw in (None, '') or not total_minor:
+                    raise ValueError('Give every party a percentage.')
+                try:
+                    amount_minor = to_minor(amount_raw, field='Share amount')
+                except ValueError as exc:
+                    raise ValueError(f'Share amount is not a number ({amount_raw}).') from exc
+                bp = _bp_of(amount_minor, total_minor)
+            else:
+                try:
+                    # basis points keep "33.33%" exact; 2 decimals of a percent
+                    bp = to_minor(raw, field='Percentage')
+                except ValueError as exc:
+                    raise ValueError(f'Percentage is not a number ({raw}).') from exc
             if bp < 0:
                 raise ValueError('Percentages cannot be negative.')
             bp_values.append(bp)
@@ -403,18 +419,34 @@ def compute_split(mode, total_minor, participants):
 
     # custom
     out = []
+    derived_from_percent = False
     for row in rows:
         raw = row.get('amount')
         if raw in (None, ''):
-            raise ValueError('Give every party an amount.')
-        try:
-            amount = to_minor(raw, field='Share amount')
-        except ValueError as exc:
-            raise ValueError(f'Share amount is not a number ({raw}).') from exc
+            # Same courtesy as above: a percentage typed without an amount is
+            # turned into rupees instead of being refused.
+            percent_raw = row.get('percent')
+            if percent_raw in (None, '') or not total_minor:
+                raise ValueError('Give every party an amount.')
+            try:
+                bp = to_minor(percent_raw, field='Percentage')
+            except ValueError as exc:
+                raise ValueError(f'Percentage is not a number ({percent_raw}).') from exc
+            amount = (total_minor * int(bp) + 5000) // 10000
+            derived_from_percent = True
+        else:
+            try:
+                amount = to_minor(raw, field='Share amount')
+            except ValueError as exc:
+                raise ValueError(f'Share amount is not a number ({raw}).') from exc
         if amount < 0:
             raise ValueError('Share amounts cannot be negative.')
         out.append({'party_id': int(row['party_id']), 'amount_minor': int(amount),
                     'percent_bp': _bp_of(amount, total_minor)})
+    if derived_from_percent:
+        # Percentages carry two decimals only, so the rupees they produce can
+        # drift by a paisa or two — hand the drift to the largest share.
+        _absorb_rounding(out, total_minor)
     diff = total_minor - sum(r['amount_minor'] for r in out)
     if diff:
         raise ValueError(

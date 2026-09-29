@@ -61,8 +61,35 @@ the app uses.
 * `percent` — basis points per head (`3333` = 33.33%), must total 10,000; the
   rupee slices are derived from the total, with the same odd-paisa rule.
 
+Either column may stand in for the other: a head with no percentage is read from
+its rupees, and a head with no amount is read from its percentage.  The form
+works both columns out live, so refusing the one the operator did not touch
+would lose work for nothing — what is typed is what is saved.  A head with
+neither figure is still refused.
+
 Duplicated or empty participants are refused, so one head cannot appear twice on
 one bill, and a bill always names at least one head.
+
+### The split on screen
+
+`static/hdc/js/pages/shared_expenses.js` keeps the split table live, and mirrors
+the engine's arithmetic exactly (integer paisa, odd paisa handed out one by one,
+rounding drift given to the largest share) so **what is on screen is what gets
+saved** — `tests/shared_expense_split_harness.js` drives the real script in a DOM
+stub and `tests/test_shared_expenses.py` pushes the figures it ends up with
+through `compute_split` to prove it.
+
+* Equal — every ticked head's rupees appear the moment the total is typed, and
+  re-appear whenever the total or the ticks change.
+* Percentages — a percentage typed in works out that head's rupees at once; an
+  amount typed in works out its percentage.  Figures the page works out are
+  tinted.
+* Custom amounts — the rupees are the operator's, and each head's percentage
+  follows along.
+
+The line under the table says whether the figures add up — and, for a
+percentage split, that percentages carry two decimals, so a three-way even
+divide is what **Equal** is for (`33.33 × 3` is 99.99%, not 100%).
 
 ## 4. Who owes whom
 

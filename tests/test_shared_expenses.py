@@ -21,9 +21,11 @@ Run with:
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -55,6 +57,8 @@ from hdc.utils.dates import _pkt_now_naive                           # noqa: E40
 from hdc.utils.money import from_minor, to_minor                     # noqa: E402
 
 ADMIN_PASSWORD = os.environ['HDC_BOOTSTRAP_ADMIN_PASSWORD']
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SPLIT_HARNESS = os.path.join(REPO_ROOT, 'tests', 'shared_expense_split_harness.js')
 
 
 def _csrf(client, url):
@@ -116,6 +120,53 @@ class SplitEngineTestCase(unittest.TestCase):
             compute_split('equal', 1000, [])
         with self.assertRaises(ValueError):
             compute_split('equal', 1000, [{'party_id': 1}, {'party_id': 1}])
+
+    def test_percent_split_reads_the_amount_when_no_percentage_is_typed(self):
+        """The form shows both columns live, so a percentage the operator did
+        not type is worked out from the rupees rather than refused."""
+        rows = compute_split('percent', 900000, [
+            {'party_id': 1, 'amount': '4,500'},
+            {'party_id': 2, 'amount': '2,700'},
+            {'party_id': 3, 'amount': '1,800'},
+        ])
+        self.assertEqual([r['amount_minor'] for r in rows], [450000, 270000, 180000])
+        self.assertEqual([r['percent_bp'] for r in rows], [5000, 3000, 2000])
+
+    def test_custom_split_reads_the_percentage_when_no_amount_is_typed(self):
+        rows = compute_split('custom', 900000, [
+            {'party_id': 1, 'percent': '50'},
+            {'party_id': 2, 'percent': '30'},
+            {'party_id': 3, 'percent': '20'},
+        ])
+        self.assertEqual(sum(r['amount_minor'] for r in rows), 900000)
+        self.assertEqual([r['amount_minor'] for r in rows], [450000, 270000, 180000])
+
+    def test_a_row_with_neither_figure_is_still_refused(self):
+        with self.assertRaises(ValueError) as ctx:
+            compute_split('percent', 900000, [
+                {'party_id': 1, 'percent': '50'},
+                {'party_id': 2},
+            ])
+        self.assertIn('percentage', str(ctx.exception).lower())
+        with self.assertRaises(ValueError) as ctx:
+            compute_split('custom', 900000, [
+                {'party_id': 1, 'amount': '4500'},
+                {'party_id': 2},
+            ])
+        self.assertIn('amount', str(ctx.exception).lower())
+
+    def test_percentages_derived_from_an_odd_paisa_split_say_so(self):
+        """A three-way equal split is 33.333…% each.  Rounded to the two
+        decimals a percentage carries it adds up to 99.99%, so the engine says
+        so instead of quietly shaving a rupee off somebody's share — which is
+        exactly why Equal split is there for an even divide."""
+        with self.assertRaises(ValueError) as ctx:
+            compute_split('percent', 500000, [
+                {'party_id': 1, 'amount': '1,666.67'},
+                {'party_id': 2, 'amount': '1,666.67'},
+                {'party_id': 3, 'amount': '1,666.66'},
+            ])
+        self.assertIn('99.99', str(ctx.exception))
 
     def test_balance_state_reads_like_a_sentence(self):
         self.assertEqual(balance_state(0)['state'], 'settled')
@@ -510,6 +561,35 @@ class SharedExpenseAppTestCase(unittest.TestCase):
         self.assertIn('equal split', page.lower())
         self.assertIn('money_source', page)
 
+    def test_a_new_form_starts_with_the_default_heads_ticked(self):
+        """Untouched form: the default heads are already in the split, so the
+        rupees appear the moment the total is typed."""
+        page = self.client.get('/hdc/accounts/shared/expenses/new').get_data(as_text=True)
+        ticked = re.findall(r'name="party_ids" value="(\d+)"\s+class="form-check-input '
+                            r'se-party-tick"\s+checked', page)
+        expected = sorted(str(p.id) for p in self.parties.values() if p.is_default)
+        self.assertEqual(sorted(ticked), expected)
+        self.assertTrue(expected, 'the fixture must seed default sharing heads')
+
+    def test_a_refused_form_keeps_the_heads_the_operator_ticked(self):
+        """After a refusal the draft comes back exactly as typed — including a
+        head the operator deliberately left out."""
+        parts = {name: str(p.id) for name, p in self.parties.items()}
+        form = self._new_expense_form(split_mode='custom')
+        form['party_ids'] = [parts['FBM'], parts['HDC']]      # Home left out
+        form['amount_party_' + parts['FBM']] = '1000'
+        form['amount_party_' + parts['HDC']] = '1000'
+        res = self._post('/hdc/accounts/shared/expenses/new', form)
+        self.assertEqual(res.status_code, 302, 'a short custom split must be refused')
+        page = self.client.get('/hdc/accounts/shared/expenses/new?restore=1')\
+            .get_data(as_text=True)
+        self.assertIn('Nothing was saved', page)
+        ticked = re.findall(r'name="party_ids" value="(\d+)"\s+class="form-check-input '
+                            r'se-party-tick"\s+checked', page)
+        self.assertEqual(sorted(ticked), sorted([parts['FBM'], parts['HDC']]),
+                         'a restored draft must not re-tick heads on its own')
+        self.assertIn('value="1000"', page, 'the typed amounts come back too')
+
     # ── row traceability + audit ─────────────────────────────────────────
 
     def test_activity_is_recorded_for_a_new_expense(self):
@@ -518,6 +598,75 @@ class SharedExpenseAppTestCase(unittest.TestCase):
         rows = UserActivity.query.filter(
             UserActivity.entity_type == 'hdc_shared_expense').all()
         self.assertTrue(rows, 'creating a shared expense must land in the activity trail')
+
+
+class SplitTableScriptTestCase(unittest.TestCase):
+    """The split table's live figures, executed for real under Node.
+
+    The page script works every figure out while the operator types; the server
+    works them out again when the form is posted.  Should the two ever drift
+    apart, the screen shows one thing and the ledger keeps another — so the
+    harness drives the *real* ``shared_expenses.js`` in a DOM stub, writes out
+    the figures it ends up with, and those figures are pushed through the real
+    split engine here.
+    """
+
+    @unittest.skipIf(shutil.which('node') is None, 'node is not installed')
+    def test_the_live_split_is_what_the_engine_saves(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out_path = os.path.join(tmp, 'split.json')
+            result = subprocess.run(
+                ['node', SPLIT_HARNESS, REPO_ROOT, out_path],
+                capture_output=True, text=True, timeout=120,
+            )
+            self.assertEqual(
+                result.returncode, 0,
+                'shared_expenses.js harness failed:\n%s%s' % (result.stdout, result.stderr))
+            self.assertIn('checks passed', result.stdout)
+            with open(out_path, encoding='utf-8') as handle:
+                payload = json.load(handle)
+
+        self.assertTrue(payload['cases'], 'the harness recorded no split')
+        for case in payload['cases']:
+            with self.subTest(case=case['name']):
+                total_minor = to_minor(case['total'])
+                # Both columns are posted for every row, exactly as the form does.
+                participants = [{'party_id': row['party_id'],
+                                 'amount': row['amount'],
+                                 'percent': row['percent']} for row in case['rows']]
+                if case['refused']:
+                    with self.assertRaises(ValueError):
+                        compute_split(case['mode'], total_minor, participants)
+                    self.assertEqual(case['state'], 'bad',
+                                     'the page must say so before the server has to')
+                    continue
+                rows = compute_split(case['mode'], total_minor, participants)
+                saved = {int(r['party_id']): int(r['amount_minor']) for r in rows}
+                shown = {int(r['party_id']): to_minor(r['amount']) for r in case['rows']}
+                self.assertEqual(saved, shown,
+                                 'what the operator saw is not what would be saved')
+                self.assertEqual(sum(saved.values()), total_minor,
+                                 'the saved slices must re-add to the total')
+                self.assertEqual(case['state'], 'ok')
+
+    def test_the_form_ships_the_script_and_the_style(self):
+        page_path = os.path.join(REPO_ROOT, 'templates', 'hdc',
+                                 'shared_expenses', 'expense_form.html')
+        with open(page_path, encoding='utf-8') as handle:
+            page = handle.read()
+        self.assertIn('id="seSplitCheck"', page)
+        for row_field in ('se-party-tick', 'se-amount', 'se-percent'):
+            with self.subTest(field=row_field):
+                self.assertIn(row_field, page)
+        nav_path = os.path.join(REPO_ROOT, 'templates', 'hdc',
+                                'shared_expenses', '_nav.html')
+        with open(nav_path, encoding='utf-8') as handle:
+            self.assertIn('js/pages/shared_expenses.js', handle.read())
+        css_path = os.path.join(REPO_ROOT, 'static', 'hdc', 'css', 'shared_expenses.css')
+        with open(css_path, encoding='utf-8') as handle:
+            css = handle.read()
+        self.assertIn('.se-split-off', css)
+        self.assertIn('input.se-auto', css)
 
 
 if __name__ == '__main__':
