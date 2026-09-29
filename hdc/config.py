@@ -168,6 +168,10 @@ def get_flask_config(settings=None):
         'SQLALCHEMY_DATABASE_URI': f'sqlite:///{settings.db_path}',
         'SQLALCHEMY_TRACK_MODIFICATIONS': False,
         # Explicit cookie policy; production is expected to run behind HTTPS.
+        # Empty keeps the clickjacking default (X-Frame-Options: SAMEORIGIN);
+        # set it to a CSP source list (e.g. "'self' https://portal.example") to
+        # allow embedding the app in a frame on those origins instead.
+        'HDC_FRAME_ANCESTORS': (os.environ.get('HDC_FRAME_ANCESTORS') or '').strip(),
         'SESSION_COOKIE_HTTPONLY': True,
         'SESSION_COOKIE_SAMESITE': 'Lax',
         'SESSION_COOKIE_SECURE': secure_cookie,

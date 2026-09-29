@@ -61,7 +61,11 @@ URLs or database schema.
   multi-instance deployments.
 - Standard security response headers are added, including nosniff,
   same-origin framing, referrer policy, permissions policy, and HSTS in
-  production.
+  production. Framing stays `X-Frame-Options: SAMEORIGIN` unless
+  `HDC_FRAME_ANCESTORS` is set to a CSP source list (for example
+  `HDC_FRAME_ANCESTORS="'self' https://portal.example"`), which switches to
+  `Content-Security-Policy: frame-ancestors …` so the app can be embedded in
+  that portal; leave it unset unless embedding is actually wanted.
 
 ## Data correctness and repository hygiene
 

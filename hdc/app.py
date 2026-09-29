@@ -110,7 +110,16 @@ def create_app(config_overrides=None):
     @app.after_request
     def _security_headers(response):
         response.headers.setdefault('X-Content-Type-Options', 'nosniff')
-        response.headers.setdefault('X-Frame-Options', 'SAMEORIGIN')
+        # Clickjacking: the app refuses to be framed by default.  A deployment
+        # that has to embed it somewhere (an intranet portal, a hosted preview)
+        # opts in with HDC_FRAME_ANCESTORS — an explicit CSP source list — and
+        # then the modern header is used instead of SAMEORIGIN.
+        frame_ancestors = (app.config.get('HDC_FRAME_ANCESTORS') or '').strip()
+        if frame_ancestors:
+            response.headers.setdefault(
+                'Content-Security-Policy', f'frame-ancestors {frame_ancestors}')
+        else:
+            response.headers.setdefault('X-Frame-Options', 'SAMEORIGIN')
         response.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
         response.headers.setdefault(
             'Permissions-Policy',
