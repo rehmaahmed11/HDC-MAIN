@@ -17,7 +17,9 @@
         })();
     </script>
     <!-- No JavaScript: the drawer cannot be toggled, so fall back to the
-         classic docked sidebar instead of hiding the navigation completely. -->
+         classic docked sidebar instead of hiding the navigation completely.
+         The collapsible groups need scripting to reopen, so show every group
+         and hide the arrows that would no longer do anything. -->
     <noscript>
         <style>
             #sidebar.collapsed {
@@ -28,9 +30,16 @@
                 min-height: 100vh;
                 box-shadow: none;
             }
+            .sidebar-subnav.collapse {
+                display: block !important;
+                visibility: visible;
+                height: auto;
+            }
             .sidebar-backdrop,
             .btn-hamburger,
-            .sidebar-close { display: none !important; }
+            .sidebar-close,
+            .nav-group-arrow,
+            .sidebar-expand-all { display: none !important; }
         </style>
     </noscript>
 </head>
@@ -46,116 +55,169 @@
             </button>
         </div>
         <div class="sidebar-divider"></div>
-        <ul class="sidebar-nav">
-            <li class="nav-item {% if request.endpoint == 'hdc_dashboard' %}active{% endif %}">
-                <a href="{{ url_for('hdc_dashboard') }}"><i class="fas fa-tachometer-alt"></i><span>Dashboard</span></a>
+        {# ── Options, grouped by the job they belong to ──────────────────────
+           Each group is a collapsible section: click its heading (or the
+           arrow on the right) to open/close the links underneath.  The group
+           that holds the page being viewed is always open and highlighted, so
+           the drawer never hides where the user is; the open/closed choice for
+           the other groups is remembered per browser by
+           core/sidebar_groups.js.  Without JavaScript the <noscript> block
+           above keeps every group open.
+
+           `match` holds the URL prefixes a link owns.  The link with the
+           LONGEST matching prefix wins, so a child page
+           (/hdc/accounts/manage) lights up its own row instead of its parent
+           (Accounts Hub), and a page that has no row of its own
+           (/hdc/accounts/cashflow) still highlights the entry point it is
+           reached from. #}
+        {% set sidebar_role = (current_user.role or '')|trim|lower %}
+        {% set sidebar_sections = [
+            {'id': 'overview', 'label': 'Overview', 'icon': 'fa-gauge-high', 'roles': [], 'links': [
+                {'label': 'Dashboard', 'icon': 'fa-tachometer-alt', 'href': url_for('hdc_dashboard'),
+                 'match': ['/hdc/', '/hdc/kpi']},
+                {'label': 'Alerts', 'icon': 'fa-bell', 'href': url_for('hdc_alerts'),
+                 'match': ['/hdc/alerts']},
+            ]},
+            {'id': 'projects', 'label': 'Projects & Estimation', 'icon': 'fa-project-diagram', 'roles': [], 'links': [
+                {'label': 'Projects', 'icon': 'fa-project-diagram', 'href': url_for('hdc_projects'),
+                 'match': ['/hdc/projects', '/hdc/cost-entries']},
+                {'label': 'Stages', 'icon': 'fa-layer-group', 'href': url_for('hdc_stage_overview'),
+                 'match': ['/hdc/stages', '/hdc/stage/']},
+                {'label': 'Estimation', 'icon': 'fa-calculator', 'href': url_for('hdc_estimation'),
+                 'match': ['/hdc/estimation']},
+                {'label': 'Project Estimation', 'icon': 'fa-list-check', 'href': url_for('hdc_project_estimation'),
+                 'match': ['/hdc/project-estimation', '/project-estimation']},
+            ]},
+            {'id': 'workforce', 'label': 'Workforce', 'icon': 'fa-people-group', 'roles': [], 'links': [
+                {'label': 'Subcontractors', 'icon': 'fa-hard-hat', 'href': url_for('hdc_subcontractors'),
+                 'match': ['/hdc/subcontractor']},
+                {'label': 'Workers', 'icon': 'fa-users-cog', 'href': url_for('hdc_workers'),
+                 'match': ['/hdc/workers']},
+                {'label': 'Trades', 'icon': 'fa-people-carry-box', 'href': url_for('hdc_trades'),
+                 'match': ['/hdc/trades']},
+                {'label': 'Timekeeping', 'icon': 'fa-calendar-check', 'href': url_for('hdc_attendance'),
+                 'match': ['/hdc/timekeeping', '/hdc/attendance']},
+                {'label': 'Payroll', 'icon': 'fa-money-check-dollar', 'href': url_for('hdc_payroll'),
+                 'match': ['/hdc/payroll']},
+            ]},
+            {'id': 'costs', 'label': 'Costs & Overheads', 'icon': 'fa-file-invoice-dollar', 'roles': [], 'links': [
+                {'label': 'Expenses', 'icon': 'fa-receipt', 'href': url_for('hdc_expenses'),
+                 'match': ['/hdc/expenses']},
+                {'label': 'Expense Categories', 'icon': 'fa-tags', 'href': url_for('hdc_expense_categories'),
+                 'match': ['/hdc/expense_categories']},
+                {'label': 'Office Management', 'icon': 'fa-building-user', 'href': url_for('hdc_office_management'),
+                 'match': ['/hdc/office-management']},
+                {'label': 'Personal Management', 'icon': 'fa-handshake', 'href': url_for('hdc_personal_management'),
+                 'match': ['/hdc/personal-management']},
+            ]},
+            {'id': 'materials', 'label': 'Materials & Tools', 'icon': 'fa-boxes-stacked', 'roles': [], 'links': [
+                {'label': 'Purchases', 'icon': 'fa-cart-flatbed', 'href': url_for('hdc_purchase_v2_page'),
+                 'match': ['/hdc/purchase-v2', '/hdc/purchases', '/hdc/materials', '/api/v2/purchase']},
+                {'label': 'HDC Tools', 'icon': 'fa-screwdriver-wrench', 'href': url_for('hdc_tool_rental_dashboard'),
+                 'match': ['/hdc/tool-rental']},
+            ]},
+            {'id': 'reports', 'label': 'Reports', 'icon': 'fa-chart-line', 'roles': [], 'links': [
+                {'label': 'Reports', 'icon': 'fa-chart-bar', 'href': url_for('hdc_reports'),
+                 'match': ['/hdc/reports']},
+                {'label': 'Glance Report', 'icon': 'fa-gauge-high', 'href': url_for('hdc_reports_glance'),
+                 'match': ['/hdc/reports/glance']},
+            ]},
+            {'id': 'accounts', 'label': 'Accounts & Cash', 'icon': 'fa-wallet',
+             'roles': ['admin', 'accountant'], 'links': [
+                {'label': 'Accounts Hub', 'icon': 'fa-compass', 'href': url_for('hdc_accounts_hub'),
+                 'badge': 'Money', 'match': ['/hdc/accounts']},
+                {'label': 'Manage Accounts', 'icon': 'fa-list', 'href': url_for('hdc_accounts_manage'),
+                 'match': ['/hdc/accounts/manage']},
+                {'label': 'All Entries', 'icon': 'fa-receipt', 'href': url_for('hdc_accounts_entries'),
+                 'note': 'audit', 'match': ['/hdc/accounts/entries']},
+                {'label': 'Shared Expenses', 'icon': 'fa-users-rectangle', 'href': url_for('hdc_shared_expenses'),
+                 'match': ['/hdc/accounts/shared']},
+            ]},
+            {'id': 'administration', 'label': 'Administration', 'icon': 'fa-user-gear',
+             'roles': ['admin'], 'links': [
+                {'label': 'Users', 'icon': 'fa-user-shield', 'href': url_for('hdc_users'),
+                 'match': ['/hdc/users']},
+                {'label': 'Event Recorder', 'icon': 'fa-clipboard-list', 'href': url_for('hdc_event_recorder'),
+                 'match': ['/hdc/event-recorder']},
+                {'label': 'Settings', 'icon': 'fa-gear', 'href': url_for('hdc_settings'),
+                 'match': ['/hdc/settings']},
+            ]},
+        ] %}
+        {# Groups a signed-in role may not open are dropped before rendering, so
+           the drawer never advertises a page the role cannot use. #}
+        {% set sidebar_visible = [] %}
+        {% for section in sidebar_sections %}
+            {% if not section.roles or sidebar_role in section.roles %}
+                {% set _ = sidebar_visible.append(section) %}
+            {% endif %}
+        {% endfor %}
+        {# Which row is the current page?  Longest matching URL prefix wins. #}
+        {% set sidebar_active = namespace(href='', group='', length=-1) %}
+        {% for section in sidebar_visible %}
+            {% for link in section.links %}
+                {% for prefix in link.match %}
+                    {% if request.path.startswith(prefix) and prefix|length > sidebar_active.length %}
+                        {% set sidebar_active.href = link.href %}
+                        {% set sidebar_active.group = section.id %}
+                        {% set sidebar_active.length = prefix|length %}
+                    {% endif %}
+                {% endfor %}
+            {% endfor %}
+        {% endfor %}
+
+        <ul class="sidebar-nav sidebar-groups" id="sidebarGroups">
+            {% for section in sidebar_visible %}
+            {% set section_open = (section.id == sidebar_active.group) %}
+            <li class="nav-group{% if section_open %} has-current{% endif %}"
+                data-hdc-nav-section="{{ section.id }}">
+                <button type="button" class="nav-group-toggle" data-bs-toggle="collapse"
+                        data-bs-target="#sidebarSection-{{ section.id }}"
+                        aria-controls="sidebarSection-{{ section.id }}"
+                        aria-expanded="{{ 'true' if section_open else 'false' }}">
+                    <i class="fas {{ section.icon }} nav-group-icon" aria-hidden="true"></i>
+                    <span class="nav-group-label">{{ section.label }}</span>
+                    <i class="fas fa-chevron-down nav-group-arrow" aria-hidden="true"></i>
+                </button>
+                <ul class="sidebar-subnav collapse{% if section_open %} show{% endif %}"
+                    id="sidebarSection-{{ section.id }}">
+                    {% for link in section.links %}
+                    {% set link_active = (link.href == sidebar_active.href) %}
+                    <li class="nav-item{% if link_active %} active{% endif %}">
+                        <a href="{{ link.href }}"{% if link_active %} aria-current="page"{% endif %}>
+                            <i class="fas {{ link.icon }}" aria-hidden="true"></i>
+                            <span>{{ link.label }}</span>
+                            {% if link.badge %}<span class="badge bg-success ms-1" style="font-size:0.55rem;">{{ link.badge }}</span>{% endif %}
+                            {% if link.note %}<span class="small text-muted ms-1" style="font-size:0.6rem;">{{ link.note }}</span>{% endif %}
+                        </a>
+                    </li>
+                    {% endfor %}
+                </ul>
             </li>
-            <li class="nav-item {% if 'project' in (request.endpoint or '') or 'stage' in (request.endpoint or '') %}active{% endif %}">
-                <a href="{{ url_for('hdc_projects') }}"><i class="fas fa-project-diagram"></i><span>Projects</span></a>
-            </li>
-            <li class="nav-item {% if request.endpoint == 'hdc_stage_overview' %}active{% endif %}">
-                <a href="{{ url_for('hdc_stage_overview') }}"><i class="fas fa-layer-group"></i><span>Stages</span></a>
-            </li>
-            <li class="nav-item {% if 'subcontractor' in (request.endpoint or '') %}active{% endif %}">
-                <a href="{{ url_for('hdc_subcontractors') }}"><i class="fas fa-hard-hat"></i><span>Subcontractors</span></a>
-            </li>
-            <li class="nav-item {% if 'worker' in (request.endpoint or '') %}active{% endif %}">
-                <a href="{{ url_for('hdc_workers') }}"><i class="fas fa-users-cog"></i><span>Workers</span></a>
-            </li>
-            <li class="nav-item {% if 'office_' in (request.endpoint or '') %}active{% endif %}">
-                <a href="{{ url_for('hdc_office_management') }}"><i class="fas fa-building-user"></i><span>Office Management</span></a>
-            </li>
-            <li class="nav-item {% if 'personal_' in (request.endpoint or '') %}active{% endif %}">
-                <a href="{{ url_for('hdc_personal_management') }}"><i class="fas fa-handshake"></i><span>Personal Management</span></a>
-            </li>
-            <li class="nav-item {% if 'trade' in (request.endpoint or '') %}active{% endif %}">
-                <a href="{{ url_for('hdc_trades') }}"><i class="fas fa-people-carry-box"></i><span>Trades</span></a>
-            </li>
-            <li class="nav-item {% if 'attendance' in (request.endpoint or '') or 'timekeeping' in (request.endpoint or '') %}active{% endif %}">
-                <a href="{{ url_for('hdc_attendance') }}"><i class="fas fa-calendar-check"></i><span>Timekeeping</span></a>
-            </li>
-            <li class="nav-item {% if request.endpoint == 'hdc_expenses' %}active{% endif %}">
-                <a href="{{ url_for('hdc_expenses') }}"><i class="fas fa-receipt"></i><span>Expenses</span></a>
-            </li>
-            <li class="nav-item {% if request.endpoint == 'hdc_expense_categories' %}active{% endif %}">
-                <a href="{{ url_for('hdc_expense_categories') }}"><i class="fas fa-tags"></i><span>Expense Categories</span></a>
-            </li>
-            <li class="nav-item {% if 'purchase_v2' in (request.endpoint or '') %}active{% endif %}">
-                <a href="{{ url_for('hdc_purchase_v2_page') }}"><i class="fas fa-cart-flatbed"></i><span>Purchases</span></a>
-            </li>
-            <li class="nav-item {% if 'tool_rental' in (request.endpoint or '') %}active{% endif %}">
-                <a href="{{ url_for('hdc_tool_rental_dashboard') }}"><i class="fas fa-screwdriver-wrench"></i><span>HDC Tools</span></a>
-            </li>
-            <li class="nav-item {% if 'estimation' in (request.endpoint or '') or 'formula' in (request.endpoint or '') %}active{% endif %}">
-                <a href="{{ url_for('hdc_estimation') }}"><i class="fas fa-calculator"></i><span>Estimation</span></a>
-            </li>
-            <li class="nav-item {% if request.endpoint == 'hdc_project_estimation' %}active{% endif %}">
-                <a href="{{ url_for('hdc_project_estimation') }}"><i class="fas fa-list-check"></i><span>Project Estimation</span></a>
-            </li>
-            <li class="nav-item {% if 'report' in (request.endpoint or '') %}active{% endif %}">
-                <a href="{{ url_for('hdc_reports') }}"><i class="fas fa-chart-bar"></i><span>Reports</span></a>
-            </li>
-            <li class="nav-item {% if request.endpoint == 'hdc_reports_glance' %}active{% endif %}">
-                <a href="{{ url_for('hdc_reports_glance') }}"><i class="fas fa-gauge-high"></i><span>Glance Report</span></a>
-            </li>
-            <li class="nav-item {% if 'payroll' in (request.endpoint or '') %}active{% endif %}">
-                <a href="{{ url_for('hdc_payroll') }}"><i class="fas fa-money-check-dollar"></i><span>Payroll</span></a>
-            </li>
-            <li class="nav-item {% if 'alerts' in (request.endpoint or '') %}active{% endif %}">
-                <a href="{{ url_for('hdc_alerts') }}"><i class="fas fa-bell"></i><span>Alerts</span></a>
-            </li>
-        </ul>
-        <div class="sidebar-divider"></div>
-        {# Admin-only area.  Split into labelled groups so the Accounts & Cash
-           section reads as one thing rather than five unrelated links — the hub
-           is the entry point and explains what each page is for. #}
-        {% if current_user.role == 'admin' %}
-        <div class="sidebar-group-label">Administration</div>
-        <ul class="sidebar-nav">
-            <li class="nav-item {% if request.endpoint == 'hdc_users' %}active{% endif %}">
-                <a href="{{ url_for('hdc_users') }}"><i class="fas fa-user-shield"></i><span>Users</span></a>
-            </li>
-            <li class="nav-item {% if request.endpoint == 'hdc_event_recorder' %}active{% endif %}">
-                <a href="{{ url_for('hdc_event_recorder') }}"><i class="fas fa-clipboard-list"></i><span>Event Recorder</span></a>
-            </li>
-            <li class="nav-item {% if request.endpoint == 'hdc_settings' %}active{% endif %}">
-                <a href="{{ url_for('hdc_settings') }}"><i class="fas fa-gear"></i><span>Settings</span></a>
-            </li>
+            {% endfor %}
         </ul>
 
-        <div class="sidebar-divider"></div>
-        <div class="sidebar-group-label">Accounts &amp; Cash</div>
-        <ul class="sidebar-nav">
-            {# Clean sidebar: Hub is the ONLY place where money transactions happen.
-               All money IN/OUT/TRANSFER (Money Center, CF Register, Cash Flow, Day Close,
-               Transactions, All Entries) are accessed via Hub actions — sidebar stays minimal. #}
-            <li class="nav-item {% if request.endpoint in ['hdc_accounts_hub', 'hdc_money_center', 'hdc_accounts', 'hdc_accounts_kpi_detail', 'hdc_accounts_reconciliation', 'hdc_cashflow_register', 'hdc_cashflow', 'hdc_cashflow_reconciliation', 'hdc_cashflow_report'] %}active{% endif %}">
-                <a href="{{ url_for('hdc_accounts_hub') }}"><i class="fas fa-compass"></i><span>Accounts Hub</span><span class="badge bg-success ms-1" style="font-size:0.55rem;">Money</span></a>
-            </li>
-            <li class="nav-item {% if request.endpoint in ['hdc_accounts_manage', 'hdc_accounts_manage_export', 'hdc_account_new', 'hdc_account_edit', 'hdc_account_ledger'] %}active{% endif %}">
-                <a href="{{ url_for('hdc_accounts_manage') }}"><i class="fas fa-list"></i><span>Manage Accounts</span></a>
-            </li>
-            <li class="nav-item {% if request.endpoint in ['hdc_accounts_entries', 'hdc_account_transaction_edit', 'hdc_account_transaction_receipt'] %}active{% endif %}">
-                <a href="{{ url_for('hdc_accounts_entries') }}"><i class="fas fa-receipt"></i><span>All Entries</span><span class="small text-muted ms-1" style="font-size:0.6rem;">audit</span></a>
-            </li>
-            {# Shared Expenses: one cost split between heads (FBM / HDC / Home / …).
-               The ledgers live here; the money itself is always posted in Accounts. #}
-            <li class="nav-item {% if request.endpoint in ['hdc_shared_expenses', 'hdc_shared_expense_list', 'hdc_shared_expense_new', 'hdc_shared_expense_detail', 'hdc_shared_expense_edit', 'hdc_shared_report', 'hdc_shared_settlements', 'hdc_shared_parties', 'hdc_shared_expenses_export', 'hdc_shared_report_export'] %}active{% endif %}">
-                <a href="{{ url_for('hdc_shared_expenses') }}"><i class="fas fa-users-rectangle"></i><span>Shared Expenses</span></a>
-            </li>
-        </ul>
-        <div class="sidebar-divider"></div>
-        {% endif %}
-        <ul class="sidebar-nav">
-            <li class="nav-item">
-                <form method="POST" action="{{ url_for('hdc_logout') }}" class="m-0">
-                    <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
-                    <button type="submit" class="btn btn-link nav-link text-danger-light p-0 text-start w-100" style="text-decoration:none;">
-                        <i class="fas fa-sign-out-alt"></i><span>Logout</span>
-                    </button>
-                </form>
-            </li>
-        </ul>
+        <div class="sidebar-footer">
+            <div class="sidebar-divider"></div>
+            {# One control for the whole drawer: open or close every group at once
+               (handled by core/collapse_groups.js, which also keeps the label,
+               arrow and aria-expanded state in sync). #}
+            <button type="button" class="sidebar-expand-all" data-hdc-collapse-group=".sidebar-subnav"
+                    data-expand-label="Expand all sections" data-collapse-label="Collapse all sections">
+                <i class="fas fa-angles-down" data-hdc-collapse-icon aria-hidden="true"></i>
+                <span data-hdc-collapse-label>Expand all sections</span>
+            </button>
+            <div class="sidebar-divider"></div>
+            <ul class="sidebar-nav">
+                <li class="nav-item">
+                    <form method="POST" action="{{ url_for('hdc_logout') }}" class="m-0">
+                        <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+                        <button type="submit" class="btn btn-link nav-link text-danger-light p-0 text-start w-100" style="text-decoration:none;">
+                            <i class="fas fa-sign-out-alt"></i><span>Logout</span>
+                        </button>
+                    </form>
+                </li>
+            </ul>
+        </div>
     </nav>
 
     <!-- Click-away veil shown while the sidebar is open -->
@@ -213,6 +275,7 @@
 <script src="/hdc_static/vendor/bootstrap/bootstrap.bundle.min.js"></script>
 <script src="/hdc_static/vendor/chartjs/chart.umd.js"></script>
 <script src="/hdc_static/js/core/layout.js"></script>
+<script src="/hdc_static/js/core/sidebar_groups.js"></script>
 <script src="/hdc_static/js/core/theme.js"></script>
 <script src="/hdc_static/js/core/forms.js"></script>
 <script src="/hdc_static/js/core/combo.js"></script>
