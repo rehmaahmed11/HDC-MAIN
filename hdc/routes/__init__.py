@@ -13,6 +13,7 @@ from hdc.routes.estimation import register as _register_estimation
 from hdc.routes.expenses import register as _register_expenses
 from hdc.routes.materials import register as _register_materials
 from hdc.routes.office import register as _register_office
+from hdc.routes.parties import register as _register_parties
 from hdc.routes.payroll import register as _register_payroll
 from hdc.routes.projects import register as _register_projects
 from hdc.routes.purchase_v2 import register as _register_purchase_v2
@@ -43,6 +44,7 @@ def register_all(app):
     _register_expenses(app)
     _register_materials(app)
     _register_office(app)
+    _register_parties(app)
     _register_payroll(app)
     _register_projects(app)
     _register_purchase_v2(app)

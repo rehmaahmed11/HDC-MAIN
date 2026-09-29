@@ -95,11 +95,14 @@ def main():
         if mod not in ("hdc.app",):
             hits = uses_global_app(tree, path)
             if layer == "routes":
-                # allowed: @app.route decorators + register(app) signature
+                # allowed: @app.route decorators, other in-register
+                # decorators such as @app.context_processor, and the
+                # register(app) signature
                 with open(path, encoding="utf-8") as f:
                     lines = f.read().splitlines()
                 bad = [ln for ln in hits
-                       if "app.route" not in lines[ln - 1]]
+                       if "app.route" not in lines[ln - 1]
+                       and "context_processor" not in lines[ln - 1]]
                 if bad:
                     violations.append(
                         f"{mod}: global app use outside @app.route: "

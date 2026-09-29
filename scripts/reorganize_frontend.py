@@ -21,7 +21,7 @@ ROUTES = os.path.join(BASE, "hdc", "routes")
 STATIC_JS = os.path.join(BASE, "static", "hdc", "js")
 
 DOMAIN_OF = {
-    "shared": ["base.html", "_pagination.html"],
+    "shared": ["base.html", "_pagination.html", "_combo_field.html"],
     "auth": ["login.html"],
     "dashboard": ["dashboard.html", "kpi_detail.html"],
     "projects": ["projects.html", "add_project.html", "edit_project.html",
@@ -60,6 +60,14 @@ DOMAIN_OF = {
                  "purchase_v2_stock.html"],
     "estimation": ["estimation.html", "project_estimation.html",
                    "formulas.html"],
+    # Parties — the counterparty directory (sidebar → Parties).
+    "parties": ["parties_directory.html"],
+    # Shared Expenses — ledgers, the party directory, settlements and report.
+    # (``expenses.html`` lives in both this folder and the expenses domain;
+    # the basename is already mapped there, so it is not listed twice.)
+    "shared_expenses": ["_nav.html", "expense_detail.html", "expense_form.html",
+                        "ledger.html", "parties.html", "report.html",
+                        "settlements.html"],
     "reports": ["reports.html", "reports_glance.html"],
     "users": ["users.html", "event_recorder.html"],
     "accounts": ["accounts.html", "account_ledger.html",
@@ -87,7 +95,8 @@ DOMAIN_OF = {
     "tool_rental": ["tool_dashboard.html", "tool_position.html",
                     "tool_rental.html", "tool_rental_detail.html",
                     "tool_inventory.html", "tool_tracking.html",
-                    "tool_reports.html", "_tools_nav.html"],
+                    "tool_reports.html", "_tools_nav.html",
+                    "_stock_forms.html"],
 }
 
 FILE_TO_DOMAIN = {f: d for d, fs in DOMAIN_OF.items() for f in fs}

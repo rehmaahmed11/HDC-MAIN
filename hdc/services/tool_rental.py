@@ -546,16 +546,20 @@ MAX_COMBO_OPTIONS = 300
 
 
 def known_tool_customers(limit=MAX_COMBO_OPTIONS):
-    """Distinct external customer names already used on a tool rental.
+    """Distinct external customer names: past rentals + the Parties module.
 
-    The customer name on a rental is free text (tools have no customer master
-    table), so the only honest "list" is the set of names this business has
-    already rented to.  Most-used-first, then alphabetical, so the top of the
-    searchable list is the customer the operator probably wants.
+    Two sources are merged so the searchable list is complete:
+
+    * names already used on an external tool rental — most-used-first, then
+      alphabetical, so the customer the operator probably wants is on top;
+    * every ``rental``-type party (sidebar → Parties → External Customers),
+      including customers added there *before* the first rental exists.
 
     Feeds the searchable combo boxes on the create-rental and site-transfer
     forms — the "every name field is searchable" rule.
     """
+    from hdc.models.cashflow import CashFlowParty
+
     rows = (db.session.query(ToolRental.customer_name, func.count(ToolRental.id))
             .filter(ToolRental.is_void == False,
                     ToolRental.customer_name.isnot(None),
@@ -575,7 +579,21 @@ def known_tool_customers(limit=MAX_COMBO_OPTIONS):
             continue
         seen.add(key)
         names.append(name)
-    return names
+    # Union with the rental-type parties (External Customers on /hdc/parties).
+    party_rows = (CashFlowParty.query
+                  .filter(CashFlowParty.is_active == True,  # noqa: E712
+                          func.lower(func.coalesce(CashFlowParty.party_type, 'other')) == 'rental')
+                  .order_by(CashFlowParty.name.asc())
+                  .limit(limit)
+                  .all())
+    for party in party_rows:
+        name = (party.name or '').strip()
+        key = name.lower()
+        if not name or key in seen:
+            continue
+        seen.add(key)
+        names.append(name)
+    return names[:limit]
 
 
 def known_tool_suppliers(limit=MAX_COMBO_OPTIONS):
@@ -663,6 +681,14 @@ def post_tool_rental_payment_to_accounts(payment, rental=None, commit=False):
     note_txt = (f'Tool Rental Receipt {rental.rental_code} - {note_raw} [{mode_raw}]').strip()[:400]
 
     party_name = rental.customer_name if rental.renter_type == 'external' else (rental.project.name if rental.project else 'Internal Site')
+
+    if rental.renter_type == 'external' and (rental.customer_name or '').strip():
+        # Every HDC Tools transaction with an outside customer lands in the
+        # Parties module (sidebar → Parties) under External Customers, so the
+        # customer exists there from the first payment onwards — even for
+        # rentals created before that directory existed.
+        from hdc.services.cashflow_register import ensure_party
+        ensure_party(rental.customer_name, party_type='rental')
 
     payload = {
         'date': date_str,

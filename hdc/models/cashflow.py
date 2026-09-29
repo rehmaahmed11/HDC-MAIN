@@ -170,10 +170,12 @@ class CashFlowParty(db.Model):
     entries that already reference it.
 
     ``party_type`` (``client | supplier | worker | staff | subcontractor |
-    lender | borrower | other``) is the *criterion* the field rules use: a
-    category can allow only some types (a loan category allows ``lender`` /
-    ``borrower``), which is what makes the party list shorten itself to the
-    people who make sense for the transaction being booked.
+    lender | borrower | rental | other``) is the *criterion* the field rules
+    use: a category can allow only some types (a loan category allows
+    ``lender`` / ``borrower``, HDC Tools customers are ``rental``), which is
+    what makes the party list shorten itself to the people who make sense for
+    the transaction being booked.  The sidebar's Parties module
+    (/hdc/parties) is the directory for adding and maintaining them.
     """
 
     __tablename__ = 'hdc_cash_flow_party'

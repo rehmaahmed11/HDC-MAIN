@@ -76,6 +76,7 @@ __all__ = [
     "category_field_rules",
     "category_rules_map",
     "save_cf_party",
+    "ensure_party",
     "save_cf_category",
     "save_cf_subcategory",
     "day_positions",
@@ -122,6 +123,7 @@ PARTY_TYPES = (
     ('subcontractor', 'Subcontractor'),
     ('lender', 'Loan Giver / Financier'),
     ('borrower', 'Loan Taker / Borrower'),
+    ('rental', 'External Customer (HDC Tools)'),
     ('other', 'Other'),
 )
 
@@ -129,6 +131,9 @@ PARTY_TYPE_VALUES = tuple(value for value, _label in PARTY_TYPES)
 
 #: Types that mean "this party has a loan with us".
 LOAN_PARTY_TYPES = ('lender', 'borrower')
+
+#: Types that mean "this party rents tools from HDC Tools".
+RENTAL_PARTY_TYPES = ('rental',)
 
 #: The four loan movements a category can be tagged with (``loan_effect``).
 LOAN_EFFECTS = ('take', 'give', 'repay', 'recover')
@@ -1209,6 +1214,38 @@ def save_cf_party(name, party_type='other', phone=None, note=None):
             row.is_active = True
         current = (row.party_type or 'other').strip().lower() or 'other'
         if ptype and ptype != current and (ptype != 'other' or current == 'other'):
+            row.party_type = ptype
+        db.session.flush()
+        return row, False
+    row = CashFlowParty(name=nm[:160], party_type=ptype, phone=(phone or '').strip() or None,
+                        note=(note or '').strip() or None, is_active=True)
+    db.session.add(row)
+    db.session.flush()
+    return row, True
+
+
+def ensure_party(name, party_type='other', phone=None, note=None):
+    """Get-or-create a party for *automatic* syncs (HDC Tools → Parties).
+
+    Like :func:`save_cf_party` but never **reclassifies** a party that
+    already has a specific type: an external tool rental whose customer is
+    already filed as (say) a lender must not silently become a rental
+    customer — and vice versa.  A missing party is created with the given
+    type, a party typed ``other`` is upgraded to it, and a deactivated row
+    is reactivated because new activity happened.  Returns ``(row, created)``.
+    """
+    nm = (name or '').strip()
+    if not nm:
+        raise ValueError('Party name is required.')
+    ptype = (party_type or 'other').strip().lower() or 'other'
+    if ptype not in PARTY_TYPE_VALUES:
+        ptype = 'other'
+    row = CashFlowParty.query.filter(func.lower(func.trim(CashFlowParty.name)) == nm.lower()).first()
+    if row:
+        if not row.is_active:
+            row.is_active = True
+        current = (row.party_type or 'other').strip().lower() or 'other'
+        if current == 'other' and ptype != 'other':
             row.party_type = ptype
         db.session.flush()
         return row, False

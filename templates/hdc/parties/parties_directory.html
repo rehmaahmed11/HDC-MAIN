@@ -1,0 +1,236 @@
+{% extends "shared/base.html" %}
+{% block title %}Parties{% endblock %}
+{% block page_heading %}Parties — Loan &amp; Rental Directory{% endblock %}
+
+{% block content %}
+{# ==========================================================================
+   Parties — the shared counterparty directory (sidebar → Parties).
+
+   One table (hdc_cash_flow_party) feeds every Party / Person picker, so the
+   groups here map straight onto where each type shows up:
+
+   * Loan Parties    → the loan Money In / Money Out categories in the CF
+                       Register (Loan Received / Given / Repayment / Recovery).
+   * External Customers → HDC Tools: every external rental syncs its customer
+                       here, and these names are offered on the rental forms.
+   * Other Parties   → everyone else the pickers offer.
+   ========================================================================== #}
+
+{# ── KPIs ─────────────────────────────────────────────────────────────────── #}
+<div class="row g-2 mb-3">
+    <div class="col-6 col-md-3">
+        <div class="card hdc-card h-100">
+            <div class="card-body py-2">
+                <div class="small text-muted"><i class="fas fa-money-bill-transfer me-1"></i>Loan Parties</div>
+                <div class="h5 mb-0">{{ counts.loan }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card hdc-card h-100">
+            <div class="card-body py-2">
+                <div class="small text-muted"><i class="fas fa-screwdriver-wrench me-1"></i>External Customers</div>
+                <div class="h5 mb-0">{{ counts.rental }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card hdc-card h-100">
+            <div class="card-body py-2">
+                <div class="small text-muted"><i class="fas fa-users me-1"></i>Other Parties</div>
+                <div class="h5 mb-0">{{ counts.other }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card hdc-card h-100">
+            <div class="card-body py-2">
+                <div class="small text-muted">Active Total</div>
+                <div class="h5 mb-0 text-success">{{ counts.active_total }}</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3">
+    {# ── Add a party ──────────────────────────────────────────────────────── #}
+    <div class="col-lg-4">
+        <div class="card hdc-card">
+            <div class="card-header hdc-card-header">
+                <i class="fas fa-user-plus me-2" aria-hidden="true"></i>Add Party
+            </div>
+            <div class="card-body">
+                <form method="post" action="{{ url_for('hdc_parties') }}">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+                    <input type="hidden" name="action" value="add_party">
+                    <div class="mb-2">
+                        <label class="form-label" for="partyName">Name <span class="hdc-req" aria-hidden="true">*</span></label>
+                        <input type="text" class="form-control" id="partyName" name="name"
+                               maxlength="160" required autocomplete="off"
+                               placeholder="e.g. Haji Sahab (lender), Khan Traders">
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label" for="partyType">Type</label>
+                        <select class="form-select" id="partyType" name="party_type">
+                            {% for gkey, glabel, options in type_choices %}
+                            <optgroup label="{{ glabel }}">
+                                {% for value, label in options %}
+                                <option value="{{ value }}"
+                                        {% if value == 'lender' %}selected{% endif %}>{{ label }}</option>
+                                {% endfor %}
+                            </optgroup>
+                            {% endfor %}
+                        </select>
+                        <div class="hdc-field-hint">
+                            Loan Parties are offered by the loan Money In / Money
+                            Out categories; External Customers feed HDC Tools.
+                        </div>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label" for="partyPhone">Phone <span class="hdc-optional">optional</span></label>
+                        <input type="text" class="form-control" id="partyPhone" name="phone"
+                               maxlength="40" autocomplete="off" placeholder="03xx-xxxxxxx">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="partyNote">Note <span class="hdc-optional">optional</span></label>
+                        <input type="text" class="form-control" id="partyNote" name="note"
+                               maxlength="300" autocomplete="off" placeholder="Anything worth remembering">
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-sm w-100">
+                        <i class="fas fa-plus me-1" aria-hidden="true"></i>Add Party
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        {# ── How the groups are used ───────────────────────────────────────── #}
+        <div class="card hdc-card mt-3">
+            <div class="card-header hdc-card-header">
+                <i class="fas fa-circle-info me-2" aria-hidden="true"></i>Where these parties show up
+            </div>
+            <div class="card-body small">
+                <p class="mb-2">
+                    <strong>Money In / Money Out (CF Register)</strong> — a loan
+                    category (<em>Loan Received, Loan Given, Loan Repayment,
+                    Loan Recovery</em>) shortens its Party picker to the
+                    <strong>Loan Parties</strong> below.
+                </p>
+                <p class="mb-2">
+                    <strong>HDC Tools</strong> — an external rental books its
+                    customer under <strong>External Customers</strong>
+                    automatically, and those names appear in the customer
+                    search on the rental forms.
+                </p>
+                <p class="mb-0">
+                    <strong>Deactivate</strong> hides a party from new
+                    transactions without touching entries that already use it.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    {# ── The directory ────────────────────────────────────────────────────── #}
+    <div class="col-lg-8">
+        <div class="card hdc-card mb-3">
+            <div class="card-header hdc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <span><i class="fas fa-magnifying-glass me-2" aria-hidden="true"></i>Find a party</span>
+            </div>
+            <div class="card-body py-2">
+                <form method="get" action="{{ url_for('hdc_parties') }}" class="d-flex gap-2">
+                    <input type="text" name="q" value="{{ search }}" class="form-control"
+                           placeholder="Search by name or phone…"
+                           aria-label="Search parties" autocomplete="off">
+                    <button type="submit" class="btn btn-outline-secondary btn-sm">
+                        <i class="fas fa-search me-1" aria-hidden="true"></i>Search
+                    </button>
+                    {% if search %}
+                    <a href="{{ url_for('hdc_parties') }}" class="btn btn-sm btn-outline-secondary">Clear</a>
+                    {% endif %}
+                </form>
+            </div>
+        </div>
+
+        {% for group in groups %}
+        <div class="card hdc-card mb-3" id="parties-group-{{ group.key }}">
+            <div class="card-header hdc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <span>
+                    <i class="fas {{ group.icon }} me-2" aria-hidden="true"></i>{{ group.label }}
+                    <span class="badge bg-secondary ms-1">{{ group.active_count }} active</span>
+                </span>
+            </div>
+            <div class="card-body py-2 small text-muted">{{ group.hint }}</div>
+            <div class="table-responsive">
+                <table class="table table-sm table-hover mb-0 align-middle">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Party</th>
+                            <th>Type</th>
+                            <th class="text-center">Entries</th>
+                            <th class="text-center">Loans</th>
+                            <th class="text-center">Tool Rentals</th>
+                            <th class="text-end">Tool Income (PKR)</th>
+                            <th class="text-center">Status</th>
+                            <th class="text-end">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% if not group.rows %}
+                        <tr>
+                            <td colspan="8" class="text-muted text-center py-3">
+                                {% if search %}
+                                No {{ group.label|lower }} match “{{ search }}”.
+                                {% elif group.key == 'loan' %}
+                                No loan parties yet — add your lenders and borrowers above.
+                                {% elif group.key == 'rental' %}
+                                No external customers yet — add one above, or create an
+                                external HDC Tools rental and it lands here.
+                                {% else %}
+                                Nothing here yet.
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endif %}
+                        {% for row in group.rows %}
+                        <tr {% if not row.party.is_active %}class="table-secondary text-muted" style="opacity:.65"{% endif %}>
+                            <td>
+                                <span class="fw-semibold">{{ row.party.name }}</span>
+                                {% if row.party.phone %}<div class="small text-muted">{{ row.party.phone }}</div>{% endif %}
+                                {% if row.party.note %}<div class="small text-muted">{{ row.party.note }}</div>{% endif %}
+                            </td>
+                            <td><span class="badge bg-light text-dark border">{{ row.type_label }}</span></td>
+                            <td class="text-center">{{ row.entries }}</td>
+                            <td class="text-center">{{ row.loans or '–' }}</td>
+                            <td class="text-center">{{ row.rentals or '–' }}</td>
+                            <td class="text-end">{{ '{:,.2f}'.format(row.rental_paid) if row.rentals else '–' }}</td>
+                            <td class="text-center">
+                                {% if row.party.is_active %}
+                                <span class="badge bg-success">Active</span>
+                                {% else %}
+                                <span class="badge bg-secondary">Hidden</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-end">
+                                <form method="post" action="{{ url_for('hdc_parties') }}" class="d-inline">
+                                    <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+                                    <input type="hidden" name="action" value="toggle_party">
+                                    <input type="hidden" name="party_id" value="{{ row.party.id }}">
+                                    <button type="submit" class="btn btn-sm {% if row.party.is_active %}btn-outline-secondary{% else %}btn-outline-success{% endif %}"
+                                            title="{{ 'Deactivate — hide from new transactions' if row.party.is_active else 'Reactivate — offer in pickers again' }}">
+                                        {% if row.party.is_active %}
+                                        <i class="fas fa-eye-slash me-1" aria-hidden="true"></i>Hide
+                                        {% else %}
+                                        <i class="fas fa-eye me-1" aria-hidden="true"></i>Show
+                                        {% endif %}
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}
