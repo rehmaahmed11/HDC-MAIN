@@ -24,6 +24,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+from html.parser import HTMLParser
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -47,6 +48,32 @@ from hdc.services.tool_tracking import (                          # noqa: E402
 from hdc.utils.dates import _pkt_today                            # noqa: E402
 
 ADMIN_PASSWORD = os.environ['HDC_BOOTSTRAP_ADMIN_PASSWORD']
+
+
+class _ModalCardNestingParser(HTMLParser):
+    """Track whether a Bootstrap modal is rendered inside an HDC card."""
+
+    _VOID_TAGS = {'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
+                  'link', 'meta', 'param', 'source', 'track', 'wbr'}
+
+    def __init__(self):
+        super().__init__()
+        self.stack = []
+        self.modal_inside_card = False
+
+    def handle_starttag(self, tag, attrs):
+        classes = set(dict(attrs).get('class', '').split())
+        if 'modal' in classes and any('hdc-card' in parent_classes
+                                      for _, parent_classes in self.stack):
+            self.modal_inside_card = True
+        if tag not in self._VOID_TAGS:
+            self.stack.append((tag, classes))
+
+    def handle_endtag(self, tag):
+        for index in range(len(self.stack) - 1, -1, -1):
+            if self.stack[index][0] == tag:
+                del self.stack[index:]
+                break
 
 
 class ToolStockLifecycleTestCase(unittest.TestCase):
@@ -400,6 +427,18 @@ class ToolStockLifecycleTestCase(unittest.TestCase):
         r = self.client.get(f'/hdc/tool-rental/inventory?category_id={cat.id}&new_category={cat.id}')
         self.assertEqual(r.status_code, 200)
         html = r.get_data(as_text=True)
+        modal_parser = _ModalCardNestingParser()
+        modal_parser.feed(html)
+        self.assertFalse(
+            modal_parser.modal_inside_card,
+            'Bootstrap modals must not be nested under .hdc-card (backdrop-filter creates a stacking context)',
+        )
+        self.assertIn(f'id="catDelModal{cat.id}"', html)
+        self.assertRegex(
+            html,
+            r'<button type="submit" class="btn btn-danger" disabled '
+            r'title="Move tools to another category first">Delete</button>',
+        )
 
         # The widget searches the categories, but the original select still posts
         # the id (or empty for No Category / All Categories) in each form.
