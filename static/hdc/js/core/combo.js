@@ -11,22 +11,28 @@
             // NOTE: Menu is rendered with position:fixed and appended to <body>
             // so it can never be clipped by a parent's overflow:hidden (cards,
             // table-responsive, modals, etc).
+            //
+            // Every colour comes from the design tokens in hdc.css so the menu
+            // follows the light/dark theme like every other surface — no
+            // hardcoded hex that would stay cream in dark mode.
             style.textContent = [
                 '.hdc-combo-wrap{position:relative;overflow:visible;}',
-                '.hdc-combo-menu{position:fixed;z-index:10500;min-width:160px;max-width:min(640px, calc(100vw - 24px));max-height:320px;overflow:auto;border:1px solid #f3b66d;border-radius:8px;background:#fff3e0;box-shadow:0 12px 28px rgba(0,0,0,.22);}',
-                '[data-theme="dark"] .hdc-combo-menu{background:#2b2b2b;border-color:#5a5a5a;color:#f1f1f1;}',
-                '.hdc-combo-item{padding:8px 10px;cursor:pointer;font-size:.9rem;border-bottom:1px solid #f7d2a5;white-space:nowrap;}',
-                '[data-theme="dark"] .hdc-combo-item{border-bottom-color:#444;}',
+                '.hdc-combo-menu{position:fixed;z-index:10500;min-width:160px;max-width:min(640px, calc(100vw - 24px));max-height:320px;overflow:auto;',
+                'border:1px solid var(--card-border);border-radius:10px;background:var(--card-bg);color:var(--text);',
+                'box-shadow:var(--shadow-card);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);}',
+                '.hdc-combo-item{padding:8px 11px;cursor:pointer;font-size:.86rem;border-bottom:1px solid var(--card-border);',
+                'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}',
                 '.hdc-combo-item:last-child{border-bottom:0;}',
-                '.hdc-combo-item:hover,.hdc-combo-item.active{background:#87af32;color:#fff;}',
+                '.hdc-combo-item:hover,.hdc-combo-item.active{background:var(--accent);color:#fff;}',
                 // Shown only when the caller passes emptyText / onAdd, so pages
                 // that do not opt in render exactly what they always did.
-                '.hdc-combo-empty{padding:8px 10px;font-size:.85rem;color:#64748b;}',
-                '[data-theme="dark"] .hdc-combo-empty{color:#cbd5e1;}',
-                '.hdc-combo-add{padding:8px 10px;cursor:pointer;font-size:.85rem;font-weight:600;',
-                'color:#137a5f;border-top:1px dashed #f3b66d;white-space:nowrap;}',
-                '.hdc-combo-add:hover,.hdc-combo-add.active{background:#87af32;color:#fff;}',
-                '[data-theme="dark"] .hdc-combo-add{color:#5eead4;}'
+                '.hdc-combo-empty{padding:8px 11px;font-size:.82rem;color:var(--text-muted);}',
+                '.hdc-combo-add{padding:8px 11px;cursor:pointer;font-size:.82rem;font-weight:700;',
+                'color:var(--accent-strong);border-top:1px dashed var(--card-border);white-space:nowrap;}',
+                '.hdc-combo-add:hover,.hdc-combo-add.active{background:var(--accent);color:#fff;}',
+                // Keyboard focus ring for the visible input, so a combo is as
+                // reachable as the select it replaced.
+                'input[data-hdc-combo]:focus-visible{outline:2px solid var(--accent);outline-offset:1px;}'
             ].join('');
             document.head.appendChild(style);
         }
@@ -283,5 +289,42 @@
                 };
             }
         };
+    }
+
+    // ── Auto-wire ────────────────────────────────────────────────────────
+    // Any input carrying data-hdc-combo="<select id>" is wired on
+    // DOMContentLoaded, so a template only has to render the pair — no
+    // per-page script, and no way for the markup and the wiring to drift
+    // apart.  Templates that need strict picking or a "+ Add new" row keep
+    // calling HDCComboList.attach() themselves and simply do not carry the
+    // attribute.
+    function wireCombos(root) {
+        var nodes = (root || document).querySelectorAll('input[data-hdc-combo]');
+        for (var i = 0; i < nodes.length; i++) {
+            var input = nodes[i];
+            if (input.__hdcCombo) continue;
+            var selectId = input.getAttribute('data-hdc-combo');
+            var select = selectId ? document.getElementById(selectId) : null;
+            if (!select) continue;
+            var opts = {
+                // Non-strict on purpose: a name that is not in the list is a
+                // NEW name (the tools customer/supplier fields have no master
+                // table), and the input owns name= so it still posts.
+                strict: false,
+                maxItems: parseInt(input.getAttribute('data-hdc-combo-max') || '50', 10),
+                emptyText: input.getAttribute('data-hdc-combo-empty') ||
+                           'No match — keep typing to use a new name.'
+            };
+            var handle = window.HDCComboList.attach(input, select, opts);
+            if (handle) input.__hdcCombo = handle;
+        }
+    }
+
+    if (typeof document !== 'undefined' && typeof document.querySelectorAll === 'function') {
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', function () { wireCombos(document); });
+        } else {
+            wireCombos(document);
+        }
     }
 })();

@@ -1,0 +1,73 @@
+{# ── Searchable combo field (the "every name is searchable" rule) ──────────
+   Renders a type-to-search combo box for any field that asks the operator to
+   name a person / party / supplier: customer on a tool rental, supplier on a
+   tool purchase, and so on.
+
+   Markup contract (mirrors static/hdc/js/core/combo.js):
+
+     * the VISIBLE input carries ``name=`` so the form always posts a value.
+       A typed name that is not in the list is a *new* name and must survive,
+       which is why the widget is attached non-strict here;
+     * the ``<select>`` is the data source only.  It has no ``name=``, so it
+       can never double-post, and it is hidden both in the markup (no flash of
+       a second control) and by the widget;
+     * ``data-hdc-combo`` points at the select id, so core/combo.js auto-wires
+       the pair on DOMContentLoaded — no per-page script to keep in sync;
+     * ``required`` lives on the select: the widget moves it onto the visible
+       input (``mirrorRequired``) so the browser focuses the control the
+       operator can actually see.
+
+   Without JavaScript the input is still a plain text box that posts, so the
+   field degrades to exactly what it was before.
+#}
+{% macro combo_field(name, field_id, options, label='', placeholder='', required=false,
+                     hint='', input_class='form-control', value='', max_items=50,
+                     empty_text='') %}
+<div class="hdc-combo-field">
+    {% if label %}<label class="form-label"{% if field_id %} for="{{ field_id }}Input"{% endif %}>{{ label }}</label>{% endif %}
+    <input type="text" id="{{ field_id }}Input" name="{{ name }}" class="{{ input_class }}"
+           value="{{ value }}" placeholder="{{ placeholder }}"
+           autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list"
+           data-hdc-combo="{{ field_id }}"
+           {% if max_items %}data-hdc-combo-max="{{ max_items }}"{% endif %}
+           {% if empty_text %}data-hdc-combo-empty="{{ empty_text }}"{% endif %}>
+    <select id="{{ field_id }}" class="form-select d-none" aria-hidden="true" tabindex="-1"
+            data-hdc-combo-source
+            {% if required %}required{% endif %}>
+        <option value=""></option>
+        {% for opt in options %}
+        <option value="{{ opt }}"{% if value and opt == value %}selected{% endif %}>{{ opt }}</option>
+        {% endfor %}
+    </select>
+    {% if hint %}<small class="text-muted d-block">{{ hint }}</small>{% endif %}
+</div>
+{% endmacro %}
+
+{# ── Same rule, id-valued list ─────────────────────────────────────────────
+   For lists whose value is an id (an account, a project, a stage) the select
+   keeps ``name=`` and posts the id; the visible input only ever holds the
+   label the operator picked.  The widget is attached non-strict so a half
+   typed label can never be mistaken for a choice.
+#}
+{% macro combo_select(name, field_id, options, label='', placeholder='', required=false,
+                      hint='', selected='', max_items=60,
+                      empty_text='') %}
+<div class="hdc-combo-field">
+    {% if label %}<label class="form-label"{% if field_id %} for="{{ field_id }}Input"{% endif %}>{{ label }}</label>{% endif %}
+    <input type="text" id="{{ field_id }}Input" class="form-control"
+           placeholder="{{ placeholder }}"
+           autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list"
+           data-hdc-combo="{{ field_id }}"
+           {% if max_items %}data-hdc-combo-max="{{ max_items }}"{% endif %}
+           {% if empty_text %}data-hdc-combo-empty="{{ empty_text }}"{% endif %}>
+    <select id="{{ field_id }}" name="{{ name }}" class="form-select d-none"
+            aria-hidden="true" tabindex="-1" data-hdc-combo-source
+            {% if required %}required{% endif %}>
+        <option value=""></option>
+        {% for value, text in options %}
+        <option value="{{ value }}"{% if selected is not none and selected|string == value|string %}selected{% endif %}>{{ text }}</option>
+        {% endfor %}
+    </select>
+    {% if hint %}<small class="text-muted d-block">{{ hint }}</small>{% endif %}
+</div>
+{% endmacro %}

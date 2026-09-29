@@ -4,8 +4,9 @@
    is hidden; otherwise the caller passes every tool and the user chooses.
    Row buttons pre-fill the modal through data-tool-id / data-tool-name (see
    tool_inventory.html's bootstrap `show.bs.modal` listener). #}
+{% from "shared/_combo_field.html" import combo_field %}
 
-{% macro purchase_modal(modal_id, tools, tool=None, today='') %}
+{% macro purchase_modal(modal_id, tools, tool=None, today='', known_suppliers=[]) %}
 <div class="modal fade" id="{{ modal_id }}" tabindex="-1">
   <div class="modal-dialog">
     <div class="modal-content hdc-modal">
@@ -54,8 +55,10 @@
             <input type="text" name="reference" class="form-control" placeholder="Invoice no">
           </div>
           <div class="col-12">
-            <label class="form-label">Supplier</label>
-            <input type="text" name="supplier" class="form-control" placeholder="e.g. Karachi Tools House">
+            {# Supplier is a name → searchable combo (see shared/_combo_field.html). #}
+            {{ combo_field('supplier', modal_id ~ 'Supplier', known_suppliers,
+               label='Supplier', placeholder='Type to search supplier…',
+               hint='Not in the list? Just type the new name.', max_items=60) }}
           </div>
           <div class="col-12">
             <label class="form-label">Notes</label>
