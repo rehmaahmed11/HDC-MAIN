@@ -539,6 +539,74 @@ def get_receiving_accounts():
             .order_by(Account.name.asc(), Account.id.asc())
             .all())
 
+
+#: How many distinct names a combo list will ever offer.  The widget itself
+#: caps what it *renders* (``maxItems``); this only bounds the query.
+MAX_COMBO_OPTIONS = 300
+
+
+def known_tool_customers(limit=MAX_COMBO_OPTIONS):
+    """Distinct external customer names already used on a tool rental.
+
+    The customer name on a rental is free text (tools have no customer master
+    table), so the only honest "list" is the set of names this business has
+    already rented to.  Most-used-first, then alphabetical, so the top of the
+    searchable list is the customer the operator probably wants.
+
+    Feeds the searchable combo boxes on the create-rental and site-transfer
+    forms — the "every name field is searchable" rule.
+    """
+    rows = (db.session.query(ToolRental.customer_name, func.count(ToolRental.id))
+            .filter(ToolRental.is_void == False,
+                    ToolRental.customer_name.isnot(None),
+                    func.trim(func.coalesce(ToolRental.customer_name, '')) != '')
+            .group_by(func.lower(func.trim(ToolRental.customer_name)))
+            .order_by(func.count(ToolRental.id).desc(),
+                      func.lower(func.trim(ToolRental.customer_name)).asc())
+            .limit(limit)
+            .all())
+    # The grouping is case-insensitive, so keep one spelling per group.
+    seen = set()
+    names = []
+    for raw, _count in rows:
+        name = (raw or '').strip()
+        key = name.lower()
+        if not name or key in seen:
+            continue
+        seen.add(key)
+        names.append(name)
+    return names
+
+
+def known_tool_suppliers(limit=MAX_COMBO_OPTIONS):
+    """Distinct supplier names tools have already been bought from.
+
+    Union of the tool-purchase ledger's own ``supplier`` text and the materials
+    supplier master, because the shop that sells cement also sells grinders.
+    Both are read-only lookups: nothing is created or renamed here.
+    """
+    names = set()
+    rows = (db.session.query(ToolPurchase.supplier)
+            .filter(ToolPurchase.supplier.isnot(None),
+                    func.trim(func.coalesce(ToolPurchase.supplier, '')) != '')
+            .limit(limit * 2)
+            .all())
+    for (raw,) in rows:
+        name = (raw or '').strip()
+        if name:
+            names.add(name)
+    try:
+        from hdc.models.materials import Supplier
+        for (raw,) in (db.session.query(Supplier.name)
+                       .filter(Supplier.name.isnot(None)).limit(limit * 2).all()):
+            name = (raw or '').strip()
+            if name:
+                names.add(name)
+    except Exception:  # pragma: no cover - supplier master is optional
+        pass
+    return sorted(names, key=lambda n: (n.lower(), n))[:limit]
+
+
 def _get_or_create_customer_account(rental):
     from hdc.services.accounts import _account_get_or_create
     if rental.renter_type == 'internal' and rental.project:

@@ -19,7 +19,11 @@
     <!-- No JavaScript: the drawer cannot be toggled, so fall back to the
          classic docked sidebar instead of hiding the navigation completely.
          The collapsible groups need scripting to reopen, so show every group
-         and hide the arrows that would no longer do anything. -->
+         and hide the arrows that would no longer do anything.
+
+         The same reasoning applies to the searchable combo boxes: the widget
+         that hides the source <select> never runs, so show the select (it
+         posts the value) and hide the text input that only mirrors it. -->
     <noscript>
         <style>
             #sidebar.collapsed {
@@ -40,6 +44,8 @@
             .sidebar-close,
             .nav-group-arrow,
             .sidebar-expand-all { display: none !important; }
+            select[data-hdc-combo-source] { display: block !important; }
+            input[data-hdc-combo] { display: none !important; }
         </style>
     </noscript>
 </head>

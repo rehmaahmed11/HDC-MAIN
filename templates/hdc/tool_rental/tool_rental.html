@@ -4,6 +4,7 @@
 
 {% block content %}
 {% set tools_active = 'rentals' %}
+{% from "shared/_combo_field.html" import combo_field %}
 {% include "tool_rental/_tools_nav.html" %}
 
 <style>
@@ -224,8 +225,15 @@
                         <div class="col-12 d-none" id="externalFields">
                             <div class="row g-2">
                                 <div class="col-6">
-                                    <label class="form-label">Customer Name</label>
-                                    <input type="text" name="customer_name" class="form-control" placeholder="Customer name">
+                                    {# Customer is a name, so it is a searchable
+                                       combo: every customer this shop has ever
+                                       rented to is one keystroke away, and a
+                                       brand-new name still posts. #}
+                                    {{ combo_field('customer_name', 'rentalCustomerName',
+                                       known_customers, label='Customer Name',
+                                       placeholder='Type to search customer…',
+                                       hint='Not in the list? Just type the new name.',
+                                       max_items=60) }}
                                 </div>
                                 <div class="col-6">
                                     <label class="form-label">Phone</label>

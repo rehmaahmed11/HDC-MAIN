@@ -4,6 +4,7 @@
 
 {% block content %}
 {% set tools_active = 'rentals' %}
+{% from "shared/_combo_field.html" import combo_field, combo_select %}
 {% include "tool_rental/_tools_nav.html" %}
 
 <style>
@@ -282,14 +283,14 @@
                         </div>
 
                         <div class="col-12" id="receivingAccSection">
-                            <label class="form-label fw-bold"><i class="fas fa-building-columns me-1"></i>Receiving Account — Cash / Bank *</label>
-                            <select name="received_to_account_id" id="recvAccReturn" class="form-select" required>
-                                <option value="">Select Cash/Bank Account</option>
-                                {% for acc in receiving_accounts %}
-                                <option value="{{ acc.id }}">{{ acc.name }} ({{ acc.type }}) - Bal: {{ "{:,.0f}".format(acc.opening_balance or 0) }}</option>
-                                {% endfor %}
-                            </select>
-                            <small class="text-muted">Where money is received: e.g., Company Cash, HBL Bank, JazzCash Wallet — posts to Accounts ledger automatically</small>
+                            {# An account is picked by NAME, so it is a searchable
+                               combo too — a shop with forty cash/bank accounts
+                               should not have to scroll a 40-item <select>. #}
+                            {{ combo_select('received_to_account_id', 'recvAccReturn',
+                               receiving_account_options, required=true,
+                               label='Receiving Account — Cash / Bank *',
+                               placeholder='Type to search account…',
+                               hint='Where money is received: e.g., Company Cash, HBL Bank, JazzCash Wallet — posts to Accounts ledger automatically') }}
                         </div>
 
                         <div class="col-12">
@@ -323,14 +324,11 @@
                         <div class="col-6"><label class="form-label">Date</label><input type="date" name="payment_date" value="{{ today }}" class="form-control" required></div>
                         <div class="col-6"><label class="form-label">Amount *</label><input type="number" name="amount" class="form-control" min="0.01" step="0.01" required></div>
                         <div class="col-12">
-                            <label class="form-label fw-bold"><i class="fas fa-building-columns me-1"></i>Receiving Account — Cash / Bank *</label>
-                            <select name="received_to_account_id" class="form-select" required>
-                                <option value="">Select Cash/Bank</option>
-                                {% for acc in receiving_accounts %}
-                                <option value="{{ acc.id }}">{{ acc.name }} ({{ acc.type }})</option>
-                                {% endfor %}
-                            </select>
-                            <small class="text-muted">e.g., Company Cash, Meezan Bank, JazzCash — will show in Accounts ledger & Day Close</small>
+                            {{ combo_select('received_to_account_id', 'recvAccPayment',
+                               receiving_account_options, required=true,
+                               label='Receiving Account — Cash / Bank *',
+                               placeholder='Type to search account…',
+                               hint='e.g., Company Cash, Meezan Bank, JazzCash — will show in Accounts ledger & Day Close') }}
                         </div>
                         <div class="col-6"><label class="form-label">Mode</label><select name="payment_mode" class="form-select"><option value="cash">Cash</option><option value="bank">Bank Transfer</option><option value="jazzcash">JazzCash/Easypaisa</option><option value="online">Online</option></select></div>
                         <div class="col-6"><label class="form-label">Ref</label><input type="text" name="reference" class="form-control" placeholder="Txn ID"></div>
@@ -387,8 +385,14 @@
                             </div>
                         </div>
                         <div class="col-12 d-none" id="toCustomerFields">
-                            <label class="form-label">To Customer Name</label>
-                            <input type="text" name="to_customer_name" class="form-control" placeholder="Customer / Person name">
+                            {# "To Customer" is a name: searchable combo over
+                               every customer this shop has rented to, and a
+                               brand-new name still posts. #}
+                            {{ combo_field('to_customer_name', 'transferCustomerName',
+                               known_customers, label='To Customer Name',
+                               placeholder='Type to search customer…',
+                               hint='Not in the list? Just type the new name.',
+                               max_items=60) }}
                         </div>
                         <div class="col-12">
                             <label class="form-label fw-bold">Which tools move? — qty per tool</label>

@@ -19,6 +19,7 @@ from hdc.services.tool_rental import (
     _ensure_tool_category, _next_rental_code, _next_tool_code,
     _parse_date, create_movement_log, get_rental_tracking_chain,
     get_receiving_accounts, global_tool_locations,
+    known_tool_customers, known_tool_suppliers,
     post_tool_rental_payment_to_accounts, recalc_rental_totals,
     record_tool_purchase, record_tool_scrap, search_rentals,
     tool_kpis, tool_purchases, tool_scraps, tool_stock_aggregates,
@@ -149,6 +150,7 @@ def register(app):
             purchases=tool_purchases(tool_id=tool.id, limit=100),
             scraps=tool_scraps(tool_id=tool.id, limit=100),
             scrap_reasons=TOOL_SCRAP_REASONS,
+            known_suppliers=known_tool_suppliers(),
             loc_store=LOC_STORE, loc_own=LOC_OWN_PROJECT, loc_customer=LOC_CUSTOMER,
             warehouse_label=WAREHOUSE_LABEL,
             today=_pkt_today().isoformat(),
@@ -189,6 +191,7 @@ def register(app):
             tools=tools,
             categories=categories,
             receiving_accounts=receiving_accounts,
+            known_customers=known_tool_customers(),
             filters=filters,
             today=_pkt_today().isoformat()
         )
@@ -323,6 +326,7 @@ def register(app):
             selected_view=view,
             new_category=new_category_id,
             scrap_reasons=TOOL_SCRAP_REASONS,
+            known_suppliers=known_tool_suppliers(),
             today=_pkt_today().isoformat(),
             focus=(request.args.get('focus') or '').strip(),
         )
@@ -691,6 +695,12 @@ def register(app):
         stages = Stage.query.order_by(Stage.name.asc()).all()
         tools = Tool.query.filter(Tool.is_void==False).order_by(Tool.name.asc()).all()
         receiving_accounts = get_receiving_accounts()
+        # (id, label) pairs for the searchable account combos on this page.
+        receiving_account_options = [
+            (acc.id, '%s (%s) - Bal: %s' % (acc.name, acc.type,
+                                             '{:,.0f}'.format(acc.opening_balance or 0)))
+            for acc in receiving_accounts
+        ]
 
         pending_tools = float(rental.total_rented_qty or 0) - float(rental.total_returned_qty or 0)
         pending_amount = float(rental.total_amount or 0) - float(rental.total_paid or 0) if rental.billing_type!='no_charge' else 0.0
@@ -719,6 +729,8 @@ def register(app):
             stages=stages,
             tools=tools,
             receiving_accounts=receiving_accounts,
+            receiving_account_options=receiving_account_options,
+            known_customers=known_tool_customers(),
             pending_tools=pending_tools,
             pending_amount=pending_amount,
             acct_links=acct_links,

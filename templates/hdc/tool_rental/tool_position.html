@@ -239,6 +239,6 @@
         </div>
     </div>
 </div>
-{{ purchase_modal('purchaseModal', [row.tool], row.tool, today) }}
+{{ purchase_modal('purchaseModal', [row.tool], row.tool, today, known_suppliers) }}
 {{ scrap_modal('scrapModal', [row.tool], row.tool, today, scrap_reasons) }}
 {% endblock %}
