@@ -19,7 +19,7 @@
     {% for p in projects %}
     <tr {{ p|hdc_row_attrs }}>
         <td><span class="badge bg-secondary">{{ p.project_code }}</span></td>
-        <td><strong>{{ p.name }}</strong></td>
+        <td><strong><a href="{{ url_for('hdc_project_detail', pid=p.id) }}" class="text-decoration-none hdc-name-link" title="Open project detail">{{ p.name }}</a></strong></td>
         <td class="text-muted small">{{ p.location or '—' }}</td>
         <td><span class="badge bg-info text-dark">{{ p.contract_type }}</span></td>
         <td>{{ "{:,.0f}".format(p.owner_contract_value) }}</td>
