@@ -4,6 +4,7 @@
 
 {% block content %}
 {% set tools_active = 'dashboard' %}
+{% from "tool_rental/_stock_forms.html" import purchase_modal, scrap_modal %}
 {% include "tool_rental/_tools_nav.html" %}
 
 <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
@@ -14,9 +15,11 @@
         </h5>
         <small class="text-muted">Rate {{ "{:,.0f}".format(row.rate_per_day) }}/day · unit cost {{ "{:,.0f}".format(row.purchase_value / row.owned_qty if row.owned_qty else 0) }} · condition {{ row.condition }}</small>
     </div>
-    <div class="d-flex gap-2">
+    <div class="d-flex gap-2 flex-wrap">
         <a href="{{ url_for('hdc_tool_rental_dashboard') }}" class="btn btn-sm btn-outline-secondary"><i class="fas fa-arrow-left me-1"></i>Dashboard</a>
-        <a href="{{ url_for('hdc_tool_rental_inventory') }}" class="btn btn-sm btn-mint"><i class="fas fa-warehouse me-1"></i>Inventory</a>
+        <a href="{{ url_for('hdc_tool_rental_inventory') }}" class="btn btn-sm btn-outline-secondary"><i class="fas fa-warehouse me-1"></i>Inventory</a>
+        <button class="btn btn-sm btn-mint" data-bs-toggle="modal" data-bs-target="#purchaseModal"><i class="fas fa-cart-plus me-1"></i>Add Stock</button>
+        <button class="btn btn-sm btn-outline-danger" data-bs-toggle="modal" data-bs-target="#scrapModal"><i class="fas fa-trash-can me-1"></i>Scrap</button>
     </div>
 </div>
 
@@ -38,6 +41,36 @@
             {% else %}
                 <span class="badge bg-danger ms-1">{{ "%+g"|format(recon.variance) }} unaccounted — fix stock in Inventory</span>
             {% endif %}
+        </div>
+        <div class="row g-2 mt-3 text-center">
+            <div class="col-6 col-md-3">
+                <div class="border rounded-3 py-2">
+                    <div class="small text-muted">Purchased</div>
+                    <div class="fw-bold">{{ "%g"|format(row.purchased_qty) }} {{ row.unit }}</div>
+                    <small class="text-muted">{{ "{:,.0f}".format(row.purchased_value) }} PKR</small>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="border rounded-3 py-2">
+                    <div class="small text-muted">Scrapped</div>
+                    <div class="fw-bold text-danger">{{ "%g"|format(row.scrapped_qty) }} {{ row.unit }}</div>
+                    <small class="text-muted">{{ "{:,.0f}".format(row.scrapped_value) }} written off</small>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="border rounded-3 py-2">
+                    <div class="small text-muted">Purchase value owned</div>
+                    <div class="fw-bold">{{ "{:,.0f}".format(row.purchase_value) }}</div>
+                    <small class="text-muted">at current unit cost</small>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="border rounded-3 py-2">
+                    <div class="small text-muted">Rate</div>
+                    <div class="fw-bold">{{ "{:,.0f}".format(row.rate_per_day) }}</div>
+                    <small class="text-muted">per day</small>
+                </div>
+            </div>
         </div>
         <div class="tools-split-bar mt-3">
             {% set owned = row.owned_qty or 0.0001 %}
@@ -106,7 +139,73 @@
             </div>
         </div>
     </div>
+</div>
 
+<!-- purchase + scrap history -->
+<div class="row g-3 mt-1">
+    <div class="col-lg-6">
+        <div class="card hdc-card">
+            <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-cart-plus me-2"></i>Purchases — stock in</span>
+                        <span class="badge bg-secondary">{{ purchases|length }}</span>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table hdc-table table-sm mb-0">
+                            <thead><tr><th>Date</th><th>Ref</th><th class="text-center">Qty</th><th class="text-end">Unit Cost</th><th class="text-end">Total</th><th>Supplier</th></tr></thead>
+                            <tbody>
+                            {% for p in purchases %}
+                                <tr>
+                                    <td>{{ p.purchase_date }}</td>
+                                    <td><span class="badge bg-secondary">{{ p.purchase_code }}</span>{% if p.is_opening_stock %}<br><small class="text-muted">opening stock</small>{% endif %}</td>
+                                    <td class="text-center fw-bold">{{ "%g"|format(p.qty or 0) }}</td>
+                                    <td class="text-end">{{ "{:,.0f}".format(p.unit_cost or 0) }}</td>
+                                    <td class="text-end">{{ "{:,.0f}".format(p.total_cost or 0) }}</td>
+                                    <td><small>{{ p.supplier or '-' }}</small>{% if p.notes %}<br><small class="text-muted">{{ p.notes }}</small>{% endif %}</td>
+                                </tr>
+                            {% else %}
+                                <tr><td colspan="6" class="text-center text-muted py-3">No purchases recorded yet.</td></tr>
+                            {% endfor %}
+                            </tbody>
+                            <tfoot>
+                                <tr class="fw-bold"><td colspan="2">Total</td><td class="text-center">{{ "%g"|format(row.purchased_qty) }}</td><td></td><td class="text-end">{{ "{:,.0f}".format(row.purchased_value) }}</td><td></td></tr>
+                            </tfoot>
+            </table>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card hdc-card">
+            <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-trash-can me-2"></i>Scrap — discarded / lost</span>
+                        <span class="badge bg-secondary">{{ scraps|length }}</span>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table hdc-table table-sm mb-0">
+                            <thead><tr><th>Date</th><th>Ref</th><th class="text-center">Qty</th><th>Reason</th><th class="text-end">Written off</th><th>Notes</th></tr></thead>
+                            <tbody>
+                            {% for s in scraps %}
+                                <tr>
+                                    <td>{{ s.scrap_date }}</td>
+                                    <td><span class="badge bg-secondary">{{ s.scrap_code }}</span></td>
+                                    <td class="text-center fw-bold">{{ "%g"|format(s.qty or 0) }}</td>
+                                    <td><span class="badge bg-danger-subtle text-danger-emphasis border border-danger-subtle">{{ s.reason_label }}</span></td>
+                                    <td class="text-end">{{ "{:,.0f}".format(s.value_written_off or 0) }}</td>
+                                    <td><small>{{ s.notes or s.reference or '-' }}</small></td>
+                                </tr>
+                            {% else %}
+                                <tr><td colspan="6" class="text-center text-muted py-3">Nothing scrapped yet.</td></tr>
+                            {% endfor %}
+                            </tbody>
+                            <tfoot>
+                                <tr class="fw-bold"><td colspan="2">Total</td><td class="text-center">{{ "%g"|format(row.scrapped_qty) }}</td><td></td><td class="text-end">{{ "{:,.0f}".format(row.scrapped_value) }}</td><td></td></tr>
+                            </tfoot>
+            </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mt-1">
     <!-- movement history -->
     <div class="col-lg-5">
         <div class="card hdc-card">
@@ -140,4 +239,6 @@
         </div>
     </div>
 </div>
+{{ purchase_modal('purchaseModal', [row.tool], row.tool, today) }}
+{{ scrap_modal('scrapModal', [row.tool], row.tool, today, scrap_reasons) }}
 {% endblock %}

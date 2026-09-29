@@ -101,6 +101,11 @@
             <span><i class="tools-split-dot" style="background: {{ seg.color }};"></i>{{ seg.label }} — <strong>{{ "%g"|format(seg.qty) }}</strong> ({{ "%.1f"|format(seg.pct) }}%)</span>
             {% endfor %}
         </div>
+        <div class="d-flex flex-wrap justify-content-center gap-3 mt-3 small text-muted border-top pt-2">
+            <span><i class="fas fa-cart-plus me-1"></i>Purchased <strong>{{ "%g"|format(t.purchased_qty) }}</strong> pcs — {{ "{:,.0f}".format(t.purchased_value) }} PKR</span>
+            <span><i class="fas fa-trash-can me-1"></i>Scrapped <strong>{{ "%g"|format(t.scrapped_qty) }}</strong> pcs — {{ "{:,.0f}".format(t.scrapped_value) }} written off</span>
+            <a href="{{ url_for('hdc_tool_rental_inventory') }}"><i class="fas fa-warehouse me-1"></i>Manage stock in Inventory</a>
+        </div>
     </div>
 </div>
 

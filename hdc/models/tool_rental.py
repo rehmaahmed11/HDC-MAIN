@@ -9,12 +9,30 @@ Design goals:
 - Flexible toggle: full / partial for tools AND money, auto calc pendings.
 - Site-to-site movement: Site1 > Site2 > Site3 chain, current site green active.
 - KPI + reporting searchable by site, tool, date range, customer, status.
+- Stock life-cycle: buy more of a tool (purchase in) and throw away what is
+  broken (scrap out), so ``total_quantity`` always has a documented reason.
 """
 
 from sqlalchemy import func
 
 from hdc.extensions import db
 from hdc.utils.dates import _pkt_now_naive, _pkt_today
+
+# Why a piece left the store without coming back.  Stored on ToolScrap so the
+# write-off report can group by reason (insurance / owner claim / scrap sale).
+TOOL_SCRAP_REASONS = (
+    ('damaged', 'Damaged beyond repair'),
+    ('lost', 'Lost / missing'),
+    ('worn_out', 'Worn out / end of life'),
+    ('obsolete', 'Obsolete / replaced by newer model'),
+    ('sold_as_scrap', 'Sold as scrap'),
+    ('other', 'Other'),
+)
+TOOL_SCRAP_REASON_LABELS = dict(TOOL_SCRAP_REASONS)
+
+# Movement types that mean "stock came in" / "stock left for good".
+MOVEMENT_PURCHASE_IN = 'purchase_in'
+MOVEMENT_SCRAP_OUT = 'scrap_out'
 
 
 class ToolCategory(db.Model):
@@ -64,6 +82,103 @@ class Tool(db.Model):
         if tot <= 0:
             return 0.0
         return (self.rented_out_qty / tot) * 100.0
+
+    # ---- stock life-cycle helpers (purchase in / scrap out) ----
+    # These are convenience reads for one tool at a time (detail pages).  List
+    # pages and the ledger use the grouped aggregates in
+    # ``hdc.services.tool_rental.tool_stock_aggregates`` instead, so a 500-row
+    # inventory never turns into 2,000 queries.
+    @property
+    def purchased_qty(self):
+        """Total pieces ever recorded as purchased (0 for legacy tools that were
+        entered before the stock register existed)."""
+        from hdc.models.tool_rental import ToolPurchase
+        val = db.session.query(func.coalesce(func.sum(ToolPurchase.qty), 0.0)).filter(
+            ToolPurchase.tool_id == self.id
+        ).scalar() or 0.0
+        return float(val)
+
+    @property
+    def scrapped_qty(self):
+        """Total pieces thrown away / lost / sold as scrap."""
+        from hdc.models.tool_rental import ToolScrap
+        val = db.session.query(func.coalesce(func.sum(ToolScrap.qty), 0.0)).filter(
+            ToolScrap.tool_id == self.id
+        ).scalar() or 0.0
+        return float(val)
+
+    @property
+    def purchase_value(self):
+        from hdc.models.tool_rental import ToolPurchase
+        val = db.session.query(func.coalesce(func.sum(ToolPurchase.total_cost), 0.0)).filter(
+            ToolPurchase.tool_id == self.id
+        ).scalar() or 0.0
+        return float(val)
+
+    @property
+    def scrapped_value(self):
+        from hdc.models.tool_rental import ToolScrap
+        val = db.session.query(func.coalesce(func.sum(ToolScrap.value_written_off), 0.0)).filter(
+            ToolScrap.tool_id == self.id
+        ).scalar() or 0.0
+        return float(val)
+
+
+class ToolPurchase(db.Model):
+    """Stock coming *in*: buying more of a tool we already own.
+
+    One row per purchase event (a supplier bill, a local market run, the
+    opening stock of a newly created tool).  ``tool.total_quantity`` is the
+    running balance and this table is the reason it moved, so "why do we own
+    53 grinders?" always has an answer.
+    """
+    __tablename__ = 'hdc_tool_purchase'
+    id = db.Column(db.Integer, primary_key=True)
+    purchase_code = db.Column(db.String(30), unique=True, nullable=False)
+    tool_id = db.Column(db.Integer, db.ForeignKey('hdc_tool.id'), nullable=False, index=True)
+
+    purchase_date = db.Column(db.Date, default=_pkt_today)
+    qty = db.Column(db.Float, default=0.0)
+    unit_cost = db.Column(db.Float, default=0.0)        # price paid per unit
+    total_cost = db.Column(db.Float, default=0.0)       # qty * unit_cost
+    supplier = db.Column(db.String(150))
+    reference = db.Column(db.String(120))               # bill / invoice no
+    notes = db.Column(db.String(300))
+
+    is_opening_stock = db.Column(db.Boolean, default=False)
+    created_by = db.Column(db.Integer, db.ForeignKey('hdc_user.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=_pkt_now_naive)
+
+    tool = db.relationship('Tool', foreign_keys=[tool_id])
+
+
+class ToolScrap(db.Model):
+    """Stock going *out for good*: broken, lost, worn out or sold as scrap.
+
+    Only pieces that are actually in the store can be scrapped — a tool that is
+    rented out has to be returned first, otherwise the balance would break.
+    """
+    __tablename__ = 'hdc_tool_scrap'
+    id = db.Column(db.Integer, primary_key=True)
+    scrap_code = db.Column(db.String(30), unique=True, nullable=False)
+    tool_id = db.Column(db.Integer, db.ForeignKey('hdc_tool.id'), nullable=False, index=True)
+
+    scrap_date = db.Column(db.Date, default=_pkt_today)
+    qty = db.Column(db.Float, default=0.0)
+    reason = db.Column(db.String(30), default='damaged')
+    unit_cost = db.Column(db.Float, default=0.0)          # cost basis at scrap time
+    value_written_off = db.Column(db.Float, default=0.0)  # qty * unit_cost
+    reference = db.Column(db.String(120))
+    notes = db.Column(db.String(300))
+
+    created_by = db.Column(db.Integer, db.ForeignKey('hdc_user.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=_pkt_now_naive)
+
+    tool = db.relationship('Tool', foreign_keys=[tool_id])
+
+    @property
+    def reason_label(self):
+        return TOOL_SCRAP_REASON_LABELS.get((self.reason or '').strip().lower(), self.reason or '-')
 
 
 class ToolRental(db.Model):
@@ -291,7 +406,8 @@ class ToolRentalTransferItem(db.Model):
 
 
 class ToolMovementLog(db.Model):
-    """Global tool tracking: every rental, return, transfer logs here for 'where are all tools' view."""
+    """Global tool tracking: every rental, return, transfer, purchase and scrap
+    logs here for the 'where are all tools' view."""
     __tablename__ = 'hdc_tool_movement_log'
     id = db.Column(db.Integer, primary_key=True)
     tool_id = db.Column(db.Integer, db.ForeignKey('hdc_tool.id'), nullable=False, index=True)
@@ -299,7 +415,7 @@ class ToolMovementLog(db.Model):
     transfer_id = db.Column(db.Integer, db.ForeignKey('hdc_tool_rental_transfer.id'), nullable=True)
     return_id = db.Column(db.Integer, db.ForeignKey('hdc_tool_rental_return.id'), nullable=True)
 
-    movement_type = db.Column(db.String(30), default='rental_out')  # rental_out / return_in / site_transfer / external_transfer / purchase_in / adjustment
+    movement_type = db.Column(db.String(30), default='rental_out')  # rental_out / return_in / site_transfer / external_transfer / purchase_in / scrap_out / adjustment
     from_location_label = db.Column(db.String(300))
     to_location_label = db.Column(db.String(300))
     qty = db.Column(db.Float, default=0.0)

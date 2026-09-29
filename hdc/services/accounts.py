@@ -1136,6 +1136,33 @@ def _accounts_set_void_by_source(source_type, source_id, make_void=True):
     return len(rows)
 
 
+def _accounts_void_by_source_prefix(source_type_prefix, reason=''):
+    """Void every ledger transaction whose source_type starts with a prefix.
+
+    Used when a whole feature's data is wiped (e.g. Tools): the linked ledger
+    rows must not survive as orphan income/expense.  Returns the number of
+    transactions voided.
+    """
+    prefix = (source_type_prefix or '').strip().lower()
+    if not prefix:
+        return 0
+    like = f'{prefix}%'
+    rows = (AccountTransaction.query
+            .filter(func.lower(func.coalesce(AccountTransaction.source_type, '')).like(like))
+            .all())
+    changed = 0
+    for row in rows:
+        if row.is_void:
+            continue
+        row.is_void = True
+        if hasattr(row, 'void_reason'):
+            row.void_reason = (reason or 'Source data wiped')[:250]
+        if hasattr(row, 'voided_at'):
+            row.voided_at = _pkt_now_naive()
+        changed += 1
+    return changed
+
+
 def _set_void_state_row(row, make_void=True, reason=''):
     if not row:
         return True, ''

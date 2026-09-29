@@ -352,6 +352,11 @@ def tool_ledger():
     for item in pending_items:
         pending_by_tool.setdefault(int(item.tool_id), []).append(item)
 
+    # Why the stock is the size it is: purchases in, scrap out.  Two grouped
+    # queries for the whole page, never one per tool.
+    from hdc.services.tool_rental import stock_stats_for, tool_stock_aggregates
+    stock_stats = tool_stock_aggregates([int(t.id) for t in tools])
+
     tool_rows = []
     locations = {}
     totals = {
@@ -360,6 +365,8 @@ def tool_ledger():
         'damaged_lost_qty': 0.0, 'maintenance_qty': 0.0, 'unaccounted_qty': 0.0,
         'purchase_value': 0.0, 'out_value': 0.0, 'rental_value': 0.0,
         'paid_value': 0.0, 'pending_amount': 0.0,
+        'purchased_qty': 0.0, 'purchased_value': 0.0,
+        'scrapped_qty': 0.0, 'scrapped_value': 0.0,
         'open_rentals': 0, 'overdue_rentals': 0, 'overdue_qty': 0.0,
         'own_project_count': 0, 'customer_count': 0,
         'unaccounted_rows': 0, 'long_out_rows': 0, 'idle_rows': 0,
@@ -372,6 +379,12 @@ def tool_ledger():
         owned = _round_qty(tool.total_quantity)
         unit_cost = _flt(tool.purchase_cost)
         condition = (tool.condition or 'good').strip().lower()
+
+        stock = stock_stats_for(stock_stats, tool.id)
+        purchased_qty = stock['purchased_qty']
+        purchased_value = stock['purchase_value']
+        scrapped_qty = stock['scrapped_qty']
+        scrapped_value = stock['scrapped_value']
 
         holdings = []
         out_qty = 0.0
@@ -480,6 +493,10 @@ def tool_ledger():
         totals['out_qty'] += out_qty
         totals['out_value'] += out_value
         totals['purchase_value'] += owned * unit_cost
+        totals['purchased_qty'] += purchased_qty
+        totals['purchased_value'] += purchased_value
+        totals['scrapped_qty'] += scrapped_qty
+        totals['scrapped_value'] += scrapped_value
         totals['damaged_lost_qty'] += damaged_lost
         totals['maintenance_qty'] += maintenance
         if unaccounted:
@@ -506,6 +523,10 @@ def tool_ledger():
             'out_qty': out_qty,
             'out_value': _round_qty(out_value),
             'purchase_value': _round_qty(owned * unit_cost),
+            'purchased_qty': purchased_qty,
+            'purchased_value': _round_qty(purchased_value),
+            'scrapped_qty': scrapped_qty,
+            'scrapped_value': _round_qty(scrapped_value),
             'rate_per_day': _flt(tool.rental_rate_per_day),
             'condition': condition,
             'status': (tool.status or 'active'),
@@ -600,7 +621,8 @@ def tool_ledger():
     totals['customer_count'] = len([r for r in location_rows if r['loc_type'] == LOC_CUSTOMER and r['qty'] > EPS])
     totals['pending_amount'] = _round_qty(totals['rental_value'] - totals['paid_value'])
     totals['utilization_pct'] = round((totals['out_qty'] / totals['owned_qty'] * 100.0), 1) if totals['owned_qty'] > 0 else 0.0
-    for key in ('purchase_value', 'out_value', 'rental_value', 'paid_value'):
+    for key in ('purchase_value', 'out_value', 'rental_value', 'paid_value',
+                'purchased_qty', 'purchased_value', 'scrapped_qty', 'scrapped_value'):
         totals[key] = _round_qty(totals[key])
 
     return {'tools': tool_rows, 'locations': location_rows, 'totals': totals, 'today': today}
@@ -743,8 +765,20 @@ def tools_attention(ledger=None, limit=None):
             issues.append({
                 'severity': 'warning', 'icon': 'fa-triangle-exclamation',
                 'title': f"{row['name']} marked {row['condition']}",
-                'detail': f"{row['owned_qty']:g} {row['unit']} counted as {row['condition']} — write off or repair.",
-                'url_endpoint': 'hdc_tool_rental_inventory', 'url_args': {},
+                'detail': (f"{row['owned_qty']:g} {row['unit']} counted as {row['condition']} — "
+                           f"scrap the broken pieces or repair and set condition back to Good."),
+                'url_endpoint': 'hdc_tool_rental_tool_position',
+                'url_args': {'tool_id': row['tool_id']},
+            })
+        if row['unaccounted'] is False and row['owned_qty'] > EPS and row['out_qty'] <= EPS \
+                and row['scrapped_qty'] > EPS and row['purchased_qty'] > row['owned_qty']:
+            issues.append({
+                'severity': 'info', 'icon': 'fa-trash-can',
+                'title': f"{row['name']} lost {row['scrapped_qty']:g} {row['unit']} to scrap",
+                'detail': (f"Bought {row['purchased_qty']:g}, now owning {row['owned_qty']:g} — "
+                           f"{row['scrapped_value']:,.0f} written off."),
+                'url_endpoint': 'hdc_tool_rental_tool_position',
+                'url_args': {'tool_id': row['tool_id']},
             })
         if row['idle'] and row['rate_per_day'] > 0:
             issues.append({
@@ -789,6 +823,50 @@ def location_summary(ledger=None):
         if loc['qty'] <= EPS and loc['loc_type'] != LOC_STORE:
             continue
         rows.append(loc)
+    return rows
+
+
+# --------------------------------------------------------------------------- #
+# inventory list: the same ledger, filtered — so the two pages can't disagree
+# --------------------------------------------------------------------------- #
+def inventory_rows(term=None, category_id=None, view='all', condition=None, limit=None):
+    """Filtered inventory rows for the Inventory page.
+
+    Built from :func:`tool_ledger` on purpose: whatever the dashboard says a
+    tool has in store / on sites / with customers is exactly what the inventory
+    list shows, and the free-text box can find a tool by the *site* it is
+    sitting on ("DHA Phase 6") and not only by its own name.
+    """
+    ledger = tool_ledger()
+    rows = ledger['tools']
+    term = (term or '').strip().lower()
+
+    if category_id:
+        rows = [r for r in rows if int(r['tool'].category_id or 0) == int(category_id)]
+    if condition:
+        rows = [r for r in rows if r['condition'] == str(condition).strip().lower()]
+    if view == 'out':
+        rows = [r for r in rows if r['out_qty'] > EPS]
+    elif view == 'store':
+        rows = [r for r in rows if r['in_store_qty'] > EPS]
+    elif view == 'attention':
+        rows = [r for r in rows
+                if r['unaccounted'] or r['overdue_qty'] > EPS or r['long_out']
+                or r['condition'] in _BAD_CONDITIONS]
+    if term:
+        matched = []
+        for r in rows:
+            haystack = ' '.join([
+                str(r['name'] or ''), str(r['code'] or ''), str(r['category'] or ''),
+                str(r['tool'].description or ''), str(r['unit'] or ''),
+                str(r['current_label'] or ''),
+                ' '.join(str(h['label'] or '') for h in r['holdings']),
+            ]).lower()
+            if term in haystack:
+                matched.append(r)
+        rows = matched
+    if limit:
+        rows = rows[:int(limit)]
     return rows
 
 

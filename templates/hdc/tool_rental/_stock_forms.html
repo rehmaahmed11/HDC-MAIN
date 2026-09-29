@@ -1,0 +1,151 @@
+{# Reusable "Add Stock" (purchase) and "Scrap" modals for the HDC Tools area.
+
+   Both accept an optional `tool`: when given, the tool is fixed and the picker
+   is hidden; otherwise the caller passes every tool and the user chooses.
+   Row buttons pre-fill the modal through data-tool-id / data-tool-name (see
+   tool_inventory.html's bootstrap `show.bs.modal` listener). #}
+
+{% macro purchase_modal(modal_id, tools, tool=None, today='') %}
+<div class="modal fade" id="{{ modal_id }}" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content hdc-modal">
+      <form method="POST" action="{% if tool %}{{ url_for('hdc_tool_rental_tool_purchase', tool_id=tool.id) }}{% else %}{{ url_for('hdc_tool_rental_purchase_create') }}{% endif %}"
+            id="{{ modal_id }}Form">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+        <div class="modal-header">
+          <h6 class="modal-title"><i class="fas fa-cart-plus me-2"></i>Add Stock — New Purchase</h6>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body row g-2">
+          {% if tool %}
+            <input type="hidden" name="tool_id" value="{{ tool.id }}">
+            <div class="col-12">
+              <label class="form-label">Tool</label>
+              <input type="text" class="form-control" value="{{ tool.name }} ({{ tool.tool_code }})" readonly>
+              <small class="text-muted">Currently owning {{ "%g"|format(tool.total_quantity or 0) }} {{ tool.unit }}</small>
+            </div>
+          {% else %}
+            <div class="col-12">
+              <label class="form-label">Tool *</label>
+              <select name="tool_id" class="form-select" required id="{{ modal_id }}Tool">
+                <option value="">Select Tool</option>
+                {% for t in tools %}
+                <option value="{{ t.id }}">{{ t.name }} ({{ t.tool_code }}) — owns {{ "%g"|format(t.total_quantity or 0) }} {{ t.unit }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          {% endif %}
+          <div class="col-6">
+            <label class="form-label">Qty Purchased *</label>
+            <input type="number" name="qty" class="form-control" min="0.1" step="0.1" required placeholder="e.g. 10">
+          </div>
+          <div class="col-6">
+            <label class="form-label">Unit Cost</label>
+            <input type="number" name="unit_cost" class="form-control" min="0" step="0.01"
+                   placeholder="{% if tool %}{{ tool.purchase_cost or 0 }}{% endif %}">
+            <small class="text-muted">Blank = keep current cost</small>
+          </div>
+          <div class="col-6">
+            <label class="form-label">Purchase Date</label>
+            <input type="date" name="purchase_date" class="form-control" value="{{ today }}">
+          </div>
+          <div class="col-6">
+            <label class="form-label">Bill / Ref No</label>
+            <input type="text" name="reference" class="form-control" placeholder="Invoice no">
+          </div>
+          <div class="col-12">
+            <label class="form-label">Supplier</label>
+            <input type="text" name="supplier" class="form-control" placeholder="e.g. Karachi Tools House">
+          </div>
+          <div class="col-12">
+            <label class="form-label">Notes</label>
+            <input type="text" name="notes" class="form-control" placeholder="Optional">
+          </div>
+          <div class="col-12">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="update_cost" value="1" id="{{ modal_id }}UpdateCost" checked>
+              <label class="form-check-label small" for="{{ modal_id }}UpdateCost">
+                Update the tool's unit cost to this price (used to value stock)
+              </label>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-mint"><i class="fas fa-check me-1"></i>Add Stock</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endmacro %}
+
+{% macro scrap_modal(modal_id, tools, tool=None, today='', reasons=[]) %}
+<div class="modal fade" id="{{ modal_id }}" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content hdc-modal">
+      <form method="POST" action="{% if tool %}{{ url_for('hdc_tool_rental_tool_scrap', tool_id=tool.id) }}{% else %}{{ url_for('hdc_tool_rental_scrap_create') }}{% endif %}"
+            id="{{ modal_id }}Form">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+        <div class="modal-header">
+          <h6 class="modal-title text-danger"><i class="fas fa-trash-can me-2"></i>Scrap / Discard Old Tool</h6>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body row g-2">
+          {% if tool %}
+            <input type="hidden" name="tool_id" value="{{ tool.id }}">
+            <div class="col-12">
+              <label class="form-label">Tool</label>
+              <input type="text" class="form-control" value="{{ tool.name }} ({{ tool.tool_code }})" readonly>
+              <small class="text-muted">
+                In store now: <strong>{{ "%g"|format(tool.available_qty) }}</strong> {{ tool.unit }}
+                {% if tool.rented_out_qty > 0 %}· {{ "%g"|format(tool.rented_out_qty) }} rented out (must be returned first){% endif %}
+              </small>
+            </div>
+          {% else %}
+            <div class="col-12">
+              <label class="form-label">Tool *</label>
+              <select name="tool_id" class="form-select" required id="{{ modal_id }}Tool">
+                <option value="">Select Tool</option>
+                {% for t in tools %}
+                <option value="{{ t.id }}">{{ t.name }} ({{ t.tool_code }}) — in store {{ "%g"|format(t.available_qty) }} {{ t.unit }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          {% endif %}
+          <div class="col-6">
+            <label class="form-label">Qty to Scrap *</label>
+            <input type="number" name="qty" class="form-control" min="0.1" step="0.1" required placeholder="e.g. 2">
+          </div>
+          <div class="col-6">
+            <label class="form-label">Date</label>
+            <input type="date" name="scrap_date" class="form-control" value="{{ today }}">
+          </div>
+          <div class="col-12">
+            <label class="form-label">Reason *</label>
+            <select name="reason" class="form-select">
+              {% for key, label in reasons %}
+              <option value="{{ key }}">{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-12">
+            <label class="form-label">Ref / Notes</label>
+            <input type="text" name="notes" class="form-control" placeholder="e.g. motor burnt, sold to scrap dealer 1,200">
+          </div>
+          <div class="col-12">
+            <div class="alert alert-warning py-2 small mb-0">
+              Scrap reduces <strong>Total Qty Owned</strong> and writes the cost off at the tool's
+              current unit cost. Only pieces sitting in the store can be scrapped.
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-danger"><i class="fas fa-trash-can me-1"></i>Record Scrap</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endmacro %}
