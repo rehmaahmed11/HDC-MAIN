@@ -227,6 +227,24 @@ _WIPE_TARGETS = {
             'hdc_runtime_flag',
         ],
     },
+    'tools': {
+        'label': 'Tools & Tool Rentals (Inventory, Purchases, Scrap, Rentals, Returns, Payments, Transfers, Tracking)',
+        'tables': [
+            'hdc_tool_movement_log',
+            'hdc_tool_rental_account_txn',
+            'hdc_tool_rental_transfer_item',
+            'hdc_tool_rental_return_item',
+            'hdc_tool_rental_payment',
+            'hdc_tool_rental_transfer',
+            'hdc_tool_rental_return',
+            'hdc_tool_rental_item',
+            'hdc_tool_rental',
+            'hdc_tool_purchase',
+            'hdc_tool_scrap',
+            'hdc_tool',
+            'hdc_tool_category',
+        ],
+    },
     'users': {
         'label': 'Users',
         'tables': [
@@ -234,6 +252,34 @@ _WIPE_TARGETS = {
         ],
     },
 }
+
+
+def _void_tool_rental_ledger_income():
+    """Void ledger income that belonged to tool rentals about to be wiped.
+
+    A tool rental payment posts an income transaction into ``hdc_account_txn``.
+    Wiping the Tools section must not leave that rent sitting in the Accounts
+    ledger as income for a rental that no longer exists.
+    """
+    from hdc.services.accounts import _accounts_void_by_source_prefix
+    return int(_accounts_void_by_source_prefix('tool_rental_payment', 'Tool data wiped'))
+
+
+def _drop_dead_tool_rental_account_links():
+    """Drop tool-rental → account links after the Accounts tables were wiped.
+
+    Runs *after* the deletes so the subqueries see the empty tables: the link
+    rows point at transactions that are gone and the payments reference
+    accounts that no longer exist.
+    """
+    db.session.execute(text(
+        'DELETE FROM hdc_tool_rental_account_txn '
+        'WHERE account_txn_id NOT IN (SELECT id FROM hdc_account_txn)'))
+    db.session.execute(text(
+        'UPDATE hdc_tool_rental_payment SET received_to_account_id = NULL '
+        'WHERE received_to_account_id IS NOT NULL '
+        'AND received_to_account_id NOT IN (SELECT id FROM hdc_account)'))
+    db.session.commit()
 
 
 def _wipe_selected_targets(target_keys):
@@ -247,6 +293,13 @@ def _wipe_selected_targets(target_keys):
             if t not in tables:
                 tables.append(t)
 
+    wipe_tools = 'tools' in keys
+    wipe_accounts = 'accounts' in keys
+    # Before the deletes: tool rent that was posted to Accounts must not
+    # survive as orphan income.
+    if wipe_tools and not wipe_accounts:
+        _void_tool_rental_ledger_income()
+
     db.session.execute(text('PRAGMA foreign_keys=OFF'))
     try:
         for tbl in tables:
@@ -258,6 +311,10 @@ def _wipe_selected_targets(target_keys):
     finally:
         db.session.execute(text('PRAGMA foreign_keys=ON'))
         db.session.commit()
+
+    # After the deletes: links into wiped Accounts tables are now dead.
+    if wipe_accounts and not wipe_tools:
+        _drop_dead_tool_rental_account_links()
 
     # Recreate essential admin/default masters if they were wiped.
     # This is system reseed work; keep it out of user-facing activity logs.

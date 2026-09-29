@@ -13,6 +13,8 @@
     <div class="col-6 col-md-2"><div class="kpi-card kpi-green"><div class="kpi-icon"><i class="fas fa-hand-holding-usd"></i></div><div class="kpi-value small">{{ "{:,.0f}".format(kpis.total_amount) }}</div><div class="kpi-label">Total Amount</div></div></div>
     <div class="col-6 col-md-2"><div class="kpi-card kpi-red"><div class="kpi-icon"><i class="fas fa-clock"></i></div><div class="kpi-value small">{{ "{:,.0f}".format(kpis.pending_amount) }}</div><div class="kpi-label">Pending Amount</div></div></div>
     <div class="col-6 col-md-2"><div class="kpi-card kpi-purple"><div class="kpi-icon"><i class="fas fa-exclamation-triangle"></i></div><div class="kpi-value">{{ "%.0f"|format(kpis.pending_tools) }}</div><div class="kpi-label">Pending Tools</div></div></div>
+    <div class="col-6 col-md-2"><div class="kpi-card kpi-teal"><div class="kpi-icon"><i class="fas fa-cart-plus"></i></div><div class="kpi-value small">{{ "{:,.0f}".format(purchase_totals.value) }}</div><div class="kpi-label">Purchased ({{ "%.0f"|format(purchase_totals.qty) }} pcs)</div></div></div>
+    <div class="col-6 col-md-2"><div class="kpi-card kpi-red"><div class="kpi-icon"><i class="fas fa-trash-can"></i></div><div class="kpi-value small">{{ "{:,.0f}".format(scrap_totals.value) }}</div><div class="kpi-label">Scrapped ({{ "%.0f"|format(scrap_totals.qty) }} pcs)</div></div></div>
 </div>
 
 <div class="card hdc-card mt-3">
@@ -36,6 +38,69 @@
             <div class="col-md-2"><label class="form-label">Date To</label><input type="date" name="date_to" value="{{ filters.date_to or '' }}" class="form-control"></div>
             <div class="col-md-2 d-flex align-items-end gap-2"><button type="submit" class="btn btn-mint"><i class="fas fa-search me-1"></i>Generate</button><a href="{{ url_for('hdc_tool_rental_reports') }}" class="btn btn-outline-secondary">Reset</a></div>
         </form>
+    </div>
+</div>
+
+<div class="row g-3 mt-3">
+    <div class="col-lg-6">
+        <div class="card hdc-card">
+            <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-cart-plus me-2"></i>Purchases — Stock In</span>
+                <span class="badge bg-secondary">{{ purchases|length }}</span>
+            </div>
+            <div class="table-responsive">
+                <table class="table hdc-table table-sm mb-0">
+                    <thead><tr><th>Date</th><th>Tool</th><th class="text-center">Qty</th><th class="text-end">Unit</th><th class="text-end">Total</th><th>Supplier / Ref</th></tr></thead>
+                    <tbody>
+                    {% for p in purchases %}
+                        <tr>
+                            <td>{{ p.purchase_date }}</td>
+                            <td>{{ p.tool.name if p.tool else p.tool_id }}<br><small class="text-muted">{{ p.purchase_code }}</small></td>
+                            <td class="text-center fw-bold">{{ "%.0f"|format(p.qty or 0) }}</td>
+                            <td class="text-end">{{ "{:,.0f}".format(p.unit_cost or 0) }}</td>
+                            <td class="text-end">{{ "{:,.0f}".format(p.total_cost or 0) }}</td>
+                            <td><small>{{ p.supplier or '-' }}{% if p.reference %}<br>{{ p.reference }}{% endif %}</small></td>
+                        </tr>
+                    {% else %}
+                        <tr><td colspan="6" class="text-center text-muted py-3">No purchases in this filter.</td></tr>
+                    {% endfor %}
+                    </tbody>
+                    <tfoot>
+                        <tr class="fw-bold"><td colspan="2">Total</td><td class="text-center">{{ "%.0f"|format(purchase_totals.qty) }}</td><td></td><td class="text-end">{{ "{:,.0f}".format(purchase_totals.value) }}</td><td></td></tr>
+                    </tfoot>
+                </table>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card hdc-card">
+            <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-trash-can me-2"></i>Scrap — Discarded / Lost</span>
+                <span class="badge bg-secondary">{{ scraps|length }}</span>
+            </div>
+            <div class="table-responsive">
+                <table class="table hdc-table table-sm mb-0">
+                    <thead><tr><th>Date</th><th>Tool</th><th class="text-center">Qty</th><th>Reason</th><th class="text-end">Written off</th><th>Notes</th></tr></thead>
+                    <tbody>
+                    {% for s in scraps %}
+                        <tr>
+                            <td>{{ s.scrap_date }}</td>
+                            <td>{{ s.tool.name if s.tool else s.tool_id }}<br><small class="text-muted">{{ s.scrap_code }}</small></td>
+                            <td class="text-center fw-bold">{{ "%.0f"|format(s.qty or 0) }}</td>
+                            <td><span class="badge bg-danger-subtle text-danger-emphasis border border-danger-subtle">{{ s.reason_label }}</span></td>
+                            <td class="text-end">{{ "{:,.0f}".format(s.value_written_off or 0) }}</td>
+                            <td><small>{{ s.notes or s.reference or '-' }}</small></td>
+                        </tr>
+                    {% else %}
+                        <tr><td colspan="6" class="text-center text-muted py-3">Nothing scrapped in this filter.</td></tr>
+                    {% endfor %}
+                    </tbody>
+                    <tfoot>
+                        <tr class="fw-bold"><td colspan="2">Total</td><td class="text-center">{{ "%.0f"|format(scrap_totals.qty) }}</td><td></td><td class="text-end">{{ "{:,.0f}".format(scrap_totals.value) }}</td><td></td></tr>
+                    </tfoot>
+                </table>
+            </div>
+        </div>
     </div>
 </div>
 

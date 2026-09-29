@@ -1770,6 +1770,39 @@ def _ensure_tool_rental_schema():
             notes VARCHAR(500)
         )
         """,
+        """
+        CREATE TABLE IF NOT EXISTS hdc_tool_purchase (
+            id INTEGER PRIMARY KEY,
+            purchase_code VARCHAR(30) NOT NULL UNIQUE,
+            tool_id INTEGER NOT NULL REFERENCES hdc_tool(id),
+            purchase_date DATE,
+            qty FLOAT DEFAULT 0,
+            unit_cost FLOAT DEFAULT 0,
+            total_cost FLOAT DEFAULT 0,
+            supplier VARCHAR(150),
+            reference VARCHAR(120),
+            notes VARCHAR(300),
+            is_opening_stock BOOLEAN DEFAULT 0,
+            created_by INTEGER REFERENCES hdc_user(id),
+            created_at DATETIME
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS hdc_tool_scrap (
+            id INTEGER PRIMARY KEY,
+            scrap_code VARCHAR(30) NOT NULL UNIQUE,
+            tool_id INTEGER NOT NULL REFERENCES hdc_tool(id),
+            scrap_date DATE,
+            qty FLOAT DEFAULT 0,
+            reason VARCHAR(30) DEFAULT 'damaged',
+            unit_cost FLOAT DEFAULT 0,
+            value_written_off FLOAT DEFAULT 0,
+            reference VARCHAR(120),
+            notes VARCHAR(300),
+            created_by INTEGER REFERENCES hdc_user(id),
+            created_at DATETIME
+        )
+        """,
     ]
     with db.engine.connect() as conn:
         for ddl in tables:
@@ -1790,6 +1823,10 @@ def _ensure_tool_rental_schema():
             "CREATE INDEX IF NOT EXISTS idx_tool_rental_item_tool ON hdc_tool_rental_item(tool_id)",
             "CREATE INDEX IF NOT EXISTS idx_tool_movement_tool_time ON hdc_tool_movement_log(tool_id, timestamp, id)",
             "CREATE INDEX IF NOT EXISTS idx_tool_movement_rental ON hdc_tool_movement_log(rental_id)",
+            "CREATE INDEX IF NOT EXISTS idx_tool_purchase_tool_date ON hdc_tool_purchase(tool_id, purchase_date)",
+            "CREATE INDEX IF NOT EXISTS idx_tool_purchase_date ON hdc_tool_purchase(purchase_date, id)",
+            "CREATE INDEX IF NOT EXISTS idx_tool_scrap_tool_date ON hdc_tool_scrap(tool_id, scrap_date)",
+            "CREATE INDEX IF NOT EXISTS idx_tool_scrap_date ON hdc_tool_scrap(scrap_date, id)",
             "CREATE INDEX IF NOT EXISTS idx_tool_transfer_rental ON hdc_tool_rental_transfer(rental_id, transfer_date)",
             "CREATE INDEX IF NOT EXISTS idx_tool_transfer_item_transfer ON hdc_tool_rental_transfer_item(transfer_id)",
             "CREATE INDEX IF NOT EXISTS idx_tool_transfer_item_rental_item ON hdc_tool_rental_transfer_item(rental_item_id)",

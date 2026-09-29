@@ -6,13 +6,21 @@ from sqlalchemy import func, or_
 from hdc.extensions import db
 from hdc.models.accounts import Account
 from hdc.models.tool_rental import (
-    Tool, ToolCategory, ToolMovementLog, ToolRental, ToolRentalAccountTxn, ToolRentalItem,
-    ToolRentalPayment, ToolRentalReturn, ToolRentalReturnItem, ToolRentalTransfer
+    MOVEMENT_PURCHASE_IN, MOVEMENT_SCRAP_OUT, TOOL_SCRAP_REASONS, Tool, ToolCategory,
+    ToolMovementLog, ToolPurchase, ToolRental, ToolRentalAccountTxn, ToolRentalItem,
+    ToolRentalPayment, ToolRentalReturn, ToolRentalReturnItem, ToolRentalTransfer, ToolScrap
 )
 from hdc.utils.dates import _pkt_now_naive, _pkt_today
 from hdc.utils.normalize import _normalize_name_ci
 
 _ACCOUNT_COMPANY_TYPES = ('company', 'cash', 'bank')
+EPS = 0.001
+
+# Location labels used by the stock movement log.  Kept here so the inventory,
+# purchase and scrap flows can never drift apart on wording.
+SUPPLIER_LABEL = 'Supplier / Purchase'
+STORE_LABEL = 'Warehouse / Store'
+SCRAP_LABEL = 'Scrap / Discard'
 
 
 def _next_tool_code():
@@ -25,6 +33,16 @@ def _next_rental_code():
     nxt = (last.id + 1) if last else 1
     return f"RENT-{nxt:05d}"
 
+def _next_purchase_code():
+    last = db.session.query(ToolPurchase).order_by(ToolPurchase.id.desc()).first()
+    nxt = (last.id + 1) if last else 1
+    return f"PUR-TOOL-{nxt:05d}"
+
+def _next_scrap_code():
+    last = db.session.query(ToolScrap).order_by(ToolScrap.id.desc()).first()
+    nxt = (last.id + 1) if last else 1
+    return f"SCRAP-{nxt:05d}"
+
 def _ensure_tool_category(name):
     name = (name or '').strip()
     if not name:
@@ -36,6 +54,233 @@ def _ensure_tool_category(name):
     db.session.add(cat)
     db.session.flush()
     return cat
+
+# --------------------------------------------------------------------------- #
+# stock life-cycle: buy more of a tool / throw the rest away
+# --------------------------------------------------------------------------- #
+def _parse_date(raw, fallback=None):
+    raw = (raw or '').strip()
+    if not raw:
+        return fallback or _pkt_today()
+    try:
+        return datetime.strptime(raw, '%Y-%m-%d').date()
+    except Exception:
+        return fallback or _pkt_today()
+
+
+def _round2(value):
+    return round(float(value or 0.0) + 0.0, 2)
+
+
+def _empty_stock_stats():
+    return {'purchased_qty': 0.0, 'purchase_value': 0.0, 'scrapped_qty': 0.0,
+            'scrapped_value': 0.0, 'purchases': 0, 'scraps': 0}
+
+
+def tool_stock_aggregates(tool_ids=None):
+    """Purchased / scrapped totals per tool in two grouped queries.
+
+    Returns ``{tool_id: {'purchased_qty', 'purchase_value', 'scrapped_qty',
+    'scrapped_value', 'purchases', 'scraps'}}`` so list pages can show the full
+    stock life-cycle without an N+1 query storm.
+    """
+    ids = [int(i) for i in (tool_ids or []) if i]
+    stats = {}
+
+    q = (db.session.query(ToolPurchase.tool_id,
+                          func.coalesce(func.sum(ToolPurchase.qty), 0.0),
+                          func.coalesce(func.sum(ToolPurchase.total_cost), 0.0),
+                          func.count(ToolPurchase.id))
+         .group_by(ToolPurchase.tool_id))
+    if ids:
+        q = q.filter(ToolPurchase.tool_id.in_(ids))
+    for tool_id, qty, value, count in q.all():
+        slot = stats.setdefault(int(tool_id), _empty_stock_stats())
+        slot['purchased_qty'] = _round2(qty)
+        slot['purchase_value'] = _round2(value)
+        slot['purchases'] = int(count or 0)
+
+    sq = (db.session.query(ToolScrap.tool_id,
+                           func.coalesce(func.sum(ToolScrap.qty), 0.0),
+                           func.coalesce(func.sum(ToolScrap.value_written_off), 0.0),
+                           func.count(ToolScrap.id))
+          .group_by(ToolScrap.tool_id))
+    if ids:
+        sq = sq.filter(ToolScrap.tool_id.in_(ids))
+    for tool_id, qty, value, count in sq.all():
+        slot = stats.setdefault(int(tool_id), _empty_stock_stats())
+        slot['scrapped_qty'] = _round2(qty)
+        slot['scrapped_value'] = _round2(value)
+        slot['scraps'] = int(count or 0)
+    return stats
+
+
+def stock_stats_for(stats, tool_id):
+    """Never-None lookup used by templates."""
+    return (stats or {}).get(int(tool_id or 0)) or _empty_stock_stats()
+
+
+def record_tool_purchase(tool_id, qty, unit_cost=None, supplier='', purchase_date=None,
+                         reference='', notes='', update_cost=True, is_opening_stock=False,
+                         created_by=None, commit=True):
+    """Buy more of a tool we already own: +qty on total_quantity + audit row.
+
+    ``unit_cost`` falls back to the tool's current cost and only overwrites it
+    when ``update_cost`` is true (a fresh market price is usually the better
+    number to value the remaining stock with).
+    """
+    tool = db.session.get(Tool, int(tool_id or 0))
+    if not tool:
+        return False, 'Tool not found.', None
+    if tool.is_void:
+        return False, f'{tool.name} is archived. Un-archive it before purchasing stock.', None
+
+    qty = _round2(qty)
+    if qty <= EPS:
+        return False, 'Purchase quantity must be greater than 0.', None
+
+    cost = _round2(tool.purchase_cost if unit_cost is None else unit_cost)
+    if cost < 0:
+        cost = 0.0
+    total_cost = _round2(qty * cost)
+    when = _parse_date(purchase_date)
+
+    purchase = ToolPurchase(
+        purchase_code=_next_purchase_code(),
+        tool_id=tool.id,
+        purchase_date=when,
+        qty=qty,
+        unit_cost=cost,
+        total_cost=total_cost,
+        supplier=(supplier or '').strip()[:150],
+        reference=(reference or '').strip()[:120],
+        notes=(notes or '').strip()[:300],
+        is_opening_stock=bool(is_opening_stock),
+        created_by=created_by,
+    )
+    db.session.add(purchase)
+    db.session.flush()
+
+    old_qty = _round2(tool.total_quantity)
+    tool.total_quantity = _round2(old_qty + qty)
+    if update_cost and cost > 0:
+        tool.purchase_cost = cost
+    tool.updated_at = _pkt_now_naive()
+
+    create_movement_log(
+        tool_id=tool.id, rental_id=None, movement_type=MOVEMENT_PURCHASE_IN,
+        from_label=(purchase.supplier or SUPPLIER_LABEL), to_label=STORE_LABEL,
+        qty=qty,
+        notes=(f'Purchase {purchase.purchase_code}: +{qty:g} {tool.unit} '
+               f'@ {cost:,.0f} = {total_cost:,.0f}'),
+    )
+    if commit:
+        db.session.commit()
+    return True, '', purchase
+
+
+def record_tool_scrap(tool_id, qty, reason='damaged', scrap_date=None, reference='',
+                      notes='', created_by=None, commit=True):
+    """Throw away / lose / sell as scrap: -qty on total_quantity + audit row.
+
+    Only what is sitting in the store can be scrapped - rented-out pieces have
+    to come back first, otherwise the owned-vs-located balance would break.
+    """
+    tool = db.session.get(Tool, int(tool_id or 0))
+    if not tool:
+        return False, 'Tool not found.', None
+    if tool.is_void:
+        return False, f'{tool.name} is archived. Un-archive it before recording scrap.', None
+
+    qty = _round2(qty)
+    if qty <= EPS:
+        return False, 'Scrap quantity must be greater than 0.', None
+
+    available = _round2(tool.available_qty)
+    if qty > available + EPS:
+        return False, (f'Only {available:g} {tool.unit} of {tool.name} is in the store '
+                       f'({tool.rented_out_qty:g} is rented out) - return it first.'), None
+
+    reason_key = (reason or 'damaged').strip().lower()
+    if reason_key not in {k for k, _ in TOOL_SCRAP_REASONS}:
+        reason_key = 'other'
+
+    unit_cost = _round2(tool.purchase_cost)
+    value = _round2(qty * unit_cost)
+    when = _parse_date(scrap_date)
+
+    scrap = ToolScrap(
+        scrap_code=_next_scrap_code(),
+        tool_id=tool.id,
+        scrap_date=when,
+        qty=qty,
+        reason=reason_key,
+        unit_cost=unit_cost,
+        value_written_off=value,
+        reference=(reference or '').strip()[:120],
+        notes=(notes or '').strip()[:300],
+        created_by=created_by,
+    )
+    db.session.add(scrap)
+    db.session.flush()
+
+    old_qty = _round2(tool.total_quantity)
+    tool.total_quantity = max(0.0, _round2(old_qty - qty))
+    tool.updated_at = _pkt_now_naive()
+
+    create_movement_log(
+        tool_id=tool.id, rental_id=None, movement_type=MOVEMENT_SCRAP_OUT,
+        from_label=STORE_LABEL, to_label=SCRAP_LABEL, qty=qty,
+        notes=(f'Scrap {scrap.scrap_code}: -{qty:g} {tool.unit} '
+               f'({scrap.reason_label}), written off {value:,.0f}'),
+    )
+    if commit:
+        db.session.commit()
+    return True, '', scrap
+
+
+def tool_purchases(tool_id=None, date_from=None, date_to=None, search_text=None, limit=200):
+    """Purchase (stock-in) register, newest first."""
+    q = ToolPurchase.query.join(Tool, Tool.id == ToolPurchase.tool_id).filter(
+        Tool.is_void == False)  # noqa: E712
+    if tool_id:
+        q = q.filter(ToolPurchase.tool_id == int(tool_id))
+    if date_from:
+        q = q.filter(ToolPurchase.purchase_date >= date_from)
+    if date_to:
+        q = q.filter(ToolPurchase.purchase_date <= date_to)
+    if search_text:
+        like = f"%{search_text.strip().lower()}%"
+        q = q.filter(or_(
+            func.lower(func.coalesce(Tool.name, '')).like(like),
+            func.lower(func.coalesce(Tool.tool_code, '')).like(like),
+            func.lower(func.coalesce(ToolPurchase.supplier, '')).like(like),
+            func.lower(func.coalesce(ToolPurchase.reference, '')).like(like),
+            func.lower(func.coalesce(ToolPurchase.purchase_code, '')).like(like),
+        ))
+    return q.order_by(ToolPurchase.purchase_date.desc(), ToolPurchase.id.desc()).limit(limit).all()
+
+
+def tool_scraps(tool_id=None, date_from=None, date_to=None, search_text=None, limit=200):
+    """Scrap (write-off) register, newest first."""
+    q = ToolScrap.query.join(Tool, Tool.id == ToolScrap.tool_id).filter(
+        Tool.is_void == False)  # noqa: E712
+    if tool_id:
+        q = q.filter(ToolScrap.tool_id == int(tool_id))
+    if date_from:
+        q = q.filter(ToolScrap.scrap_date >= date_from)
+    if date_to:
+        q = q.filter(ToolScrap.scrap_date <= date_to)
+    if search_text:
+        like = f"%{search_text.strip().lower()}%"
+        q = q.filter(or_(
+            func.lower(func.coalesce(Tool.name, '')).like(like),
+            func.lower(func.coalesce(Tool.tool_code, '')).like(like),
+            func.lower(func.coalesce(ToolScrap.reference, '')).like(like),
+            func.lower(func.coalesce(ToolScrap.notes, '')).like(like),
+            func.lower(func.coalesce(ToolScrap.scrap_code, '')).like(like),
+        ))
+    return q.order_by(ToolScrap.scrap_date.desc(), ToolScrap.id.desc()).limit(limit).all()
 
 def recalc_rental_totals(rental_id):
     rental = db.session.get(ToolRental, rental_id)
@@ -158,6 +403,10 @@ def tool_kpis():
     external_rentals = db.session.query(func.count(ToolRental.id)).filter(ToolRental.renter_type=='external', ToolRental.is_void==False).scalar() or 0
     credit_rentals = db.session.query(func.count(ToolRental.id)).filter(ToolRental.payment_status=='credit', ToolRental.is_void==False).scalar() or 0
     credit_amount = db.session.query(func.coalesce(func.sum(ToolRental.total_amount - ToolRental.total_paid), 0.0)).filter(ToolRental.payment_status=='credit', ToolRental.is_void==False).scalar() or 0.0
+    purchased_qty = db.session.query(func.coalesce(func.sum(ToolPurchase.qty), 0.0)).scalar() or 0.0
+    purchase_value = db.session.query(func.coalesce(func.sum(ToolPurchase.total_cost), 0.0)).scalar() or 0.0
+    scrapped_qty = db.session.query(func.coalesce(func.sum(ToolScrap.qty), 0.0)).scalar() or 0.0
+    scrapped_value = db.session.query(func.coalesce(func.sum(ToolScrap.value_written_off), 0.0)).scalar() or 0.0
     return {
         'total_tools': float(total_tools),
         'total_tool_types': int(total_tool_types),
@@ -173,6 +422,10 @@ def tool_kpis():
         'external_rentals': int(external_rentals),
         'credit_rentals': int(credit_rentals),
         'credit_amount': float(credit_amount),
+        'purchased_qty': float(purchased_qty),
+        'purchase_value': float(purchase_value),
+        'scrapped_qty': float(scrapped_qty),
+        'scrapped_value': float(scrapped_value),
     }
 
 def search_rentals(filters):
@@ -212,6 +465,10 @@ def search_rentals(filters):
     return q.all()
 
 def global_tool_locations(search_tool_id=None, search_project_id=None, search_text=None):
+    from hdc.services.tool_tracking import tool_ledger
+    ledger = tool_ledger()
+    rows_by_tool = {int(r['tool_id']): r for r in ledger['tools']}
+
     tq = Tool.query.filter(Tool.is_void==False)
     if search_tool_id:
         tq = tq.filter(Tool.id == search_tool_id)
@@ -224,6 +481,10 @@ def global_tool_locations(search_tool_id=None, search_project_id=None, search_te
     tools = tq.order_by(Tool.name.asc()).all()
     result = []
     for tool in tools:
+        # The position ledger is the single source of truth for "where is it
+        # now": a tool can sit on two sites at once, which no single "last
+        # movement" label can express.
+        ledger_row = rows_by_tool.get(int(tool.id))
         last_log = (ToolMovementLog.query
                     .filter_by(tool_id=tool.id)
                     .order_by(ToolMovementLog.timestamp.desc(), ToolMovementLog.id.desc())
@@ -249,7 +510,12 @@ def global_tool_locations(search_tool_id=None, search_project_id=None, search_te
                     has_match = True
             if not has_match:
                 continue
-        current_label = last_log.to_location_label if last_log else "Warehouse / Store"
+        if ledger_row:
+            current_label = ledger_row['current_label']
+            holdings = ledger_row['holdings']
+        else:
+            current_label = last_log.to_location_label if last_log else STORE_LABEL
+            holdings = []
         result.append({
             'tool': tool,
             'current_label': current_label,
@@ -257,6 +523,9 @@ def global_tool_locations(search_tool_id=None, search_project_id=None, search_te
             'chain': chain_logs,
             'rented_out_qty': tool.rented_out_qty,
             'available_qty': tool.available_qty,
+            'owned_qty': ledger_row['owned_qty'] if ledger_row else float(tool.total_quantity or 0),
+            'in_store_qty': ledger_row['in_store_qty'] if ledger_row else float(tool.available_qty or 0),
+            'holdings': holdings,
         })
     return result
 

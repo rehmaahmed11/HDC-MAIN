@@ -11,21 +11,24 @@ from hdc.extensions import _money_write_required, db
 from hdc.models.accounts import Account
 from hdc.models.projects import Project, Stage
 from hdc.models.tool_rental import (
-    Tool, ToolCategory, ToolMovementLog, ToolRental, ToolRentalItem,
-    ToolRentalPayment, ToolRentalReturn, ToolRentalReturnItem, ToolRentalTransfer,
-    ToolRentalTransferItem
+    TOOL_SCRAP_REASONS, Tool, ToolCategory, ToolMovementLog, ToolPurchase, ToolRental,
+    ToolRentalItem, ToolRentalPayment, ToolRentalReturn, ToolRentalReturnItem,
+    ToolRentalTransfer, ToolRentalTransferItem
 )
 from hdc.services.tool_rental import (
     _ensure_tool_category, _next_rental_code, _next_tool_code,
-    create_movement_log, get_rental_tracking_chain,
+    _parse_date, create_movement_log, get_rental_tracking_chain,
     get_receiving_accounts, global_tool_locations,
     post_tool_rental_payment_to_accounts, recalc_rental_totals,
-    search_rentals, tool_kpis, void_tool_rental_payment_in_accounts
+    record_tool_purchase, record_tool_scrap, search_rentals,
+    tool_kpis, tool_purchases, tool_scraps, tool_stock_aggregates,
+    void_tool_rental_payment_in_accounts
 )
 from hdc.services.tool_tracking import (
     LOC_CUSTOMER, LOC_OWN_PROJECT, LOC_STORE, WAREHOUSE_LABEL,
-    allocate_transfer_qty, dashboard_summary, location_summary, record_transfer_items,
-    tool_ledger, tool_position, tools_reconciliation, tools_universal_search
+    allocate_transfer_qty, dashboard_summary, inventory_rows, location_summary,
+    record_transfer_items, tool_ledger, tool_position, tools_reconciliation,
+    tools_universal_search
 )
 from hdc.utils.dates import _pkt_now_naive, _pkt_today
 from hdc.utils.format import _flt, _amount_to_words
@@ -132,6 +135,7 @@ def register(app):
             flash('Tool not found.', 'danger')
             return redirect(url_for('hdc_tool_rental_dashboard'))
         row = position['row']
+        tool = row['tool']
         return render_template('tool_rental/tool_position.html',
             row=row,
             movements=position['movements'],
@@ -142,6 +146,9 @@ def register(app):
                 'accounted': row['in_store_qty'] + row['out_qty'],
                 'variance': row['variance'], 'balanced': not row['unaccounted'],
             },
+            purchases=tool_purchases(tool_id=tool.id, limit=100),
+            scraps=tool_scraps(tool_id=tool.id, limit=100),
+            scrap_reasons=TOOL_SCRAP_REASONS,
             loc_store=LOC_STORE, loc_own=LOC_OWN_PROJECT, loc_customer=LOC_CUSTOMER,
             warehouse_label=WAREHOUSE_LABEL,
             today=_pkt_today().isoformat(),
@@ -193,78 +200,134 @@ def register(app):
     def hdc_tool_rental_inventory():
         if request.method == 'POST':
             action = (request.form.get('action') or 'add').strip()
+
+            # ---- new category (standalone) ----
             if action == 'add_category':
                 name = (request.form.get('category_name') or '').strip()
                 if not name:
                     flash('Category name required.', 'danger')
+                    return redirect(url_for('hdc_tool_rental_inventory'))
+                before = ToolCategory.query.filter(
+                    func.lower(ToolCategory.name) == name.lower()).first()
+                cat = _ensure_tool_category(name)
+                db.session.commit()
+                if before:
+                    flash(f'Category "{cat.name}" already exists — selected for you.', 'info')
                 else:
-                    _ensure_tool_category(name)
-                    db.session.commit()
-                    flash(f'Category {name} saved.', 'success')
-                return redirect(url_for('hdc_tool_rental_inventory'))
+                    flash(f'Category "{cat.name}" created. Now add a tool to it.', 'success')
+                # keep the user in the flow: land back on the add-tool form with
+                # the new category already chosen
+                return redirect(url_for('hdc_tool_rental_inventory',
+                                        new_category=cat.id, focus='tool'))
 
-            name = (request.form.get('name') or '').strip()
-            if not name:
-                flash('Tool name required.', 'danger')
-                return redirect(url_for('hdc_tool_rental_inventory'))
-            code = (request.form.get('tool_code') or '').strip().upper() or _next_tool_code()
-            if Tool.query.filter_by(tool_code=code).first():
-                code = _next_tool_code()
-            category_id = request.form.get('category_id', type=int)
-            total_qty = max(0.0, _flt(request.form.get('total_quantity')))
-            purchase_cost = max(0.0, _flt(request.form.get('purchase_cost')))
-            rate = max(0.0, _flt(request.form.get('rental_rate_per_day')))
-            unit = (request.form.get('unit') or 'pcs').strip()
-            condition = (request.form.get('condition') or 'good').strip()
-            description = (request.form.get('description') or '').strip()
+            # ---- new tool (optionally with its opening purchase) ----
+            if action in ('add_tool', 'add', ''):
+                name = (request.form.get('name') or '').strip()
+                if not name:
+                    flash('Tool name required.', 'danger')
+                    return redirect(url_for('hdc_tool_rental_inventory'))
 
-            tool = Tool(
-                tool_code=code,
-                name=name,
-                category_id=category_id,
-                description=description,
-                unit=unit,
-                total_quantity=total_qty,
-                purchase_cost=purchase_cost,
-                rental_rate_per_day=rate,
-                condition=condition,
-                status='active',
-                is_void=False
-            )
-            db.session.add(tool)
-            db.session.flush()
-            create_movement_log(
-                tool_id=tool.id,
-                rental_id=None,
-                movement_type='purchase_in',
-                from_label='Supplier / Purchase',
-                to_label='Warehouse / Store',
-                qty=total_qty,
-                notes=f'Initial stock: {total_qty} {unit}'
-            )
-            db.session.commit()
-            flash(f'Tool {tool.name} ({code}) added with {total_qty} qty.', 'success')
+                category_id = request.form.get('category_id', type=int)
+                new_category = (request.form.get('new_category') or '').strip()
+                if not category_id and new_category:
+                    cat = _ensure_tool_category(new_category)
+                    category_id = cat.id if cat else None
+
+                code = (request.form.get('tool_code') or '').strip().upper() or _next_tool_code()
+                if Tool.query.filter_by(tool_code=code).first():
+                    code = _next_tool_code()
+                total_qty = max(0.0, _flt(request.form.get('total_quantity')))
+                purchase_cost = max(0.0, _flt(request.form.get('purchase_cost')))
+                rate = max(0.0, _flt(request.form.get('rental_rate_per_day')))
+                unit = (request.form.get('unit') or 'pcs').strip() or 'pcs'
+                condition = (request.form.get('condition') or 'good').strip()
+                description = (request.form.get('description') or '').strip()
+
+                tool = Tool(
+                    tool_code=code,
+                    name=name,
+                    category_id=category_id,
+                    description=description,
+                    unit=unit,
+                    total_quantity=0.0,
+                    purchase_cost=purchase_cost,
+                    rental_rate_per_day=rate,
+                    condition=condition,
+                    status='active',
+                    is_void=False
+                )
+                db.session.add(tool)
+                db.session.flush()
+
+                # opening stock is a real purchase: it keeps "why do we own 8?"
+                # answerable from the stock register instead of a magic number
+                purchase = None
+                if total_qty > 0:
+                    ok_pur, msg_pur, purchase = record_tool_purchase(
+                        tool_id=tool.id,
+                        qty=total_qty,
+                        unit_cost=purchase_cost,
+                        supplier=(request.form.get('supplier') or '').strip(),
+                        purchase_date=(request.form.get('purchase_date') or '').strip() or None,
+                        reference=(request.form.get('purchase_reference') or '').strip(),
+                        notes=(request.form.get('purchase_notes') or '').strip() or 'Opening stock',
+                        is_opening_stock=True,
+                        created_by=current_user.id if hasattr(current_user, 'id') else None,
+                        commit=False,
+                    )
+                    if not ok_pur:
+                        db.session.rollback()
+                        flash(msg_pur or 'Could not record opening stock.', 'danger')
+                        return redirect(url_for('hdc_tool_rental_inventory'))
+
+                db.session.commit()
+                if purchase is not None:
+                    flash(f'Tool {tool.name} ({code}) added with {total_qty:g} {unit} '
+                          f'opening stock ({purchase.purchase_code}).', 'success')
+                else:
+                    flash(f'Tool {tool.name} ({code}) added with 0 qty — '
+                          f'use "Add Stock" when it arrives.', 'success')
+                return redirect(url_for('hdc_tool_rental_inventory',
+                                        q=tool.tool_code, focus='tool'))
+
+            flash('Unknown inventory action.', 'warning')
             return redirect(url_for('hdc_tool_rental_inventory'))
 
+        # ------------------------------ LIST ------------------------------
         q = (request.args.get('q') or '').strip()
         category_id = request.args.get('category_id', type=int)
-        tq = Tool.query.filter(Tool.is_void==False)
-        if q:
-            ql = f"%{q.lower()}%"
-            tq = tq.filter(func.lower(Tool.name).like(ql) | func.lower(Tool.tool_code).like(ql))
-        if category_id:
-            tq = tq.filter(Tool.category_id==category_id)
-        tools = tq.order_by(Tool.name.asc()).all()
-        categories = ToolCategory.query.order_by(ToolCategory.name.asc()).all()
+        view = (request.args.get('view') or 'all').strip().lower()
+        if view not in ('all', 'out', 'store', 'attention'):
+            view = 'all'
+        new_category_id = request.args.get('new_category', type=int)
+
+        # One ledger, one set of numbers: the inventory page can never disagree
+        # with the Tools dashboard about what is in store / out / on a site.
+        tools = inventory_rows(term=q, category_id=category_id, view=view)
+        stock_stats = tool_stock_aggregates([int(r['tool_id']) for r in tools])
+        categories = (ToolCategory.query
+                      .order_by(ToolCategory.name.asc()).all())
+        category_tool_counts = dict(
+            (int(cid), int(cnt)) for cid, cnt in db.session.query(
+                Tool.category_id, func.count(Tool.id)).group_by(Tool.category_id).all()
+            if cid is not None)
         kpis = tool_kpis()
         return render_template('tool_rental/tool_inventory.html',
             tools=tools,
+            stock_stats=stock_stats,
             categories=categories,
+            category_tool_counts=category_tool_counts,
             kpis=kpis,
             q=q,
-            selected_category=category_id
+            selected_category=category_id,
+            selected_view=view,
+            new_category=new_category_id,
+            scrap_reasons=TOOL_SCRAP_REASONS,
+            today=_pkt_today().isoformat(),
+            focus=(request.args.get('focus') or '').strip(),
         )
 
+    # ------------------ EDIT / ARCHIVE A TOOL ------------------
     @app.route('/hdc/tool-rental/inventory/<int:tool_id>/edit', methods=['POST'])
     @login_required
     @_money_write_required()
@@ -295,6 +358,8 @@ def register(app):
         tool.description = (request.form.get('description') or tool.description).strip()
         tool.updated_at = _pkt_now_naive()
 
+        # A hand-typed qty is a stock adjustment, not a purchase or a scrap, so
+        # it is logged as one and the dashboard can still reconcile.
         if abs(diff) > 0.001:
             create_movement_log(
                 tool_id=tool.id,
@@ -307,7 +372,7 @@ def register(app):
             )
         db.session.commit()
         flash(f'Tool {tool.name} updated.', 'success')
-        return redirect(url_for('hdc_tool_rental_inventory'))
+        return redirect(url_for('hdc_tool_rental_inventory', q=tool.tool_code))
 
     @app.route('/hdc/tool-rental/inventory/<int:tool_id>/delete', methods=['POST'])
     @login_required
@@ -316,12 +381,143 @@ def register(app):
         tool = Tool.query.get_or_404(tool_id)
         pending = db.session.query(func.coalesce(func.sum(ToolRentalItem.qty_pending),0.0)).filter(ToolRentalItem.tool_id==tool.id).scalar() or 0.0
         if float(pending) > 0.001:
-            flash(f'Cannot delete {tool.name}: {pending} qty still rented out.', 'danger')
-            return redirect(url_for('hdc_tool_rental_inventory'))
+            flash(f'Cannot archive {tool.name}: {pending:g} qty still rented out.', 'danger')
+            return redirect(url_for('hdc_tool_rental_inventory', q=tool.tool_code))
         tool.is_void = True
         tool.status = 'retired'
         db.session.commit()
         flash(f'Tool {tool.name} archived.', 'success')
+        return redirect(url_for('hdc_tool_rental_inventory'))
+
+    # ------------------ PURCHASE / STOCK IN ------------------
+    def _do_tool_purchase(tool_id):
+        """Buy more of a tool we already own: +qty, audit row, movement log.
+
+        Shared by the per-tool route and the generic "Purchase Stock" modal so
+        both behave identically.
+        """
+        tool = Tool.query.get_or_404(tool_id)
+        qty = max(0.0, _flt(request.form.get('qty')))
+        if qty <= 0:
+            flash('Purchase quantity must be greater than 0.', 'danger')
+            return redirect(url_for('hdc_tool_rental_inventory', q=tool.tool_code))
+        purchase_date = _parse_date(request.form.get('purchase_date'))
+        if _has_recent_duplicate(ToolPurchase, tool_id=tool.id, qty=qty,
+                                 purchase_date=purchase_date):
+            flash('Duplicate purchase prevented (same tool + qty + date submitted twice).', 'warning')
+            return redirect(url_for('hdc_tool_rental_inventory', q=tool.tool_code))
+
+        ok, msg, purchase = record_tool_purchase(
+            tool_id=tool.id,
+            qty=qty,
+            unit_cost=_flt(request.form.get('unit_cost'), tool.purchase_cost),
+            supplier=(request.form.get('supplier') or '').strip(),
+            purchase_date=(request.form.get('purchase_date') or '').strip() or None,
+            reference=(request.form.get('reference') or '').strip(),
+            notes=(request.form.get('notes') or '').strip(),
+            update_cost=(request.form.get('update_cost') == '1'),
+            created_by=current_user.id if hasattr(current_user, 'id') else None,
+        )
+        if not ok:
+            flash(msg or 'Could not record purchase.', 'danger')
+            return redirect(url_for('hdc_tool_rental_inventory', q=tool.tool_code))
+        flash(f'Stock in: {qty:g} {tool.unit} of {tool.name} ({purchase.purchase_code}) — '
+              f'now owning {tool.total_quantity:g} {tool.unit}.', 'success')
+        return redirect(url_for('hdc_tool_rental_inventory', q=tool.tool_code))
+
+    @app.route('/hdc/tool-rental/inventory/purchase', methods=['POST'])
+    @login_required
+    @_money_write_required()
+    def hdc_tool_rental_purchase_create():
+        tool_id = request.form.get('tool_id', type=int)
+        if not tool_id:
+            flash('Select the tool you purchased.', 'danger')
+            return redirect(url_for('hdc_tool_rental_inventory'))
+        return _do_tool_purchase(tool_id)
+
+    @app.route('/hdc/tool-rental/inventory/<int:tool_id>/purchase', methods=['POST'])
+    @login_required
+    @_money_write_required()
+    def hdc_tool_rental_tool_purchase(tool_id):
+        return _do_tool_purchase(tool_id)
+
+    # ------------------ SCRAP / DISCARD ------------------
+    def _do_tool_scrap(tool_id):
+        """Throw away broken / lost tools: -qty, audit row, movement log."""
+        tool = Tool.query.get_or_404(tool_id)
+        qty = max(0.0, _flt(request.form.get('qty')))
+        if qty <= 0:
+            flash('Scrap quantity must be greater than 0.', 'danger')
+            return redirect(url_for('hdc_tool_rental_inventory', q=tool.tool_code))
+
+        ok, msg, scrap = record_tool_scrap(
+            tool_id=tool.id,
+            qty=qty,
+            reason=(request.form.get('reason') or 'damaged').strip(),
+            scrap_date=(request.form.get('scrap_date') or '').strip() or None,
+            reference=(request.form.get('reference') or '').strip(),
+            notes=(request.form.get('notes') or '').strip(),
+            created_by=current_user.id if hasattr(current_user, 'id') else None,
+        )
+        if not ok:
+            flash(msg or 'Could not record scrap.', 'danger')
+            return redirect(url_for('hdc_tool_rental_inventory', q=tool.tool_code))
+        flash(f'Scrapped {qty:g} {tool.unit} of {tool.name} ({scrap.scrap_code}, '
+              f'{scrap.reason_label}) — written off {scrap.value_written_off:,.0f}. '
+              f'{tool.total_quantity:g} {tool.unit} left.', 'warning')
+        return redirect(url_for('hdc_tool_rental_inventory', q=tool.tool_code))
+
+    @app.route('/hdc/tool-rental/inventory/scrap', methods=['POST'])
+    @login_required
+    @_money_write_required()
+    def hdc_tool_rental_scrap_create():
+        tool_id = request.form.get('tool_id', type=int)
+        if not tool_id:
+            flash('Select the tool you are scrapping.', 'danger')
+            return redirect(url_for('hdc_tool_rental_inventory'))
+        return _do_tool_scrap(tool_id)
+
+    @app.route('/hdc/tool-rental/inventory/<int:tool_id>/scrap', methods=['POST'])
+    @login_required
+    @_money_write_required()
+    def hdc_tool_rental_tool_scrap(tool_id):
+        return _do_tool_scrap(tool_id)
+
+    # ------------------ CATEGORY: RENAME / DELETE ------------------
+    @app.route('/hdc/tool-rental/category/<int:category_id>/edit', methods=['POST'])
+    @login_required
+    @_money_write_required()
+    def hdc_tool_rental_category_edit(category_id):
+        cat = ToolCategory.query.get_or_404(category_id)
+        name = (request.form.get('name') or '').strip()
+        if not name:
+            flash('Category name required.', 'danger')
+            return redirect(url_for('hdc_tool_rental_inventory'))
+        clash = ToolCategory.query.filter(func.lower(ToolCategory.name) == name.lower(),
+                                          ToolCategory.id != cat.id).first()
+        if clash:
+            flash(f'Another category is already called "{name}".', 'danger')
+            return redirect(url_for('hdc_tool_rental_inventory'))
+        cat.name = name
+        cat.description = (request.form.get('description') or cat.description or '').strip()
+        db.session.commit()
+        flash(f'Category renamed to "{cat.name}".', 'success')
+        return redirect(url_for('hdc_tool_rental_inventory', category_id=cat.id))
+
+    @app.route('/hdc/tool-rental/category/<int:category_id>/delete', methods=['POST'])
+    @login_required
+    @_money_write_required()
+    def hdc_tool_rental_category_delete(category_id):
+        cat = ToolCategory.query.get_or_404(category_id)
+        used = db.session.query(func.count(Tool.id)).filter(Tool.category_id == cat.id).scalar() or 0
+        if int(used) > 0:
+            flash(f'Cannot delete "{cat.name}": {int(used)} tool(s) still use it. '
+                  f'Move them to another category first.', 'danger')
+            return redirect(url_for('hdc_tool_rental_inventory'))
+        name = cat.name
+        db.session.delete(cat)
+        db.session.commit()
+        flash(f'Category "{name}" deleted.', 'success')
         return redirect(url_for('hdc_tool_rental_inventory'))
 
     # ------------------ CREATE RENTAL ------------------
@@ -999,6 +1195,35 @@ def register(app):
         kpis = tool_kpis()
         receiving_accounts = get_receiving_accounts()
 
+        # ---- stock life-cycle registers: what we bought, what we scrapped ----
+        date_from = date_to = None
+        for key in ('date_from', 'date_to'):
+            raw = filters.get(key)
+            if not raw:
+                continue
+            try:
+                parsed = datetime.strptime(raw, '%Y-%m-%d').date()
+            except Exception:
+                continue
+            if key == 'date_from':
+                date_from = parsed
+            else:
+                date_to = parsed
+        purchases = tool_purchases(tool_id=filters.get('tool_id'), date_from=date_from,
+                                   date_to=date_to, search_text=filters.get('search_text'))
+        scraps = tool_scraps(tool_id=filters.get('tool_id'), date_from=date_from,
+                             date_to=date_to, search_text=filters.get('search_text'))
+        purchase_totals = {
+            'qty': sum(float(p.qty or 0) for p in purchases),
+            'value': sum(float(p.total_cost or 0) for p in purchases),
+            'count': len(purchases),
+        }
+        scrap_totals = {
+            'qty': sum(float(s.qty or 0) for s in scraps),
+            'value': sum(float(s.value_written_off or 0) for s in scraps),
+            'count': len(scraps),
+        }
+
         return render_template('tool_rental/tool_reports.html',
             rentals=rentals,
             filters=filters,
@@ -1010,6 +1235,10 @@ def register(app):
             total_pending_amount=total_pending_amount,
             tool_breakdown=tool_breakdown,
             site_breakdown=site_breakdown,
+            purchases=purchases,
+            scraps=scraps,
+            purchase_totals=purchase_totals,
+            scrap_totals=scrap_totals,
             projects=projects,
             tools=tools,
             receiving_accounts=receiving_accounts,
@@ -1092,5 +1321,7 @@ def register(app):
                 'out': r['out_qty'], 'utilization_pct': r['utilization_pct'],
                 'overdue': r['overdue_qty'], 'days_out': r['oldest_days_out'],
                 'unaccounted': r['unaccounted'], 'current_label': r['current_label'],
+                'purchased_qty': r['purchased_qty'], 'purchased_value': r['purchased_value'],
+                'scrapped_qty': r['scrapped_qty'], 'scrapped_value': r['scrapped_value'],
             } for r in ledger['tools']],
         })

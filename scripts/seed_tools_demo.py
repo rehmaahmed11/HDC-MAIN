@@ -27,7 +27,9 @@ from hdc.models.tool_rental import (                                      # noqa
     Tool, ToolCategory, ToolRental, ToolRentalItem, ToolRentalTransfer,
     ToolRentalTransferItem,
 )
-from hdc.services.tool_rental import create_movement_log                  # noqa: E402
+from hdc.services.tool_rental import (                                    # noqa: E402
+    create_movement_log, record_tool_purchase, record_tool_scrap,
+)
 from hdc.services.tool_tracking import (                                  # noqa: E402
     allocate_transfer_qty, record_transfer_items, tools_reconciliation,
     tool_ledger,
@@ -64,18 +66,23 @@ def _get_or_create_category(name):
     return cat
 
 
-def _get_or_create_tool(code, name, qty, rate, cost, cat, condition='good', unit='pcs'):
+def _get_or_create_tool(code, name, qty, rate, cost, cat, condition='good', unit='pcs',
+                       supplier='Karachi Tools House'):
     tool = Tool.query.filter_by(tool_code=code).first()
     if tool:
         return tool
     tool = Tool(tool_code=code, name=name, category_id=cat.id, unit=unit,
-                total_quantity=qty, purchase_cost=cost, rental_rate_per_day=rate,
+                total_quantity=0.0, purchase_cost=cost, rental_rate_per_day=rate,
                 condition=condition, status='active', is_void=False)
     db.session.add(tool)
     db.session.flush()
-    create_movement_log(tool_id=tool.id, rental_id=None, movement_type='purchase_in',
-                        from_label='Supplier / Purchase', to_label='Warehouse / Store',
-                        qty=qty, notes=f'Initial stock: {qty} {unit}')
+    # opening stock goes through the purchase register so the Tools dashboard
+    # can show where every piece came from (and what was later scrapped)
+    ok, msg, _ = record_tool_purchase(tool_id=tool.id, qty=qty, unit_cost=cost,
+                                      supplier=supplier, is_opening_stock=True,
+                                      commit=False)
+    if not ok:
+        raise RuntimeError(f'Could not seed opening stock for {code}: {msg}')
     return tool
 
 
@@ -197,6 +204,14 @@ def main():
         broken = _get_or_create_tool('TOOL-DEMO-BRK', 'Old Rebar Bender', 2, 0, 55000, power, condition='damaged')
         db.session.commit()
 
+        # a top-up purchase + one scrap so the stock register is not empty
+        record_tool_purchase(tool_id=grinder.id, qty=10, unit_cost=9500,
+                             supplier='Lahore Tool Depot', reference='LTD-4471',
+                             notes='Top-up for slab work')
+        record_tool_scrap(tool_id=broken.id, qty=1, reason='damaged',
+                          notes='Burnt motor — sold to scrap dealer')
+        db.session.commit()
+
         # --- internal: own sites, some no-charge (included in contract) ---
         r1 = _create_rental('RENT-DEMO-001', [(prop, 120), (plate, 80), (vib, 6)],
                             'internal', today - timedelta(days=26), project=site_a,
@@ -254,6 +269,8 @@ def main():
         recon = tools_reconciliation(ledger)
         t = ledger['totals']
         print('--- HDC Tools demo seeded ---')
+        print(f"purchased        : {t['purchased_qty']:g} pcs ({t['purchased_value']:,.0f} PKR)")
+        print(f"scrapped         : {t['scrapped_qty']:g} pcs ({t['scrapped_value']:,.0f} PKR)")
         print(f"owned            : {t['owned_qty']:g}")
         print(f"in store         : {recon['in_store']:g}")
         print(f"sent own projects: {recon['own_project']:g}  ({t['own_project_count']} sites)")

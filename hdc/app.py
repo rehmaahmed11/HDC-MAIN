@@ -147,6 +147,11 @@ def create_app(config_overrides=None):
     app.jinja_env.globals["actor_for"] = actor_for
     app.jinja_env.filters["hdc_row_attrs"] = row_attrs_html
 
+    # Tools inventory: ``{{ stock_stats|stock_lookup(tool_id) }}`` returns the
+    # purchased / scrapped totals for one tool without a query per row.
+    from hdc.services.tool_rental import stock_stats_for
+    app.jinja_env.filters["stock_lookup"] = stock_stats_for
+
     register_audit_events()
     register_all(app)
     _ensure_bootstrap_once(app)
