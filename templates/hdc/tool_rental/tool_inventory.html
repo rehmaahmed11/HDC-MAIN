@@ -59,7 +59,9 @@
                             <input type="text" name="tool_code" class="form-control" placeholder="TOOL-0001">
                         </div>
                         <div class="col-12">
-                            <label class="form-label">Category</label>
+                            <label class="form-label" for="toolCategoryInput">Category</label>
+                            <input type="text" id="toolCategoryInput" class="form-control" placeholder="Search categories or choose No Category"
+                                   autocomplete="off">
                             <select name="category_id" id="toolCategorySelect" class="form-select">
                                 <option value="">No Category</option>
                                 {% for c in categories %}
@@ -215,8 +217,10 @@
                         <input type="text" name="q" value="{{ q or '' }}" class="form-control" placeholder="e.g. Vibrator, TOOL-0003, DHA Phase 6, Ali Traders">
                     </div>
                     <div class="col-md-3">
-                        <label class="form-label small mb-1">Category</label>
-                        <select name="category_id" class="form-select">
+                        <label class="form-label small mb-1" for="inventoryCategoryInput">Category</label>
+                        <input type="text" id="inventoryCategoryInput" class="form-control" placeholder="Search categories"
+                               autocomplete="off">
+                        <select name="category_id" id="inventoryCategorySelect" class="form-select">
                             <option value="">All Categories</option>
                             {% for c in categories %}
                             <option value="{{ c.id }}" {% if selected_category==c.id %}selected{% endif %}>{{ c.name }}</option>
@@ -300,7 +304,15 @@
                                 <div class="modal-body row g-2">
                                     <div class="col-8"><label class="form-label">Name</label><input type="text" name="name" value="{{ r.name }}" class="form-control" required></div>
                                     <div class="col-4"><label class="form-label">Code</label><input type="text" name="tool_code" value="{{ r.code }}" class="form-control"></div>
-                                    <div class="col-6"><label class="form-label">Category</label><select name="category_id" class="form-select"><option value="">No Category</option>{% for c in categories %}<option value="{{ c.id }}" {% if r.tool.category_id==c.id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}</select></div>
+                                    <div class="col-6">
+                                        <label class="form-label" for="editToolCategoryInput{{ r.tool_id }}">Category</label>
+                                        <input type="text" id="editToolCategoryInput{{ r.tool_id }}" class="form-control js-edit-tool-category-input"
+                                               placeholder="Search categories" autocomplete="off">
+                                        <select name="category_id" id="editToolCategorySelect{{ r.tool_id }}" class="form-select">
+                                            <option value="">No Category</option>
+                                            {% for c in categories %}<option value="{{ c.id }}" {% if r.tool.category_id==c.id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}
+                                        </select>
+                                    </div>
                                     <div class="col-3"><label class="form-label">Unit</label><input type="text" name="unit" value="{{ r.unit }}" class="form-control"></div>
                                     <div class="col-3"><label class="form-label">Condition</label><select name="condition" class="form-select"><option value="good" {% if r.condition=='good' %}selected{% endif %}>Good</option><option value="maintenance" {% if r.condition=='maintenance' %}selected{% endif %}>Maintenance</option><option value="damaged" {% if r.condition=='damaged' %}selected{% endif %}>Damaged</option></select></div>
                                     <div class="col-6"><label class="form-label">Total Qty Owned</label><input type="number" name="total_quantity" value="{{ r.owned_qty }}" class="form-control" step="0.1">
@@ -365,16 +377,40 @@
 {% block extra_js %}
 <script>
 document.addEventListener('DOMContentLoaded', function () {
+    // Keep the named selects as the submitted values; the visible inputs search their options.
+    if (window.HDCComboList) {
+        window.HDCComboList.attach('toolCategoryInput', 'toolCategorySelect', {
+            includeEmpty: true, strict: true, emptyText: 'No matching categories'
+        });
+        window.HDCComboList.attach('inventoryCategoryInput', 'inventoryCategorySelect', {
+            includeEmpty: true, strict: true, emptyText: 'No matching categories'
+        });
+        document.querySelectorAll('.js-edit-tool-category-input').forEach(function (input) {
+            window.HDCComboList.attach(input, document.getElementById(input.id.replace('Input', 'Select')), {
+                includeEmpty: true, strict: true, emptyText: 'No matching categories'
+            });
+        });
+    }
+
     // "+ Create new category…" inside the tool form keeps the user in one flow.
     var catSelect = document.getElementById('toolCategorySelect');
     var catInput = document.getElementById('toolNewCategory');
+    var catSearch = document.getElementById('toolCategoryInput');
     if (catSelect && catInput) {
-        catSelect.addEventListener('change', function () {
+        function syncNewCategory() {
             var isNew = catSelect.value === '__new';
             catInput.classList.toggle('d-none', !isNew);
-            if (isNew) { catInput.required = true; catInput.focus(); }
-            else { catInput.required = false; catInput.value = ''; }
+            catInput.required = isNew;
+            if (isNew) catInput.focus();
+            else catInput.value = '';
+        }
+        catSelect.addEventListener('change', syncNewCategory);
+        // Typing a different search clears the combo selection; do not leave
+        // the new-category field visible/required if the user changes their mind.
+        if (catSearch) catSearch.addEventListener('input', function () {
+            if (catInput.required) syncNewCategory();
         });
+        syncNewCategory();
     }
     {% if focus == 'tool' %}
     var card = document.getElementById('addToolCard');
