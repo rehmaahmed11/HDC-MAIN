@@ -1,0 +1,27 @@
+<link rel="stylesheet" href="/hdc_static/css/shared_expenses.css">
+<script src="/hdc_static/js/pages/shared_expenses.js"></script>
+{# Shared Expenses sub-navigation.  Included by every page in the module and
+   driven by `se_page` (set with {% set se_page = '...' %} before the include),
+   so the tab that is lit always matches the page being rendered. #}
+<div class="se-tabs">
+    <a href="{{ url_for('hdc_shared_expenses') }}"
+       class="se-tab {% if se_page == 'ledger' %}active{% endif %}">
+        <i class="fas fa-book-open"></i><span>Ledgers</span>
+    </a>
+    <a href="{{ url_for('hdc_shared_expense_list') }}"
+       class="se-tab {% if se_page == 'expenses' %}active{% endif %}">
+        <i class="fas fa-receipt"></i><span>Shared Expenses</span>
+    </a>
+    <a href="{{ url_for('hdc_shared_report') }}"
+       class="se-tab {% if se_page == 'report' %}active{% endif %}">
+        <i class="fas fa-table-columns"></i><span>Share Report</span>
+    </a>
+    <a href="{{ url_for('hdc_shared_settlements') }}"
+       class="se-tab {% if se_page == 'settlements' %}active{% endif %}">
+        <i class="fas fa-right-left"></i><span>Settlements</span>
+    </a>
+    <a href="{{ url_for('hdc_shared_parties') }}"
+       class="se-tab {% if se_page == 'parties' %}active{% endif %}">
+        <i class="fas fa-users"></i><span>Sharing Parties</span>
+    </a>
+</div>

@@ -29,21 +29,23 @@ hdc/                    the application package (import here, not hdc_erp)
   utils/                pure helpers: dates, format, normalize
   models/               76 ORM models, one file per domain (auth, projects,
                         workforce, office, subcontract, materials, accounts,
-                        cashflow)
+                        cashflow, shared_expenses)
   services/             business engines: accounts, accounts_manage (account
                         master list + classification editor), purchase,
                         timekeeping, ledger, subcontract, aggregation,
                         reporting, audit, actors (row traceability), lookups,
                         backups, estimation, receipts, cashflow,
-                        cashflow_register, account_classification
+                        cashflow_register, account_classification,
+                        shared_expenses (split engine + party balances)
   core/                 runtime platform: flags, schema/migrations,
                         bootstrap, admin ops (restore/wipe/maintenance)
   routes/               one file per page group; register(app) each
                         (auth, dashboard, projects, subcontractors, workers,
                         timekeeping, payroll, expenses, office, materials,
                         purchase_v2, estimation, reports, users, accounts,
-                        accounts_manage, cashflow, cashflow_register, settings,
-                        api_purchase, api_accounts, api_actors)
+                        accounts_manage, cashflow, cashflow_register,
+                        shared_expenses, settings, api_purchase, api_accounts,
+                        api_actors)
 hdc_erp.py              backward-compat shim: app, db, models, helpers
 wsgi.py                 gunicorn/PythonAnywhere entrypoint (env-configured)
 deploy_hook.py          standalone stdlib-only WSGI app: GitHub push webhook ->
@@ -69,6 +71,9 @@ CASHFLOW_MODEL.md       Cash Flow register + day close: what was ported from
                         the AMS accounts model, what was deliberately not, and
                         why (derived vs stored balance, void+replace, minor
                         units, period locks)
+SHARED_EXPENSES.md      Shared Expenses: one bill split across FBM / HDC /
+                        Home / N heads, why the money still moves only through
+                        Accounts (link or post), and how the balances work
 tests/                  differential smoke test vs the pre-split baseline
 ```
 
@@ -119,6 +124,7 @@ which fails if a new route lands in no bucket.
 | **Cash Flow** | `/hdc/accounts/cashflow` | **Where you read** — the daily in/out report over the whole ledger, including flows other modules posted |
 | **Day Close** | `/hdc/accounts/cashflow/reconciliation` | Counted cash vs ledger per account, then lock the day; a locked day rolls its counted closing forward and rejects back-dated entries |
 | **Reconciliation Check** | `/hdc/accounts/reconciliation` | Forensic scan of ledger rows vs the source records that created them |
+| **Shared Expenses** | `/hdc/accounts/shared` | Ledger of bills several heads share (car fuel split FBM / HDC / Home / N ways): who paid, each head's slice, running balances, settlements. The money itself is an ordinary accounts entry — linked or posted from here |
 
 ### Day Close: the large-difference rule
 
@@ -129,6 +135,29 @@ written reason. Without both, `lock_cash_day()` refuses and nothing is written.
 The Hub lists recent closes and highlights any locked day above the threshold
 with its reason. This exists because a −492,000 PKR difference could previously
 be locked silently.
+
+### Shared expenses: one bill, several heads
+
+Car fuel, a workshop bill, a utility that serves FBM, HDC and Home at once: the
+money leaves **one** account, but the cost belongs to **several** heads. That is
+what [`/hdc/accounts/shared`](SHARED_EXPENSES.md) keeps — and it is an
+*allocation* ledger, never a second wallet:
+
+* **The money is always an `hdc_account_txn` row.** A bill either **links** an
+  entry already recorded in Accounts, or **posts** a new one through the same
+  register engine (`source_type='shared_expense'`), which means the day lock,
+  the overdraft block, the idempotency guard and the audit trail all apply
+  exactly as they do on the Cash Flow Register. A bill with no accounts entry is
+  shown as *Not in Accounts* instead of being counted as paid.
+* **The split is per expense, not a fixed trio.** Any number of heads can share
+  one bill (three, four, more); the split is equal, custom rupee figures, or
+  percentages, and the shares always re-add to the total to the paisa.
+* **Balances are derived** — `shares − paid − settled` per head, on every read;
+  nothing is stored twice, so the module can never disagree with Accounts.
+* **Settling up between heads** is a row here *and* (optionally) a transfer in
+  the accounts ledger, so a head paying another head moves real money.
+
+The module is `admin`-only, like the rest of the Accounts section.
 
 ### Supplier payments have one path
 

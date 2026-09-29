@@ -1,0 +1,229 @@
+/* Shared Expenses (Accounts section) — page styling.
+ *
+ * Sits on top of `accounts.css`: the pages reuse the `.acc-*` vocabulary so the
+ * module reads as part of the Accounts section rather than a bolt-on.  What is
+ * defined here is only what is specific to this module: the sub-nav tabs, the
+ * balance pills, the split table, the money-side panels and the report matrix.
+ *
+ * Colours come from the theme variables in `hdc.css`, so light and dark mode
+ * both work without a second stylesheet.
+ */
+
+/* ── sub-navigation ─────────────────────────────────────────────────────── */
+.se-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 16px;
+    padding: 6px;
+    border-radius: 12px;
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+}
+
+.se-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 8px 14px;
+    border-radius: 9px;
+    font-size: .88rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-decoration: none;
+    transition: background .15s, color .15s;
+}
+
+.se-tab:hover { background: var(--table-hover); color: var(--text); }
+
+.se-tab.active {
+    background: linear-gradient(135deg, #10b981, #047857);
+    color: #fff;
+    box-shadow: 0 6px 16px rgba(16, 185, 129, .28);
+}
+
+.se-tab i { font-size: .82rem; }
+
+/* ── balances ───────────────────────────────────────────────────────────── */
+.se-balance {
+    display: inline-block;
+    padding: 3px 9px;
+    border-radius: 999px;
+    font-size: .78rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.se-balance.se-rose    { background: rgba(244, 63, 94, .12);  color: #be123c; }
+.se-balance.se-emerald { background: rgba(16, 185, 129, .14); color: #047857; }
+.se-balance.se-amber   { background: rgba(245, 158, 11, .16); color: #b45309; }
+.se-balance.se-slate   { background: rgba(100, 116, 139, .14); color: #475569; }
+
+[data-theme="dark"] .se-balance.se-rose    { color: #fda4af; }
+[data-theme="dark"] .se-balance.se-emerald { color: #6ee7b7; }
+[data-theme="dark"] .se-balance.se-amber   { color: #fcd34d; }
+[data-theme="dark"] .se-balance.se-slate   { color: #cbd5e1; }
+
+.se-share-chip {
+    display: inline-block;
+    margin: 2px 4px 2px 0;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: .75rem;
+    background: rgba(139, 92, 246, .12);
+    color: var(--text);
+    white-space: nowrap;
+}
+
+/* Voided rows stay readable but visibly out of the numbers. */
+.se-void-row > td {
+    background: rgba(148, 163, 184, .16);
+    color: var(--text-muted);
+    text-decoration: line-through;
+    text-decoration-color: rgba(148, 163, 184, .7);
+}
+
+.se-outside-row > td {
+    background: rgba(245, 158, 11, .08);
+    font-style: italic;
+}
+
+/* ── the split table on the expense form ────────────────────────────────── */
+.se-split-table {
+    border: 1px solid var(--card-border);
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+.se-split-head,
+.se-split-row {
+    display: grid;
+    grid-template-columns: 1fr 110px 78px;
+    gap: 8px;
+    align-items: center;
+    padding: 7px 10px;
+}
+
+.se-split-head {
+    background: var(--table-head);
+    font-size: .74rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .03em;
+    color: var(--text-muted);
+}
+
+.se-split-row { border-top: 1px solid var(--card-border); }
+.se-split-row:hover { background: var(--table-hover); }
+
+.se-split-new {
+    background: rgba(16, 185, 129, .1);
+    animation: se-flash 1.6s ease-out 1;
+}
+
+@keyframes se-flash {
+    0%   { background: rgba(16, 185, 129, .38); }
+    100% { background: rgba(16, 185, 129, .1); }
+}
+
+.se-split-name {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: .9rem;
+    margin: 0;
+    cursor: pointer;
+}
+
+.se-split-check {
+    margin-top: 10px;
+    padding: 8px 10px;
+    border-radius: 9px;
+    font-size: .82rem;
+    background: var(--table-head);
+    border: 1px dashed var(--card-border);
+}
+
+.se-split-check.ok      { border-color: rgba(16, 185, 129, .6);  background: rgba(16, 185, 129, .1); }
+.se-split-check.bad     { border-color: rgba(244, 63, 94, .55);  background: rgba(244, 63, 94, .1); }
+
+.se-inline-edit { padding: 10px 12px; background: var(--table-head); border-radius: 8px; }
+
+/* ── money-side panel ───────────────────────────────────────────────────── */
+.se-radio-row { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+
+.se-radio {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--card-border);
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: .88rem;
+    margin: 0;
+}
+
+.se-radio:hover { background: var(--table-hover); }
+.se-radio.active { border-color: #10b981; background: rgba(16, 185, 129, .08); }
+.se-radio input { margin: 0; }
+
+.se-money-panel { padding-top: 4px; }
+.se-money-panel.se-hidden { display: none; }
+
+.se-money-box {
+    border: 1px solid var(--card-border);
+    border-radius: 10px;
+    padding: 12px;
+    background: var(--card-bg);
+}
+
+.se-money-box h6 { font-size: .86rem; font-weight: 700; margin-bottom: 8px; }
+
+/* ── "how it works" strip on the ledger page ────────────────────────────── */
+.se-how-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 14px;
+}
+
+.se-how {
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    padding: 14px;
+    background: var(--card-bg);
+    position: relative;
+}
+
+.se-how-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #10b981, #047857);
+    color: #fff;
+    font-weight: 700;
+    font-size: .8rem;
+    margin-bottom: 8px;
+}
+
+.se-how h6 { font-size: .9rem; font-weight: 700; margin: 0 0 4px; }
+.se-how p  { font-size: .82rem; color: var(--text-muted); margin: 0; line-height: 1.5; }
+
+/* ── report matrix ──────────────────────────────────────────────────────── */
+.se-matrix thead th { white-space: nowrap; }
+.se-matrix tfoot td { background: var(--table-head); }
+.se-matrix td, .se-matrix th { font-variant-numeric: tabular-nums; }
+
+/* ── print ──────────────────────────────────────────────────────────────── */
+@media print {
+    #sidebar, .topbar, .acc-toolbar, .acc-filter-bar, .se-tabs,
+    .se-how-grid, .btn, .sidebar-backdrop { display: none !important; }
+
+    #page-content { margin: 0 !important; padding: 0 !important; }
+    .acc-section { break-inside: avoid; box-shadow: none; border: 1px solid #999; }
+    .se-print-block { page-break-inside: avoid; }
+    body { background: #fff !important; }
+}

@@ -1,0 +1,387 @@
+{% extends "shared/base.html" %}
+{% block title %}Shared Expenses — Ledgers{% endblock %}
+{% block page_heading %}Shared Expenses — Ledgers{% endblock %}
+
+{% block content %}
+{#
+  Shared Expenses → the ledgers.
+
+  One cost (car fuel, a utility, a workshop bill) is paid once and divided
+  between however many heads it belongs to — FBM / HDC / Home today, four or
+  five of them tomorrow.  This page is where those divisions are read back:
+
+    * the balances table — what each head has shared, paid and settled, and
+      whether it still owes or is owed;
+    * the ledger below — every line behind those balances, with a running
+      balance when one head is selected.
+
+  Nothing on this page is stored: the figures are derived from the shares, the
+  payments and the settlements on every read, so the ledger can never disagree
+  with the expenses behind it.  Money itself is never created here — the
+  payment is recorded in the Accounts section and linked to the split.
+#}
+{% set se_page = 'ledger' %}
+{% include 'shared_expenses/_nav.html' %}
+
+<div class="acc-page-header">
+    <div>
+        <h2><i class="fas fa-book-open me-2"></i>Shared Expense Ledgers
+            <span class="badge bg-success ms-2" style="font-size:.7rem;">Derived, never stored</span>
+        </h2>
+        <div class="acc-subtitle">
+            Share, payment and settlement history of every sharing head — one row per line, oldest first.
+            Money moves only through the Accounts section; here we only record <strong>who the spend was for</strong>.
+        </div>
+    </div>
+    <div class="acc-toolbar">
+        <a href="{{ url_for('hdc_shared_expense_new') }}" class="btn btn-mint btn-sm">
+            <i class="fas fa-plus-lg me-1"></i>New Shared Expense
+        </a>
+        <a href="{{ url_for('hdc_shared_report') }}" class="btn btn-outline-primary btn-sm">
+            <i class="fas fa-table-columns me-1"></i>Share Report
+        </a>
+        <a href="{{ url_for('hdc_shared_expenses_export', **filter_qs) }}" class="btn btn-outline-dark btn-sm">
+            <i class="fas fa-file-csv me-1"></i>CSV
+        </a>
+        <a href="{{ url_for('hdc_accounts_hub') }}" class="btn btn-outline-secondary btn-sm">
+            <i class="fas fa-compass me-1"></i>Accounts Hub
+        </a>
+    </div>
+</div>
+
+{# ── Filters ─────────────────────────────────────────────────────────────── #}
+<form method="get" class="acc-filter-bar">
+    <div>
+        <label for="date_from">From</label>
+        <input type="date" class="form-control form-control-sm" id="date_from" name="date_from"
+               value="{{ flt.date_from.isoformat() if flt.date_from else '' }}">
+    </div>
+    <div>
+        <label for="date_to">To</label>
+        <input type="date" class="form-control form-control-sm" id="date_to" name="date_to"
+               value="{{ flt.date_to.isoformat() if flt.date_to else '' }}">
+    </div>
+    <div>
+        <label for="party_id">Sharing Party</label>
+        <select class="form-select form-select-sm" id="party_id" name="party_id">
+            <option value="">All parties (every ledger)</option>
+            {% for p in parties %}
+            <option value="{{ p.id }}" {% if flt.party_id == p.id %}selected{% endif %}>
+                {{ p.name }}{% if not p.is_active %} — inactive{% endif %}
+            </option>
+            {% endfor %}
+        </select>
+    </div>
+    <div>
+        <label for="category">Category</label>
+        <select class="form-select form-select-sm" id="category" name="category">
+            <option value="">All categories</option>
+            {% for c in categories %}
+            <option value="{{ c }}" {% if flt.category == c %}selected{% endif %}>{{ c }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div>
+        <label for="money">Accounts Link</label>
+        <select class="form-select form-select-sm" id="money" name="money">
+            <option value="">Any</option>
+            <option value="linked" {% if flt.money == 'linked' %}selected{% endif %}>Linked to an entry</option>
+            <option value="unlinked" {% if flt.money == 'unlinked' %}selected{% endif %}>Not in Accounts yet</option>
+        </select>
+    </div>
+    <div>
+        <label for="status">Status</label>
+        <select class="form-select form-select-sm" id="status" name="status">
+            <option value="active" {% if flt.status == 'active' %}selected{% endif %}>Active</option>
+            <option value="void" {% if flt.status == 'void' %}selected{% endif %}>Voided</option>
+            <option value="all" {% if flt.status == 'all' %}selected{% endif %}>All</option>
+        </select>
+    </div>
+    <div style="min-width:200px;flex:1 1 200px;">
+        <label for="q">Search</label>
+        <input type="text" class="form-control form-control-sm" id="q" name="q"
+               placeholder="Title, category, note…" value="{{ flt.search or '' }}">
+    </div>
+    <div class="d-flex align-items-end gap-2">
+        <button type="submit" class="btn btn-success btn-sm"><i class="fas fa-filter me-1"></i>Apply</button>
+        <a href="{{ url_for('hdc_shared_expenses') }}" class="btn btn-outline-secondary btn-sm">Reset</a>
+    </div>
+</form>
+
+{# ── KPI tiles ───────────────────────────────────────────────────────────── #}
+<div class="row g-3 mb-4">
+    <div class="col-6 col-xl-3">
+        <div class="acc-stat acc-emerald">
+            <div class="acc-stat-label"><i class="fas fa-sack-dollar me-1"></i>Total Shared (filtered)</div>
+            <div class="acc-stat-value"><small>Rs.</small> {{ '{:,.0f}'.format(summary.total_amount) }}</div>
+            <div class="acc-stat-sub">{{ summary.expense_count }} expense(s){% if summary.void_count %} · {{ summary.void_count }} voided{% endif %}</div>
+            <i class="fas fa-sack-dollar acc-stat-icon"></i>
+        </div>
+    </div>
+    <div class="col-6 col-xl-3">
+        <div class="acc-stat acc-rose">
+            <div class="acc-stat-label"><i class="fas fa-arrow-up me-1"></i>Still Owed by Heads</div>
+            <div class="acc-stat-value"><small>Rs.</small> {{ '{:,.0f}'.format(summary.owed_in_amount) }}</div>
+            <div class="acc-stat-sub">Shares not yet covered by a payment or a settlement</div>
+            <i class="fas fa-hand-holding-dollar acc-stat-icon"></i>
+        </div>
+    </div>
+    <div class="col-6 col-xl-3">
+        <div class="acc-stat acc-blue">
+            <div class="acc-stat-label"><i class="fas fa-arrow-down me-1"></i>To Be Received Back</div>
+            <div class="acc-stat-value"><small>Rs.</small> {{ '{:,.0f}'.format(summary.owed_out_amount) }}</div>
+            <div class="acc-stat-sub">Heads that paid more than their share</div>
+            <i class="fas fa-rotate-left acc-stat-icon"></i>
+        </div>
+    </div>
+    <div class="col-6 col-xl-3">
+        <div class="acc-stat {{ 'acc-amber' if summary.unlinked_count else 'acc-slate' }}">
+            <div class="acc-stat-label"><i class="fas fa-link me-1"></i>Not in Accounts Yet</div>
+            <div class="acc-stat-value">{{ summary.unlinked_count }}</div>
+            <div class="acc-stat-sub">
+                {% if summary.unlinked_count %}
+                Rs. {{ '{:,.0f}'.format(summary.unlinked_amount) }} still to be recorded in Accounts
+                {% else %}Every share is backed by an Accounts entry{% endif %}
+            </div>
+            <i class="fas fa-triangle-exclamation acc-stat-icon"></i>
+        </div>
+    </div>
+</div>
+
+{# ── Party balances ──────────────────────────────────────────────────────── #}
+<div class="acc-section">
+    <div class="acc-section-head">
+        <h5><i class="fas fa-scale-balanced me-2" style="color:#10b981;"></i>Where Each Party Stands</h5>
+        <span class="small text-muted">
+            Balance = shares − paid − settled out + settled in
+        </span>
+    </div>
+    <div class="acc-section-body flush">
+        <div class="table-responsive">
+            <table class="table acc-table mb-0">
+                <thead>
+                    <tr>
+                        <th>Sharing Party</th>
+                        <th class="text-end">Share</th>
+                        <th class="text-end">Paid</th>
+                        <th class="text-end">Settled Out</th>
+                        <th class="text-end">Settled In</th>
+                        <th class="text-end">Balance</th>
+                        <th class="text-center">Ledger</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in balances %}
+                    <tr class="{% if not row.party.is_active %}text-muted{% endif %}">
+                        <td>
+                            <span class="acc-name">{{ row.party_name }}</span>
+                            <span class="acc-group-path d-block">
+                                {{ row.party.kind|title }}{% if not row.party.is_active %} · inactive{% endif %}
+                                {% if row.party.account %} · <a href="{{ url_for('hdc_account_ledger', account_id=row.party.account_id) }}">{{ row.party.account.name }}</a>{% endif %}
+                            </span>
+                        </td>
+                        <td class="text-end acc-muted-amount">{{ '{:,.2f}'.format(row.share_amount) }}</td>
+                        <td class="text-end acc-muted-amount">{{ '{:,.2f}'.format(row.paid_amount) }}</td>
+                        <td class="text-end acc-muted-amount">{{ '{:,.2f}'.format(row.settled_out_amount) }}</td>
+                        <td class="text-end acc-muted-amount">{{ '{:,.2f}'.format(row.settled_in_amount) }}</td>
+                        <td class="text-end">
+                            <span class="se-balance se-{{ row.balance.tone }}">{{ row.balance.text }}</span>
+                        </td>
+                        <td class="text-center">
+                            <a class="btn btn-sm btn-outline-success"
+                               href="{{ party_links.get(row.party_id) or url_for('hdc_shared_expenses', **base_qs) }}"
+                               title="Open this party's running ledger">
+                                <i class="fas fa-book"></i>
+                            </a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    {% if outside.unattributed_minor %}
+                    <tr class="se-outside-row">
+                        <td>
+                            <span class="acc-name">{{ outside.party_name }}</span>
+                            <span class="acc-group-path d-block">
+                                Paid from an accounts account without naming a head — set
+                                <em>Paid by</em> on those expenses to attribute them.
+                            </span>
+                        </td>
+                        <td class="text-end acc-muted-amount">—</td>
+                        <td class="text-end acc-muted-amount">{{ '{:,.2f}'.format(outside.unattributed_amount) }}</td>
+                        <td class="text-end acc-muted-amount">—</td>
+                        <td class="text-end acc-muted-amount">
+                            {% if outside.settled_in_minor %}{{ '{:,.2f}'.format(outside.settled_in_amount) }}{% else %}—{% endif %}
+                        </td>
+                        <td class="text-end">
+                            <span class="se-balance se-{{ outside.balance.tone }}">{{ outside.balance.text }}</span>
+                        </td>
+                        <td class="text-center text-muted" title="Not a sharing head — kept in view so the ledger balances">
+                            <i class="fas fa-building-columns"></i>
+                        </td>
+                    </tr>
+                    {% endif %}
+                </tbody>
+                <tfoot>
+                    <tr class="fw-bold">
+                        <td>Total{% if not totals.balanced %} <span class="badge bg-warning text-dark">check</span>{% endif %}</td>
+                        <td class="text-end">{{ '{:,.2f}'.format(totals.share_amount) }}</td>
+                        <td class="text-end">{{ '{:,.2f}'.format(totals.paid_amount) }}</td>
+                        <td class="text-end">{{ '{:,.2f}'.format(totals.settled_out_amount) }}</td>
+                        <td class="text-end">{{ '{:,.2f}'.format(totals.settled_in_amount) }}</td>
+                        <td class="text-end">
+                            {% if totals.balanced %}
+                            <span class="se-balance se-slate">Balanced</span>
+                            {% else %}
+                            <span class="se-balance se-amber">{{ '{:,.2f}'.format(totals.balances|abs) }} unb</span>
+                            {% endif %}
+                        </td>
+                        <td></td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    </div>
+    <div class="acc-section-body">
+        <p class="small text-muted mb-0">
+            <strong>Rows are per party, not per payment.</strong> A head that paid a bill carries it in
+            <em>Paid</em>; every head that shares it carries its slice in <em>Share</em>. The two sides of
+            the whole module cancel out, which is what the total row checks —
+            <em>Paid from accounts — no head named</em> is only there because a payment was entered without
+            saying who it was for.
+        </p>
+    </div>
+</div>
+
+{# ── The ledger itself ───────────────────────────────────────────────────── #}
+<div class="acc-section">
+    <div class="acc-section-head">
+        <h5>
+            <i class="fas fa-list-ul me-2" style="color:#f59e0b;"></i>
+            {% if selected_party %}{{ selected_party.name }} — Running Ledger{% else %}All Ledgers — Every Line{% endif %}
+        </h5>
+        <span class="small text-muted">
+            {% if selected_party %}
+            {{ statement|length }} line(s) · closing balance
+            {{ '{:,.2f}'.format((statement[-1].running_minor if statement else 0) / 100) }}
+            {% else %}Every share, payment and settlement, oldest first{% endif %}
+        </span>
+    </div>
+    <div class="acc-section-body flush">
+        <div class="table-responsive">
+            <table class="table acc-table mb-0">
+                <thead>
+                    <tr>
+                        <th style="width:104px;">Date</th>
+                        {% if not selected_party %}<th>Party</th>{% endif %}
+                        <th>Particulars</th>
+                        <th>Category</th>
+                        <th class="text-end">Share</th>
+                        <th class="text-end">Paid</th>
+                        <th class="text-end">Settled</th>
+                        {% if selected_party %}<th class="text-end">Running Balance</th>{% endif %}
+                        <th class="text-center">Accounts</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for line in (statement if selected_party else lines) %}
+                    <tr class="{% if line.is_void %}se-void-row{% endif %}">
+                        <td>{{ line.date.strftime('%d %b %Y') if line.date else '—' }}</td>
+                        {% if not selected_party %}
+                        <td>
+                            <span class="acc-name">{{ line.party_name }}</span>
+                        </td>
+                        {% endif %}
+                        <td>
+                            {% if line.kind == 'expense' %}
+                            <a href="{{ url_for('hdc_shared_expense_detail', expense_id=line.expense_id) }}"
+                               class="text-decoration-none">{{ line.title }}</a>
+                            {% else %}
+                            <a href="{{ url_for('hdc_shared_settlements') }}"
+                               class="text-decoration-none">{{ line.title }}</a>
+                            {% endif %}
+                            {% if line.is_void %}<span class="badge bg-secondary ms-1">void</span>{% endif %}
+                            {% if line.note %}<span class="d-block small text-muted">{{ line.note|truncate(70) }}</span>{% endif %}
+                        </td>
+                        <td>{{ line.category or '—' }}</td>
+                        <td class="text-end acc-muted-amount">
+                            {% if line.share_minor %}{{ '{:,.2f}'.format(line.share_minor / 100) }}{% else %}—{% endif %}
+                        </td>
+                        <td class="text-end acc-muted-amount">
+                            {% if line.paid_minor %}{{ '{:,.2f}'.format(line.paid_minor / 100) }}{% else %}—{% endif %}
+                        </td>
+                        <td class="text-end acc-muted-amount">
+                            {% if line.settled_out_minor %}−{{ '{:,.2f}'.format(line.settled_out_minor / 100) }}{% endif %}
+                            {% if line.settled_in_minor %}+{{ '{:,.2f}'.format(line.settled_in_minor / 100) }}{% endif %}
+                            {% if not line.settled_out_minor and not line.settled_in_minor %}—{% endif %}
+                        </td>
+                        {% if selected_party %}
+                        <td class="text-end">
+                            <span class="{% if line.running_minor > 0 %}text-danger{% elif line.running_minor < 0 %}text-success{% endif %} acc-amount">
+                                {{ '{:,.2f}'.format(line.running_minor / 100) }}
+                            </span>
+                        </td>
+                        {% endif %}
+                        <td class="text-center">
+                            {% if line.kind == 'expense' %}
+                                {% if line.linked %}
+                                <span class="badge bg-success-subtle text-success" title="Linked to an entry in the accounts ledger">
+                                    <i class="fas fa-link"></i>
+                                </span>
+                                {% else %}
+                                <span class="badge bg-warning-subtle text-warning" title="No Accounts entry yet — record it in Accounts">
+                                    <i class="fas fa-triangle-exclamation"></i>
+                                </span>
+                                {% endif %}
+                            {% else %}
+                                <span class="badge bg-light text-muted">—</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="{{ 9 if selected_party else 8 }}">
+                            <div class="acc-empty">
+                                <i class="fas fa-book"></i>
+                                <div class="mt-2">No shared expense lines for this filter yet.</div>
+                                <a href="{{ url_for('hdc_shared_expense_new') }}" class="btn btn-sm btn-mint mt-2">
+                                    <i class="fas fa-plus me-1"></i>Record the first shared expense
+                                </a>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+{# ── How the module works (read once, so nobody has to guess) ────────────── #}
+<div class="acc-section">
+    <div class="acc-section-head">
+        <h5><i class="fas fa-circle-info me-2" style="color:#3b82f6;"></i>How a shared expense works here</h5>
+    </div>
+    <div class="acc-section-body">
+        <div class="se-how-grid">
+            <div class="se-how">
+                <span class="se-how-num">1</span>
+                <h6>Record the spend</h6>
+                <p>Either pay it from an account on the expense form (it posts to the Accounts section's
+                   own register engineer — <code>hdc_account_txn</code>), or record the payment in Accounts
+                   first and link it here.</p>
+            </div>
+            <div class="se-how">
+                <span class="se-how-num">2</span>
+                <h6>Split it between heads</h6>
+                <p>Tick the heads that share it — three, four or more. Equal, custom amounts or percentages;
+                   the odd paisa is handed out so the slices always re-add to the total exactly.</p>
+            </div>
+            <div class="se-how">
+                <span class="se-how-num">3</span>
+                <h6>Settle up</h6>
+                <p>When one head repays another, record the settlement here. It can post the matching
+                   transfer in Accounts, so the cash movement and the ledger of who-owes-whom agree.</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

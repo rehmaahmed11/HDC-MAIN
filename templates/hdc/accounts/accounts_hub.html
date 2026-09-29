@@ -187,6 +187,27 @@
                 </div>
             </a>
 
+            {# Shared Expenses — one cost split between heads (FBM / HDC / Home / …).
+               The ledgers and the share report live there; the money is posted here. #}
+            <a class="hub-action-card" href="{{ url_for('hdc_shared_expenses') }}">
+                <div class="d-flex gap-3 align-items-start">
+                    <div class="hub-action-icon amber"><i class="fas fa-users-rectangle"></i></div>
+                    <div>
+                        <div class="fw-bold">Shared Expenses</div>
+                        <div class="small text-muted">
+                            One spend (car fuel, utilities) divided between FBM / HDC / Home — or however
+                            many heads share it. Ledger per head, running balances and a print-ready
+                            share report. Payments stay in Accounts.
+                        </div>
+                        <div class="mt-1 d-flex flex-wrap gap-1">
+                            <span class="badge bg-light border">Ledgers</span>
+                            <span class="badge bg-light border">Share report</span>
+                            <span class="badge bg-light border">Settle up</span>
+                        </div>
+                    </div>
+                </div>
+            </a>
+
             {# Cash Flow — moved from sidebar to Hub #}
             <a class="hub-action-card" href="{{ url_for('hdc_cashflow') }}">
                 <div class="d-flex gap-3 align-items-start">

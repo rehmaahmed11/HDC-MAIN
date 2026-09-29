@@ -5,6 +5,7 @@ from hdc.models.auth import ActivityLog, HDCUser, UserActivity
 from hdc.models.materials import Delivery, Material, MaterialUsage, MaterialV2, Purchase, PurchaseV2, Supplier, SupplierLedger, UsageLogV2
 from hdc.models.office import AllowanceCategory, OfficeExpense, OfficeExpenseCategory, OfficeStaff, OfficeStaffAttendance, OfficeStaffLedger, StaffAllowance
 from hdc.models.projects import CustomFormula, Estimation, EstimationStage, Project, Stage, StageDefinition, StageDrawing, StageRateHistory
+from hdc.models.shared_expenses import SharedExpense, SharedExpenseShare, SharedParty, SharedSettlement
 from hdc.models.subcontract import SubcontractAttendance, SubcontractEvent, SubcontractLabourAttendance, SubcontractLabourPayment, SubcontractLabourWorker, SubcontractPayment, SubcontractTeamAttendance, Subcontractor
 from hdc.models.workforce import Attendance, AttendanceDay, AttendanceMark, LabourLedger, LabourRateHistory, PayrollItem, PayrollRun, TimeEntry, Worker, WorkerRate, WorkerTrade
 from hdc.models.cashflow import AccountReconciliation, CashDayAccountPosition, CashDayLock, CashFlowCategory, CashFlowEntry, CashFlowEntryAudit, CashFlowParty, CashFlowSubcategory
@@ -57,6 +58,10 @@ __all__ = [
     "Purchase",
     "PurchaseV2",
     "StaffAllowance",
+    "SharedExpense",
+    "SharedExpenseShare",
+    "SharedParty",
+    "SharedSettlement",
     "Stage",
     "StageDefinition",
     "StageDrawing",

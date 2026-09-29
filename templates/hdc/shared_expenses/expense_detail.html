@@ -1,0 +1,338 @@
+{% extends "shared/base.html" %}
+{% block title %}Shared Expense #{{ expense.id }}{% endblock %}
+{% block page_heading %}Shared Expense #{{ expense.id }}{% endblock %}
+
+{% block content %}
+{#
+  One shared expense, everything about it on one screen:
+
+    * the split — who shares it and how much each slice is (exact paisa);
+    * the money side — the Accounts entry it is linked to, or the buttons to
+      post one / link one, or the warning that there is none yet;
+    * void / restore / delete — with the choice of whether the linked Accounts
+      entry is voided with it.
+
+  Nothing here edits a posted amount in place: the module follows the same
+  immutable rule as the accounts ledger (void with a reason, then replace).
+#}
+{% set se_page = 'expenses' %}
+{% include 'shared_expenses/_nav.html' %}
+
+<div class="acc-page-header">
+    <div>
+        <h2>
+            <i class="fas fa-receipt me-2"></i>{{ expense.title }}
+            {% if expense.is_void %}<span class="badge bg-secondary ms-2">Voided</span>{% endif %}
+            {% if not expense.is_linked %}<span class="badge bg-warning text-dark ms-2">Not in Accounts</span>{% endif %}
+        </h2>
+        <div class="acc-subtitle">
+            {{ expense.date.strftime('%d %B %Y') if expense.date else '—' }}
+            · {{ expense.category or 'Uncategorised' }}
+            · Rs. {{ '{:,.2f}'.format(total) }}
+            · {{ expense.party_count }} share(s)
+            {% if expense.reference %}· ref {{ expense.reference }}{% endif %}
+        </div>
+    </div>
+    <div class="acc-toolbar">
+        {% if not expense.is_void %}
+        <a href="{{ url_for('hdc_shared_expense_edit', expense_id=expense.id) }}" class="btn btn-outline-primary btn-sm">
+            <i class="fas fa-pen me-1"></i>Edit
+        </a>
+        {% endif %}
+        <a href="{{ url_for('hdc_shared_expenses') }}" class="btn btn-outline-secondary btn-sm">
+            <i class="fas fa-book-open me-1"></i>Ledgers
+        </a>
+        <a href="{{ url_for('hdc_shared_expense_new') }}" class="btn btn-mint btn-sm">
+            <i class="fas fa-plus-lg me-1"></i>New
+        </a>
+    </div>
+</div>
+
+<div class="row g-3">
+    <div class="col-12 col-xl-7">
+        {# ── The split ────────────────────────────────────────────────────── #}
+        <div class="acc-section">
+            <div class="acc-section-head">
+                <h5><i class="fas fa-users-rectangle me-2" style="color:#8b5cf6;"></i>How it is divided</h5>
+                <span class="small text-muted">{{ expense.split_mode|title }} · re-adds to Rs. {{ '{:,.2f}'.format(total) }}</span>
+            </div>
+            <div class="acc-section-body flush">
+                <div class="table-responsive">
+                    <table class="table acc-table mb-0">
+                        <thead>
+                            <tr>
+                                <th>Sharing Party</th>
+                                <th class="text-end">Share</th>
+                                <th class="text-end">of Total</th>
+                                {% if expense.payer_party_id %}<th class="text-center">Paid the bill</th>{% endif %}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for s in shares %}
+                            <tr>
+                                <td class="acc-name">{{ s.party_name }}</td>
+                                <td class="text-end acc-amount">{{ '{:,.2f}'.format(s.amount) }}</td>
+                                <td class="text-end acc-muted-amount">
+                                    {% if s.percent is not none %}{{ '{:.2f}'.format(s.percent) }}%{% else %}—{% endif %}
+                                </td>
+                                {% if expense.payer_party_id %}
+                                <td class="text-center">
+                                    {% if s.party_id == expense.payer_party_id %}
+                                    <span class="badge bg-success-subtle text-success"><i class="fas fa-check"></i></span>
+                                    {% endif %}
+                                </td>
+                                {% endif %}
+                            </tr>
+                            {% else %}
+                            <tr><td colspan="4" class="text-muted">This expense has no shares.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                        <tfoot>
+                            <tr class="fw-bold">
+                                <td>Total</td>
+                                <td class="text-end">{{ '{:,.2f}'.format(total) }}</td>
+                                <td class="text-end">100.00%</td>
+                                {% if expense.payer_party_id %}<td></td>{% endif %}
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            </div>
+            <div class="acc-section-body">
+                <div class="row g-3 small">
+                    <div class="col-6 col-md-3">
+                        <div class="text-muted">Paid by</div>
+                        <div class="fw-semibold">
+                            {% if expense.payer_party %} {{ expense.payer_party.name }}
+                            {% else %}<span class="text-warning">not attributed to a head</span>{% endif %}
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="text-muted">Paid from account</div>
+                        <div class="fw-semibold">
+                            {% if expense.paid_from_account %}{{ expense.paid_from_account.name }}
+                            {% else %}—{% endif %}
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="text-muted">Entered by</div>
+                        <div class="fw-semibold">{{ expense.created_by or '—' }}</div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="text-muted">Created</div>
+                        <div class="fw-semibold">{{ expense.created_at.strftime('%d %b %Y %H:%M') if expense.created_at else '—' }}</div>
+                    </div>
+                    {% if expense.note %}
+                    <div class="col-12">
+                        <div class="text-muted">Note</div>
+                        <div>{{ expense.note }}</div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        {# ── The money side ───────────────────────────────────────────────── #}
+        <div class="acc-section">
+            <div class="acc-section-head">
+                <h5><i class="fas fa-building-columns me-2" style="color:#3b82f6;"></i>The Accounts side</h5>
+                <span class="small text-muted">One payment, one ledger</span>
+            </div>
+            <div class="acc-section-body">
+                {% if expense.cf_entry_id %}
+                {% set entry = expense.cash_flow_entry %}
+                <div class="alert {{ 'alert-secondary' if entry and entry.is_void else 'alert-success' }} mb-3">
+                    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+                        <div>
+                            <i class="fas fa-link me-1"></i>
+                            <strong>Linked to Accounts entry #{{ expense.cf_entry_id }}</strong>
+                            {% if entry %}
+                            <span class="badge {{ 'bg-secondary' if entry.is_void else 'bg-success' }} ms-1">
+                                {{ 'Voided' if entry.is_void else 'Posted' }}
+                            </span>
+                            <div class="small mt-1">
+                                {{ entry.date_posted.strftime('%d %b %Y') if entry.date_posted else '' }}
+                                · {{ entry.description or '' }}
+                                · Rs. {{ '{:,.2f}'.format((entry.amount_minor or 0) / 100) }}
+                                · {{ entry.account.name if entry.account else '' }}
+                                {% if entry.created_by %}· entered by {{ entry.created_by }}{% endif %}
+                            </div>
+                            {% else %}
+                            <div class="small mt-1">The register document is missing — the ledger row is #{{ expense.txn_id }}.</div>
+                            {% endif %}
+                        </div>
+                        <div class="d-flex gap-2">
+                            {% if expense.txn_id %}
+                            <a class="btn btn-sm btn-outline-secondary"
+                               href="{{ url_for('hdc_accounts_entries', q=expense.title) }}">
+                                <i class="fas fa-receipt me-1"></i>All Entries
+                            </a>
+                            {% endif %}
+                            {% if entry and not entry.is_void %}
+                            <form method="post" action="{{ url_for('hdc_shared_expense_unlink', expense_id=expense.id) }}">
+                                <button class="btn btn-sm btn-outline-danger" type="submit">
+                                    <i class="fas fa-link-slash me-1"></i>Unlink
+                                </button>
+                            </form>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% if entry and entry.is_void %}
+                    <div class="small mb-0">
+                        The Accounts entry is voided, so this payment no longer counts in the ledger.
+                        Restore the expense (below) to bring both back, or restore it in Accounts.
+                    </div>
+                    {% endif %}
+                </div>
+                {% else %}
+                <div class="alert alert-warning">
+                    <i class="fas fa-triangle-exclamation me-1"></i>
+                    <strong>No Accounts entry is linked yet.</strong>
+                    The split is recorded, but nothing in the accounts ledger says this money moved.
+                </div>
+
+                {% if not expense.is_void %}
+                <div class="row g-3">
+                    <div class="col-12 col-lg-6">
+                        <div class="se-money-box">
+                            <h6><i class="fas fa-money-bill-transfer me-1 text-success"></i>Pay it now (posts to Accounts)</h6>
+                            <form method="post" action="{{ url_for('hdc_shared_expense_pay', expense_id=expense.id) }}">
+                                <div class="mb-2">
+                                    <label class="form-label small" for="pay_account_id">Pay from account</label>
+                                    <select class="form-select form-select-sm" id="pay_account_id" name="account_id" required>
+                                        <option value="">— choose cash / bank —</option>
+                                        {% for a in accounts %}
+                                        <option value="{{ a.id }}" {% if expense.paid_from_account_id == a.id %}selected{% endif %}>
+                                            {{ a.name }} ({{ a.type }})
+                                        </option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="mb-2">
+                                    <label class="form-label small" for="pay_cf_category">Accounts category</label>
+                                    <select class="form-select form-select-sm" id="pay_cf_category" name="cf_category_id">
+                                        <option value="">Use "{{ expense.category or 'Shared Expenses' }}" (created if new)</option>
+                                        {% for c in accounts_categories %}
+                                        <option value="{{ c.id }}">{{ c.name }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <button class="btn btn-success btn-sm w-100" type="submit">
+                                    <i class="fas fa-arrow-up-from-bracket me-1"></i>
+                                    Post Rs. {{ '{:,.2f}'.format(total) }} to Accounts
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                    <div class="col-12 col-lg-6">
+                        <div class="se-money-box">
+                            <h6><i class="fas fa-link me-1 text-primary"></i>Already paid in Accounts</h6>
+                            <form method="post" action="{{ url_for('hdc_shared_expense_link', expense_id=expense.id) }}">
+                                <label class="form-label small" for="link_entry">Money-out entry</label>
+                                <select class="form-select form-select-sm mb-2" id="link_entry" name="cf_entry_id" required size="6">
+                                    {% for item in linkable %}
+                                    <option value="{{ item.id }}">{{ item.label }}</option>
+                                    {% else %}
+                                    <option value="" disabled>No unallocated money-out entries yet</option>
+                                    {% endfor %}
+                                </select>
+                                <button class="btn btn-outline-primary btn-sm w-100" type="submit">
+                                    <i class="fas fa-link me-1"></i>Link the selected entry
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    {# ── Void / restore / delete ──────────────────────────────────────────── #}
+    <div class="col-12 col-xl-5">
+        <div class="acc-section">
+            <div class="acc-section-head">
+                <h5><i class="fas fa-shield-halved me-2" style="color:#f43f5e;"></i>Status &amp; audit</h5>
+            </div>
+            <div class="acc-section-body">
+                {% if expense.is_void %}
+                <div class="alert alert-secondary">
+                    <strong>Voided</strong> by {{ expense.voided_by or '—' }}
+                    {% if expense.voided_at %}on {{ expense.voided_at.strftime('%d %b %Y %H:%M') }}{% endif %}.
+                    <div class="small mt-1">Reason: {{ expense.void_reason or '—' }}</div>
+                </div>
+                <form method="post" action="{{ url_for('hdc_shared_expense_restore', expense_id=expense.id) }}">
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" name="restore_linked_entry"
+                               id="restoreLinked" value="1" checked>
+                        <label class="form-check-label small" for="restoreLinked">
+                            Also restore the linked Accounts entry
+                        </label>
+                    </div>
+                    <button class="btn btn-success w-100" type="submit">
+                        <i class="fas fa-rotate-left me-1"></i>Restore this expense
+                    </button>
+                </form>
+                {% else %}
+                <form method="post" action="{{ url_for('hdc_shared_expense_void', expense_id=expense.id) }}">
+                    <label class="form-label" for="void_reason">Reason for voiding <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control mb-2" id="void_reason" name="void_reason"
+                           maxlength="300" required placeholder="Wrong amount / duplicate / cancelled">
+                    {% if expense.cf_entry_id %}
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" name="void_linked_entry"
+                               id="voidLinked" value="1" checked>
+                        <label class="form-check-label small" for="voidLinked">
+                            Also void the linked Accounts entry #{{ expense.cf_entry_id }}
+                            <span class="text-muted d-block">Recommended: otherwise the payment stays in the ledger
+                            while the split disappears.</span>
+                        </label>
+                    </div>
+                    {% endif %}
+                    <button class="btn btn-outline-danger w-100" type="submit">
+                        <i class="fas fa-ban me-1"></i>Void this expense
+                    </button>
+                </form>
+                {% if not expense.is_linked %}
+                <hr>
+                <form method="post" action="{{ url_for('hdc_shared_expense_delete', expense_id=expense.id) }}"
+                      onsubmit="return confirm('Delete this shared expense? It has no Accounts link, so nothing else is affected.');">
+                    <button class="btn btn-outline-secondary w-100" type="submit">
+                        <i class="fas fa-trash me-1"></i>Delete (never used in Accounts)
+                    </button>
+                    <div class="form-text">
+                        Allowed only while nothing in Accounts depends on it. Once money is linked,
+                        void with a reason instead — history is never deleted.
+                    </div>
+                </form>
+                {% endif %}
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="acc-section">
+            <div class="acc-section-head">
+                <h5><i class="fas fa-clock-rotate-left me-2" style="color:#64748b;"></i>Traceability</h5>
+            </div>
+            <div class="acc-section-body">
+                {% set trail = actor_for(expense) %}
+                <table class="table table-sm mb-0">
+                    <tbody>
+                        <tr><td class="text-muted">Entered by</td><td>{{ trail.created_by or expense.created_by or '—' }}</td></tr>
+                        <tr><td class="text-muted">Entered at</td><td>{{ trail.created_at or '—' }}</td></tr>
+                        <tr><td class="text-muted">Last change by</td><td>{{ trail.updated_by or '—' }}</td></tr>
+                        <tr><td class="text-muted">Last change at</td><td>{{ trail.updated_at or '—' }}</td></tr>
+                        {% if trail.voided_by %}
+                        <tr><td class="text-muted">Voided by</td><td>{{ trail.voided_by }} · {{ trail.voided_at }}</td></tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+                <p class="small text-muted mb-0 mt-2">
+                    Row changes are recorded in the same activity trail every other list in HDC uses.
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

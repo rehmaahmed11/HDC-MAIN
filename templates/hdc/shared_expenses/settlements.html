@@ -1,0 +1,235 @@
+{% extends "shared/base.html" %}
+{% block title %}Settlements — Shared Expenses{% endblock %}
+{% block page_heading %}Shared Expense Settlements{% endblock %}
+
+{% block content %}
+{#
+  Squaring up between heads.
+
+  When FBM pays HDC its slice of the car fuel, that is a settlement: one head
+  paying another (or paying back into an account).  Recording it here moves the
+  "who owes whom" answer forward without touching the splits themselves.
+
+  The money side stays optional but visible: tick "post the transfer in
+  Accounts" and the same amount is moved between the two accounts through the
+  Cash Flow register engine, so the accounts ledger and this ledger of
+  who-owes-whom agree.  Without it, the settlement is recorded but marked as
+  not backed by an Accounts entry.
+#}
+{% set se_page = 'settlements' %}
+{% include 'shared_expenses/_nav.html' %}
+
+<div class="acc-page-header">
+    <div>
+        <h2><i class="fas fa-right-left me-2"></i>Settlements</h2>
+        <div class="acc-subtitle">
+            One head paying another head (or an account) to square up its share.
+            Every settlement is a line in both parties' ledgers.
+        </div>
+    </div>
+    <div class="acc-toolbar">
+        <a href="{{ url_for('hdc_shared_expense_list') }}" class="btn btn-outline-secondary btn-sm">
+            <i class="fas fa-receipt me-1"></i>Expenses
+        </a>
+        <a href="{{ url_for('hdc_shared_report') }}" class="btn btn-outline-primary btn-sm">
+            <i class="fas fa-table-columns me-1"></i>Share Report
+        </a>
+        <a href="{{ url_for('hdc_shared_settlements', show_void=('' if show_void else 'yes'), **filter_qs) }}"
+           class="btn btn-outline-dark btn-sm">
+            <i class="fas fa-eye{{ '-slash' if not show_void }} me-1"></i>{{ 'Hide voided' if show_void else 'Show voided' }}
+        </a>
+    </div>
+</div>
+
+<div class="row g-3">
+    <div class="col-12 col-xl-4">
+        <div class="acc-section">
+            <div class="acc-section-head">
+                <h5><i class="fas fa-plus me-2" style="color:#10b981;"></i>Record a settlement</h5>
+            </div>
+            <div class="acc-section-body">
+                <form method="post" action="{{ url_for('hdc_shared_settlements') }}">
+                    <input type="hidden" name="action" value="create">
+                    <div class="mb-2">
+                        <label class="form-label" for="date">Date <span class="text-danger">*</span></label>
+                        <input type="date" class="form-control" id="date" name="date" required value="{{ today }}">
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label" for="from_party_id">Paid by <span class="text-danger">*</span></label>
+                        <select class="form-select se-party-pick" id="from_party_id" name="from_party_id" required>
+                            <option value="">— choose head —</option>
+                            {% for p in parties if p.is_active %}
+                            <option value="{{ p.id }}" data-account-id="{{ p.account_id or '' }}">
+                                {{ p.name }}{% if balances.get(p.id) %} — {{ balances[p.id].balance.text }}{% endif %}
+                            </option>
+                            {% endfor %}
+                        </select>
+                        <div class="form-text">Balances shown are as of now.</div>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label" for="to_party_id">Received by (head)</label>
+                        <select class="form-select se-party-pick" id="to_party_id" name="to_party_id">
+                            <option value="">— none (paid into an account instead) —</option>
+                            {% for p in parties if p.is_active %}
+                            <option value="{{ p.id }}" data-account-id="{{ p.account_id or '' }}">{{ p.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label" for="to_account_id">…or received into an account</label>
+                        <select class="form-select" id="to_account_id" name="to_account_id">
+                            <option value="">— none —</option>
+                            {% for a in accounts %}
+                            <option value="{{ a.id }}">{{ a.name }} ({{ a.type }})</option>
+                            {% endfor %}
+                        </select>
+                        <div class="form-text">Choose a head <em>or</em> an account, not both.</div>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label" for="amount">Amount (PKR) <span class="text-danger">*</span></label>
+                        <div class="input-group">
+                            <span class="input-group-text">Rs.</span>
+                            <input type="text" class="form-control" id="amount" name="amount" inputmode="decimal" required>
+                        </div>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label" for="note">Note</label>
+                        <input type="text" class="form-control" id="note" name="note" maxlength="300"
+                               placeholder="Cash handed over / bank transfer">
+                    </div>
+
+                    <div class="se-money-box mb-2">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="money_source" value="post"
+                                   id="postTransfer">
+                            <label class="form-check-label" for="postTransfer">
+                                <strong>Post the transfer in Accounts</strong>
+                            </label>
+                        </div>
+                        <div id="seTransferFields" class="mt-2">
+                            <div class="mb-2">
+                                <label class="form-label small" for="from_account_id">From account</label>
+                                <select class="form-select form-select-sm" id="from_account_id" name="from_account_id">
+                                    <option value="">— the paying head's account —</option>
+                                    {% for a in money_accounts %}
+                                    <option value="{{ a.id }}">{{ a.name }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="mb-2">
+                                <label class="form-label small" for="settlement_to_account_id">To account</label>
+                                <select class="form-select form-select-sm" id="settlement_to_account_id"
+                                        name="settlement_to_account_id">
+                                    <option value="">— the receiving head's / selected account —</option>
+                                    {% for a in money_accounts %}
+                                    <option value="{{ a.id }}">{{ a.name }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="form-text">
+                                Needs both accounts. The transfer is posted by the Cash Flow register engine and
+                                appears in All Entries like any other movement.
+                            </div>
+                        </div>
+                    </div>
+
+                    <button class="btn btn-mint w-100" type="submit">
+                        <i class="fas fa-floppy-disk me-1"></i>Save settlement
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-12 col-xl-8">
+        <div class="acc-section">
+            <div class="acc-section-head">
+                <h5><i class="fas fa-list me-2" style="color:#8b5cf6;"></i>{{ settlements|length }} settlement(s)</h5>
+                <span class="small text-muted">Newest first</span>
+            </div>
+            <div class="acc-section-body flush">
+                <div class="table-responsive">
+                    <table class="table acc-table mb-0">
+                        <thead>
+                            <tr>
+                                <th style="width:104px;">Date</th>
+                                <th>From</th>
+                                <th>To</th>
+                                <th class="text-end">Amount</th>
+                                <th class="text-center">Accounts</th>
+                                <th>Note</th>
+                                <th class="text-end">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for s in settlements %}
+                            <tr {{ s|hdc_row_attrs }}>
+                                <td>{{ s.date.strftime('%d %b %Y') if s.date else '—' }}</td>
+                                <td class="acc-name">{{ s.from_party.name if s.from_party else '—' }}</td>
+                                <td>
+                                    {% if s.to_party %}{{ s.to_party.name }}
+                                    {% elif s.to_account %}<span class="text-muted">{{ s.to_account.name }}</span>
+                                    {% else %}—{% endif %}
+                                </td>
+                                <td class="text-end acc-amount">{{ '{:,.2f}'.format(s.minor / 100) }}</td>
+                                <td class="text-center">
+                                    {% if s.cf_entry_id %}
+                                    <span class="badge bg-success-subtle text-success"
+                                          title="Cash Flow register entry #{{ s.cf_entry_id }}">
+                                        <i class="fas fa-link me-1"></i>#{{ s.cf_entry_id }}
+                                    </span>
+                                    {% else %}
+                                    <span class="badge bg-warning-subtle text-warning"
+                                          title="Recorded in this module only — no Accounts entry">
+                                        <i class="fas fa-triangle-exclamation"></i>
+                                    </span>
+                                    {% endif %}
+                                </td>
+                                <td class="small">{{ s.note or '—' }}</td>
+                                <td class="text-end acc-actions">
+                                    {% if s.is_void %}
+                                    <form method="post" action="{{ url_for('hdc_shared_settlements') }}" class="d-inline">
+                                        <input type="hidden" name="action" value="restore">
+                                        <input type="hidden" name="settlement_id" value="{{ s.id }}">
+                                        <button class="btn btn-outline-success" type="submit" title="Restore">
+                                            <i class="fas fa-rotate-left"></i>
+                                        </button>
+                                    </form>
+                                    {% else %}
+                                    <form method="post" action="{{ url_for('hdc_shared_settlements') }}" class="d-inline">
+                                        <input type="hidden" name="action" value="void">
+                                        <input type="hidden" name="settlement_id" value="{{ s.id }}">
+                                        <input type="hidden" name="void_reason" value="Voided from the settlements list">
+                                        {% if s.cf_entry_id %}
+                                        <input type="hidden" name="void_linked_entry" value="1">
+                                        {% endif %}
+                                        <button class="btn btn-outline-danger" type="submit" title="Void">
+                                            <i class="fas fa-ban"></i>
+                                        </button>
+                                    </form>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr><td colspan="7">
+                                <div class="acc-empty">
+                                    <i class="fas fa-right-left"></i>
+                                    <div class="mt-2">No settlements recorded yet.</div>
+                                </div>
+                            </td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="acc-section-body">
+                <p class="small text-muted mb-0">
+                    A settlement reduces what the payer owes and increases what the receiver is owed —
+                    it never changes an expense's split. Voiding one (with its Accounts entry, when it has one)
+                    puts both ledgers back where they were.
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

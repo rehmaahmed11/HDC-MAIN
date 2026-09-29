@@ -1,0 +1,316 @@
+{% extends "shared/base.html" %}
+{% block title %}{{ 'Edit' if is_edit else 'New' }} Shared Expense{% endblock %}
+{% block page_heading %}{{ 'Edit' if is_edit else 'New' }} Shared Expense{% endblock %}
+
+{% block content %}
+{#
+  Record (or edit) one shared expense.
+
+  Three answers are needed and nothing else:
+
+    1. WHAT was spent — date, what for, category, total;
+    2. WHO it was divided between — tick the heads, then split equally, by
+       typed amounts, or by percentages.  Three today, four or five tomorrow;
+       the split is re-checked in integer paisa, so the slices must re-add to
+       the total exactly;
+    3. WHERE the money side lives — pay it out of an account now (posted to
+       Accounts through the Cash Flow register engine, so it lands in the one
+       ledger and in All Entries), link an Accounts entry recorded earlier, or
+       leave it unlinked for now (the module says so everywhere until it is).
+
+  Nothing here invents a second money ledger: whichever option is picked, the
+  payment is an ordinary Accounts transaction and this module only keeps the
+  split and the link.
+#}
+{% set se_page = 'expenses' %}
+{% include 'shared_expenses/_nav.html' %}
+
+<div class="acc-page-header">
+    <div>
+        <h2>
+            <i class="fas fa-{{ 'pen' if is_edit else 'plus' }} me-2"></i>
+            {{ 'Edit Shared Expense #' ~ expense.id if is_edit else 'New Shared Expense' }}
+        </h2>
+        <div class="acc-subtitle">
+            One cost, divided between the heads that share it.
+            {% if is_edit %}Editing keeps the audit trail: the accounts entry is corrected the immutable
+            way (void + replace) when this expense posted it, and any entry recorded in Accounts is left
+            untouched.{% endif %}
+        </div>
+    </div>
+    <div class="acc-toolbar">
+        {% if is_edit %}
+        <a href="{{ url_for('hdc_shared_expense_detail', expense_id=expense.id) }}"
+           class="btn btn-outline-secondary btn-sm"><i class="fas fa-arrow-left me-1"></i>Back to expense</a>
+        {% endif %}
+        <a href="{{ url_for('hdc_shared_expenses') }}" class="btn btn-outline-secondary btn-sm">
+            <i class="fas fa-book-open me-1"></i>Ledgers
+        </a>
+        <a href="{{ url_for('hdc_shared_parties') }}" class="btn btn-outline-info btn-sm">
+            <i class="fas fa-users me-1"></i>Sharing Parties
+        </a>
+    </div>
+</div>
+
+{% if form_error %}
+<div class="alert alert-danger d-flex align-items-start gap-2">
+    <i class="fas fa-circle-exclamation mt-1"></i>
+    <div><strong>Nothing was saved.</strong> {{ form_error }}</div>
+</div>
+{% endif %}
+
+<form method="post" id="seExpenseForm"
+      action="{{ url_for('hdc_shared_expense_edit', expense_id=expense.id) if is_edit else url_for('hdc_shared_expense_new') }}">
+    <input type="hidden" name="idempotency_key" value="{{ form_token }}">
+
+    <div class="row g-3">
+        {# ── 1. What was spent ────────────────────────────────────────────── #}
+        <div class="col-12 col-xl-7">
+            <div class="acc-section">
+                <div class="acc-section-head">
+                    <h5><i class="fas fa-file-invoice-dollar me-2" style="color:#10b981;"></i>What was spent</h5>
+                    <span class="small text-muted">Total, then the split below</span>
+                </div>
+                <div class="acc-section-body">
+                    <div class="row g-3">
+                        <div class="col-6 col-md-4">
+                            <label class="form-label" for="date">Date <span class="text-danger">*</span></label>
+                            <input type="date" class="form-control" id="date" name="date" required
+                                   value="{{ values.get('date') or today }}">
+                        </div>
+                        <div class="col-6 col-md-4">
+                            <label class="form-label" for="category">Category</label>
+                            <input type="text" class="form-control" id="category" name="category"
+                                   list="seCategories" placeholder="Car Fuel" autocomplete="off"
+                                   value="{{ values.get('category') or '' }}">
+                            <datalist id="seCategories">
+                                {% for c in categories_in_use %}<option value="{{ c }}"></option>{% endfor %}
+                            </datalist>
+                            <div class="form-text">Becomes the cash-flow head in Accounts.</div>
+                        </div>
+                        <div class="col-12 col-md-4">
+                            <label class="form-label" for="total_amount">Total Amount (PKR) <span class="text-danger">*</span></label>
+                            <div class="input-group">
+                                <span class="input-group-text">Rs.</span>
+                                <input type="text" class="form-control fw-bold" id="total_amount" name="total_amount"
+                                       inputmode="decimal" required placeholder="5,000"
+                                       value="{{ values.get('total_amount') or '' }}">
+                            </div>
+                            <div class="form-text">Exactly what left the account / was paid.</div>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label" for="title">Title / Particulars <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="title" name="title" required
+                                   maxlength="160" placeholder="Car Fuel — Honda City, tank full"
+                                   value="{{ values.get('title') or '' }}">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label" for="reference">Reference</label>
+                            <input type="text" class="form-control" id="reference" name="reference"
+                                   maxlength="120" placeholder="Slip / bill no." value="{{ values.get('reference') or '' }}">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label" for="payer_party_id">Paid By (head)</label>
+                            <select class="form-select" id="payer_party_id" name="payer_party_id">
+                                <option value="">— not a sharing head (company/account) —</option>
+                                {% for row in party_rows %}
+                                <option value="{{ row.party_id }}"
+                                        {% if values.get('payer_party_id')|string == row.party_id|string %}selected{% endif %}>
+                                    {{ row.party.name }}{% if not row.party.is_active %} — inactive{% endif %}
+                                </option>
+                                {% endfor %}
+                            </select>
+                            <div class="form-text">
+                                Who fronted the money. Leaving this empty still records the split, but the
+                                balance table will flag the payment as not attributed to a head.
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label" for="note">Note</label>
+                            <input type="text" class="form-control" id="note" name="note" maxlength="400"
+                                   placeholder="Anything worth remembering about this bill"
+                                   value="{{ values.get('note') or '' }}">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {# ── 3. The money side ────────────────────────────────────────── #}
+            <div class="acc-section">
+                <div class="acc-section-head">
+                    <h5><i class="fas fa-building-columns me-2" style="color:#3b82f6;"></i>The money side (Accounts)</h5>
+                    <span class="small text-muted">Payments stay in the one accounts ledger</span>
+                </div>
+                <div class="acc-section-body">
+                    {% set money_source = values.get('money_source') or 'post' %}
+                    <div class="se-radio-row">
+                        {% for key, label in money_sources.items() %}
+                        <label class="se-radio {% if money_source == key %}active{% endif %}" data-money-choice="{{ key }}">
+                            <input type="radio" name="money_source" value="{{ key }}"
+                                   {% if money_source == key %}checked{% endif %}>
+                            <span>{{ label }}</span>
+                        </label>
+                        {% endfor %}
+                    </div>
+
+                    <div class="se-money-panel" data-money-panel="post">
+                        <div class="row g-3 align-items-end">
+                            <div class="col-12 col-md-6">
+                                <label class="form-label" for="account_id">Pay from account</label>
+                                <select class="form-select" id="account_id" name="account_id">
+                                    <option value="">— choose cash / bank —</option>
+                                    {% for a in accounts %}
+                                    <option value="{{ a.id }}"
+                                            {% if values.get('account_id')|string == a.id|string %}selected{% endif %}>
+                                        {{ a.name }} ({{ a.type }})
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-12 col-md-6">
+                                <label class="form-label" for="cf_category_id">Accounts category</label>
+                                <select class="form-select" id="cf_category_id" name="cf_category_id">
+                                    <option value="">Use the category typed above (created if new)</option>
+                                    {% for c in accounts_categories %}
+                                    <option value="{{ c.id }}">{{ c.name }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
+                        <div class="alert alert-info small mt-3 mb-0">
+                            <i class="fas fa-circle-info me-1"></i>
+                            This posts <strong>one</strong> payment to the Accounts section through the Cash Flow
+                            register engine — same rules as the New Transaction form: day lock, overdraft block,
+                            double-submit guard. It shows in the register, in All Entries and in the Cash Flow report.
+                        </div>
+                    </div>
+
+                    <div class="se-money-panel" data-money-panel="link">
+                        <label class="form-label" for="cf_entry_id">Accounts entry (money out)</label>
+                        <input type="text" class="form-control form-control-sm mb-1" id="seEntrySearch"
+                               placeholder="Type to filter the list…" autocomplete="off">
+                        <select class="form-select" id="cf_entry_id" name="cf_entry_id" size="8">
+                            {% for item in linkable %}
+                            <option value="{{ item.id }}"
+                                    data-search="{{ item.label|lower }}"
+                                    {% if values.get('cf_entry_id')|string == item.id|string %}selected{% endif %}>
+                                {{ item.label }}{% if item.already_linked %} — already allocated{% endif %}
+                            </option>
+                            {% else %}
+                            <option value="" disabled>No unallocated money-out entries in Accounts yet</option>
+                            {% endfor %}
+                        </select>
+                        <div class="form-text">
+                            Entries already allocated to another shared expense are left out, so one payment
+                            can never fund two splits. Record the payment in
+                            <a href="{{ url_for('hdc_cashflow_register') }}" target="_blank">the Cash Flow register</a>
+                            or <a href="{{ url_for('hdc_money_center') }}" target="_blank">Money Center</a> first.
+                        </div>
+                    </div>
+
+                    <div class="se-money-panel" data-money-panel="none">
+                        <div class="alert alert-warning small mb-0">
+                            <i class="fas fa-triangle-exclamation me-1"></i>
+                            The split is saved without any Accounts entry. Every list and the report will mark
+                            it <strong>“not in Accounts”</strong> until the payment is recorded and linked —
+                            nothing pretends the money moved.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        {# ── 2. The split ─────────────────────────────────────────────────── #}
+        <div class="col-12 col-xl-5">
+            <div class="acc-section">
+                <div class="acc-section-head">
+                    <h5><i class="fas fa-users-rectangle me-2" style="color:#8b5cf6;"></i>Split between</h5>
+                    <span class="small text-muted">Tick every head that shares this</span>
+                </div>
+                <div class="acc-section-body">
+                    <div class="mb-3">
+                        <label class="form-label" for="split_mode">How to divide</label>
+                        <select class="form-select" id="split_mode" name="split_mode">
+                            <option value="equal" {% if values.get('split_mode') in (None, '', 'equal') %}selected{% endif %}>Equal split</option>
+                            <option value="custom" {% if values.get('split_mode') == 'custom' %}selected{% endif %}>Custom amounts (must add up to the total)</option>
+                            <option value="percent" {% if values.get('split_mode') == 'percent' %}selected{% endif %}>Percentages (must add up to 100%)</option>
+                        </select>
+                    </div>
+
+                    <div class="se-split-table">
+                        <div class="se-split-head">
+                            <span>Sharing Party</span>
+                            <span class="text-end">Amount</span>
+                            <span class="text-end">%</span>
+                        </div>
+                        {% for row in party_rows %}
+                        <div class="se-split-row {% if new_party_id == row.party_id %}se-split-new{% endif %}">
+                            <label class="se-split-name">
+                                <input type="checkbox" name="party_ids" value="{{ row.party_id }}"
+                                       class="form-check-input se-party-tick"
+                                       {% if row.checked or new_party_id == row.party_id %}checked{% endif %}>
+                                <span>
+                                    {{ row.party.name }}
+                                    {% if not row.party.is_active %}<span class="badge bg-secondary">inactive</span>{% endif %}
+                                </span>
+                            </label>
+                            <input type="text" inputmode="decimal" class="form-control form-control-sm text-end se-amount"
+                                   name="amount_party_{{ row.party_id }}" value="{{ row.amount_raw }}"
+                                   placeholder="0.00" autocomplete="off">
+                            <input type="text" inputmode="decimal" class="form-control form-control-sm text-end se-percent"
+                                   name="percent_party_{{ row.party_id }}" value="{{ row.percent_raw }}"
+                                   placeholder="0" autocomplete="off">
+                        </div>
+                        {% else %}
+                        <div class="acc-empty">
+                            <i class="fas fa-users"></i>
+                            <div class="mt-2">No sharing parties yet — add FBM, HDC, Home or whoever shares.</div>
+                        </div>
+                        {% endfor %}
+                    </div>
+
+                    <div class="se-split-check" id="seSplitCheck">
+                        <span class="text-muted">Tick the parties and enter the total to see the split.</span>
+                    </div>
+
+                    <div class="mt-3">
+                        <label class="form-label small text-muted mb-1">Add another sharing head</label>
+                        <div class="input-group input-group-sm">
+                            <input type="text" class="form-control" name="new_party_name" maxlength="80"
+                                   placeholder="e.g. Factory, Site 2, Ahsan">
+                            <button class="btn btn-outline-success" type="submit" name="action" value="add_party"
+                                    formnovalidate>
+                                <i class="fas fa-user-plus me-1"></i>Add
+                            </button>
+                        </div>
+                        <div class="form-text">
+                            Creates the head and its own Accounts ledger account, then comes back here with the
+                            letter you had typed still in place.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="acc-section">
+                <div class="acc-section-head">
+                    <h5><i class="fas fa-circle-check me-2" style="color:#10b981;"></i>Save</h5>
+                </div>
+                <div class="acc-section-body">
+                    <div class="d-grid gap-2">
+                        <button type="submit" class="btn btn-mint">
+                            <i class="fas fa-floppy-disk me-1"></i>
+                            {{ 'Save changes' if is_edit else 'Save shared expense' }}
+                        </button>
+                        <a href="{{ url_for('hdc_shared_expense_detail', expense_id=expense.id) if is_edit else url_for('hdc_shared_expenses') }}"
+                           class="btn btn-outline-secondary">Cancel</a>
+                    </div>
+                    <p class="small text-muted mb-0 mt-3">
+                        The odd paisa from an equal split is handed out one by one (1,666.67 + 1,666.67 +
+                        1,666.66), so the slices always re-add to the total — never a rupee lost to rounding.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+</form>
+{% endblock %}
