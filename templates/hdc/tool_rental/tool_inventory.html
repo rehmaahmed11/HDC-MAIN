@@ -156,41 +156,6 @@
                     </div>
                 </div>
 
-                <div class="modal fade" id="catModal{{ c.id }}" tabindex="-1">
-                  <div class="modal-dialog modal-sm">
-                    <div class="modal-content hdc-modal">
-                      <form method="POST" action="{{ url_for('hdc_tool_rental_category_edit', category_id=c.id) }}">
-                        <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
-                        <div class="modal-header"><h6 class="modal-title">Rename Category</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-                        <div class="modal-body">
-                            <label class="form-label">Name</label>
-                            <input type="text" name="name" value="{{ c.name }}" class="form-control" required>
-                        </div>
-                        <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button type="submit" class="btn btn-mint">Save</button></div>
-                      </form>
-                    </div>
-                  </div>
-                </div>
-
-                <div class="modal fade" id="catDelModal{{ c.id }}" tabindex="-1">
-                  <div class="modal-dialog modal-sm">
-                    <div class="modal-content hdc-modal">
-                      <form method="POST" action="{{ url_for('hdc_tool_rental_category_delete', category_id=c.id) }}">
-                        <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
-                        <div class="modal-header"><h6 class="modal-title">Delete Category?</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-                        <div class="modal-body">
-                            Delete <strong>{{ c.name }}</strong>?
-                            {% if category_tool_counts.get(c.id, 0) > 0 %}
-                            <div class="alert alert-danger py-2 small mt-2 mb-0">
-                                {{ category_tool_counts.get(c.id, 0) }} tool(s) still use this category — move them first.
-                            </div>
-                            {% endif %}
-                        </div>
-                        <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button type="submit" class="btn btn-danger">Delete</button></div>
-                      </form>
-                    </div>
-                  </div>
-                </div>
                 {% else %}
                 <div class="list-group-item text-center text-muted py-3">No categories yet.</div>
                 {% endfor %}
@@ -294,6 +259,72 @@
                             </td>
                         </tr>
 
+                    {% else %}
+                        <tr><td colspan="10" class="text-center text-muted py-4">
+                            No tools match. Add your first tool on the left, or
+                            <a href="{{ url_for('hdc_tool_rental_inventory') }}">reset the filters</a>.
+                        </td></tr>
+                    {% endfor %}
+                    </tbody>
+                    <tfoot>
+                        <tr class="hdc-empty-row">
+                            <td class="fw-bold">Totals ({{ tools|length }} shown)</td>
+                            <td></td>
+                            <td class="text-center fw-bold">{{ "%g"|format(tools|sum(attribute='owned_qty')) }}</td>
+                            <td class="text-center fw-bold">{{ "%g"|format(tools|sum(attribute='in_store_qty')) }}</td>
+                            <td class="text-center fw-bold">{{ "%g"|format(tools|sum(attribute='out_qty')) }}</td>
+                            <td class="text-center fw-bold">{{ "%g"|format(tools|sum(attribute='purchased_qty')) }}</td>
+                            <td class="text-center fw-bold">{{ "%g"|format(tools|sum(attribute='scrapped_qty')) }}</td>
+                            <td colspan="3"></td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+    {# Keep Bootstrap dialogs at the page root: .hdc-card backdrop-filter creates a stacking context. #}
+    {% for c in categories %}
+                <div class="modal fade" id="catModal{{ c.id }}" tabindex="-1">
+                  <div class="modal-dialog modal-sm">
+                    <div class="modal-content hdc-modal">
+                      <form method="POST" action="{{ url_for('hdc_tool_rental_category_edit', category_id=c.id) }}">
+                        <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+                        <div class="modal-header"><h6 class="modal-title">Rename Category</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                        <div class="modal-body">
+                            <label class="form-label">Name</label>
+                            <input type="text" name="name" value="{{ c.name }}" class="form-control" required>
+                        </div>
+                        <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button type="submit" class="btn btn-mint">Save</button></div>
+                      </form>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="modal fade" id="catDelModal{{ c.id }}" tabindex="-1">
+                  <div class="modal-dialog modal-sm">
+                    <div class="modal-content hdc-modal">
+                      <form method="POST" action="{{ url_for('hdc_tool_rental_category_delete', category_id=c.id) }}">
+                        <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+                        <div class="modal-header"><h6 class="modal-title">Delete Category?</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                        <div class="modal-body">
+                            Delete <strong>{{ c.name }}</strong>?
+                            {% if category_tool_counts.get(c.id, 0) > 0 %}
+                            <div class="alert alert-danger py-2 small mt-2 mb-0">
+                                {{ category_tool_counts.get(c.id, 0) }} tool(s) still use this category — move them first.
+                            </div>
+                            {% endif %}
+                        </div>
+                        <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button type="submit" class="btn btn-danger" {% if category_tool_counts.get(c.id, 0) > 0 %}disabled title="Move tools to another category first"{% endif %}>Delete</button></div>
+                      </form>
+                    </div>
+                  </div>
+                </div>
+    {% endfor %}
+
+{# Tool dialogs are also outside .hdc-card and outside the table DOM. #}
+{% for r in tools %}
                         <!-- Edit Modal -->
                         <div class="modal fade" id="editModal{{ r.tool_id }}" tabindex="-1">
                           <div class="modal-dialog">
@@ -344,30 +375,7 @@
                           </div>
                         </div>
 
-                    {% else %}
-                        <tr><td colspan="10" class="text-center text-muted py-4">
-                            No tools match. Add your first tool on the left, or
-                            <a href="{{ url_for('hdc_tool_rental_inventory') }}">reset the filters</a>.
-                        </td></tr>
-                    {% endfor %}
-                    </tbody>
-                    <tfoot>
-                        <tr class="hdc-empty-row">
-                            <td class="fw-bold">Totals ({{ tools|length }} shown)</td>
-                            <td></td>
-                            <td class="text-center fw-bold">{{ "%g"|format(tools|sum(attribute='owned_qty')) }}</td>
-                            <td class="text-center fw-bold">{{ "%g"|format(tools|sum(attribute='in_store_qty')) }}</td>
-                            <td class="text-center fw-bold">{{ "%g"|format(tools|sum(attribute='out_qty')) }}</td>
-                            <td class="text-center fw-bold">{{ "%g"|format(tools|sum(attribute='purchased_qty')) }}</td>
-                            <td class="text-center fw-bold">{{ "%g"|format(tools|sum(attribute='scrapped_qty')) }}</td>
-                            <td colspan="3"></td>
-                        </tr>
-                    </tfoot>
-                </table>
-            </div>
-        </div>
-    </div>
-</div>
+{% endfor %}
 
 {# ------------------------------------------------ shared stock modals -- #}
 {{ purchase_modal('purchaseModal', tools|map(attribute='tool')|list, None, today) }}
