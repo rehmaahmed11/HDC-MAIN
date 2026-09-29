@@ -235,6 +235,12 @@
                             <option value="custom" {% if values.get('split_mode') == 'custom' %}selected{% endif %}>Custom amounts (must add up to the total)</option>
                             <option value="percent" {% if values.get('split_mode') == 'percent' %}selected{% endif %}>Percentages (must add up to 100%)</option>
                         </select>
+                        <div class="form-text">
+                            Type the total and the split fills itself in. Percentages work out the
+                            rupees; type an amount instead and the percentage is worked out for you.
+                            Figures the page works out are tinted — type over them by switching to
+                            Custom amounts.
+                        </div>
                     </div>
 
                     <div class="se-split-table">

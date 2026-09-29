@@ -27,12 +27,14 @@ handlers parse the request, call one service function and flash the outcome.
 
 import csv
 import io
+import os
 import secrets
 
 from flask import (Response, current_app, flash, redirect, render_template,
                    request, session, url_for)
 from flask_login import current_user, login_required
 
+from hdc.config import BASE_DIR
 from hdc.extensions import _admin_only, db
 from hdc.models.shared_expenses import SharedExpense, SharedParty, SharedSettlement
 from hdc.services.shared_expenses import (
@@ -81,6 +83,25 @@ DRAFT_KEY = 'hdc_shared_expense_draft'
 DRAFT_ERROR_KEY = 'hdc_shared_expense_draft_error'
 
 
+def _asset_stamp():
+    """A ?v= stamp for this module's own CSS / JS.
+
+    Static files are served straight off disk (PythonAnywhere maps
+    ``/hdc_static`` itself), so a browser that fetched the script last week
+    keeps using it and the operator sees the old page — a split table that
+    never updates, however correct the new script is.  Stamping the two files
+    with their modified time makes every deploy land without asking anybody to
+    hard-reload.
+    """
+    stamp = 0
+    for rel in ('js/pages/shared_expenses.js', 'css/shared_expenses.css'):
+        try:
+            stamp = max(stamp, int(os.path.getmtime(os.path.join(BASE_DIR, 'static', 'hdc', rel))))
+        except OSError:
+            continue
+    return str(stamp or 1)
+
+
 # ---------------------------------------------------------------------------
 # form drafts — never lose what was typed
 # ---------------------------------------------------------------------------
@@ -117,17 +138,22 @@ def _draft_party_ids(values):
 # shared form context
 # ---------------------------------------------------------------------------
 
-def _party_rows(values, *, expense=None):
+def _party_rows(values, *, expense=None, fresh=False):
     """The split table: one row per sharing head, with what is already typed.
 
     Inactive heads are shown only when they already carry a share of the
     expense being edited — a head that was retired this morning must not
     silently lose a slice of last month's bill.
+
+    ``fresh`` marks a form nobody has typed into yet (a new expense, not a
+    draft being restored after a refusal).  Those start with the default heads
+    already ticked, so the operator sees the split the moment the total is
+    typed instead of hunting for a tick box first.
     """
     ids = _draft_party_ids(values)
     if not ids and expense is not None:
         ids = [int(s.party_id) for s in (expense.shares or [])]
-    if not ids and not values and expense is None:
+    if not ids and fresh and expense is None:
         ids = default_party_ids()
     existing = {int(s.party_id): s for s in (expense.shares or [])} if expense else {}
 
@@ -177,14 +203,14 @@ def _expense_values(expense):
     }
 
 
-def _form_context(values, *, expense=None, error=None, new_party_id=None):
+def _form_context(values, *, expense=None, error=None, new_party_id=None, fresh=False):
     linkable = linkable_entries(limit=300)
     ctx = {
         'values': values,
         'form_error': error or '',
         'expense': expense,
         'is_edit': expense is not None,
-        'party_rows': _party_rows(values, expense=expense),
+        'party_rows': _party_rows(values, expense=expense, fresh=fresh),
         'new_party_id': new_party_id,
         'money_sources': MONEY_SOURCE_LABELS,
         'accounts': account_options(),
@@ -248,6 +274,15 @@ def _csv_response(rows, header, filename):
 
 def register(app):
     """Register the Shared Expenses pages."""
+
+    # The ?v= stamp for this module's assets (see _asset_stamp).  Computed once
+    # at start-up: a deploy restarts the process, which is exactly when the
+    # stamp has to change.
+    stamp = _asset_stamp()
+
+    @app.context_processor
+    def _inject_asset_stamp():
+        return {'se_asset_stamp': stamp}
 
     # ------------------------------------------------------------------
     # the ledgers
@@ -428,14 +463,16 @@ def register(app):
                 return redirect(url_for('hdc_shared_expense_new', restore=1))
 
         values, error = _pop_draft()
-        if not values:
+        fresh = not values
+        if fresh:
             values = {'date': _pkt_today().isoformat(),
                       'split_mode': 'equal',
                       'money_source': 'post'}
         new_party_id = request.args.get('new_party', type=int)
         return render_template('shared_expenses/expense_form.html',
                                **_form_context(values, error=error,
-                                               new_party_id=new_party_id))
+                                               new_party_id=new_party_id,
+                                               fresh=fresh))
 
     @app.route('/hdc/accounts/shared/expenses/<int:expense_id>')
     @login_required

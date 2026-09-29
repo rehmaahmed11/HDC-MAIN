@@ -116,6 +116,19 @@
 .se-split-row { border-top: 1px solid var(--card-border); }
 .se-split-row:hover { background: var(--table-hover); }
 
+/* A head that is not ticked takes no share: dimmed, never counted. */
+.se-split-row.se-split-off { opacity: .45; }
+.se-split-row.se-split-off .se-split-name span { text-decoration: line-through; }
+.se-split-row.se-split-off:hover { background: transparent; }
+
+/* Worked out by the page (equal split, or the column that follows the other
+   one) — tinted so the operator can see it is derived, not typed. */
+.se-split-row input.se-auto {
+    background: var(--table-head);
+    color: var(--text-muted);
+}
+.se-split-row input.se-auto:focus { box-shadow: none; }
+
 .se-split-new {
     background: rgba(16, 185, 129, .1);
     animation: se-flash 1.6s ease-out 1;
