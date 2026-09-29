@@ -392,6 +392,36 @@ class ToolStockLifecycleTestCase(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(inventory_rows(term='nothing-like-this'), [])
 
+    def test_inventory_category_search_fields_keep_named_selects(self):
+        cat = ToolCategory(name='Power Tools', active_status=True)
+        db.session.add(cat)
+        db.session.commit()
+        tool = self._make_tool('TOOL-0001', 'Vibrator', 1, category=cat)
+        r = self.client.get(f'/hdc/tool-rental/inventory?category_id={cat.id}&new_category={cat.id}')
+        self.assertEqual(r.status_code, 200)
+        html = r.get_data(as_text=True)
+
+        # The widget searches the categories, but the original select still posts
+        # the id (or empty for No Category / All Categories) in each form.
+        for input_id, select_id in (
+            ('toolCategoryInput', 'toolCategorySelect'),
+            ('inventoryCategoryInput', 'inventoryCategorySelect'),
+            (f'editToolCategoryInput{tool.id}', f'editToolCategorySelect{tool.id}'),
+        ):
+            self.assertIn(f'id="{input_id}"', html)
+            self.assertRegex(html, rf'<select name="category_id" id="{select_id}"')
+            self.assertRegex(html, rf'id="{select_id}"[^>]*>\s*<option value=""')
+        self.assertIn('value="__new">＋ Create new category…', html)
+        self.assertIn('id="toolNewCategory"', html)
+        self.assertIn("HDCComboList.attach('toolCategoryInput', 'toolCategorySelect'", html)
+        self.assertIn("HDCComboList.attach('inventoryCategoryInput', 'inventoryCategorySelect'", html)
+        self.assertIn("querySelectorAll('.js-edit-tool-category-input')", html)
+        for select_id in ('toolCategorySelect', 'inventoryCategorySelect',
+                          f'editToolCategorySelect{tool.id}'):
+            self.assertIsNotNone(re.search(
+                rf'id="{select_id}"[^>]*>.*?value="{cat.id}" selected', html, re.S
+            ), select_id)
+
     def test_inventory_page_renders_with_stock_controls(self):
         tool = self._make_tool('TOOL-0001', 'Vibrator', 10)
         record_tool_purchase(tool.id, qty=4, unit_cost=45000)
