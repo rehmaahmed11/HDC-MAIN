@@ -284,6 +284,190 @@ body.sidebar-scroll-lock { overflow: hidden; }
     font-weight: 700;
 }
 
+/* ── Collapsible navigation groups ───────────────────────────────────────
+   Every option sits under a group heading (`.nav-group-toggle`) that opens and
+   closes its list with the arrow on the right.  `.has-current` marks the group
+   that holds the page being viewed — it keeps its highlight (and a teal arrow)
+   even when the user closes it, so the drawer always answers "where am I?".
+   Behaviour lives in core/sidebar_groups.js. */
+.sidebar-groups {
+    padding: 6px 0 2px;
+}
+
+.nav-group {
+    list-style: none;
+}
+
+.nav-group-toggle {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: calc(100% - 20px);
+    margin: 2px 10px;
+    padding: 9px 12px;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    background: transparent;
+    color: var(--sidebar-text);
+    font-family: inherit;
+    font-size: 0.7rem;
+    font-weight: 800;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease;
+}
+
+.nav-group-toggle:hover {
+    background: var(--sidebar-hover);
+    color: var(--sidebar-text-active);
+    border-color: rgba(255, 255, 255, 0.14);
+}
+
+.nav-group-toggle:focus-visible {
+    outline: 2px solid rgba(45, 212, 191, 0.65);
+    outline-offset: 1px;
+}
+
+.nav-group-icon {
+    flex: 0 0 auto;
+    min-width: 18px;
+    text-align: center;
+    font-size: 0.82rem;
+    opacity: 0.85;
+}
+
+.nav-group-label {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* the dropdown arrow: ▼ while open, ▶ while closed */
+.nav-group-arrow {
+    flex: 0 0 auto;
+    font-size: 0.72rem;
+    opacity: 0.7;
+    transition: transform 0.2s ease;
+}
+
+.nav-group-toggle[aria-expanded="false"] .nav-group-arrow {
+    transform: rotate(-90deg);
+}
+
+/* the group holding the current page */
+.nav-group.has-current > .nav-group-toggle {
+    background: rgba(45, 212, 191, 0.12);
+    color: var(--sidebar-text-active);
+}
+
+.nav-group.has-current > .nav-group-toggle .nav-group-icon {
+    color: #31ffd0;
+    opacity: 1;
+}
+
+.nav-group.has-current > .nav-group-toggle .nav-group-arrow {
+    color: #31ffd0;
+    opacity: 0.95;
+}
+
+/* closed, but it is the section holding the current page — say so with a dot */
+.nav-group.has-current.is-section-closed > .nav-group-toggle .nav-group-label::after {
+    content: "";
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-left: 7px;
+    border-radius: 50%;
+    background: #31ffd0;
+    vertical-align: middle;
+    box-shadow: 0 0 6px rgba(49, 255, 208, 0.9);
+}
+
+/* its links are indented, with a rail that shows they belong to the group */
+.sidebar-subnav {
+    position: relative;
+    list-style: none;
+    margin: 0;
+    padding: 2px 0 6px;
+}
+
+.sidebar-subnav::before {
+    content: "";
+    position: absolute;
+    left: 27px;
+    top: 2px;
+    bottom: 9px;
+    width: 1px;
+    background: rgba(255, 255, 255, 0.12);
+    pointer-events: none;
+}
+
+.sidebar-subnav .nav-item a {
+    margin-left: 22px;
+    padding: 9px 10px;
+    font-size: 0.83rem;
+}
+
+.sidebar-subnav .nav-item a i {
+    min-width: 16px;
+    font-size: 0.88rem;
+}
+
+/* Footer: expand/collapse-all plus Logout, pinned to the bottom of the
+   drawer when the list is shorter than the screen. */
+.sidebar-footer {
+    margin-top: auto;
+    padding-bottom: 6px;
+}
+
+.sidebar-expand-all {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    width: calc(100% - 20px);
+    margin: 2px 10px;
+    padding: 9px 12px;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    background: transparent;
+    color: var(--sidebar-text);
+    font-family: inherit;
+    font-size: 0.78rem;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+    opacity: 0.85;
+    transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease;
+}
+
+.sidebar-expand-all i {
+    min-width: 18px;
+    text-align: center;
+    font-size: 0.82rem;
+}
+
+.sidebar-expand-all:hover,
+.sidebar-expand-all:focus-visible {
+    background: var(--sidebar-hover);
+    color: var(--sidebar-text-active);
+    border-color: rgba(255, 255, 255, 0.14);
+    opacity: 1;
+}
+
+.sidebar-expand-all:focus-visible {
+    outline: 2px solid rgba(45, 212, 191, 0.65);
+    outline-offset: 1px;
+}
+
+.sidebar-expand-all:disabled {
+    cursor: default;
+    opacity: 0.35;
+}
+
 .text-danger-light { color: #ff8a8a !important; }
 
 #page-content {
@@ -838,7 +1022,8 @@ code {
 /* Respect users who ask for less motion: snap the drawer instead of sliding. */
 @media (prefers-reduced-motion: reduce) {
     #sidebar,
-    .sidebar-backdrop { transition: none; }
+    .sidebar-backdrop,
+    .nav-group-arrow { transition: none; }
 }
 
 /* Never print the drawer, its veil or the hamburger. */

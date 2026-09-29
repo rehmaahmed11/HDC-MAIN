@@ -34,8 +34,8 @@
             ? (button.getAttribute('data-collapse-label') || 'Collapse all')
             : (button.getAttribute('data-expand-label') || 'Expand all');
         if (icon) {
-            icon.classList.toggle('fa-chevrons-up', allOpen);
-            icon.classList.toggle('fa-chevrons-down', !allOpen);
+            icon.classList.toggle('fa-angles-up', allOpen);
+            icon.classList.toggle('fa-angles-down', !allOpen);
         }
     }
 
