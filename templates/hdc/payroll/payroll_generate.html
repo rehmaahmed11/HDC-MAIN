@@ -84,28 +84,28 @@
 
         <div class="row g-2 mb-3">
             <div class="col-6 col-md-3">
-                <div class="kpi-card kpi-green">
+                <div class="kpi-card kpi-green kpi-compact">
                     <div class="kpi-icon"><i class="fas fa-users"></i></div>
                     <div class="kpi-value">{{ totals.workers }}</div>
                     <div class="kpi-label">Workers</div>
                 </div>
             </div>
             <div class="col-6 col-md-3">
-                <div class="kpi-card kpi-teal">
+                <div class="kpi-card kpi-teal kpi-compact">
                     <div class="kpi-icon"><i class="fas fa-money-bill-wave"></i></div>
                     <div class="kpi-value">{{ "{:,.0f}".format(totals.total_wage or 0) }}</div>
                     <div class="kpi-label">Total Wage</div>
                 </div>
             </div>
             <div class="col-6 col-md-3">
-                <div class="kpi-card kpi-orange">
+                <div class="kpi-card kpi-orange kpi-compact">
                     <div class="kpi-icon"><i class="fas fa-hand-holding-usd"></i></div>
                     <div class="kpi-value">{{ "{:,.0f}".format(totals.total_advance or 0) }}</div>
                     <div class="kpi-label">Advance</div>
                 </div>
             </div>
             <div class="col-6 col-md-3">
-                <div class="kpi-card {% if (totals.total_balance or 0) > 0 %}kpi-red{% else %}kpi-profit{% endif %}">
+                <div class="kpi-card kpi-compact {% if (totals.total_balance or 0) > 0 %}kpi-red{% else %}kpi-profit{% endif %}">
                     <div class="kpi-icon"><i class="fas fa-balance-scale"></i></div>
                     <div class="kpi-value">{{ "{:,.0f}".format(totals.total_balance or 0) }}</div>
                     <div class="kpi-label">Balance Pending</div>
