@@ -757,7 +757,13 @@ def _validate_account_transaction_payload(norm):
         return False, f'project_id is required for type={tx_type}.'
     expected_rel = _account_expected_related_type(tx_type)
     if expected_rel:
-        if related_entity_type != expected_rel:
+        # A subcontractor's own labourer is paid as payroll too, but is not a
+        # company Worker row; its ledger lives in SubcontractLabourPayment.
+        # Without this, every "Pay" on a sub-labour worker was refused.
+        allowed_rel = {expected_rel}
+        if expected_rel == 'worker':
+            allowed_rel.add('subcontractor_labour_worker')
+        if related_entity_type not in allowed_rel:
             return False, f'{tx_type} requires related_entity_type={expected_rel}.'
         if not related_entity_id:
             return False, f'related_entity_id is required for type={tx_type}.'
@@ -3442,6 +3448,38 @@ def _accounts_post_expense_row(expense_row, commit=False):
         'reference_id': f'expense#{expense_row.id}',
     }
     return _accounts_post_transaction(payload, source_type='expense', source_id=(expense_row.id if expense_row else None), commit=commit)
+
+
+def _accounts_sync_expense_row(expense_row):
+    """Keep the ledger posting of a project expense in step with the expense.
+
+    Editing or voiding an expense used to change only ``hdc_expense``: the
+    cash stayed deducted at the old amount (and was never given back on
+    void), so Company Cash drifted away from the expense register.  Called by
+    the expense edit/void handlers inside their own transaction.
+    Returns the number of ledger rows touched.
+    """
+    if expense_row is None or not getattr(expense_row, 'id', None):
+        return 0
+    rows = (AccountTransaction.query
+            .filter(AccountTransaction.source_id == int(expense_row.id),
+                    or_(func.lower(func.coalesce(AccountTransaction.source_type, '')) == 'expense',
+                        func.lower(func.coalesce(AccountTransaction.source_type, '')).like('expense:%')))
+            .all())
+    if bool(getattr(expense_row, 'is_void', False)):
+        for r in rows:
+            r.is_void = True
+        return len(rows)
+    if not rows:
+        ok, _msg, _ = _accounts_post_expense_row(expense_row, commit=False)
+        return 1 if ok else 0
+    for r in rows:
+        r.is_void = False
+        r.amount = float(expense_row.amount or 0.0)
+        r.date = expense_row.date or r.date
+        r.project_id = expense_row.project_id
+        r.stage_id = expense_row.stage_id
+    return len(rows)
 
 
 def _accounts_post_personal_expense_row(personal_expense_row, commit=False):

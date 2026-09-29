@@ -11,7 +11,7 @@ from sqlalchemy import func
 from hdc.extensions import _money_write_required, db
 from hdc.models.accounts import Alert, Expense, ExpenseCategory
 from hdc.models.projects import Project, Stage
-from hdc.services.accounts import _accounts_post_expense_row
+from hdc.services.accounts import _accounts_post_expense_row, _accounts_sync_expense_row
 from hdc.services.audit import log_action
 from hdc.services.ledger import _is_linked_system_expense
 from hdc.services.lookups import _category_name_from_id, _ensure_expense_category_by_id
@@ -293,6 +293,7 @@ def register(app):
                 'expense',
                 exp.id
             )
+            _accounts_sync_expense_row(exp)
             db.session.commit()
             flash('Expense updated.', 'success')
             return redirect(url_for('hdc_expenses', project_id=pid))
@@ -324,6 +325,7 @@ def register(app):
             'expense',
             exp.id
         )
+        _accounts_sync_expense_row(exp)
         db.session.commit()
         flash('Expense voided.', 'success')
         return redirect(url_for('hdc_expenses', project_id=pid))
