@@ -14,6 +14,7 @@ from hdc.extensions import db
 from hdc.models.projects import Project
 from hdc.models.workforce import Attendance, AttendanceDay, AttendanceMark, LabourLedger, TimeEntry, Worker, WorkerRate
 from hdc.services.ledger import _worker_tip_expenses
+from hdc.services.record_permissions import integrity_query, readonly_exact_request
 from hdc.utils.dates import _pkt_now_naive
 from hdc.utils.format import _activity_at_for, _flt
 
@@ -108,7 +109,7 @@ def _recalculate_attendance_day(worker_id, work_date):
 
 
 def _has_recent_duplicate(model, seconds=12, timestamp_field='created_at', **eq_fields):
-    q = db.session.query(model)
+    q = db.session.query(model.id)
     for key, val in eq_fields.items():
         q = q.filter(getattr(model, key) == val)
     if hasattr(model, 'is_void') and 'is_void' not in eq_fields:
@@ -116,10 +117,12 @@ def _has_recent_duplicate(model, seconds=12, timestamp_field='created_at', **eq_
     ts_col = getattr(model, timestamp_field, None)
     if ts_col is not None:
         q = q.filter(ts_col >= (_pkt_now_naive() - timedelta(seconds=seconds)))
-    return q.first() is not None
+    return integrity_query(q.limit(1)).first() is not None
 
 
 def _reconcile_worker_tip_ledger(worker):
+    if readonly_exact_request():
+        return 0
     tips = _worker_tip_expenses(worker)
     for exp in tips:
         # Primary identity check: every reconciled tip ledger row carries
@@ -276,6 +279,8 @@ def _void_orphan_work_ledgers_for_time_entry(te, reason='Time entry voided'):
 
 
 def _repair_worker_work_ledger_links(worker_id):
+    if readonly_exact_request():
+        return 0
     rows = (LabourLedger.query
             .filter(
                 LabourLedger.worker_id == worker_id,
@@ -310,6 +315,8 @@ def _repair_worker_work_ledger_links(worker_id):
 
 
 def _reconcile_worker_time_entries(worker_id):
+    if readonly_exact_request():
+        return 0
     day_entries = (TimeEntry.query
                    .filter(TimeEntry.worker_id == worker_id, TimeEntry.is_void == False)
                    .order_by(TimeEntry.check_in.asc(), TimeEntry.id.asc())

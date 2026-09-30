@@ -16,6 +16,7 @@ from hdc.models.materials import Delivery, MaterialV2, PurchaseV2, Supplier, Sup
 from hdc.models.projects import Project, Stage
 from hdc.services.accounts import _accounts_post_supplier_credit_row, _accounts_set_void_by_source, _accounts_upsert_purchase_paid_txn
 from hdc.services.audit import log_action
+from hdc.services.record_permissions import integrity_message, integrity_query
 from hdc.services.purchase import validate_delivery_reduction, _MATERIAL_V2_UNITS, _ensure_material_v2, _ensure_supplier_quick, _material_v2_available, _material_v2_delivered, _material_v2_scope_stock_rows, _material_v2_used, _purchase_v2_available_in_scope_qty, _purchase_v2_delivered_qty, _purchase_v2_delivered_to_scope_qty, _purchase_v2_scope_remaining_map, _purchase_v2_used_in_scope_qty, _supplier_balance, _sync_purchase_v2_ledger
 from hdc.utils.dates import _pkt_now_naive
 from hdc.utils.format import _flt, _payload_int
@@ -113,8 +114,8 @@ def register(app):
             log_action(current_user, 'update', f'{current_user.username.title()} updated supplier #{row.id}: {row.name}', 'supplier', row.id)
             db.session.commit()
             return jsonify(ok=True, id=row.id)
-        has_purchase = PurchaseV2.query.filter_by(supplier_id=row.id, is_void=False).first() is not None
-        has_ledger = SupplierLedger.query.filter_by(supplier_id=row.id, is_void=False).first() is not None
+        has_purchase = integrity_query(db.session.query(PurchaseV2.id).filter_by(supplier_id=row.id, is_void=False)).first() is not None
+        has_ledger = integrity_query(db.session.query(SupplierLedger.id).filter_by(supplier_id=row.id, is_void=False)).first() is not None
         if has_purchase or has_ledger:
             return jsonify(ok=False, message='Supplier has transactions; set status inactive instead of delete.'), 400
         row.is_void = True
@@ -192,9 +193,9 @@ def register(app):
             log_action(current_user, 'update', f'{current_user.username.title()} updated material #{row.id}: {row.name} ({row.unit})', 'material_v2', row.id)
             db.session.commit()
             return jsonify(ok=True, id=row.id)
-        has_purchase = PurchaseV2.query.filter_by(material_id=row.id, is_void=False).first() is not None
-        has_delivery = Delivery.query.filter_by(material_id=row.id, is_void=False).first() is not None
-        has_usage = UsageLogV2.query.filter_by(material_id=row.id, is_void=False).first() is not None
+        has_purchase = integrity_query(db.session.query(PurchaseV2.id).filter_by(material_id=row.id, is_void=False)).first() is not None
+        has_delivery = integrity_query(db.session.query(Delivery.id).filter_by(material_id=row.id, is_void=False)).first() is not None
+        has_usage = integrity_query(db.session.query(UsageLogV2.id).filter_by(material_id=row.id, is_void=False)).first() is not None
         if has_purchase or has_delivery or has_usage:
             return jsonify(ok=False, message='Material has transactions; set status inactive instead of delete.'), 400
         row.is_void = True
@@ -307,9 +308,9 @@ def register(app):
                 return jsonify(ok=False, message='Valid material is required.'), 400
             if unit_price <= 0 or quantity <= 0:
                 return jsonify(ok=False, message='Unit price and quantity must be greater than 0.'), 400
-            delivered = _purchase_v2_delivered_qty(row.id)
+            delivered = _purchase_v2_delivered_qty(row.id, integrity=True)
             if quantity + 1e-9 < delivered:
-                return jsonify(ok=False, message=f'Cannot set quantity below delivered quantity ({delivered:.2f}).'), 400
+                return jsonify(ok=False, message=integrity_message('Cannot reduce quantity: deliveries already exist.', f'Cannot set quantity below delivered quantity ({delivered:.2f}).')), 400
             if row.material_id != material.id and delivered > 0:
                 return jsonify(ok=False, message='Cannot change material after deliveries are recorded for this purchase.'), 400
             if not math.isfinite(unit_price * quantity):
@@ -339,9 +340,9 @@ def register(app):
             )
             db.session.commit()
             return jsonify(ok=True, id=row.id, total_amount=float(row.total_amount or 0.0))
-        delivered = _purchase_v2_delivered_qty(row.id)
+        delivered = _purchase_v2_delivered_qty(row.id, integrity=True)
         if delivered > 0:
-            return jsonify(ok=False, message=f'Cannot delete purchase #{row.id}; delivery exists ({delivered:.2f}).'), 400
+            return jsonify(ok=False, message=integrity_message('Cannot delete purchase: deliveries already exist.', f'Cannot delete purchase #{row.id}; delivery exists ({delivered:.2f}).')), 400
         row.is_void = True
         row.void_reason = 'Deleted by user from Purchase V2'
         row.voided_at = _pkt_now_naive()
@@ -503,11 +504,10 @@ def register(app):
                 return jsonify(ok=False, message='Selected stage does not belong to selected project.'), 400
             if quantity <= 0:
                 return jsonify(ok=False, message='Quantity must be greater than 0.'), 400
-            delivered_so_far = float(db.session.query(func.coalesce(func.sum(Delivery.quantity), 0.0))
-                                     .filter(Delivery.purchase_id == purchase.id, Delivery.is_void == False).scalar() or 0.0)
+            delivered_so_far = _purchase_v2_delivered_qty(purchase.id, integrity=True)
             remaining_purchase_qty = max(0.0, float(purchase.quantity or 0.0) - delivered_so_far)
             if quantity > remaining_purchase_qty + 1e-9:
-                return jsonify(ok=False, message=f'Cannot deliver more than remaining purchase quantity ({remaining_purchase_qty:.2f}).'), 400
+                return jsonify(ok=False, message=integrity_message('Cannot deliver more than the remaining purchase quantity.', f'Cannot deliver more than remaining purchase quantity ({remaining_purchase_qty:.2f}).')), 400
             row = Delivery(
                 purchase_id=purchase.id,
                 material_id=purchase.material_id,
@@ -599,9 +599,9 @@ def register(app):
                 return jsonify(ok=False, message='Selected stage does not belong to selected project.'), 400
             if quantity <= 0:
                 return jsonify(ok=False, message='Quantity must be greater than 0.'), 400
-            available = _purchase_v2_available_in_scope_qty(purchase.id, project.id, stage.id if stage else None)
+            available = _purchase_v2_available_in_scope_qty(purchase.id, project.id, stage.id if stage else None, integrity=True)
             if quantity > available + 1e-9:
-                return jsonify(ok=False, message=f'Usage exceeds available stock for selected purchase order in this stage ({available:.2f}).'), 400
+                return jsonify(ok=False, message=integrity_message('Usage exceeds available stock for this purchase order and stage.', f'Usage exceeds available stock for selected purchase order in this stage ({available:.2f}).')), 400
             unit_price = float(purchase.unit_price or 0.0)
             cost = float(unit_price * quantity)
             if not math.isfinite(cost):

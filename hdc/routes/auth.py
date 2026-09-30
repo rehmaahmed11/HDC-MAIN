@@ -14,6 +14,7 @@ from werkzeug.security import check_password_hash
 
 from hdc.models.auth import HDCUser
 from hdc.services.audit import _record_user_activity, log_action
+from hdc.services.permissions import permission_landing_url
 
 def register(app):
     """Register Login, logout and the root redirect."""
@@ -61,7 +62,7 @@ def register(app):
     @app.route('/hdc/login', methods=['GET', 'POST'])
     def hdc_login():
         if current_user.is_authenticated:
-            return redirect(url_for('hdc_dashboard'))
+            return redirect(permission_landing_url(current_user))
         if request.method == 'POST':
             login_key = _login_key()
             if _login_blocked(login_key):
@@ -80,7 +81,7 @@ def register(app):
                     changed={},
                     force_commit=True
                 )
-                return redirect(url_for('hdc_dashboard'))
+                return redirect(permission_landing_url(current_user))
             _record_login_failure(login_key)
             flash('Invalid username or password.', 'danger')
         return render_template('auth/login.html')
@@ -102,6 +103,12 @@ def register(app):
         return redirect(url_for('hdc_login'))
 
 
+    @app.route('/hdc/access')
+    @login_required
+    def hdc_access_home():
+        return render_template('auth/access_home.html')
+
+
     @app.route('/')
     def hdc_root():
-        return redirect(url_for('hdc_dashboard'))
+        return redirect(permission_landing_url(current_user))

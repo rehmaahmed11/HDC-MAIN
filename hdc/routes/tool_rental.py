@@ -23,7 +23,7 @@ from hdc.services.tool_rental import (
     known_tool_customers, known_tool_suppliers,
     post_tool_rental_payment_to_accounts, recalc_rental_totals,
     record_tool_purchase, record_tool_scrap, search_rentals,
-    tool_kpis, tool_purchases, tool_scraps, tool_stock_aggregates,
+    tool_available_for_integrity, tool_kpis, tool_purchases, tool_scraps, tool_stock_aggregates,
     void_tool_rental_payment_in_accounts
 )
 from hdc.services.tool_tracking import (
@@ -35,6 +35,7 @@ from hdc.services.tool_tracking import (
 from hdc.utils.dates import _pkt_now_naive, _pkt_today
 from hdc.utils.format import _flt, _amount_to_words
 from hdc.services.receipts import _receipt_company_profile
+from hdc.services.record_permissions import integrity_message
 from hdc.services.timekeeping import _has_recent_duplicate
 
 
@@ -576,6 +577,7 @@ def register(app):
             return redirect(url_for('hdc_tool_rental'))
 
         parsed_items = []
+        requested_by_tool = {}
         total_rented_qty = 0.0
         total_amount = 0.0
         for idx, (tid_raw, qty_raw) in enumerate(zip(tool_ids, qtys)):
@@ -592,8 +594,10 @@ def register(app):
             if qty <= 0:
                 flash(f'Quantity must be >0 at row {idx+1}.', 'danger')
                 return redirect(url_for('hdc_tool_rental'))
-            if qty > tool.available_qty + 0.001:
-                flash(f'Not enough stock for {tool.name}: available {tool.available_qty}, requested {qty}.', 'danger')
+            available = tool_available_for_integrity(tool)
+            requested_by_tool[tid] = requested_by_tool.get(tid, 0) + qty
+            if requested_by_tool[tid] > available + 0.001:
+                flash(integrity_message('Not enough available tool stock.', f'Not enough stock for {tool.name}: available {available}, requested {qty}.'), 'danger')
                 return redirect(url_for('hdc_tool_rental'))
             rate_raw = rates[idx] if idx < len(rates) else tool.rental_rate_per_day
             rate = max(0.0, _flt(rate_raw, tool.rental_rate_per_day))

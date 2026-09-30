@@ -5,6 +5,7 @@ original @app.route decorator and endpoint name.
 """
 
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 
 from flask import flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
@@ -362,9 +363,12 @@ def register(app):
         filter_date_to = request.args.get('date_to')
         filter_show_voided = (request.args.get('show_voided') or '').strip().lower() in ('1', 'true', 'on', 'yes')
 
+        # A selected attendance row remains readable on its own. Missing
+        # parent grants hide names/details instead of implicitly opening the
+        # worker or project (or silently losing the allowed attendance row).
         q = (db.session.query(TimeEntry, Worker, Project)
-             .join(Worker, TimeEntry.worker_id == Worker.id)
-             .join(Project, TimeEntry.project_id == Project.id))
+             .outerjoin(Worker, TimeEntry.worker_id == Worker.id)
+             .outerjoin(Project, TimeEntry.project_id == Project.id))
         if not filter_show_voided:
             q = q.filter(TimeEntry.is_void == False)
 
@@ -395,6 +399,8 @@ def register(app):
 
         grouped = {}
         for te, wk, proj in records:
+            wk = wk or SimpleNamespace(id=te.worker_id, name=f'Worker #{te.worker_id}', role_type='')
+            proj = proj or SimpleNamespace(id=te.project_id, name=f'Project #{te.project_id}')
             key = (wk.id, te.check_in.date())
             row = grouped.get(key)
             if not row:

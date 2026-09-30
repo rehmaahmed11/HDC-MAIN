@@ -22,6 +22,10 @@ class HDCUser(UserMixin, db.Model):
     stage_scope_enabled = db.Column(db.Boolean, default=False, nullable=False)
     allowed_stage_ids_json = db.Column(db.Text, nullable=True)  # readable stages
     write_stage_ids_json = db.Column(db.Text, nullable=True)
+    # Optional exact-record allow-list; empty selections deny all business rows.
+    # Read/Edit/Delete lists and Create flags are independent for each data type.
+    record_scope_enabled = db.Column(db.Boolean, default=False, nullable=False)
+    record_permissions_json = db.Column(db.Text, nullable=True)
     created_at    = db.Column(db.DateTime, default=_pkt_now_naive)
 
 

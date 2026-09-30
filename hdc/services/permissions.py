@@ -24,6 +24,8 @@ PAGE_TREE = [
         {'id': 'project_create', 'label': 'Create project', 'paths': [r'^/hdc/projects/add$', r'^/hdc/api/next_project_code$']},
         {'id': 'project_costs', 'label': 'Project cost drilldowns', 'paths': [r'^/hdc/cost-entries(?:/|$)']},
         {'id': 'project_detail', 'label': 'Project details & edit', 'paths': [r'^/hdc/projects/\d+(?:/|$)']},
+        {'id': 'project_financials', 'label': 'Project financial summaries & pricing fields', 'paths': []},
+        {'id': 'project_receipts', 'label': 'Project owner receipts & payments', 'paths': [r'^/hdc/projects/\d+/owner_payment(?:/|$)']},
         {'id': 'stages', 'label': 'Stages', 'paths': [r'^/hdc/stages$', r'^/hdc/api/project_stages/']},
         {'id': 'stage_create', 'label': 'Add / edit / remove stages', 'paths': [r'^/hdc/projects/\d+/(?:stage/add|bulk_stages)$', r'^/hdc/stage/\d+/(?:edit|delete|status|sub-progress)$']},
         {'id': 'stage_ledger', 'label': 'Stage ledger', 'paths': [r'^/hdc/stage/\d+/ledger$']},
@@ -33,7 +35,7 @@ PAGE_TREE = [
         {'id': 'project_estimation', 'label': 'Project estimation', 'paths': [r'^/hdc/project-estimation(?:/|$)']},
     ]},
     {'id': 'workforce_section', 'label': 'Workforce', 'children': [
-        {'id': 'subcontractors', 'label': 'Subcontractors', 'paths': [r'^/hdc/subcontractors$']},
+        {'id': 'subcontractors', 'label': 'Subcontractors', 'paths': [r'^/hdc/subcontractors$', r'^/hdc/projects/\d+/add_subcontractor$']},
         {'id': 'subcontractor_attendance', 'label': 'Subcontractor attendance & progress', 'paths': [r'^/hdc/subcontractor/\d+/(?:attendance|labour_attendance|team_attendance|attendance_page|progress)(?:/|$)', r'^/hdc/stage/\d+/shift/']},
         {'id': 'subcontractor_workers', 'label': 'Subcontractor teams & worker ledgers', 'paths': [r'^/hdc/subcontractor/\d+/workers(?:/|$)']},
         {'id': 'subcontractor_payments', 'label': 'Subcontractor payments & ledger', 'paths': [r'^/hdc/subcontractor/\d+/(?:pay|payments|ledger|events)(?:/|$)', r'^/hdc/subcontractor/\d+/payment/']},
@@ -101,6 +103,7 @@ PAGE_BY_ID = {page['id']: page for page in PAGE_CATALOG}
 
 def page_id_for_path(path):
     path = str(path or '')
+    path = '/hdc/' if path.rstrip('/') == '/hdc' else path.rstrip('/')
     for matcher, page_id in _PAGE_MATCHERS:
         if matcher.search(path):
             return page_id
@@ -116,7 +119,10 @@ def parse_permissions(user):
 
 
 def has_custom_permissions(user):
-    return bool((getattr(user, 'permissions_json', None) or '').strip())
+    # Strict data access can never fall back to a broad base role, even if a
+    # damaged/legacy record has no page map stored alongside its row grants.
+    return bool((getattr(user, 'permissions_json', None) or '').strip() or
+                getattr(user, 'record_scope_enabled', False))
 
 
 def permission_for(user, page_id, mode='read'):
@@ -127,18 +133,40 @@ def permission_for(user, page_id, mode='read'):
         return True
     if not has_custom_permissions(user):
         return None
-    value = parse_permissions(user).get(page_id, {})
+    if page_id in {'users', 'event_recorder', 'settings'}:
+        return False  # Administration is never delegable to a restricted user.
+    configured = parse_permissions(user)
+    # These independent subsections did not exist in older page maps. Keep
+    # their old parent-page behavior only outside strict exact-data mode.
+    legacy_parents = {
+        'project_financials': ('projects', 'project_detail', 'project_create', 'project_edit'),
+        'project_receipts': ('project_detail',),
+    }
+    if (not getattr(user, 'record_scope_enabled', False) and page_id not in configured and
+            page_id in legacy_parents):
+        return any(permission_for(user, parent, mode) is True for parent in legacy_parents[page_id])
+    value = configured.get(page_id, {})
     if not isinstance(value, dict):
         return False
     if mode == 'write':
-        return bool(value.get('write')) and bool(value.get('read'))
-    return bool(value.get('read'))
+        return value.get('write') is True and value.get('read') is True
+    return value.get('read') is True
+
+
+def permission_editor_grants(user):
+    configured = parse_permissions(user)
+    if has_custom_permissions(user) and not getattr(user, 'record_scope_enabled', False):
+        for page in ('project_financials', 'project_receipts'):
+            if page not in configured:
+                configured[page] = {'read': permission_for(user, page) is True,
+                                    'write': permission_for(user, page, 'write') is True}
+    return configured
 
 
 def may_access_path(user, path, mode='read'):
     page_id = page_id_for_path(path)
     if page_id is None:
-        if has_custom_permissions(user) and (
+        if has_custom_permissions(user) and (getattr(user, 'role', '') or '').strip().lower() != 'admin' and (
                 str(path or '').startswith(('/hdc/', '/api/', '/project-estimation'))):
             return False  # New routes fail closed until assigned to a page bucket.
         return None
@@ -148,7 +176,11 @@ def may_access_path(user, path, mode='read'):
 def _stage_ids_from_json(raw):
     try:
         values = json.loads(raw or '[]')
-        return {int(value) for value in values if str(value).isdigit()}
+        if not isinstance(values, list):
+            return set()
+        return {int(value) for value in values
+                if not isinstance(value, bool) and len(str(value)) <= 19 and str(value).isascii()
+                and str(value).isdigit() and 0 < int(value) <= 9223372036854775807}
     except (TypeError, ValueError):
         return set()
 
@@ -190,7 +222,12 @@ def _cached_scope(mode='read'):
 
 def stage_is_allowed(stage_id, mode='read'):
     scope = user_stage_scope(current_user, mode)
-    return scope is None or (stage_id is not None and int(stage_id) in scope)
+    if scope is None:
+        return True
+    try:
+        return stage_id is not None and int(stage_id) in scope
+    except (TypeError, ValueError, OverflowError):
+        return False
 
 
 _QUERY_SCOPE_INSTALLED = False
@@ -245,7 +282,40 @@ def install_permission_query_scope():
         execute_state.statement = statement
 
 
-def install_permission_template_helpers(app):
-    app.jinja_env.globals['hdc_page_allowed'] = lambda page_id, mode='read': permission_for(current_user, page_id, mode) is not False
-    app.jinja_env.globals['hdc_page_catalog'] = PAGE_TREE
-    app.jinja_env.globals['hdc_page_id_for_path'] = page_id_for_path
+def install_permission_template_helpers(application):
+    application.jinja_env.globals['hdc_page_allowed'] = lambda page_id, mode='read': permission_for(current_user, page_id, mode) is not False
+    application.jinja_env.globals['hdc_page_catalog'] = PAGE_TREE
+    application.jinja_env.globals['hdc_page_id_for_path'] = page_id_for_path
+
+
+def permission_landing_url(user):
+    """Land on a granted screen instead of a forbidden dashboard after login."""
+    if not has_custom_permissions(user) or (getattr(user, 'role', '') or '').strip().lower() == 'admin':
+        return '/hdc/'
+    for path in (
+        '/hdc/', '/hdc/projects', '/hdc/stages', '/hdc/workers', '/hdc/timekeeping',
+        '/hdc/timekeeping/status', '/hdc/subcontractors', '/hdc/expenses', '/hdc/payroll',
+        '/hdc/trades', '/hdc/estimation', '/hdc/project-estimation', '/hdc/alerts',
+        '/hdc/office-management', '/hdc/office-management/staff',
+        '/hdc/office-management/staff/attendance', '/hdc/office-management/staff/ledger',
+        '/hdc/office-management/expenses', '/hdc/personal-management',
+        '/hdc/purchase-v2', '/hdc/purchase-v2/materials', '/hdc/purchase-v2/suppliers',
+        '/hdc/purchase-v2/purchases', '/hdc/purchase-v2/delivered', '/hdc/purchase-v2/usage',
+        '/hdc/tool-rental', '/hdc/tool-rental/inventory', '/hdc/tool-rental/tracking',
+        '/hdc/parties', '/hdc/reports', '/hdc/reports/glance', '/hdc/accounts',
+        '/hdc/accounts/manage', '/hdc/accounts/entries', '/hdc/accounts/cashflow',
+        '/hdc/accounts/money-center', '/hdc/accounts/shared',
+    ):
+        if may_access_path(user, path) is True:
+            return path
+    # A user may be given only a detail/ledger page, without its list page.
+    from hdc.models.projects import Project, Stage
+    if permission_for(user, 'project_detail') is True:
+        row = Project.query.order_by(Project.id).first()
+        if row:
+            return f'/hdc/projects/{row.id}'
+    if permission_for(user, 'stage_ledger') is True:
+        row = Stage.query.order_by(Stage.id).first()
+        if row:
+            return f'/hdc/stage/{row.id}/ledger'
+    return '/hdc/access'

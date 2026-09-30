@@ -10,6 +10,7 @@ from flask_login import login_required
 from hdc.extensions import _money_write_required, db
 from hdc.models.materials import Material, MaterialUsage, Purchase
 from hdc.models.projects import Project, Stage
+from hdc.services.record_permissions import integrity_message
 from hdc.services.purchase import _material_stock_for_scope, _material_stock_map
 from hdc.services.timekeeping import _has_recent_duplicate
 from hdc.utils.dates import _pkt_today
@@ -75,9 +76,9 @@ def register(app):
                 flash('Selected stage does not belong to selected project.', 'danger')
                 return redirect(url_for('hdc_material_usage'))
 
-            available = _material_stock_for_scope(mid, project_id=pid, stage_id=sid)
+            available = _material_stock_for_scope(mid, project_id=pid, stage_id=sid, integrity=True)
             if qty > available:
-                flash(f'Insufficient stock. Available: {available:,.2f} {m.unit}.', 'danger')
+                flash(integrity_message('Insufficient stock.', f'Insufficient stock. Available: {available:,.2f} {m.unit}.'), 'danger')
                 return redirect(url_for('hdc_material_usage'))
 
             rate = 0.0
@@ -150,10 +151,10 @@ def register(app):
             approved_by = (request.form.get('approved_by','') or '').strip()
             if action == 'return':
                 m = Material.query.get(mid)
-                available = _material_stock_for_scope(mid, project_id=pid, stage_id=sid)
+                available = _material_stock_for_scope(mid, project_id=pid, stage_id=sid, integrity=True)
                 if qty > available + 1e-6:
                     unit = m.unit if m else 'unit'
-                    flash(f'Cannot return more than available stock. Available: {available:,.2f} {unit}.', 'danger')
+                    flash(integrity_message('Cannot return more than available stock.', f'Cannot return more than available stock. Available: {available:,.2f} {unit}.'), 'danger')
                     return redirect(url_for('hdc_purchases'))
             signed_qty = -qty if action == 'return' else qty
             total = signed_qty * rate

@@ -51,6 +51,8 @@ def _bootstrap_hdc():
         'stage_scope_enabled': 'stage_scope_enabled BOOLEAN NOT NULL DEFAULT 0',
         'allowed_stage_ids_json': 'allowed_stage_ids_json TEXT',
         'write_stage_ids_json': 'write_stage_ids_json TEXT',
+        'record_scope_enabled': 'record_scope_enabled BOOLEAN NOT NULL DEFAULT 0',
+        'record_permissions_json': 'record_permissions_json TEXT',
     })
     _ensure_timeentry_attendance_day_schema()
     _ensure_subcontract_labour_attendance_schema()

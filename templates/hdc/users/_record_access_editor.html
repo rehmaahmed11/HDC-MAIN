@@ -1,0 +1,71 @@
+{% macro render_record_access(catalog, cards=[], enabled=false, prefix='new') %}
+<section class="record-access mt-3" data-record-editor data-record-endpoint="{{ url_for('hdc_user_access_data') }}">
+    <div class="record-access-heading">
+        <div><span class="badge bg-dark mb-2">Exact data control</span><h3 class="h6 mb-1">Choose the data this user may access</h3></div>
+        <span class="badge bg-light text-dark border" data-record-count>{{ cards|sum(attribute='records', start=[])|length }} selected records</span>
+    </div>
+    <label class="d-flex gap-2 align-items-start my-3" for="exactData-{{ prefix }}">
+        <input class="form-check-input mt-1" type="checkbox" id="exactData-{{ prefix }}" name="record_scope_enabled" value="1" {% if enabled %}checked{% endif %}>
+        <span><strong>Only selected data (strict)</strong><br><small class="text-muted">Everything is blocked except the exact records and actions selected below. This also requires an explicit page access map above.</small></span>
+    </label>
+    <div class="alert alert-warning small py-2">
+        <strong>No automatic access.</strong> Selecting a project does not grant its stages, attendance, workers, payments, or other records. Edit and Delete/void also include Read, but never include each other. New records are blocked unless Create is explicitly allowed for their data type. Linked bookkeeping requires its own grants. New records are not automatically assigned for later visits. Administrators always retain full access.
+    </div>
+    <fieldset data-record-controls {% if not enabled %}disabled{% endif %}>
+        <legend class="visually-hidden">Exact data selections</legend>
+        <div class="record-finder">
+            <label class="small fw-semibold">Data type
+                <select class="form-select form-select-sm mt-1" data-record-type>
+                    {% for group in catalog|groupby('group') %}
+                    <optgroup label="{{ group.grouper }}">
+                        {% for resource in group.list %}
+                        <option value="{{ resource.id }}" {% if resource.id == 'hdc_project' %}selected{% endif %}>{{ resource.label }}</option>
+                        {% endfor %}
+                    </optgroup>
+                    {% endfor %}
+                </select>
+            </label>
+            <label class="small fw-semibold">Find a record
+                <input class="form-control form-control-sm mt-1" type="search" data-record-search placeholder="Name, code, date or #ID" autocomplete="off">
+            </label>
+            <button class="btn btn-sm btn-outline-primary align-self-end" type="button" data-record-find><i class="fas fa-magnifying-glass me-1"></i>Find</button>
+        </div>
+        <div class="d-flex flex-wrap gap-2 align-items-center mt-2">
+            <button class="btn btn-sm btn-outline-secondary" type="button" data-record-create>Add Create permission for this data type</button>
+            <span class="small text-muted">Optional; does not grant existing records.</span>
+        </div>
+        <div class="small text-muted my-2" data-record-status role="status" aria-live="polite">Choose a data type, then find and select individual records.</div>
+        <div class="record-results" data-record-results></div>
+        <button class="btn btn-sm btn-outline-secondary mt-2" type="button" data-record-next hidden>More results</button>
+        <div class="d-flex justify-content-between align-items-center mt-3 mb-2">
+            <strong class="small">Selected data & actions</strong>
+            <button class="btn btn-sm btn-outline-danger" type="button" data-record-clear>Clear data selections</button>
+        </div>
+        <div data-record-grants>
+            {% for card in cards %}
+            <section class="record-grant-card mb-2" data-record-resource="{{ card.id }}">
+                <div class="d-flex justify-content-between align-items-center gap-2 mb-2">
+                    <strong>{{ card.label }}</strong>
+                    <label class="small d-flex align-items-center gap-2 mb-0"><input class="form-check-input mt-0" type="checkbox" name="record_create_{{ card.id }}" value="1" {% if card.create %}checked{% endif %} data-record-create-grant>Create new</label>
+                </div>
+                <div class="record-row record-row-head small text-muted"><span>Record</span><span>Read</span><span>Edit</span><span>Delete/void</span><span></span></div>
+                <div data-record-rows>
+                    {% for row in card.records %}
+                    <div class="record-row" data-record-id="{{ row.id }}">
+                        <span class="record-label">{{ row.label }}</span>
+                        {% for mode in ['read', 'write', 'delete'] %}
+                        <label class="record-toggle"><input class="form-check-input mt-0" type="checkbox" name="record_{{ mode }}_{{ card.id }}" value="{{ row.id }}" {% if row[mode] %}checked{% endif %} data-record-mode="{{ mode }}" aria-label="{{ {'read':'Read', 'write':'Edit', 'delete':'Delete or void'}[mode] }} {{ row.label }}"></label>
+                        {% endfor %}
+                        <button class="btn btn-sm btn-link text-danger p-1" type="button" data-record-remove aria-label="Remove {{ row.label }}"><i class="fas fa-xmark" aria-hidden="true"></i></button>
+                    </div>
+                    {% endfor %}
+                </div>
+            </section>
+            {% endfor %}
+        </div>
+        <p class="small text-muted mb-0" data-record-empty {% if cards %}hidden{% endif %}>No data selected. With strict mode enabled, this user cannot access any business records.</p>
+    </fieldset>
+    <p class="small text-muted mt-3 mb-0">Both gates apply: a data grant never opens a blocked page, and a page grant never opens unselected data. Related records needed for an operation must be explicitly granted too. New records are not assigned automatically on future requests. Admin accounts always have full access.</p>
+    <noscript><p class="small text-danger mt-2">Enable JavaScript to find and add records. You can still change existing selections and save them.</p></noscript>
+</section>
+{% endmacro %}

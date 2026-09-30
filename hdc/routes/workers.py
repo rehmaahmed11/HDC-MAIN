@@ -7,7 +7,7 @@ original @app.route decorator and endpoint name.
 import re
 
 from flask import abort, flash, redirect, render_template, request, url_for
-from flask_login import login_required
+from flask_login import current_user, login_required
 from sqlalchemy import func
 from sqlalchemy.orm import selectinload
 
@@ -18,6 +18,7 @@ from hdc.models.workforce import LabourLedger, LabourRateHistory, TimeEntry, Wor
 from hdc.services.accounts import _accounts_post_labour_ledger_row, _accounts_set_void_by_source, _accounts_upsert_labour_ledger_txn
 from hdc.services.ledger import _linked_expense_for_labour_ledger, _worker_payable_snapshot
 from hdc.services.lookups import _ensure_expense_category, _trade_options
+from hdc.services.record_permissions import exact_access_enabled, require_complete_grant
 from hdc.services.receipts import _receipt_company_profile
 from hdc.services.timekeeping import _has_recent_duplicate, _reconcile_worker_time_entries, _reconcile_worker_tip_ledger, _repair_worker_work_ledger_links
 from hdc.utils.dates import _pkt_now_naive, _pkt_today
@@ -105,9 +106,13 @@ def register(app):
                     else:
                         old_name = trade.name or ''
                         trade.name = new_name
-                        Worker.query.filter(func.lower(Worker.role_type) == (old_name or '').lower()).update(
-                            {Worker.role_type: new_name}, synchronize_session=False
-                        )
+                        matching = Worker.query.filter(func.lower(Worker.role_type) == (old_name or '').lower())
+                        if exact_access_enabled(current_user):
+                            require_complete_grant(current_user, Worker, matching.with_entities(Worker.id))
+                            for worker in matching.all():
+                                worker.role_type = new_name
+                        else:
+                            matching.update({Worker.role_type: new_name}, synchronize_session=False)
                         db.session.commit()
                         flash(f'Trade updated to "{new_name}".', 'success')
             elif action == 'delete_trade':

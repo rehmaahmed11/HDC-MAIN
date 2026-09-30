@@ -256,9 +256,11 @@
                     <tr {{ row|hdc_row_attrs }} class="{% if row.status == 'Voided' %}table-secondary{% endif %}">
                         <td>{{ row.date.isoformat() }}</td>
                         <td>
+                            {% if hdc_page_allowed('worker_ledgers') and hdc_record_allowed('hdc_worker', row.worker.id) %}
                             <a href="{{ url_for('hdc_worker_ledger', wid=row.worker.id) }}" class="text-decoration-none">
                                 <strong>{{ row.worker.name }}</strong>
-                            </a><br>
+                            </a>
+                            {% else %}<strong>{{ row.worker.name }}</strong>{% endif %}<br>
                             <small class="text-muted">{{ row.worker.role_type or '' }}</small>
                         </td>
                         <td>
@@ -277,15 +279,21 @@
                                 </div>
                                 <div class="mt-1">
                                     {% if e.is_void %}
+                                    {% if hdc_page_allowed('timekeeping_records', 'write') and hdc_record_allowed('hdc_time_entry', e.id, 'write') %}
                                     <form method="POST" action="{{ url_for('hdc_reactivate_attendance', tid=e.id) }}" class="d-inline" onsubmit="return confirm('Reactivate this entry?');">
                                         <button type="submit" class="btn btn-sm btn-outline-success"><i class="fas fa-undo"></i></button>
                                     </form>
+                                    {% endif %}
                                     {% else %}
+                                    {% if hdc_page_allowed('timekeeping_records', 'write') and hdc_record_allowed('hdc_time_entry', e.id, 'write') %}
                                     <a href="{{ url_for('hdc_edit_attendance', tid=e.id) }}" class="btn btn-sm btn-outline-primary"><i class="fas fa-edit"></i></a>
+                                    {% endif %}
+                                    {% if hdc_page_allowed('timekeeping_records', 'write') and hdc_record_allowed('hdc_time_entry', e.id, 'delete') %}
                                     <form method="POST" action="{{ url_for('hdc_delete_attendance', tid=e.id) }}" class="d-inline" onsubmit="return confirm('Void this entry?');">
                                         <input type="hidden" name="void_reason" value="Voided from timekeeping list">
                                         <button type="submit" class="btn btn-sm btn-outline-danger"><i class="fas fa-ban"></i></button>
                                     </form>
+                                    {% endif %}
                                     {% endif %}
                                 </div>
                             </div>

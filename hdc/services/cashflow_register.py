@@ -380,7 +380,8 @@ def day_lock_state(day):
 
 
 def is_day_locked(day):
-    return day_lock_state(day) is not None
+    from hdc.services.record_permissions import integrity_query
+    return integrity_query(db.session.query(CashDayLock.id).filter(CashDayLock.lock_date == day).limit(1)).first() is not None
 
 
 def assert_period_open(account_id, when, operation='posted'):
@@ -393,6 +394,12 @@ def assert_period_open(account_id, when, operation='posted'):
     if when is None:
         return
     day = when.date() if isinstance(when, datetime) else when
+    from flask_login import current_user
+    from hdc.services.record_permissions import exact_access_enabled
+    if exact_access_enabled(current_user):
+        if is_day_locked(day):
+            raise ValueError('Financial day is locked. This change is blocked.')
+        return
     lock = day_lock_state(day)
     if lock is None:
         return
@@ -447,7 +454,7 @@ def validate_manual_cash_flow(*, direction, amount, account_id, destination_acco
 
     if check_balance and direction in (CF_DIR_OUT, CF_DIR_TRANSFER):
         from hdc.services.accounts import _account_balance_map
-        balances = _account_balance_map()
+        balances = _account_balance_map(integrity=True, account_ids=[int(account_id or 0)])
         available = float((balances or {}).get(int(account.id), 0.0) or 0.0)
         if skip_balance_account_id and int(skip_balance_account_id) == int(account.id):
             # The entry being amended is still posted, so its own amount is
@@ -1547,6 +1554,12 @@ def _day_movement(account, day):
 
 def day_positions(day, *, refresh=False):
     """Per-account positions for ``day`` (creates the rows on first view)."""
+    from flask import has_request_context, request
+    from flask_login import current_user
+    from types import SimpleNamespace
+    from hdc.services.record_permissions import exact_access_enabled
+    readonly = (has_request_context() and exact_access_enabled(current_user) and
+                request.method in ('GET', 'HEAD', 'OPTIONS'))
     positions = []
     for acc in _money_accounts():
         pos = (CashDayAccountPosition.query
@@ -1557,7 +1570,13 @@ def day_positions(day, *, refresh=False):
         amount_in, amount_out, t_in, t_out = _day_movement(acc, day)
         expected = opening + amount_in + t_in - amount_out - t_out
 
-        if pos is None:
+        if readonly:
+            saved = pos
+            values = {column.key: getattr(saved, column.key) if saved else None
+                      for column in CashDayAccountPosition.__table__.columns}
+            values.update(position_date=day, account_id=int(acc.id), account=acc, _hdc_row=saved)
+            pos = SimpleNamespace(**values)
+        elif pos is None:
             pos = CashDayAccountPosition(position_date=day, account_id=int(acc.id))
             db.session.add(pos)
         pos.account_name = acc.name
@@ -1579,7 +1598,8 @@ def day_positions(day, *, refresh=False):
             pos.counted = float(from_minor(pos.counted_minor))
             pos.difference = float(from_minor(pos.difference_minor or 0))
         positions.append(pos)
-    db.session.flush()
+    if not readonly:
+        db.session.flush()
     return positions
 
 
