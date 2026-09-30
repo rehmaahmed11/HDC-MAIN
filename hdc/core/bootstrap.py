@@ -45,6 +45,13 @@ def _migrate_legacy_done_markers_to_db():
 def _bootstrap_hdc():
     db.create_all()
     _run_migrations()
+    from hdc.core.schema import _ensure_table_columns_sqlite
+    _ensure_table_columns_sqlite('hdc_user', {
+        'permissions_json': 'permissions_json TEXT',
+        'stage_scope_enabled': 'stage_scope_enabled BOOLEAN NOT NULL DEFAULT 0',
+        'allowed_stage_ids_json': 'allowed_stage_ids_json TEXT',
+        'write_stage_ids_json': 'write_stage_ids_json TEXT',
+    })
     _ensure_timeentry_attendance_day_schema()
     _ensure_subcontract_labour_attendance_schema()
     _ensure_purchase_v2_schema()

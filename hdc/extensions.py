@@ -94,10 +94,27 @@ def _csrf_protect():
 
 
 def _admin_only():
-    if current_user.role != 'admin':
+    """Keep administration locked, but honor explicit custom page grants.
+
+    User/role administration, settings, event audit and maintenance remain
+    non-delegable. Other routes that historically used this helper may be
+    delegated by an administrator through the per-user permission editor.
+    """
+    role = (getattr(current_user, 'role', None) or '').strip().lower()
+    if role == 'admin':
+        return False
+    if request.path.startswith(('/hdc/users', '/hdc/settings', '/hdc/event-recorder', '/hdc/admin/')):
         flash('Admin access required.', 'danger')
         return True
-    return False
+    try:
+        from hdc.services.permissions import has_custom_permissions, may_access_path
+        mode = 'read' if request.method in ('GET', 'HEAD', 'OPTIONS') else 'write'
+        if has_custom_permissions(current_user) and may_access_path(current_user, request.path, mode) is True:
+            return False
+    except Exception:
+        pass
+    flash('Admin access required.', 'danger')
+    return True
 
 
 _MONEY_ROLES = frozenset({'admin', 'accountant'})
@@ -105,7 +122,17 @@ _MONEY_ACCESS_MESSAGE = 'Admin/Accountant access required.'
 
 
 def _money_only():
-    """Return True when the current user must not make operational money writes."""
+    """Return True when the current user must not make operational money writes.
+
+    An administrator may explicitly grant a non-finance role write access to
+    this exact page. Existing admin-only route checks remain stricter.
+    """
+    try:
+        from hdc.services.permissions import may_access_path
+        if may_access_path(current_user, request.path, 'write') is True:
+            return False
+    except Exception:
+        pass
     role = (getattr(current_user, 'role', None) or '').strip().lower()
     if not current_user.is_authenticated or role not in _MONEY_ROLES:
         flash(_MONEY_ACCESS_MESSAGE, 'danger')

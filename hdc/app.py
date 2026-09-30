@@ -6,7 +6,7 @@ the legacy single-file app: same URLs, same endpoint names, same database.
 import os
 import re
 
-from flask import Flask, session, url_for
+from flask import Flask, render_template, request, session, url_for
 from werkzeug.routing import BuildError
 
 from hdc.config import BASE_DIR, ensure_dirs, get_flask_config, settings_for_app
@@ -102,6 +102,58 @@ def create_app(config_overrides=None):
     app.context_processor(_inject_alert_count)
     app.before_request(_ensure_db_runtime_ready)
     app.before_request(_csrf_protect)
+
+    from hdc.services.permissions import (
+        install_permission_query_scope, install_permission_template_helpers,
+        may_access_path, stage_is_allowed, user_stage_scope,
+    )
+    install_permission_template_helpers(app)
+    install_permission_query_scope()
+
+    @app.before_request
+    def _enforce_user_permissions():
+        from flask import abort, jsonify
+        from flask_login import current_user
+        if not current_user.is_authenticated:
+            return None
+        if request.path.startswith(('/hdc/login', '/hdc/logout', '/hdc_static/', '/static/')):
+            return None
+        mode = 'read' if request.method in ('GET', 'HEAD', 'OPTIONS') else 'write'
+        permission = may_access_path(current_user, request.path, mode)
+        if permission is False:
+            if request.is_json or request.path.startswith('/api/') or '/api/' in request.path:
+                return jsonify(ok=False, message='You do not have permission to access this page.'), 403
+            abort(403, description='You do not have permission to access this page.')
+
+        # Enforce direct stage URLs and submitted stage references as well as
+        # filtering all ORM result sets (so forms/APIs cannot bypass the scope).
+        scope = user_stage_scope(current_user, mode)
+        if scope is not None:
+            # A newly-created stage cannot be included in the administrator's
+            # existing allow-list safely; stage-limited users may edit only
+            # stages that were explicitly assigned to them.
+            if request.method not in ('GET', 'HEAD', 'OPTIONS') and re.match(
+                    r'^/hdc/projects/(?:add|\d+/(?:stage/add|bulk_stages))$', request.path):
+                abort(403, description='Stage-limited users cannot create or bulk-replace project stages.')
+            stage_match = re.match(r'^/hdc/stage/(\d+)(?:/|$)', request.path)
+            requested_stage = (stage_match.group(1) if stage_match else None)
+            if requested_stage is None:
+                requested_stage = request.values.get('stage_id', type=int)
+            if requested_stage is None and request.is_json:
+                payload = request.get_json(silent=True) or {}
+                if isinstance(payload, dict):
+                    requested_stage = payload.get('stage_id')
+            if requested_stage not in (None, '') and not stage_is_allowed(requested_stage, mode):
+                if request.is_json or '/api/' in request.path:
+                    return jsonify(ok=False, message='This stage is outside your assigned access.'), 403
+                abort(403, description='This stage is outside your assigned access.')
+        return None
+
+    @app.errorhandler(403)
+    def _permission_denied(error):
+        if request.is_json or request.path.startswith('/api/') or '/api/' in request.path:
+            return {'ok': False, 'message': 'You do not have permission to access this page.'}, 403
+        return render_template('shared/forbidden.html'), 403
 
     # …and the matching write side: every POST form gets the token inline so
     # forms keep working with JavaScript disabled.

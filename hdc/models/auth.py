@@ -16,6 +16,12 @@ class HDCUser(UserMixin, db.Model):
     username      = db.Column(db.String(80), unique=True, nullable=False)
     password_hash = db.Column(db.String(200), nullable=False)
     role          = db.Column(db.String(20), default='admin')   # admin/manager/accountant
+    # NULL permissions preserve the role-based access policy for upgraded users.
+    # A JSON object means this account uses the explicit per-page permission map.
+    permissions_json = db.Column(db.Text, nullable=True)
+    stage_scope_enabled = db.Column(db.Boolean, default=False, nullable=False)
+    allowed_stage_ids_json = db.Column(db.Text, nullable=True)  # readable stages
+    write_stage_ids_json = db.Column(db.Text, nullable=True)
     created_at    = db.Column(db.DateTime, default=_pkt_now_naive)
 
 

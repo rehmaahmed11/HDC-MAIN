@@ -100,13 +100,12 @@ each of these in the UI.
 
 ### Who may do what
 
-Money **writes** require role `admin` or `accountant`. This is enforced by
-`_money_write_required()` in `hdc/extensions.py`, applied at the top of every
-money-moving handler (HTML handlers redirect to the dashboard with a message;
-JSON handlers return **403**). Reads are deliberately wider than writes: staff
-may *view* the operational pages (workers, payroll, expenses, subcontractors,
-purchase-v2, tools, office, reports, timekeeping) but the Accounts section,
-Money Center, `/hdc/settings` and `/hdc/users` stay `admin`/`accountant` only.
+By default, money **writes** require role `admin` or `accountant`. This is
+enforced by `_money_write_required()` in `hdc/extensions.py`. An administrator
+can delegate specific operational page writes with the per-user access editor;
+settings, event audit, maintenance and user/role administration remain
+non-delegable. Reads are deliberately wider by default: staff may *view*
+operational pages, while each custom user can be narrowed to selected pages.
 
 The matrix is written down as data in `ACCESS_MATRIX` (also in
 `hdc/extensions.py`) and pinned by
@@ -187,15 +186,17 @@ be saved. `hdc/services/accounts_manage.py` holds the list/edit/archive rules;
 
 ### Money-write permissions
 
-**Operational money writes require role `admin` or `accountant`.** Staff,
-manager, blank, and unrecognized roles are denied. The role check runs on the
-server before record lookup or mutation; hiding a button is not authorization.
+**Default operational money writes require role `admin` or `accountant`.**
+Staff, manager, blank, and unrecognized roles are denied unless an administrator
+explicitly grants Write for that page in the custom access map. The server checks
+this before record lookup or mutation; hiding a button is not authorization.
 
-| Area | Admin | Accountant | Staff / other roles |
+| Area | Admin | Accountant | Staff / manager / other roles |
 |---|---|---|---|
-| Operational money writes | Allowed | Allowed | Denied |
-| Existing operational reads | Unchanged | Unchanged | Unchanged |
-| Accounts, Money Center, cash-flow administration, settings and user administration | Existing admin access | Still denied wherever admin-only | Still denied wherever admin-only |
+| Operational money writes | Allowed | Allowed by role default | Denied by default; allow per page with an explicit custom Write grant |
+| Existing operational reads | Unchanged | Unchanged | Unchanged by default; custom access can narrow pages |
+| Accounts / shared expenses | Existing admin access | Existing default restrictions | Denied by default; can be delegated page-by-page |
+| Settings, event audit, maintenance, user/role administration | Admin-only | Admin-only | Admin-only |
 
 This covers worker payments/advances/rates/ledger corrections, payroll,
 expenses and categories, subcontractor contracts/payments/attendance, office
@@ -203,18 +204,26 @@ staff/salary/allowances/expenses, purchases/payments/delivery/usage/transfers,
 tool inventory/rentals/payments/returns, and wage-affecting timekeeping. Owner
 receipts (including void/restore), stage status/subcontractor-progress updates,
 personal-expense voids/categories, legacy
-material routes and purchase/office write APIs use the same guard. This policy
-does **not** grant accountants access to the admin-only Accounts workspace.
+material routes and purchase/office write APIs use the same guard. On mixed read/write routes, `GET`, `HEAD`, and `OPTIONS` are checked against
+read access; `POST`, `PUT`, `PATCH`, and `DELETE` require write access. The User
+Management screen now supports a per-user custom matrix across the sidebar and
+its subpages, with independent Read and Write switches. A custom matrix is
+fail-closed for unassigned application routes; legacy users with no custom map
+keep their existing role defaults. Users/role administration, settings, event
+audit and maintenance remain non-delegable admin operations. CSRF and existing
+money-write rules still apply; an explicit custom page grant can delegate
+operational writes while preserving those stricter admin boundaries.
 
-On mixed read/write routes, `GET`, `HEAD`, and `OPTIONS` keep existing access.
-`POST`, `PUT`, `PATCH`, and `DELETE` are guarded: denied HTML requests redirect
-to the dashboard with **“Admin/Accountant access required.”**; denied API writes
-return JSON `403` with `ok: false`. Login and CSRF checks remain required.
-Existing staff views (payroll, workers, expenses, reports, purchasing, tools,
-office, etc.) are unchanged; the finer per-page read matrix remains the
-separate audit Step 15 decision, not a newly implemented admin-configurable
-permissions system. Unrelated project/estimation/drawing workflows are not
-reclassified by this money-posting guard.
+The same editor can assign separate stage Read and Write lists. Write access
+automatically includes Read for those stages. For scoped users, direct stage
+URLs and submitted stage IDs are checked against the current operation, and
+stage-linked ORM rows are filtered on the server; projects with no assigned
+stages are removed from project lists. New/bulk stages cannot be created by a
+stage-limited user because the new record could not safely inherit the existing
+allow-list.
+Stage scope complements page access; global master data still follows its own
+page-level Read/Write grant. Regression coverage is in
+`tests/test_user_permissions.py`.
 
 For a new operational finance write route, use `@_money_write_required()`
 **below** `@login_required` (use `@_money_write_required(api=True)` for JSON APIs).

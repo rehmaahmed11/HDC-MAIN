@@ -1,0 +1,53 @@
+{% macro render_permission_tree(tree, stages, permissions={}, selected_read_stages=[], selected_write_stages=[], scope_enabled=false, user_prefix='user') %}
+<div class="access-matrix">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+        <div><strong>Page access</strong><div class="small text-muted">Read controls viewing. Write controls create, edit, delete and other changes.</div><div class="small text-muted">Grant a section overview's Read access to show its sidebar link; each subpage below remains independently controlled.</div></div>
+        <input type="search" class="form-control form-control-sm" data-access-search placeholder="Find a page…" aria-label="Find a permission page" style="max-width:190px">
+        <div class="btn-group btn-group-sm" role="group" aria-label="Bulk permission controls">
+            <button type="button" class="btn btn-outline-secondary" data-access-bulk="read">Allow all reads</button>
+            <button type="button" class="btn btn-outline-secondary" data-access-bulk="write">Allow all writes</button>
+            <button type="button" class="btn btn-outline-secondary" data-access-bulk="clear">Clear all</button>
+        </div>
+    </div>
+    {% for section in tree %}
+    <section class="access-section mb-2">
+        <div class="access-section-title">{{ section.label }}</div>
+        {% for page in section.children %}
+        {% set saved = permissions.get(page.id, {}) %}
+        <div class="access-row">
+            <div class="access-page-label">{{ page.label }}</div>
+            <label class="access-check"><input type="checkbox" class="form-check-input access-read" name="read_{{ page.id }}" value="1" {% if saved.get('read') %}checked{% endif %}><span>Read</span></label>
+            <label class="access-check"><input type="checkbox" class="form-check-input access-write" name="write_{{ page.id }}" value="1" {% if saved.get('write') %}checked{% endif %}><span>Write</span></label>
+        </div>
+        {% endfor %}
+    </section>
+    {% endfor %}
+    <section class="access-section mt-3">
+        <div class="access-section-title">Project stage data</div>
+        <label class="d-flex align-items-start gap-2 py-2">
+            <input type="checkbox" class="form-check-input mt-1" name="stage_scope_enabled" value="1" {% if scope_enabled %}checked{% endif %}>
+            <span><strong>Limit this user to selected stages</strong><br><small class="text-muted">When enabled, records and stage pages outside the selected stages are blocked and filtered from lists.</small></span>
+        </label>
+        <div class="row g-3 mt-1">
+            <div class="col-lg-6">
+                <label class="form-label fw-semibold" for="readStages-{{ user_prefix }}">Stages this user may read</label>
+                <select class="form-select" name="read_stage_ids" id="readStages-{{ user_prefix }}" multiple size="6" aria-label="Stages this user may read">
+                    {% for stage, project in stages %}
+                    <option value="{{ stage.id }}" {% if stage.id in selected_read_stages %}selected{% endif %}>{{ project.project_code }} · {{ project.name }} — {{ stage.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-lg-6">
+                <label class="form-label fw-semibold" for="writeStages-{{ user_prefix }}">Stages this user may write</label>
+                <select class="form-select" name="write_stage_ids" id="writeStages-{{ user_prefix }}" multiple size="6" aria-label="Stages this user may write">
+                    {% for stage, project in stages %}
+                    <option value="{{ stage.id }}" {% if stage.id in selected_write_stages %}selected{% endif %}>{{ project.project_code }} · {{ project.name }} — {{ stage.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+        <small class="text-muted">Use Ctrl / ⌘ to choose more than one. Write-stage grants also include Read. If stage limiting is enabled and neither list has a selection, no stage records are visible.</small>
+    </section>
+</div>
+{% endmacro %}
+

@@ -1,100 +1,142 @@
 {% extends "shared/base.html" %}
+{% from "users/_permission_editor.html" import render_permission_tree %}
 {% block title %}User Management{% endblock %}
 {% block page_heading %}User Management{% endblock %}
 
 {% block content %}
+<style>
+.access-matrix{font-size:.9rem}.access-section{border:1px solid var(--bs-border-color,#dee2e6);border-radius:.65rem;padding:.65rem .8rem;background:var(--bs-body-bg,#fff)}
+.access-section-title{font-weight:700;color:#24443d;margin-bottom:.25rem}.access-row{display:grid;grid-template-columns:minmax(180px,1fr) 90px 90px;align-items:center;gap:.5rem;padding:.32rem .1rem;border-top:1px solid rgba(120,140,135,.15)}
+.access-check{display:flex;align-items:center;gap:.42rem;margin:0;cursor:pointer}.access-check .form-check-input{margin:0}.access-matrix select[multiple]{min-height:135px}
+@media(max-width:520px){.access-row{grid-template-columns:minmax(120px,1fr) 68px 68px;font-size:.82rem}}
+</style>
 <div class="row g-3 mt-1">
-    <!-- Add User -->
-    <div class="col-md-4">
+    <div class="col-xl-4">
         <div class="card hdc-card">
             <div class="card-header hdc-card-header"><i class="fas fa-user-plus me-2"></i>Add New User</div>
             <div class="card-body">
                 <form method="POST">
                     <input type="hidden" name="action" value="add">
+                    <div class="mb-3"><label class="form-label">Username *</label><input type="text" name="username" class="form-control" placeholder="e.g. manager_ali" required></div>
+                    <div class="mb-3"><label class="form-label">Password *</label><input type="password" name="password" class="form-control" placeholder="Minimum 6 characters" required></div>
                     <div class="mb-3">
-                        <label class="form-label">Username *</label>
-                        <input type="text" name="username" class="form-control" placeholder="e.g. manager_ali" required>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Password *</label>
-                        <input type="password" name="password" class="form-control" placeholder="Minimum 6 characters" required>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Role</label>
+                        <label class="form-label">Base role</label>
                         <select name="role" class="form-select">
-                            <option value="manager">Manager — can view + add records</option>
-                            <option value="accountant">Accountant — finance access</option>
+                            <option value="manager">Manager — operational access</option>
+                            <option value="accountant">Accountant — finance role</option>
+                            <option value="staff">Staff — operational role</option>
                             <option value="admin">Admin — full access</option>
                         </select>
+                        <div class="form-text">Choose a base role, then optionally define an exact page-by-page access map below. Admin accounts remain unrestricted.</div>
                     </div>
-                    <button type="submit" class="btn btn-mint w-100"><i class="fas fa-save me-1"></i>Create User</button>
+                    <details class="mb-3 border rounded p-2">
+                        <summary class="fw-semibold">Configure custom access now</summary>
+                        <div class="form-check form-switch my-3">
+                            <input class="form-check-input" type="checkbox" role="switch" name="custom_permissions" value="1" id="newCustomAccess">
+                            <label class="form-check-label" for="newCustomAccess">Use custom permissions (unchecked uses role defaults)</label>
+                        </div>
+                        {{ render_permission_tree(page_tree, stages) }}
+                    </details>
+                    <button type="submit" class="btn btn-mint w-100"><i class="fas fa-user-plus me-1"></i>Create User</button>
                 </form>
             </div>
         </div>
     </div>
 
-    <!-- User List -->
-    <div class="col-md-8">
+    <div class="col-xl-8">
         <div class="card hdc-card">
-            <div class="card-header hdc-card-header"><i class="fas fa-users me-2"></i>All Users ({{ users|length }})</div>
+            <div class="card-header hdc-card-header d-flex justify-content-between align-items-center"><span><i class="fas fa-users me-2"></i>All Users</span><span class="badge bg-light text-dark">{{ users|length }}</span></div>
             <div class="table-responsive">
-                <table class="table hdc-table table-sm mb-0">
-                    <thead><tr>
-                        <th>#</th><th>Username</th><th>Role</th><th>Created</th><th>Actions</th>
-                    </tr></thead>
+                <table class="table hdc-table table-sm align-middle mb-0">
+                    <thead><tr><th>#</th><th>Username</th><th>Role / Access</th><th>Created</th><th>Account actions</th></tr></thead>
                     <tbody>
                     {% for u in users %}
                     <tr {{ u|hdc_row_attrs }} class="{% if u.id == current_user.id %}table-active{% endif %}">
                         <td class="text-muted">{{ loop.index }}</td>
+                        <td><strong>{{ u.username }}</strong>{% if u.id == current_user.id %}<span class="badge bg-primary ms-1">You</span>{% endif %}</td>
                         <td>
-                            <strong>{{ u.username }}</strong>
-                            {% if u.id == current_user.id %}<span class="badge bg-primary ms-1">You</span>{% endif %}
-                        </td>
-                        <td>
-                            <span class="badge {% if u.role == 'admin' %}bg-danger{% elif u.role == 'manager' %}bg-success{% else %}bg-info text-dark{% endif %}">
-                                {{ u.role | title }}
-                            </span>
+                            <span class="badge {% if u.role == 'admin' %}bg-danger{% elif u.role == 'manager' %}bg-success{% else %}bg-info text-dark{% endif %}">{{ u.role|title }}</span>
+                            {% if u.permissions_json %}<span class="badge bg-primary">Custom</span>{% else %}<span class="badge bg-secondary">Role defaults</span>{% endif %}
+                            {% if u.stage_scope_enabled %}<div class="small text-warning-emphasis mt-1"><i class="fas fa-layer-group me-1"></i>Stage-limited</div>{% endif %}
                         </td>
                         <td class="text-muted small">{{ u.created_at.strftime('%Y-%m-%d') if u.created_at else '—' }}</td>
-                        <td>
-                            <!-- Reset Password -->
-                            <button class="btn btn-xs btn-outline-warning btn-sm"
-                                data-bs-toggle="collapse" data-bs-target="#reset-{{ u.id }}">
-                                <i class="fas fa-key me-1"></i>Reset
-                            </button>
-                            <div class="collapse mt-1" id="reset-{{ u.id }}">
-                                <form method="POST" class="d-flex gap-1">
-                                    <input type="hidden" name="action" value="reset_password">
-                                    <input type="hidden" name="user_id" value="{{ u.id }}">
-                                    <input type="password" name="new_password" class="form-control form-control-sm"
-                                        style="width:130px" placeholder="New password" required>
+                        <td class="text-nowrap">
+                            <button class="btn btn-sm btn-outline-primary" type="button" data-bs-toggle="collapse" data-bs-target="#access-{{ u.id }}" aria-expanded="false"><i class="fas fa-sliders me-1"></i>Access</button>
+                            <button class="btn btn-sm btn-outline-warning" type="button" data-bs-toggle="collapse" data-bs-target="#reset-{{ u.id }}"><i class="fas fa-key me-1"></i>Password</button>
+                            {% if u.id != current_user.id %}
+                            <form method="POST" class="d-inline ms-1" onsubmit="return confirm('Delete user {{ u.username }}?')">
+                                <input type="hidden" name="action" value="delete"><input type="hidden" name="user_id" value="{{ u.id }}">
+                                <button type="submit" class="btn btn-sm btn-outline-danger" aria-label="Delete {{ u.username }}"><i class="fas fa-trash"></i></button>
+                            </form>
+                            {% endif %}
+                            <div class="collapse mt-2" id="reset-{{ u.id }}">
+                                <form method="POST" class="d-flex gap-2">
+                                    <input type="hidden" name="action" value="reset_password"><input type="hidden" name="user_id" value="{{ u.id }}">
+                                    <input type="password" name="new_password" class="form-control form-control-sm" placeholder="New password" required>
                                     <button type="submit" class="btn btn-warning btn-sm">Set</button>
                                 </form>
                             </div>
-                            {% if u.id != current_user.id %}
-                            <form method="POST" class="d-inline ms-1"
-                                onsubmit="return confirm('Delete user {{ u.username }}?')">
-                                <input type="hidden" name="action" value="delete">
-                                <input type="hidden" name="user_id" value="{{ u.id }}">
-                                <button type="submit" class="btn btn-xs btn-outline-danger btn-sm">
-                                    <i class="fas fa-trash"></i>
-                                </button>
-                            </form>
-                            {% endif %}
                         </td>
                     </tr>
+                    <tr class="collapse" id="access-{{ u.id }}"><td colspan="5" class="p-0 border-0">
+                        <form method="POST" class="p-3 bg-body-tertiary border-bottom">
+                            <input type="hidden" name="action" value="configure_permissions"><input type="hidden" name="user_id" value="{{ u.id }}">
+                            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+                                <div><strong>Access for {{ u.username }}</strong><div class="small text-muted">Changes take effect on their next request.{% if u.role == 'admin' %} Admin role always has unrestricted access.{% endif %}</div></div>
+                                <div class="d-flex align-items-center gap-3 flex-wrap">
+                                    <label class="small mb-0">Base role
+                                        <select name="role" class="form-select form-select-sm d-inline-block ms-1" style="width:auto">
+                                            {% if u.role not in ['admin','manager','accountant','staff'] %}<option value="{{ u.role or '' }}" selected>{{ u.role or 'Unassigned' }} (legacy)</option>{% endif %}
+                                            <option value="manager" {% if u.role == 'manager' %}selected{% endif %}>Manager</option>
+                                            <option value="accountant" {% if u.role == 'accountant' %}selected{% endif %}>Accountant</option>
+                                            <option value="staff" {% if u.role == 'staff' %}selected{% endif %}>Staff</option>
+                                            <option value="admin" {% if u.role == 'admin' %}selected{% endif %}>Admin</option>
+                                        </select>
+                                    </label>
+                                    <label class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" role="switch" name="custom_permissions" value="1" {% if u.permissions_json %}checked{% endif %}><span class="form-check-label">Use custom access map</span></label>
+                                </div>
+                            </div>
+                            {{ render_permission_tree(page_tree, stages, permissions_by_user.get(u.id, {}), read_stage_ids_by_user.get(u.id, []), write_stage_ids_by_user.get(u.id, []), u.stage_scope_enabled, 'u' ~ u.id) }}
+                            <div class="d-flex justify-content-end gap-2 mt-3"><button type="submit" class="btn btn-primary"><i class="fas fa-check me-1"></i>Save access</button></div>
+                        </form>
+                    </td></tr>
                     {% endfor %}
                     </tbody>
                 </table>
             </div>
-            <div class="px-3 py-2 border-top">
-                <small class="text-muted">
-                    <strong>Admin</strong> — full access, user management &nbsp;|&nbsp;
-                    <strong>Manager</strong> — can add/view records &nbsp;|&nbsp;
-                    <strong>Accountant</strong> — finance views only
-                </small>
+            <div class="px-3 py-3 border-top small text-muted">
+                <strong>Role defaults</strong> preserve current system behavior. A custom map replaces page access with only the checked Read / Write grants; write always requires read. Admin-only operations retain their existing stricter checks.
             </div>
         </div>
+        <div class="alert alert-info mt-3 mb-0"><i class="fas fa-shield-halved me-2"></i><strong>Stage limits are data limits, not just menu controls.</strong> When enabled, stage pages and ORM records for unselected stages are blocked or filtered, including direct URLs and submitted stage IDs.</div>
     </div>
 </div>
+<script>
+(function(){
+  document.querySelectorAll('[data-access-search]').forEach(function(input){input.addEventListener('input',function(){
+    var q=input.value.trim().toLowerCase(), form=input.closest('form');
+    form.querySelectorAll('.access-section').forEach(function(section){
+      var rows=section.querySelectorAll('.access-row'), visible=0;
+      rows.forEach(function(row){var show=!q||row.textContent.toLowerCase().indexOf(q)!==-1;row.hidden=!show;if(show)visible++;});
+      section.hidden=!!q&&rows.length>0&&!visible;
+    });
+  });});
+  document.querySelectorAll('[data-access-bulk]').forEach(function(btn){btn.addEventListener('click',function(){
+    var form=btn.closest('form'), mode=btn.getAttribute('data-access-bulk');
+    form.querySelectorAll('.access-read,.access-write').forEach(function(box){box.checked=mode==='clear'?false:(mode==='read'?box.classList.contains('access-read'):true);});
+  });});
+  document.querySelectorAll('.access-write').forEach(function(write){write.addEventListener('change',function(){if(write.checked){var read=write.closest('.access-row').querySelector('.access-read');if(read)read.checked=true;}});});
+  document.querySelectorAll('.access-read').forEach(function(read){read.addEventListener('change',function(){if(!read.checked){var write=read.closest('.access-row').querySelector('.access-write');if(write)write.checked=false;}});});
+  document.querySelectorAll('select[name="write_stage_ids"]').forEach(function(writeSelect){
+    var form=writeSelect.closest('form'), readSelect=form.querySelector('select[name="read_stage_ids"]');
+    if(!readSelect)return;
+    writeSelect.addEventListener('change',function(){
+      Array.from(writeSelect.options).forEach(function(option){if(option.selected){var readOption=Array.from(readSelect.options).find(function(x){return x.value===option.value;});if(readOption)readOption.selected=true;}});
+    });
+    readSelect.addEventListener('change',function(){
+      Array.from(readSelect.options).forEach(function(option){if(!option.selected){var writeOption=Array.from(writeSelect.options).find(function(x){return x.value===option.value;});if(writeOption)writeOption.selected=false;}});
+    });
+  });
+})();
+</script>
 {% endblock %}
