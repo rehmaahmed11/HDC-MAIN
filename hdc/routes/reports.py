@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 
 import openpyxl
 from flask import Response, abort, render_template, request
-from flask_login import login_required
+from flask_login import current_user, login_required
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from sqlalchemy import func
@@ -26,9 +26,17 @@ from hdc.services.aggregation import _apply_aggregated_project_costs, _apply_agg
 from hdc.services.ledger import _office_expense_total
 from hdc.services.lookups import _trade_options
 from hdc.services.purchase import _material_stock_map
+from hdc.services.record_permissions import report_section_allowed
 from hdc.services.reporting import _project_report_data
 from hdc.utils.dates import _pkt_now, _pkt_today
 from hdc.utils.format import _parse_date
+
+
+def _require_report_section(section, project_id=None):
+    """Cascade reporting grants are an additional, deny-by-default gate."""
+    if not report_section_allowed(current_user, section, project_id=project_id):
+        abort(403, description='This report is outside your assigned access.')
+
 
 def register(app):
     """Register Reports and CSV/XLSX/print exports."""
@@ -56,6 +64,11 @@ def register(app):
         pid = request.args.get('project_id', type=int)
         selected = Project.query.get(pid) if pid else None
         section = request.args.get('section', 'project')
+        # Cascade reporting sections (Users → Access) refine page + record
+        # grants per project/stage once any reporting grant is stored.
+        if section == 'project' and pid and not report_section_allowed(
+                current_user, 'project_report', project_id=pid):
+            abort(403, description='This project report is outside your assigned access.')
 
         worker_project_id = request.args.get('worker_project_id', type=int)
         worker_stage_id = request.args.get('worker_stage_id', type=int)
@@ -226,8 +239,15 @@ def register(app):
         if stage_id:
             stage_q = stage_q.filter(Stage.id == stage_id)
         stage_source = stage_q.all()
+        if section == 'stage' and stage_id and stage_source and not report_section_allowed(
+                current_user, 'stage_report',
+                project_id=stage_source[0].project_id, stage_id=stage_id):
+            abort(403, description='This stage report is outside your assigned access.')
         _apply_aggregated_stage_costs(stage_source)
         for s in stage_source:
+            if not report_section_allowed(current_user, 'stage_report',
+                                          project_id=s.project_id, stage_id=s.id):
+                continue
             stage_cost_rows.append({
                 'project': s.project.name if s.project else '',
                 'stage': s.name,
@@ -286,6 +306,8 @@ def register(app):
     @app.route('/hdc/reports/glance')
     @login_required
     def hdc_reports_glance():
+        if not report_section_allowed(current_user, 'glance_report'):
+            abort(403, description='The glance report is outside your assigned access.')
         today = _pkt_today()
         start_30 = today - timedelta(days=29)
         start_today_dt = datetime.combine(today, datetime.min.time())
@@ -522,6 +544,7 @@ def register(app):
     @app.route('/hdc/reports/export/profitability')
     @login_required
     def hdc_export_profitability():
+        _require_report_section('report_exports')
         out = io.StringIO()
         w   = csv.writer(out)
         w.writerow(['Code','Name','Client','Contract Value','Stage Value','Total Received',
@@ -543,6 +566,7 @@ def register(app):
     @app.route('/hdc/reports/export/salary')
     @login_required
     def hdc_export_salary():
+        _require_report_section('report_exports')
         out = io.StringIO()
         w   = csv.writer(out)
         w.writerow(['Date','Worker Code','Worker Name','Role','Project','Stage','Hours','Overtime','Wage'])
@@ -562,6 +586,7 @@ def register(app):
     @app.route('/hdc/reports/export/materials')
     @login_required
     def hdc_export_materials():
+        _require_report_section('report_exports')
         out = io.StringIO()
         w   = csv.writer(out)
         w.writerow(['Date','Type','Project','Stage','Material','Unit','Qty','Rate','Total','Supplier','Return Ref','Reason','Approved By'])
@@ -580,6 +605,7 @@ def register(app):
     @app.route('/hdc/reports/project/<int:pid>/csv')
     @login_required
     def hdc_project_report_csv(pid):
+        _require_report_section('project_report', project_id=pid)
         d   = _project_report_data(pid)
         p   = d['project']
         out = io.StringIO()
@@ -654,6 +680,7 @@ def register(app):
     @app.route('/hdc/reports/project/<int:pid>/xlsx')
     @login_required
     def hdc_project_report_xlsx(pid):
+        _require_report_section('project_report', project_id=pid)
         d   = _project_report_data(pid)
         p   = d['project']
         wb  = openpyxl.Workbook()
@@ -889,6 +916,7 @@ def register(app):
     @app.route('/hdc/reports/project/<int:pid>/pdf')
     @login_required
     def hdc_project_report_pdf(pid):
+        _require_report_section('project_report', project_id=pid)
         d = _project_report_data(pid)
         return render_template('projects/project_report_print.html', **d,
                                now=_pkt_now().strftime('%Y-%m-%d %H:%M'))

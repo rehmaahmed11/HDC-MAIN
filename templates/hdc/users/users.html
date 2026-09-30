@@ -38,7 +38,7 @@
                             <label class="form-check-label" for="newCustomAccess">Use custom permissions (unchecked uses role defaults)</label>
                         </div>
                         {{ render_permission_tree(page_tree, stages) }}
-                        {{ render_record_access(record_catalog) }}
+                        {{ render_record_access(record_catalog, project_options=project_options, stages_by_project=stages_by_project) }}
                     </details>
                     <button type="submit" class="btn btn-mint w-100"><i class="fas fa-user-plus me-1"></i>Create User</button>
                 </form>
@@ -101,7 +101,7 @@
                                 </div>
                             </div>
                             {{ render_permission_tree(page_tree, stages, permissions_by_user.get(u.id, {}), read_stage_ids_by_user.get(u.id, []), write_stage_ids_by_user.get(u.id, []), u.stage_scope_enabled, 'u' ~ u.id) }}
-                            {{ render_record_access(record_catalog, record_cards_by_user.get(u.id, []), u.record_scope_enabled, 'u' ~ u.id) }}
+                            {{ render_record_access(record_catalog, record_cards_by_user.get(u.id, []), u.record_scope_enabled, 'u' ~ u.id, project_options, stages_by_project, cascade_branches_by_user.get(u.id, [])) }}
                             <div class="d-flex justify-content-end gap-2 mt-3"><button type="submit" class="btn btn-primary"><i class="fas fa-check me-1"></i>Save access</button></div>
                         </form>
                     </td></tr>

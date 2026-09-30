@@ -114,9 +114,11 @@
                         {% endfor %}
                     </select>
                     <a href="{{ url_for('hdc_purchases') }}" class="btn btn-sm btn-outline-secondary">Clear</a>
+                    {% if hdc_report_allowed('report_exports') %}
                     <a href="{{ url_for('hdc_export_materials') }}" class="btn btn-sm btn-outline-success ms-auto">
                         <i class="fas fa-download me-1"></i>CSV
                     </a>
+                    {% endif %}
                 </form>
             </div>
             <div class="table-responsive">

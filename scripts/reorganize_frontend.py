@@ -21,8 +21,8 @@ ROUTES = os.path.join(BASE, "hdc", "routes")
 STATIC_JS = os.path.join(BASE, "static", "hdc", "js")
 
 DOMAIN_OF = {
-    "shared": ["base.html", "_pagination.html", "_combo_field.html"],
-    "auth": ["login.html"],
+    "shared": ["base.html", "_pagination.html", "_combo_field.html", "forbidden.html"],
+    "auth": ["login.html", "access_home.html"],
     "dashboard": ["dashboard.html", "kpi_detail.html"],
     "projects": ["projects.html", "add_project.html", "edit_project.html",
                  "project_detail.html", "project_report_print.html",
@@ -69,7 +69,8 @@ DOMAIN_OF = {
                         "ledger.html", "parties.html", "report.html",
                         "settlements.html"],
     "reports": ["reports.html", "reports_glance.html"],
-    "users": ["users.html", "event_recorder.html"],
+    "users": ["users.html", "event_recorder.html",
+              "_permission_editor.html", "_record_access_editor.html"],
     "accounts": ["accounts.html", "account_ledger.html",
                  "accounts_entries.html", "accounts_transaction_edit.html",
                  "accounts_reconciliation.html",

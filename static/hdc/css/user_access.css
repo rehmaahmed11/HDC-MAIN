@@ -8,5 +8,22 @@
 .record-row-head{text-align:center;font-size:.7rem}.record-row-head span:first-child{text-align:left}
 .record-label{overflow-wrap:anywhere}.record-toggle{display:flex;justify-content:center;align-items:center;margin:0;cursor:pointer}
 .record-access fieldset:disabled{opacity:.65}.record-access input[type=checkbox]{cursor:pointer}.record-access .alert{margin-bottom:.8rem}
+.record-cascade{border:1px dashed var(--bs-border-color,#c9d5d0);border-radius:.6rem;padding:.65rem .7rem;background:var(--bs-tertiary-bg,#f7f9f8)}
+.cascade-head{display:flex;flex-wrap:wrap;gap:.75rem;align-items:center;margin-bottom:.4rem}
+.cascade-gate{display:flex;gap:1.1rem;align-items:center;padding:.4rem .1rem;border-top:1px solid var(--bs-border-color,#dee2e6);border-bottom:1px solid var(--bs-border-color,#dee2e6);font-size:.82rem}
+.cascade-gate-name{font-weight:600;min-width:110px}
+.cascade-gate .record-toggle span{font-size:.78rem}
+.cascade-picker{max-width:420px;margin:.5rem 0}
+.cascade-branch{border:1px solid var(--bs-border-color,#dee2e6)}
+.cascade-project-row{border-top:none}
+.cascade-stage{margin:.15rem .5rem 0 .9rem;border-left:3px solid rgba(36,68,61,.25);padding-left:.45rem}
+.cascade-sections{margin:.1rem .3rem .45rem 1.4rem}
+.cascade-section-head,.cascade-section-row{display:grid;grid-template-columns:minmax(130px,1fr) 58px 58px;gap:.35rem;align-items:center;font-size:.76rem;padding:.22rem 0}
+.cascade-section-head{text-transform:uppercase;letter-spacing:.03em;border-top:1px solid var(--bs-border-color,#dee2e6);margin-top:.2rem}
+.cascade-section-head span:not(:first-child),.cascade-section-row span:not(:first-child){text-align:center}
+.cascade-section-head span:nth-child(2),.cascade-section-row span:nth-child(2){grid-column:2}
+.cascade-section-row label{justify-content:center}
+@media(max-width:650px){.cascade-section-head,.cascade-section-row{grid-template-columns:minmax(90px,1fr) 48px 48px;font-size:.72rem}.cascade-stage{margin-left:.4rem}.cascade-sections{margin-left:.6rem}.cascade-gate{gap:.6rem}.cascade-gate-name{min-width:70px}}
+@media(min-width:1200px){.col-xl-4 .cascade-stage{margin-left:.4rem}.col-xl-4 .cascade-section-head,.col-xl-4 .cascade-section-row{grid-template-columns:minmax(100px,1fr) 46px 46px;font-size:.7rem}}
 @media(max-width:650px){.record-finder{grid-template-columns:1fr 1fr}.record-finder button{grid-column:1/-1}.record-row{grid-template-columns:minmax(90px,1fr) 34px 34px 66px 20px;font-size:.75rem}.record-grant-card{padding:.5rem}.record-access{padding:.8rem}}
 @media(min-width:1200px){.col-xl-4 .record-finder{grid-template-columns:1fr}.col-xl-4 .record-row{grid-template-columns:minmax(70px,1fr) 32px 32px 58px 18px;font-size:.72rem}}
