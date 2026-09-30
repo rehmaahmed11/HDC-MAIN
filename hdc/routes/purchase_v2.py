@@ -15,6 +15,7 @@ from hdc.models.materials import Delivery, MaterialV2, PurchaseV2, Supplier, Sup
 from hdc.models.projects import Project, Stage
 from hdc.services.accounts import _accounts_post_supplier_credit_row, _accounts_set_void_by_source, _accounts_upsert_purchase_paid_txn
 from hdc.services.audit import log_action
+from hdc.services.record_permissions import integrity_message, integrity_query
 from hdc.services.purchase import validate_delivery_reduction, _MATERIAL_V2_UNITS, _ensure_material_v2, _ensure_supplier_quick, _material_v2_available, _material_v2_delivered, _material_v2_used, _material_v2_weighted_cost, _purchase_v2_available_in_scope_qty, _purchase_v2_delivered_qty, _purchase_v2_integrity_report, _repair_supplier_purchase_v2_ledger, _sync_purchase_v2_ledger, _sync_supplier_po_payment_status, _transfer_v2_material_between_scopes
 from hdc.services.timekeeping import _has_recent_duplicate
 from hdc.utils.dates import _pkt_now_naive, _pkt_today
@@ -152,9 +153,9 @@ def register(app):
     @_money_write_required()
     def hdc_purchase_v2_material_delete(material_id):
         row = MaterialV2.query.get_or_404(material_id)
-        has_purchase = PurchaseV2.query.filter_by(material_id=row.id, is_void=False).first() is not None
-        has_delivery = Delivery.query.filter_by(material_id=row.id, is_void=False).first() is not None
-        has_usage = UsageLogV2.query.filter_by(material_id=row.id, is_void=False).first() is not None
+        has_purchase = integrity_query(db.session.query(PurchaseV2.id).filter_by(material_id=row.id, is_void=False)).first() is not None
+        has_delivery = integrity_query(db.session.query(Delivery.id).filter_by(material_id=row.id, is_void=False)).first() is not None
+        has_usage = integrity_query(db.session.query(UsageLogV2.id).filter_by(material_id=row.id, is_void=False)).first() is not None
         if has_purchase or has_delivery or has_usage:
             row.status = 'inactive'
             row.updated_at = _pkt_now_naive()
@@ -317,9 +318,9 @@ def register(app):
         if unit_price <= 0 or quantity <= 0:
             flash('Unit price and quantity must be greater than 0.', 'danger')
             return redirect(url_for('hdc_purchase_v2_purchases'))
-        delivered = _purchase_v2_delivered_qty(row.id)
+        delivered = _purchase_v2_delivered_qty(row.id, integrity=True)
         if quantity + 1e-9 < delivered:
-            flash(f'Cannot set quantity below delivered quantity ({delivered:,.2f}).', 'danger')
+            flash(integrity_message('Cannot reduce quantity: deliveries already exist.', f'Cannot set quantity below delivered quantity ({delivered:,.2f}).'), 'danger')
             return redirect(url_for('hdc_purchase_v2_purchases'))
         if row.material_id != material.id and delivered > 0:
             flash('Cannot change material after deliveries are recorded for this purchase.', 'danger')
@@ -371,9 +372,9 @@ def register(app):
         if row.is_void:
             flash('Purchase is already deleted.', 'warning')
             return redirect(url_for('hdc_purchase_v2_purchases'))
-        delivered = _purchase_v2_delivered_qty(row.id)
+        delivered = _purchase_v2_delivered_qty(row.id, integrity=True)
         if delivered > 0:
-            flash(f'Cannot delete purchase #{row.id}; delivery exists ({delivered:,.2f}).', 'danger')
+            flash(integrity_message('Cannot delete purchase: deliveries already exist.', f'Cannot delete purchase #{row.id}; delivery exists ({delivered:,.2f}).'), 'danger')
             return redirect(url_for('hdc_purchase_v2_purchases'))
         row.is_void = True
         row.void_reason = 'Deleted by user from Purchase V2'
@@ -767,11 +768,10 @@ def register(app):
             if quantity <= 0:
                 flash('Quantity must be greater than 0.', 'danger')
                 return redirect(url_for('hdc_purchase_v2_delivered'))
-            delivered_so_far = float(db.session.query(func.coalesce(func.sum(Delivery.quantity), 0.0))
-                                     .filter(Delivery.purchase_id == purchase.id, Delivery.is_void == False).scalar() or 0.0)
+            delivered_so_far = _purchase_v2_delivered_qty(purchase.id, integrity=True)
             remaining_purchase_qty = max(0.0, float(purchase.quantity or 0.0) - delivered_so_far)
             if quantity > remaining_purchase_qty + 1e-9:
-                flash(f'Cannot deliver more than remaining purchase quantity ({remaining_purchase_qty:,.2f}).', 'danger')
+                flash(integrity_message('Cannot deliver more than the remaining purchase quantity.', f'Cannot deliver more than remaining purchase quantity ({remaining_purchase_qty:,.2f}).'), 'danger')
                 return redirect(url_for('hdc_purchase_v2_delivered'))
             _del_date_raw = (request.form.get('date') or '').strip()
             try:
@@ -910,9 +910,9 @@ def register(app):
             flash('Shift quantity must be greater than 0.', 'danger')
             return redirect(url_for('hdc_purchase_v2_delivered'))
 
-        available = _material_v2_available(material.id, from_project.id, from_stage.id if from_stage else None)
+        available = _material_v2_available(material.id, from_project.id, from_stage.id if from_stage else None, integrity=True)
         if qty > available + 1e-9:
-            flash(f'Shift exceeds source available stock ({available:,.2f}).', 'danger')
+            flash(integrity_message('Shift exceeds available source stock.', f'Shift exceeds source available stock ({available:,.2f}).'), 'danger')
             return redirect(url_for('hdc_purchase_v2_delivered'))
 
         _date_raw = (request.form.get('date') or '').strip()
@@ -984,9 +984,9 @@ def register(app):
             if quantity <= 0:
                 flash('Quantity must be greater than 0.', 'danger')
                 return redirect(url_for('hdc_purchase_v2_usage_page'))
-            available = _purchase_v2_available_in_scope_qty(purchase.id, project.id, stage.id if stage else None)
+            available = _purchase_v2_available_in_scope_qty(purchase.id, project.id, stage.id if stage else None, integrity=True)
             if quantity > available + 1e-9:
-                flash(f'Usage exceeds available stock for selected purchase order in this stage ({available:,.2f}).', 'danger')
+                flash(integrity_message('Usage exceeds available stock for this purchase order and stage.', f'Usage exceeds available stock for selected purchase order in this stage ({available:,.2f}).'), 'danger')
                 return redirect(url_for('hdc_purchase_v2_usage_page'))
             unit_price = float(purchase.unit_price or 0.0)
             cost = float(unit_price * quantity)
@@ -1182,11 +1182,10 @@ def register(app):
             return redirect(url_for('hdc_purchase_v2_delivered'))
         purchase = PurchaseV2.query.get(row.purchase_id)
         if purchase:
-            other_delivered = float(db.session.query(func.coalesce(func.sum(Delivery.quantity), 0.0))
-                .filter(Delivery.purchase_id == purchase.id, Delivery.is_void == False, Delivery.id != row.id).scalar() or 0.0)
+            other_delivered = _purchase_v2_delivered_qty(purchase.id, exclude_delivery_id=row.id, integrity=True)
             remaining = max(0.0, float(purchase.quantity or 0.0) - other_delivered)
             if qty > remaining + 1e-9:
-                flash(f'Quantity exceeds remaining purchase qty ({remaining:,.2f}).', 'danger')
+                flash(integrity_message('Quantity exceeds the remaining purchase stock.', f'Quantity exceeds remaining purchase qty ({remaining:,.2f}).'), 'danger')
                 return redirect(url_for('hdc_purchase_v2_delivered'))
         try:
             validate_delivery_reduction(row, qty)
@@ -1260,10 +1259,10 @@ def register(app):
                 purchase.id,
                 project.id,
                 stage.id if stage else None,
-                exclude_usage_id=row.id
+                exclude_usage_id=row.id, integrity=True
             )
             if qty > available_for_edit + 1e-9:
-                flash(f'Edited usage exceeds selected purchase order stock in this stage ({available_for_edit:,.2f}).', 'danger')
+                flash(integrity_message('Edited usage exceeds available purchase stock in this stage.', f'Edited usage exceeds selected purchase order stock in this stage ({available_for_edit:,.2f}).'), 'danger')
                 return redirect(url_for('hdc_purchase_v2_usage_page'))
             row.cost = float(float(purchase.unit_price or 0.0) * qty)
         else:
@@ -1281,9 +1280,9 @@ def register(app):
             if stage:
                 del_q = del_q.filter(Delivery.stage_id == stage.id)
                 use_q = use_q.filter(UsageLogV2.stage_id == stage.id)
-            available_for_edit = max(0.0, float(del_q.scalar() or 0.0) - float(use_q.scalar() or 0.0))
+            available_for_edit = max(0.0, float(integrity_query(del_q).scalar() or 0.0) - float(integrity_query(use_q).scalar() or 0.0))
             if qty > available_for_edit + 1e-9:
-                flash(f'Edited usage exceeds available delivered stock ({available_for_edit:,.2f}).', 'danger')
+                flash(integrity_message('Edited usage exceeds available delivered stock.', f'Edited usage exceeds available delivered stock ({available_for_edit:,.2f}).'), 'danger')
                 return redirect(url_for('hdc_purchase_v2_usage_page'))
             avg_cost = _material_v2_weighted_cost(row.material_id)
             row.cost = float(avg_cost * qty)

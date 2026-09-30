@@ -8,7 +8,7 @@ import os
 from uuid import uuid4
 
 from flask import abort, current_app, flash, jsonify, redirect, render_template, request, send_file, url_for
-from flask_login import login_required
+from flask_login import current_user, login_required
 from sqlalchemy import func
 from werkzeug.utils import secure_filename
 
@@ -22,6 +22,8 @@ from hdc.models.workforce import TimeEntry, Worker
 from hdc.services.accounts import _ACCOUNT_COMPANY_TYPES, _accounts_post_owner_receipt, _accounts_set_void_by_source
 from hdc.services.aggregation import _apply_aggregated_project_costs, _apply_aggregated_stage_costs, _running_projects_receivable_rows
 from hdc.services.lookups import _next_project_code
+from hdc.services.permissions import may_access_path, permission_for, permission_landing_url
+from hdc.services.record_permissions import record_allowed
 from hdc.services.receipts import _owner_payment_recent_entries, _receipt_company_profile
 from hdc.services.reporting import _build_stage_event_ledger
 from hdc.services.subcontract import _log_subcontract_event, assign_subcontractors_from_form, selected_subcontractor_ids
@@ -31,6 +33,14 @@ from hdc.utils.format import _activity_at_for, _amount_to_words, _flt, _is_pdf_u
 
 def register(app):
     """Register Projects, stages, drawings, stage library, owner payments."""
+    def drawing_return_url(drawing):
+        parent = drawing.stage
+        if parent and record_allowed(current_user, 'hdc_project', parent.project_id):
+            destination = url_for('hdc_project_detail', pid=parent.project_id)
+            if may_access_path(current_user, destination) is not False:
+                return destination
+        return permission_landing_url(current_user)
+
     def _stage_form_subcontractor_pool():
         return Subcontractor.query.order_by(Subcontractor.name.asc(), Subcontractor.id.asc()).all()
 
@@ -66,7 +76,8 @@ def register(app):
         pg_total_pages = max(1, (pg_total_items + per_page - 1) // per_page)
         page = min(page, pg_total_pages)
         projects = q.offset((page - 1) * per_page).limit(per_page).all()
-        _apply_aggregated_project_costs(projects)
+        if permission_for(current_user, 'project_financials') is not False:
+            _apply_aggregated_project_costs(projects)
         return render_template('projects/projects.html',
                                projects=projects,
                                pg_page=page,
@@ -126,21 +137,23 @@ def register(app):
     @login_required
     def hdc_project_detail(pid):
         p        = Project.query.get_or_404(pid)
-        workers  = Worker.query.filter_by(active_status=True).all()
-        stages   = Stage.query.filter_by(project_id=pid).order_by(Stage.id).all()
+        workers  = Worker.query.filter_by(active_status=True).all() if permission_for(current_user, 'timekeeping') is not False else []
+        stages   = Stage.query.filter_by(project_id=pid).order_by(Stage.id).all() if permission_for(current_user, 'stages') is not False else []
         _apply_aggregated_stage_costs(stages)
-        _apply_aggregated_project_costs([p])
+        if permission_for(current_user, 'project_financials') is not False:
+            _apply_aggregated_project_costs([p])
         stage_defs = (StageDefinition.query
                       .filter_by(project_id=pid, active_status=True)
                       .order_by(StageDefinition.default_order, StageDefinition.id)
                       .all())
         materials  = Material.query.filter_by(is_active=True).all()
-        subcontractor_pool = Subcontractor.query.order_by(Subcontractor.name.asc(), Subcontractor.id.asc()).all()
+        subcontractor_pool = (Subcontractor.query.order_by(Subcontractor.name.asc(), Subcontractor.id.asc()).all()
+                              if permission_for(current_user, 'subcontractors') is not False else [])
         recent_time_entries = (TimeEntry.query
                                .filter(TimeEntry.project_id == pid, TimeEntry.is_void == False)
                                .order_by(TimeEntry.check_in.desc(), TimeEntry.id.desc())
                                .limit(10)
-                               .all())
+                               .all()) if (permission_for(current_user, 'timekeeping') is not False or permission_for(current_user, 'timekeeping_records') is not False) else []
         sqft_stages = [s for s in stages if (str(s.contract_basis or '').strip().lower() == 'per sq ft') and float(s.qty_sqft or 0.0) > 0]
         if sqft_stages:
             project_total_sqft = float(sum(float(s.qty_sqft or 0.0) for s in sqft_stages))
@@ -155,11 +168,11 @@ def register(app):
         owner_payments = (OwnerPayment.query
                           .filter_by(project_id=pid, is_void=False)
                           .order_by(OwnerPayment.date.desc(), OwnerPayment.id.desc())
-                          .all())
+                          .all()) if permission_for(current_user, 'project_receipts') is not False else []
         owner_payments_voided = (OwnerPayment.query
                                  .filter_by(project_id=pid, is_void=True)
                                  .order_by(OwnerPayment.voided_at.desc(), OwnerPayment.id.desc())
-                                 .all())
+                                 .all()) if permission_for(current_user, 'project_receipts') is not False else []
         receiving_accounts = (Account.query
                               .filter(
                                   Account.is_void == False,
@@ -167,8 +180,8 @@ def register(app):
                                   func.lower(func.coalesce(Account.type, '')).in_(_ACCOUNT_COMPANY_TYPES)
                               )
                               .order_by(Account.name.asc(), Account.id.asc())
-                              .all())
-        project_receivable_rows = _running_projects_receivable_rows()
+                              .all()) if permission_for(current_user, 'project_receipts', 'write') is not False else []
+        project_receivable_rows = _running_projects_receivable_rows() if permission_for(current_user, 'project_receipts') is not False else []
         return render_template('projects/project_detail.html',
             p=p, workers=workers, stages=stages,
             stage_defs=stage_defs, materials=materials,
@@ -220,16 +233,21 @@ def register(app):
     def hdc_edit_project(pid):
         p = Project.query.get_or_404(pid)
         if request.method == 'POST':
-            p.name                  = request.form.get('name','').strip()
-            p.client                = request.form.get('client','').strip()
-            p.client_phone          = request.form.get('client_phone','').strip()
-            p.location              = request.form.get('location','').strip()
-            p.total_constructed_sqft= _flt(request.form.get('total_sqft'))
-            p.owner_rate_per_sqft   = _flt(request.form.get('owner_rate'))
-            p.owner_lump_sum        = _flt(request.form.get('lump_sum'))
-            p.contract_type         = request.form.get('contract_type','sqft')
-            p.status                = request.form.get('status','active')
-            p.planned_end           = _parse_date(request.form.get('planned_end')) if request.form.get('planned_end') else None
+            financial_fields = {'total_sqft', 'owner_rate', 'lump_sum', 'contract_type'}
+            if financial_fields.intersection(request.form) and permission_for(current_user, 'project_financials', 'write') is False:
+                abort(403)
+            for field in ('name', 'client', 'client_phone', 'location', 'status'):
+                if field in request.form:
+                    setattr(p, field, request.form.get(field, '').strip())
+            if permission_for(current_user, 'project_financials', 'write') is not False:
+                for field, column in (('total_sqft', 'total_constructed_sqft'),
+                                      ('owner_rate', 'owner_rate_per_sqft'), ('lump_sum', 'owner_lump_sum')):
+                    if field in request.form:
+                        setattr(p, column, _flt(request.form.get(field)))
+                if 'contract_type' in request.form:
+                    p.contract_type = request.form['contract_type']
+            if 'planned_end' in request.form:
+                p.planned_end = _parse_date(request.form.get('planned_end')) if request.form.get('planned_end') else None
             db.session.commit()
             flash('Project updated.', 'success')
             return redirect(url_for('hdc_project_detail', pid=pid))
@@ -581,7 +599,7 @@ def register(app):
         path = os.path.join(get_runtime_settings().stage_drawings_dir, d.stored_name or '')
         if not os.path.exists(path):
             flash('Drawing file not found on disk.', 'danger')
-            return redirect(url_for('hdc_project_detail', pid=d.stage.project_id))
+            return redirect(drawing_return_url(d))
         return send_file(path, mimetype='application/pdf', as_attachment=False, download_name=d.original_name)
 
 
@@ -589,7 +607,7 @@ def register(app):
     @login_required
     def hdc_stage_drawing_delete(did):
         d = StageDrawing.query.get_or_404(did)
-        pid = d.stage.project_id
+        destination = drawing_return_url(d)
         path = os.path.join(get_runtime_settings().stage_drawings_dir, d.stored_name or '')
         db.session.delete(d)
         db.session.commit()
@@ -599,18 +617,18 @@ def register(app):
         except Exception as ex:
             current_app.logger.warning('Could not remove stage drawing file: %s', ex)
         flash('Drawing deleted.', 'success')
-        return redirect(url_for('hdc_project_detail', pid=pid))
+        return redirect(destination)
 
 
     @app.route('/hdc/stage/drawing/<int:did>/replace', methods=['POST'])
     @login_required
     def hdc_stage_drawing_replace(did):
         d = StageDrawing.query.get_or_404(did)
-        pid = d.stage.project_id
+        destination = drawing_return_url(d)
         f = request.files.get('drawing_file')
         if not _is_pdf_upload(f):
             flash('Please upload a valid PDF file.', 'warning')
-            return redirect(url_for('hdc_project_detail', pid=pid))
+            return redirect(destination)
         old_path = os.path.join(get_runtime_settings().stage_drawings_dir, d.stored_name or '')
         new_original = secure_filename(f.filename or 'drawing.pdf') or 'drawing.pdf'
         new_stored = f"{uuid4().hex}.pdf"
@@ -626,7 +644,7 @@ def register(app):
         except Exception as ex:
             current_app.logger.warning('Could not remove replaced stage drawing file: %s', ex)
         flash('Drawing replaced successfully.', 'success')
-        return redirect(url_for('hdc_project_detail', pid=pid))
+        return redirect(destination)
 
 
     @app.route('/hdc/projects/<int:pid>/bulk_stages', methods=['POST'])

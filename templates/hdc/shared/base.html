@@ -50,7 +50,7 @@
     </noscript>
 </head>
 {% set current_permission_page = hdc_page_id_for_path(request.path) %}
-<body data-hdc-custom-access="{{ 'true' if current_user.permissions_json else 'false' }}" data-hdc-page-write="{{ 'true' if hdc_page_allowed(current_permission_page, 'write') else 'false' }}">
+<body data-hdc-custom-access="{{ 'true' if current_user.permissions_json or current_user.record_scope_enabled else 'false' }}" data-hdc-page-write="{{ 'true' if hdc_page_allowed(current_permission_page, 'write') else 'false' }}">
 <style>
 body[data-hdc-custom-access="true"][data-hdc-page-write="false"] form[method="post"]:not([action="/hdc/logout"]),
 body[data-hdc-custom-access="true"][data-hdc-page-write="false"] form[method="POST"]:not([action="/hdc/logout"]) { display:none !important; }
@@ -166,7 +166,7 @@ body[data-hdc-custom-access="true"][data-hdc-page-write="false"] form[method="PO
             {% set role_can_see_section = (not section.roles or sidebar_role in section.roles or (current_user.permissions_json and section.id != 'administration')) %}
             {% set visible_links = [] %}
             {% for link in section.links %}
-                {% if role_can_see_section and hdc_page_allowed(link.permission, 'read') %}
+                {% if role_can_see_section and hdc_page_allowed(link.permission|default(hdc_page_id_for_path(link.href)), 'read') %}
                     {% set _ = visible_links.append(link) %}
                 {% endif %}
             {% endfor %}
@@ -292,6 +292,7 @@ body[data-hdc-custom-access="true"][data-hdc-page-write="false"] form[method="PO
 
         <!-- MAIN CONTENT -->
         <main class="main-content px-4 pb-4">
+            {% if hdc_exact_access() %}<div class="alert alert-info small py-2 mt-2"><i class="fas fa-shield-halved me-1" aria-hidden="true"></i>Only administrator-assigned data is shown. Calculated totals reflect visible records, not necessarily the full project or company.</div>{% endif %}
             {% block content %}{% endblock %}
         </main>
     </div>
@@ -385,6 +386,14 @@ function hdcJumpToPage(event) {
   var body=document.body;
   if(!body || body.dataset.hdcCustomAccess!=='true' || body.dataset.hdcPageWrite!=='false') return;
   var actionPath=/(?:\/edit|\/delete|\/void|\/restore|\/remove|\/toggle|\/suspend|\/activate|\/payment|\/pay|\/advance|\/rate|\/status|\/sub-progress|\/add_subcontractor|\/stage\/add|\/bulk_stages|\/return|\/transfer|\/scrap|\/purchase)(?:\/|$|[?#])/i;
+  document.querySelectorAll('a[href]').forEach(function(link){
+    if(actionPath.test(new URL(link.href,window.location.href).pathname)) link.hidden=true;
+  });
+})();
+</script>
+</body>
+</html>
+stages|\/return|\/transfer|\/scrap|\/purchase)(?:\/|$|[?#])/i;
   document.querySelectorAll('a[href]').forEach(function(link){
     if(actionPath.test(new URL(link.href,window.location.href).pathname)) link.hidden=true;
   });

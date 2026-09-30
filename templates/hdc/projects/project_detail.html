@@ -4,6 +4,15 @@
 {% block page_heading %}{{ p.name }} <span class="badge bg-secondary ms-2 fs-6">{{ p.project_code }}</span>{% endblock %}
 
 {% block content %}
+<div class="card hdc-card mt-2">
+    <div class="card-body d-flex justify-content-between align-items-start gap-3 flex-wrap">
+        <div><strong>{{ p.name }}</strong><div class="small text-muted">{{ p.client or 'No client set' }}{% if p.client_phone %} · {{ p.client_phone }}{% endif %}{% if p.location %} · {{ p.location }}{% endif %}</div></div>
+        <div class="d-flex align-items-center gap-2"><span class="badge bg-secondary">{{ p.status }}</span>
+            {% if hdc_page_allowed('project_detail', 'write') and hdc_record_allowed('hdc_project', p.id, 'write') %}<a class="btn btn-sm btn-outline-primary" href="{{ url_for('hdc_edit_project', pid=p.id) }}">Edit project</a>{% endif %}
+        </div>
+    </div>
+</div>
+{% if hdc_page_allowed('project_financials') %}
 <!-- FINANCIAL SUMMARY CARDS -->
 <div class="row g-3 mt-1">
     <div class="col-6 col-md-2">
@@ -139,7 +148,7 @@
                 <div class="kpi-value small">{{ "{:,.2f}".format(profit_per_sqft or 0) if sqft_metrics_valid else 'N/A' }}</div>
                 <div class="kpi-sub">{% if sqft_metrics_valid %}PKR per sqft{% else %}Only for Per Sq Ft basis{% endif %}</div>
             </div>
-            {% if owner_payments_voided %}
+            {% if hdc_page_allowed('project_receipts') and owner_payments_voided %}
             <div class="border-top p-2">
                 <div class="small fw-semibold text-muted mb-1">Voided Payments (Restore)</div>
                 {% for op in owner_payments_voided[:10] %}
@@ -156,6 +165,9 @@
     </div>
 </div>
 
+{% endif %}
+
+{% if hdc_page_allowed('stages') %}
 <!-- STAGES SECTION -->
 <div class="card hdc-card mt-3">
     <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
@@ -213,7 +225,7 @@
                     </span>
                 </td>
                 <td class="text-nowrap">
-                    {% set members = s.assigned_subcontractors %}
+                    {% set members = s.assigned_subcontractors if hdc_page_allowed('subcontractors') else [] %}
                     {% if members %}
                     <span class="badge bg-warning text-dark"
                           title="{{ members|map(attribute='name')|join(', ') }} — click the arrow next to the stage name for details">
@@ -245,7 +257,7 @@
                 </td>
                 <td class="text-nowrap">
                     <span class="badge bg-light text-dark border" title="Drawings — click the arrow next to the stage name to manage">
-                        <i class="fas fa-file-pdf me-1 text-danger"></i>{{ s.drawings|length }}
+                        <i class="fas fa-file-pdf me-1 text-danger"></i>{{ s.drawings|length if hdc_page_allowed('stage_drawings') else '—' }}
                     </span>
                 </td>
                 <td class="text-nowrap">
@@ -320,7 +332,7 @@
         18-column horizontal scroller the panel would be stretched past the
         card edge, which clipped the fields and broke their alignment. -#}
     {% for s in stages %}
-    {% set members = s.assigned_subcontractors %}
+    {% set members = s.assigned_subcontractors if hdc_page_allowed('subcontractors') else [] %}
     {% set stage_done = (s.status or '')|lower in ['completed', 'complete'] %}
     <div class="collapse stage-details-row stage-panel-wrap" id="stage-details-{{ s.id }}">
         <div class="stage-sub-panel stage-details-panel p-2 my-1">
@@ -346,6 +358,7 @@
             </div>
             {% if (s.qty_sqft or 0) > 0 %}{{ stage_sqft_strip(s.sqft_allocation_summary) }}{% endif %}
 
+            {% if hdc_page_allowed('subcontractors') %}
             <div class="stage-details-section" id="stage-subs-{{ s.id }}">
                 <div class="stage-details-section-title"><i class="fas fa-users-gear me-1 text-warning"></i>Subcontractors on this stage
                     <span class="badge bg-secondary ms-1">{{ members|length }}</span></div>
@@ -437,9 +450,11 @@
             </form>
             {% endif %}
             </div>
+            {% endif %}
+            {% if hdc_page_allowed('stage_drawings') %}
             <div class="stage-details-section" id="drawings-{{ s.id }}">
                 <div class="stage-details-section-title"><i class="fas fa-file-pdf me-1 text-danger"></i>Drawings
-                    <span class="badge bg-secondary ms-1">{{ s.drawings|length }}</span></div>
+                    <span class="badge bg-secondary ms-1">{{ s.drawings|length if hdc_page_allowed('stage_drawings') else '—' }}</span></div>
                 <div class="d-flex flex-column gap-2">
             <form method="POST" action="{{ url_for('hdc_stage_drawings_upload', sid=s.id) }}" enctype="multipart/form-data" class="d-flex flex-wrap gap-2 align-items-center">
                 <span class="small text-muted fw-bold">Upload PDF Drawings:</span>
@@ -474,14 +489,18 @@
             {% endif %}
                 </div>
             </div>
+            {% endif %}
         </div>
 
     </div>
     {% endfor %}
 </div>
 
+{% endif %}
+
 <!-- FINANCIAL BREAKDOWN + PAYMENTS ROW -->
 <div class="row g-3 mt-1">
+    {% if hdc_page_allowed('project_financials') %}
     <div class="col-md-4">
         <div class="card hdc-card h-100">
             <div class="card-header hdc-card-header"><i class="fas fa-chart-bar me-2"></i>Financial Breakdown</div>
@@ -513,6 +532,8 @@
         </div>
     </div>
 
+    {% endif %}
+    {% if hdc_page_allowed('project_receipts') %}
     <!-- Owner Payments -->
     <div class="col-md-8">
         <div class="card hdc-card">
@@ -579,8 +600,10 @@
             </div>
         </div>
     </div>
+    {% endif %}
 </div>
 
+{% if hdc_page_allowed('subcontractors') %}
 <!-- SUBCONTRACTORS -->
 <div class="card hdc-card mt-3">
     <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
@@ -682,8 +705,11 @@
     </div>
 </div>
 
+{% endif %}
+
 <!-- ATTENDANCE RECENT + MATERIAL PURCHASES -->
 <div class="row g-3 mt-1">
+    {% if hdc_page_allowed('timekeeping') or hdc_page_allowed('timekeeping_records') %}
     <div class="col-md-6">
         <div class="card hdc-card">
             <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
@@ -697,8 +723,8 @@
                     {% for a in recent_time_entries %}
                     <tr {{ a|hdc_row_attrs }}>
                         <td>{{ fmt_pkt(a.check_in) }}</td>
-                        <td>{{ a.worker.name }}</td>
-                        <td><small class="text-muted">{{ a.stage.name if a.stage_id else '—' }}</small></td>
+                        <td>{{ a.worker.name if a.worker else ('Worker #' ~ a.worker_id) }}</td>
+                        <td><small class="text-muted">{{ a.stage.name if a.stage else '—' }}</small></td>
                         <td>{{ "{:,.2f}".format(a.hours or 0) }}h</td>
                         <td class="{% if a.overtime > 0 %}text-warning{% endif %}">{{ "{:,.2f}".format(a.overtime or 0) }}h</td>
                         <td class="text-success">{{ "{:,.0f}".format(a.wage_calculated or 0) }}</td>
@@ -712,6 +738,8 @@
         </div>
     </div>
 
+    {% endif %}
+    {% if hdc_page_allowed('purchases') or hdc_page_allowed('purchase_orders') %}
     <!-- Expenses + Materials -->
     <div class="col-md-6">
         <div class="card hdc-card">
@@ -726,8 +754,8 @@
                     {% for pur in (p.purchases | sort(attribute='activity_at', reverse=True))[:8] %}
                     <tr {{ pur|hdc_row_attrs }}>
                         <td>{{ fmt_pkt(pur.activity_at or pur.created_at) }}</td>
-                        <td>{{ pur.material.name }} <small class="text-muted">({{ pur.material.unit }})</small></td>
-                        <td><small class="text-muted">{{ pur.stage.name if pur.stage_id else '—' }}</small></td>
+                        <td>{{ pur.material.name if pur.material else ('Material #' ~ pur.material_id) }} <small class="text-muted">({{ pur.material.unit if pur.material else '—' }})</small></td>
+                        <td><small class="text-muted">{{ pur.stage.name if pur.stage else '—' }}</small></td>
                         <td>{{ pur.qty }}</td>
                         <td class="fw-bold">{{ "{:,.0f}".format(pur.total) }}</td>
                     </tr>
@@ -739,6 +767,7 @@
             </div>
         </div>
     </div>
+    {% endif %}
 </div>
 {% endblock %}
 

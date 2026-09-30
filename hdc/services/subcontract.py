@@ -13,6 +13,7 @@ from hdc.models.subcontract import (
     SubcontractEvent, SubcontractLabourAttendance, SubcontractPayment,
     SubcontractTeamAttendance, Subcontractor,
 )
+from hdc.services.record_permissions import readonly_exact_request, record_code_query
 from hdc.utils.dates import _pkt_now_naive
 
 
@@ -100,7 +101,7 @@ def sub_labour_rollup(sub_id, date_from=None, date_to=None, stage_id=None):
 
 def _next_subcontractor_code():
     max_n = 0
-    rows = db.session.query(Subcontractor.subcontractor_code).all()
+    rows = record_code_query(db.session.query(Subcontractor.subcontractor_code), 'hdc_subcontractor').all()
     for (code,) in rows:
         if not code:
             continue
@@ -140,6 +141,8 @@ def _log_subcontract_event(sub, event_type, from_value='', to_value='', amount=0
 
 
 def _ensure_subcontract_baseline_events(sub):
+    if readonly_exact_request():
+        return 0
     if not sub:
         return 0
     created = 0

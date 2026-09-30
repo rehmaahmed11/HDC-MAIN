@@ -10,6 +10,7 @@ from hdc.models.accounts import ExpenseCategory
 from hdc.models.office import OfficeStaff
 from hdc.models.projects import Project
 from hdc.models.workforce import Worker, WorkerTrade
+from hdc.services.record_permissions import record_code_query
 from hdc.utils.normalize import _normalize_expense_category_name
 
 def _trade_options():
@@ -72,8 +73,8 @@ def _generate_project_code():
 def _next_project_code():
     prefix = "HDC-"
     max_n = 0
-    for p in Project.query.filter(Project.project_code.like(prefix + '%')).all():
-        code = (p.project_code or '').strip().upper()
+    for (raw_code,) in record_code_query(db.session.query(Project.project_code).filter(Project.project_code.like(prefix + '%')), 'hdc_project').all():
+        code = (raw_code or '').strip().upper()
         if not code.startswith(prefix):
             continue
         suffix = code[len(prefix):]
@@ -82,7 +83,7 @@ def _next_project_code():
     candidate = max_n + 1
     while True:
         code = f"HDC-{candidate:05d}"
-        if not Project.query.filter_by(project_code=code).first():
+        if not record_code_query(db.session.query(Project.id).filter_by(project_code=code), 'hdc_project').first():
             return code
         candidate += 1
 
@@ -90,8 +91,8 @@ def _next_project_code():
 def _next_worker_code():
     prefix = "HDC-WORKER-"
     max_n = 0
-    for w in Worker.query.filter(Worker.worker_code.like(prefix + '%')).all():
-        last = (w.worker_code or '').replace(prefix, '')
+    for (code,) in record_code_query(db.session.query(Worker.worker_code).filter(Worker.worker_code.like(prefix + '%')), 'hdc_worker').all():
+        last = (code or '').replace(prefix, '')
         if last.isdigit():
             max_n = max(max_n, int(last))
     return f"{prefix}{(max_n + 1):06d}"
@@ -100,8 +101,8 @@ def _next_worker_code():
 def _next_office_staff_code():
     prefix = "HDC-OFFICE-"
     max_n = 0
-    for s in OfficeStaff.query.filter(OfficeStaff.staff_code.like(prefix + '%')).all():
-        last = (s.staff_code or '').replace(prefix, '')
+    for (code,) in record_code_query(db.session.query(OfficeStaff.staff_code).filter(OfficeStaff.staff_code.like(prefix + '%')), 'hdc_office_staff').all():
+        last = (code or '').replace(prefix, '')
         if last.isdigit():
             max_n = max(max_n, int(last))
     return f"{prefix}{(max_n + 1):06d}"

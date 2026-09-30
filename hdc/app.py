@@ -107,8 +107,14 @@ def create_app(config_overrides=None):
         install_permission_query_scope, install_permission_template_helpers,
         may_access_path, stage_is_allowed, user_stage_scope,
     )
+    from hdc.services.record_permissions import (
+        enforce_record_request, install_record_permission_scope,
+        install_record_template_helpers,
+    )
     install_permission_template_helpers(app)
     install_permission_query_scope()
+    install_record_template_helpers(app)
+    install_record_permission_scope()
 
     @app.before_request
     def _enforce_user_permissions():
@@ -116,7 +122,7 @@ def create_app(config_overrides=None):
         from flask_login import current_user
         if not current_user.is_authenticated:
             return None
-        if request.path.startswith(('/hdc/login', '/hdc/logout', '/hdc_static/', '/static/')):
+        if request.path.rstrip('/') in ('/', '/hdc/login', '/hdc/logout', '/hdc/access') or request.path.startswith(('/hdc_static/', '/static/')):
             return None
         mode = 'read' if request.method in ('GET', 'HEAD', 'OPTIONS') else 'write'
         permission = may_access_path(current_user, request.path, mode)
@@ -124,6 +130,8 @@ def create_app(config_overrides=None):
             if request.is_json or request.path.startswith('/api/') or '/api/' in request.path:
                 return jsonify(ok=False, message='You do not have permission to access this page.'), 403
             abort(403, description='You do not have permission to access this page.')
+
+        enforce_record_request(current_user)
 
         # Enforce direct stage URLs and submitted stage references as well as
         # filtering all ORM result sets (so forms/APIs cannot bypass the scope).
@@ -151,6 +159,9 @@ def create_app(config_overrides=None):
 
     @app.errorhandler(403)
     def _permission_denied(error):
+        # A denial may be raised at flush after a handler staged several writes.
+        # Roll back before rendering (context processors also issue queries).
+        db.session.rollback()
         if request.is_json or request.path.startswith('/api/') or '/api/' in request.path:
             return {'ok': False, 'message': 'You do not have permission to access this page.'}, 403
         return render_template('shared/forbidden.html'), 403

@@ -478,22 +478,29 @@ def _account_rows_active():
             .all())
 
 
-def _account_balances_query(include_inactive=False):
-    outgoing_sq = (db.session.query(
+def _account_balances_query(include_inactive=False, *, integrity=False, account_ids=None):
+    outgoing_query = (db.session.query(
         AccountTransaction.from_account_id.label('account_id'),
         func.coalesce(func.sum(AccountTransaction.amount), 0.0).label('outgoing_total')
     ).filter(
         AccountTransaction.is_void == False
-    ).group_by(AccountTransaction.from_account_id).subquery())
-    incoming_sq = (db.session.query(
+    ))
+    if account_ids is not None:
+        outgoing_query = outgoing_query.filter(AccountTransaction.from_account_id.in_(account_ids))
+    outgoing_sq = outgoing_query.group_by(AccountTransaction.from_account_id).subquery()
+    incoming_query = (db.session.query(
         AccountTransaction.to_account_id.label('account_id'),
         func.coalesce(func.sum(AccountTransaction.amount), 0.0).label('incoming_total')
     ).filter(
         AccountTransaction.is_void == False,
         AccountTransaction.to_account_id.isnot(None)
-    ).group_by(AccountTransaction.to_account_id).subquery())
+    ))
+    if account_ids is not None:
+        incoming_query = incoming_query.filter(AccountTransaction.to_account_id.in_(account_ids))
+    incoming_sq = incoming_query.group_by(AccountTransaction.to_account_id).subquery()
+    account_columns = [Account.id, Account.opening_balance] if integrity else [Account]
     q = (db.session.query(
-            Account,
+            *account_columns,
             func.coalesce(incoming_sq.c.incoming_total, 0.0).label('incoming_total'),
             func.coalesce(outgoing_sq.c.outgoing_total, 0.0).label('outgoing_total')
         )
@@ -502,17 +509,26 @@ def _account_balances_query(include_inactive=False):
         .filter(Account.is_void == False))
     if not include_inactive:
         q = q.filter(func.lower(func.coalesce(Account.status, 'active')) == 'active')
+    if account_ids is not None:
+        q = q.filter(Account.id.in_(account_ids))
+    if integrity:
+        from hdc.services.record_permissions import integrity_query
+        q = integrity_query(q)
     return q.order_by(Account.name.asc(), Account.id.asc()).all()
 
 
-def _account_balance_map():
-    rows = _account_balances_query(include_inactive=False)
+def _account_balance_map(*, integrity=False, account_ids=None):
+    # Displayed balances remain scoped; overdraft checks must use the actual
+    # complete ledger, without exposing unassigned rows or amounts to the user.
+    rows = _account_balances_query(include_inactive=False, integrity=integrity, account_ids=account_ids)
     mp = {}
-    for a, incoming, outgoing in rows:
-        opening = float(a.opening_balance or 0.0)
-        incoming = float(incoming or 0.0)
-        outgoing = float(outgoing or 0.0)
-        mp[int(a.id)] = float(opening + incoming - outgoing)
+    for row in rows:
+        if integrity:
+            aid, opening, incoming, outgoing = row
+        else:
+            account, incoming, outgoing = row
+            aid, opening = account.id, account.opening_balance
+        mp[int(aid)] = float(float(opening or 0.0) + float(incoming or 0.0) - float(outgoing or 0.0))
     return mp
 
 
@@ -622,11 +638,12 @@ def _account_get_or_create(name, acc_type='person', opening_balance=0.0, bank_na
 def _account_txn_source_exists(source_type, source_id):
     if not source_type or not source_id:
         return False
-    return db.session.query(AccountTransaction.id).filter(
+    from hdc.services.record_permissions import integrity_query
+    query = db.session.query(AccountTransaction.id).filter(
         AccountTransaction.source_type == str(source_type),
         AccountTransaction.source_id == int(source_id),
-        AccountTransaction.is_void == False
-    ).first() is not None
+        AccountTransaction.is_void == False)
+    return integrity_query(query.limit(1)).first() is not None
 
 
 def _normalize_account_txn_payload(payload):
@@ -779,10 +796,12 @@ def _check_overdraft_block(pending_rows):
     """
     if not pending_rows:
         return True, ''
+    account_ids = {int(row.get(field) or 0) for row in pending_rows
+                   for field in ('from_account_id', 'to_account_id')} - {0}
     # Build exact minor-unit balance map
     try:
         from hdc.utils.money import to_minor as _to_minor
-        bal_float = _account_balance_map()
+        bal_float = _account_balance_map(integrity=True, account_ids=account_ids)
         bal_minor = {}
         for aid, bval in bal_float.items():
             try:
@@ -790,7 +809,7 @@ def _check_overdraft_block(pending_rows):
             except Exception:
                 bal_minor[int(aid)] = int(round(float(bval or 0.0) * 100))
     except Exception:
-        bal_float = _account_balance_map()
+        bal_float = _account_balance_map(integrity=True, account_ids=account_ids)
         bal_minor = {int(k): int(round(float(v or 0.0) * 100)) for k, v in bal_float.items()}
 
     for r in pending_rows:
@@ -819,15 +838,24 @@ def _check_overdraft_block(pending_rows):
                     bal_readable = float(_from_minor(bal_minor.get(from_id, 0)))
                 except Exception:
                     bal_readable = float(bal_minor.get(from_id, 0) or 0) / 100.0
+                from flask_login import current_user
+                from hdc.services.record_permissions import exact_access_enabled
+                if exact_access_enabled(current_user):
+                    return False, 'Insufficient balance. This change is blocked.'
                 return False, f'Insufficient balance in account: {nm}. Would be {bal_readable:,.2f} PKR after this transaction. Overdraft blocked for treasury accounts.'
     return True, ''
 
 
 def _check_overdraft_block_replace(existing_rows, replacement_rows):
     """Overdraft check for edit flow using exact minor units."""
+    account_ids = {int(getattr(row, field, 0) or 0) for row in (existing_rows or [])
+                   for field in ('from_account_id', 'to_account_id')}
+    account_ids |= {int(row.get(field) or 0) for row in (replacement_rows or []) if isinstance(row, dict)
+                    for field in ('from_account_id', 'to_account_id')}
+    account_ids.discard(0)
     try:
         from hdc.utils.money import to_minor as _to_minor, from_minor as _from_minor
-        bal_float = _account_balance_map()
+        bal_float = _account_balance_map(integrity=True, account_ids=account_ids)
         bal_minor = {}
         for aid, bval in bal_float.items():
             try:
@@ -835,7 +863,7 @@ def _check_overdraft_block_replace(existing_rows, replacement_rows):
             except Exception:
                 bal_minor[int(aid)] = int(round(float(bval or 0.0) * 100))
     except Exception:
-        bal_float = _account_balance_map()
+        bal_float = _account_balance_map(integrity=True, account_ids=account_ids)
         bal_minor = {int(k): int(round(float(v or 0.0) * 100)) for k, v in bal_float.items()}
 
     for r in (existing_rows or []):
@@ -877,6 +905,10 @@ def _check_overdraft_block_replace(existing_rows, replacement_rows):
                     bal_readable = float(_from_minor(bal_minor.get(from_id, 0)))
                 except Exception:
                     bal_readable = float(bal_minor.get(from_id, 0) or 0) / 100.0
+                from flask_login import current_user
+                from hdc.services.record_permissions import exact_access_enabled
+                if exact_access_enabled(current_user):
+                    return False, 'Insufficient balance. This change is blocked.'
                 return False, f'Insufficient balance in account: {nm}. Would be {bal_readable:,.2f} PKR after edit. Overdraft blocked.'
     return True, ''
 

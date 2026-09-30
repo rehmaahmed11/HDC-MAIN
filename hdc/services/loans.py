@@ -45,6 +45,7 @@ from hdc.models.loans import (
     Loan,
     LoanMovement,
 )
+from hdc.services.record_permissions import record_code_query
 from hdc.services.cashflow_register import (
     LOAN_EFFECT_PARTY_TYPE,
     LOAN_EFFECTS,
@@ -134,7 +135,7 @@ def _parse_day(value, fallback=None):
 
 def _next_loan_code():
     """``LN-0001``-style code, unique without a sequence table."""
-    rows = db.session.query(Loan.loan_code).filter(Loan.loan_code.isnot(None)).all()
+    rows = record_code_query(db.session.query(Loan.loan_code).filter(Loan.loan_code.isnot(None)), 'hdc_loan').all()
     highest = 0
     for (code,) in rows:
         digits = ''.join(ch for ch in str(code or '') if ch.isdigit())

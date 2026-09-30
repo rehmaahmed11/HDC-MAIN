@@ -1,16 +1,18 @@
 {% extends "shared/base.html" %}
 {% block title %}Stage Ledger - {{ s.name }}{% endblock %}
-{% block page_heading %}{{ s.name }} <span class="badge bg-secondary ms-2 fs-6">{{ p.project_code }}</span>{% endblock %}
+{% block page_heading %}{{ s.name }} <span class="badge bg-secondary ms-2 fs-6">{{ p.project_code if p else 'Project #' ~ s.project_id }}</span>{% endblock %}
 
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mt-2 mb-3">
     <div>
-        <div class="small text-muted">Project: {{ p.name }} | Stage Status: {{ s.status }}</div>
+        <div class="small text-muted">Project: {{ p.name if p else 'Project #' ~ s.project_id }} | Stage Status: {{ s.status }}</div>
         <div class="small text-muted">Chronological ledger: oldest on top, PKT timestamps</div>
     </div>
+    {% if p and hdc_page_allowed('project_detail') %}
     <a href="{{ url_for('hdc_project_detail', pid=p.id) }}" class="btn btn-outline-secondary btn-sm">
         <i class="fas fa-arrow-left me-1"></i>Back to Project
     </a>
+    {% endif %}
 </div>
 
 <div class="row g-3 mb-3">

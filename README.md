@@ -225,6 +225,57 @@ Stage scope complements page access; global master data still follows its own
 page-level Read/Write grant. Regression coverage is in
 `tests/test_user_permissions.py`.
 
+### Exact selected-record access
+
+For a non-admin user who must see **only the individual records you choose**, go
+to **Users → Access → Only selected data (strict)**. The existing page/stage
+controls remain available; exact-data mode adds an independent, deny-by-default
+record gate.
+
+1. Select the pages the user may read or write. Strict mode always requires an
+   explicit page map and never restores broad role defaults.
+2. Choose a data type, search by name, code, date or `#ID`, and select individual
+   records. The picker is paginated and available only to administrators.
+3. Set **Read**, **Edit**, and **Delete/void** for each selected record. Edit and
+   Delete/void include Read, but do not include each other.
+4. Leave **Create new** unchecked unless this user may create records of that
+   type. Creation does not grant existing records, related records, or permanent
+   access to new records; assign their IDs separately for later visits.
+5. Save access. Changes apply on the user's next request.
+
+**Example: one project only.** Enable strict mode, allow Read on Projects and
+Project details, then select that one project with Read. Leave other pages,
+records and Create permissions unchecked. The user cannot see other projects,
+stages, attendance, workers, payments or related financial records. Project
+pricing/financial summaries and owner receipts have separate page switches.
+A selected attendance entry or stage can render placeholder parent labels
+without revealing an unassigned worker/project name.
+
+Page access never grants records, and a record grant never opens a denied page.
+Lists, direct URLs, APIs, exports, relationship loads, aliases and aggregate
+queries share the server-side record filter. A separate mutation guard validates
+Create/Edit/Delete, primary keys and submitted/generated record references;
+ordinary Read access is never write authority. Unreviewed bulk/raw SQL paths
+fail closed for strict users. Administrator roles and non-delegable administrative
+operations retain their existing boundaries.
+
+Linked workflows may require additional explicitly readable records and separate
+action/Create grants for bookkeeping they change. Hidden history must not be
+mistaken for absent history: bounded internal scalar checks still prevent unsafe
+overdrafts, duplicate postings, stock reductions and deletions without returning
+unassigned rows or totals. Read-only strict views do not automatically repair or
+create business records. Displayed aggregates use assigned data only.
+
+This is **record-level access**, not a general field-level ACL. Leave strict mode
+off to retain existing role/page behavior. Older non-strict custom project maps
+retain their former subsection access until those switches are explicitly saved.
+If stage limiting is also enabled, both restrictions apply; leave it off when
+assigning a project with no stages. Empty or malformed strict grants deny access.
+
+Regression coverage: `tests/test_exact_data_permissions.py` (including single
+records, independent actions, references, rollback, hidden-history integrity,
+admin saving/search, navigation and legacy compatibility).
+
 For a new operational finance write route, use `@_money_write_required()`
 **below** `@login_required` (use `@_money_write_required(api=True)` for JSON APIs).
 Keep stricter `_admin_only()` checks where they already exist. Regression

@@ -7,14 +7,17 @@ original @app.route decorator and endpoint name.
 from datetime import datetime
 import json
 
-from flask import flash, redirect, render_template, request, url_for
+from flask import abort, flash, jsonify, redirect, render_template, request, url_for
+from sqlalchemy import String, cast, or_
 from flask_login import current_user, login_required
 from werkzeug.security import generate_password_hash
 
 from hdc.extensions import _admin_only, db
 from hdc.models.auth import ActivityLog, HDCUser
 from hdc.models.projects import Project, Stage
-from hdc.services.permissions import PAGE_CATALOG, PAGE_TREE, parse_permissions
+from hdc.services.permissions import PAGE_CATALOG, PAGE_TREE, permission_editor_grants
+from hdc.services.record_permissions import (record_catalog, record_grant_cards, record_label,
+    record_models, record_permissions_from_form)
 from hdc.utils.format import _is_strong_password, _parse_date
 
 
@@ -53,6 +56,23 @@ def _stage_access_from_form(form):
     read_ids = set(_selected_stage_ids(form, 'read_stage_ids')) | write_ids
     return sorted(read_ids), sorted(write_ids)
 
+def _save_access_from_form(user, form):
+    user.record_scope_enabled = form.get('record_scope_enabled') == '1'
+    user.record_permissions_json = (json.dumps(record_permissions_from_form(form), separators=(',', ':'))
+                                    if user.record_scope_enabled else None)
+    # Strict data mode must never silently inherit broad role/page defaults.
+    custom = form.get('custom_permissions') == '1' or user.record_scope_enabled
+    user.permissions_json = json.dumps(_permissions_from_form(form), separators=(',', ':')) if custom else None
+    user.stage_scope_enabled = form.get('stage_scope_enabled') == '1'
+    if user.stage_scope_enabled:
+        read_ids, write_ids = _stage_access_from_form(form)
+        user.allowed_stage_ids_json = json.dumps(read_ids)
+        user.write_stage_ids_json = json.dumps(write_ids)
+    else:
+        user.allowed_stage_ids_json = None
+        user.write_stage_ids_json = None
+
+
 def register(app):
     """Register User management and event recorder."""
     # --- User Management -------------------------------------------------------
@@ -80,13 +100,7 @@ def register(app):
                         username=uname,
                         password_hash=generate_password_hash(raw_pwd),
                         role=role)
-                    if request.form.get('custom_permissions') == '1':
-                        user.permissions_json = json.dumps(_permissions_from_form(request.form), separators=(',', ':'))
-                    if request.form.get('stage_scope_enabled') == '1':
-                        user.stage_scope_enabled = True
-                        read_ids, write_ids = _stage_access_from_form(request.form)
-                        user.allowed_stage_ids_json = json.dumps(read_ids)
-                        user.write_stage_ids_json = json.dumps(write_ids)
+                    _save_access_from_form(user, request.form)
                     db.session.add(user)
                     db.session.commit()
                     flash(f'User "{uname}" created.', 'success')
@@ -110,33 +124,16 @@ def register(app):
                             flash('You cannot change your own role.', 'warning')
                         elif user.id != current_user.id:
                             user.role = new_role
-                    if request.form.get('custom_permissions') != '1':
-                        user.permissions_json = None
-                        user.stage_scope_enabled = request.form.get('stage_scope_enabled') == '1'
-                        if user.stage_scope_enabled:
-                            read_ids, write_ids = _stage_access_from_form(request.form)
-                            user.allowed_stage_ids_json = json.dumps(read_ids)
-                            user.write_stage_ids_json = json.dumps(write_ids)
-                        else:
-                            user.allowed_stage_ids_json = None
-                            user.write_stage_ids_json = None
-                        db.session.commit()
-                        if user.stage_scope_enabled:
-                            flash(f'Role defaults restored with a stage limit for {user.username}.', 'success')
-                        else:
-                            flash(f'Role defaults restored for {user.username}.', 'success')
-                    else:
-                        user.permissions_json = json.dumps(_permissions_from_form(request.form), separators=(',', ':'))
-                        user.stage_scope_enabled = request.form.get('stage_scope_enabled') == '1'
-                        if user.stage_scope_enabled:
-                            read_ids, write_ids = _stage_access_from_form(request.form)
-                            user.allowed_stage_ids_json = json.dumps(read_ids)
-                            user.write_stage_ids_json = json.dumps(write_ids)
-                        else:
-                            user.allowed_stage_ids_json = None
-                            user.write_stage_ids_json = None
-                        db.session.commit()
+                    _save_access_from_form(user, request.form)
+                    db.session.commit()
+                    if user.record_scope_enabled:
+                        flash(f'Exact access saved for {user.username}. Only assigned pages and records are accessible.', 'success')
+                    elif user.permissions_json:
                         flash(f'Access saved for {user.username}.', 'success')
+                    elif user.stage_scope_enabled:
+                        flash(f'Role defaults restored with a stage limit for {user.username}.', 'success')
+                    else:
+                        flash(f'Role defaults restored for {user.username}.', 'success')
             elif action == 'reset_password':
                 uid = request.form.get('user_id', type=int)
                 u   = HDCUser.query.get(uid)
@@ -160,11 +157,40 @@ def register(app):
             write_ids = _selected_stage_ids_from_json(user.write_stage_ids_json)
             read_stage_ids_by_user[user.id] = _selected_stage_ids_from_json(user.allowed_stage_ids_json) | write_ids
             write_stage_ids_by_user[user.id] = write_ids
+        catalog = record_catalog()
         return render_template('users/users.html', users=users, stages=stages,
+            record_catalog=catalog,
+            record_cards_by_user={user.id: record_grant_cards(user, catalog) for user in users},
             page_tree=PAGE_TREE,
-            permissions_by_user={user.id: parse_permissions(user) for user in users},
+            permissions_by_user={user.id: permission_editor_grants(user) for user in users},
             read_stage_ids_by_user=read_stage_ids_by_user,
             write_stage_ids_by_user=write_stage_ids_by_user)
+
+
+    @app.route('/hdc/users/access-data')
+    @login_required
+    def hdc_user_access_data():
+        if _admin_only():
+            abort(403)
+        table = (request.args.get('resource') or '').strip()
+        model = record_models().get(table)
+        if model is None:
+            return jsonify(ok=False, message='Unknown data type.'), 400
+        search = (request.args.get('search') or '').strip()[:100]
+        page = min(10000, max(1, request.args.get('page', type=int) or 1))
+        query = model.query
+        if search:
+            term = search.removeprefix('#')
+            fields = [cast(model.id, String).ilike('%' + term + '%')]
+            for column in model.__table__.columns:
+                if column.key in ('name', 'project_code', 'worker_code', 'staff_code',
+                                  'subcontractor_code', 'description', 'notes', 'original_name',
+                                  'date', 'check_in', 'project_id', 'stage_id', 'worker_id', 'staff_id'):
+                    fields.append(cast(getattr(model, column.key), String).ilike('%' + term + '%'))
+            query = query.filter(or_(*fields))
+        rows = query.order_by(model.id.desc()).offset((page - 1) * 25).limit(26).all()
+        return jsonify(ok=True, records=[{'id': str(row.id), 'label': record_label(row)} for row in rows[:25]],
+                       has_more=len(rows) > 25, next_page=page + 1)
 
 
     @app.route('/hdc/event-recorder')

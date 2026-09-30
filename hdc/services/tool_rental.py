@@ -10,6 +10,7 @@ from hdc.models.tool_rental import (
     ToolMovementLog, ToolPurchase, ToolRental, ToolRentalAccountTxn, ToolRentalItem,
     ToolRentalPayment, ToolRentalReturn, ToolRentalReturnItem, ToolRentalTransfer, ToolScrap
 )
+from hdc.services.record_permissions import integrity_message, integrity_query, record_code_query
 from hdc.utils.dates import _pkt_now_naive, _pkt_today
 from hdc.utils.normalize import _normalize_name_ci
 
@@ -24,23 +25,23 @@ SCRAP_LABEL = 'Scrap / Discard'
 
 
 def _next_tool_code():
-    last = db.session.query(Tool).order_by(Tool.id.desc()).first()
-    nxt = (last.id + 1) if last else 1
+    last_id = record_code_query(db.session.query(func.max(Tool.id)), Tool.__tablename__).scalar()
+    nxt = int(last_id or 0) + 1
     return f"TOOL-{nxt:04d}"
 
 def _next_rental_code():
-    last = db.session.query(ToolRental).order_by(ToolRental.id.desc()).first()
-    nxt = (last.id + 1) if last else 1
+    last_id = record_code_query(db.session.query(func.max(ToolRental.id)), ToolRental.__tablename__).scalar()
+    nxt = int(last_id or 0) + 1
     return f"RENT-{nxt:05d}"
 
 def _next_purchase_code():
-    last = db.session.query(ToolPurchase).order_by(ToolPurchase.id.desc()).first()
-    nxt = (last.id + 1) if last else 1
+    last_id = record_code_query(db.session.query(func.max(ToolPurchase.id)), ToolPurchase.__tablename__).scalar()
+    nxt = int(last_id or 0) + 1
     return f"PUR-TOOL-{nxt:05d}"
 
 def _next_scrap_code():
-    last = db.session.query(ToolScrap).order_by(ToolScrap.id.desc()).first()
-    nxt = (last.id + 1) if last else 1
+    last_id = record_code_query(db.session.query(func.max(ToolScrap.id)), ToolScrap.__tablename__).scalar()
+    nxt = int(last_id or 0) + 1
     return f"SCRAP-{nxt:05d}"
 
 def _ensure_tool_category(name):
@@ -179,6 +180,12 @@ def record_tool_purchase(tool_id, qty, unit_cost=None, supplier='', purchase_dat
     return True, '', purchase
 
 
+def tool_available_for_integrity(tool):
+    query = db.session.query(func.coalesce(func.sum(ToolRentalItem.qty_pending), 0.0)).filter(
+        ToolRentalItem.tool_id == tool.id)
+    return max(0.0, float(tool.total_quantity or 0) - float(integrity_query(query).scalar() or 0))
+
+
 def record_tool_scrap(tool_id, qty, reason='damaged', scrap_date=None, reference='',
                       notes='', created_by=None, commit=True):
     """Throw away / lose / sell as scrap: -qty on total_quantity + audit row.
@@ -196,9 +203,10 @@ def record_tool_scrap(tool_id, qty, reason='damaged', scrap_date=None, reference
     if qty <= EPS:
         return False, 'Scrap quantity must be greater than 0.', None
 
-    available = _round2(tool.available_qty)
+    available = _round2(tool_available_for_integrity(tool))
     if qty > available + EPS:
-        return False, (f'Only {available:g} {tool.unit} of {tool.name} is in the store '
+        return False, integrity_message('Insufficient available tool stock. Return rented tools first.',
+                       f'Only {available:g} {tool.unit} of {tool.name} is in the store '
                        f'({tool.rented_out_qty:g} is rented out) - return it first.'), None
 
     reason_key = (reason or 'damaged').strip().lower()

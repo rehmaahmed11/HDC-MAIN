@@ -7,6 +7,7 @@ from sqlalchemy import and_, func
 
 from hdc.extensions import db
 from hdc.models.materials import Delivery, Material, MaterialUsage, MaterialV2, Purchase, PurchaseV2, Supplier, SupplierLedger, UsageLogV2
+from hdc.services.record_permissions import integrity_query
 from hdc.utils.dates import _pkt_now_naive, _pkt_today
 from hdc.utils.normalize import _normalize_name_ci
 
@@ -48,7 +49,17 @@ def _material_stock_map(project_id=None, stage_id=None):
     return out
 
 
-def _material_stock_for_scope(material_id, project_id=None, stage_id=None):
+def _material_stock_for_scope(material_id, project_id=None, stage_id=None, *, integrity=False):
+    if integrity:
+        totals = []
+        for model in (Purchase, MaterialUsage):
+            query = db.session.query(func.coalesce(func.sum(model.qty), 0.0)).filter(model.material_id == material_id)
+            if stage_id:
+                query = query.filter(model.stage_id == stage_id)
+            elif project_id:
+                query = query.filter(model.project_id == project_id)
+            totals.append(float(integrity_query(query).scalar() or 0.0))
+        return totals[0] - totals[1]
     stock_map = _material_stock_map(project_id=project_id, stage_id=stage_id)
     row = stock_map.get(int(material_id or 0), {}) if material_id else {}
     return float(row.get('remaining', 0.0) or 0.0)
@@ -69,6 +80,13 @@ def _sync_supplier_po_payment_status(supplier_id):
            .filter(PurchaseV2.supplier_id == supplier_id, PurchaseV2.is_void == False)
            .order_by(PurchaseV2.date, PurchaseV2.id)
            .all())
+    from flask_login import current_user
+    from hdc.services.record_permissions import exact_access_enabled, require_complete_grant
+    if exact_access_enabled(current_user):
+        require_complete_grant(current_user, PurchaseV2, db.session.query(PurchaseV2.id).filter(
+            PurchaseV2.supplier_id == supplier_id, PurchaseV2.is_void == False))
+        require_complete_grant(current_user, SupplierLedger, db.session.query(SupplierLedger.id).filter(
+            SupplierLedger.supplier_id == supplier_id, SupplierLedger.is_void == False))
     total_credits = float(db.session.query(func.coalesce(func.sum(SupplierLedger.amount), 0.0))
                           .filter(
                               SupplierLedger.supplier_id == supplier_id,
@@ -129,7 +147,7 @@ def _supplier_balance(supplier_id):
     return max(0.0, debit - credit)
 
 
-def _material_v2_delivered(material_id, project_id=None, stage_id=None):
+def _material_v2_delivered(material_id, project_id=None, stage_id=None, *, integrity=False):
     q = db.session.query(func.coalesce(func.sum(Delivery.quantity), 0.0)).filter(
         Delivery.material_id == material_id, Delivery.is_void == False
     )
@@ -137,10 +155,10 @@ def _material_v2_delivered(material_id, project_id=None, stage_id=None):
         q = q.filter(Delivery.project_id == project_id)
     if stage_id:
         q = q.filter(Delivery.stage_id == stage_id)
-    return float(q.scalar() or 0.0)
+    return float((integrity_query(q) if integrity else q).scalar() or 0.0)
 
 
-def _material_v2_used(material_id, project_id=None, stage_id=None):
+def _material_v2_used(material_id, project_id=None, stage_id=None, *, integrity=False):
     q = db.session.query(func.coalesce(func.sum(UsageLogV2.quantity), 0.0)).filter(
         UsageLogV2.material_id == material_id, UsageLogV2.is_void == False
     )
@@ -148,11 +166,12 @@ def _material_v2_used(material_id, project_id=None, stage_id=None):
         q = q.filter(UsageLogV2.project_id == project_id)
     if stage_id:
         q = q.filter(UsageLogV2.stage_id == stage_id)
-    return float(q.scalar() or 0.0)
+    return float((integrity_query(q) if integrity else q).scalar() or 0.0)
 
 
-def _material_v2_available(material_id, project_id=None, stage_id=None):
-    return max(0.0, _material_v2_delivered(material_id, project_id, stage_id) - _material_v2_used(material_id, project_id, stage_id))
+def _material_v2_available(material_id, project_id=None, stage_id=None, *, integrity=False):
+    return max(0.0, _material_v2_delivered(material_id, project_id, stage_id, integrity=integrity) -
+               _material_v2_used(material_id, project_id, stage_id, integrity=integrity))
 
 
 def _purchase_v2_integrity_report():
@@ -264,7 +283,7 @@ def _transfer_v2_material_between_scopes(material_id, from_project_id, from_stag
     for p in purchases:
         if qty_left <= 1e-9:
             break
-        scope_qty = _delivery_scope_qty_by_purchase(p.id, from_project_id, from_stage_id)
+        scope_qty = _purchase_v2_available_in_scope_qty(p.id, from_project_id, from_stage_id, integrity=True)
         if scope_qty <= 1e-9:
             continue
         take = min(scope_qty, qty_left)
@@ -322,10 +341,12 @@ def _material_v2_weighted_cost(material_id):
     return float(last.unit_price if last else 0.0)
 
 
-def _purchase_v2_delivered_qty(purchase_id):
-    return float(db.session.query(func.coalesce(func.sum(Delivery.quantity), 0.0))
-                 .filter(Delivery.purchase_id == purchase_id, Delivery.is_void == False)
-                 .scalar() or 0.0)
+def _purchase_v2_delivered_qty(purchase_id, *, exclude_delivery_id=None, integrity=False):
+    query = db.session.query(func.coalesce(func.sum(Delivery.quantity), 0.0)).filter(
+        Delivery.purchase_id == purchase_id, Delivery.is_void == False)
+    if exclude_delivery_id:
+        query = query.filter(Delivery.id != exclude_delivery_id)
+    return float((integrity_query(query) if integrity else query).scalar() or 0.0)
 
 
 def _purchase_v2_delivered_to_scope_qty(purchase_id, project_id, stage_id):
@@ -356,16 +377,17 @@ def _purchase_v2_used_in_scope_qty(purchase_id, project_id, stage_id, exclude_us
     return float(q.scalar() or 0.0)
 
 
-def _purchase_v2_scope_remaining_map(material_id, project_id, stage_id, exclude_usage_id=None):
+def _purchase_v2_scope_remaining_map(material_id, project_id, stage_id, exclude_usage_id=None, *, integrity=False):
     if (not material_id) or (not project_id):
         return {}
-    purchases = (PurchaseV2.query
+    purchases_query = (db.session.query(PurchaseV2.id) if integrity else PurchaseV2.query)
+    purchases = (purchases_query
                  .filter(
                      PurchaseV2.material_id == material_id,
                      PurchaseV2.is_void == False
                  )
-                 .order_by(PurchaseV2.created_at.asc(), PurchaseV2.id.asc())
-                 .all())
+                 .order_by(PurchaseV2.created_at.asc(), PurchaseV2.id.asc()))
+    purchases = (integrity_query(purchases) if integrity else purchases).all()
     purchase_ids = [int(p.id) for p in purchases]
     if not purchase_ids:
         return {}
@@ -381,7 +403,7 @@ def _purchase_v2_scope_remaining_map(material_id, project_id, stage_id, exclude_
     if stage_id:
         del_q = del_q.filter(Delivery.stage_id == stage_id)
     del_q = del_q.group_by(Delivery.purchase_id)
-    delivered_map = {int(pid): float(qty or 0.0) for pid, qty in del_q.all()}
+    delivered_map = {int(pid): float(qty or 0.0) for pid, qty in (integrity_query(del_q) if integrity else del_q).all()}
 
     use_q = (db.session.query(
         UsageLogV2.purchase_id,
@@ -395,7 +417,7 @@ def _purchase_v2_scope_remaining_map(material_id, project_id, stage_id, exclude_
         use_q = use_q.filter(UsageLogV2.stage_id == stage_id)
     if exclude_usage_id:
         use_q = use_q.filter(UsageLogV2.id != exclude_usage_id)
-    linked_used_map = {int(pid): float(qty or 0.0) for pid, qty in use_q.group_by(UsageLogV2.purchase_id).all()}
+    linked_used_map = {int(pid): float(qty or 0.0) for pid, qty in (integrity_query(use_q) if integrity else use_q).group_by(UsageLogV2.purchase_id).all()}
 
     legacy_q = db.session.query(func.coalesce(func.sum(UsageLogV2.quantity), 0.0)).filter(
         UsageLogV2.is_void == False,
@@ -407,7 +429,7 @@ def _purchase_v2_scope_remaining_map(material_id, project_id, stage_id, exclude_
         legacy_q = legacy_q.filter(UsageLogV2.stage_id == stage_id)
     if exclude_usage_id:
         legacy_q = legacy_q.filter(UsageLogV2.id != exclude_usage_id)
-    legacy_unlinked_qty = float(legacy_q.scalar() or 0.0)
+    legacy_unlinked_qty = float((integrity_query(legacy_q) if integrity else legacy_q).scalar() or 0.0)
 
     remaining_map = {}
     carry = max(0.0, legacy_unlinked_qty)
@@ -424,15 +446,15 @@ def _purchase_v2_scope_remaining_map(material_id, project_id, stage_id, exclude_
     return remaining_map
 
 
-def _purchase_v2_available_in_project_qty(purchase_id, project_id, exclude_usage_id=None):
+def _purchase_v2_available_in_project_qty(purchase_id, project_id, exclude_usage_id=None, *, integrity=False):
     purchase = PurchaseV2.query.get(purchase_id) if purchase_id else None
     if (not purchase) or purchase.is_void:
         return 0.0
-    remaining_map = _purchase_v2_scope_remaining_map(purchase.material_id, project_id, None, exclude_usage_id=exclude_usage_id)
+    remaining_map = _purchase_v2_scope_remaining_map(purchase.material_id, project_id, None, exclude_usage_id=exclude_usage_id, integrity=integrity)
     return float(remaining_map.get(int(purchase.id), 0.0) or 0.0)
 
 
-def _purchase_v2_available_in_scope_qty(purchase_id, project_id, stage_id, exclude_usage_id=None):
+def _purchase_v2_available_in_scope_qty(purchase_id, project_id, stage_id, exclude_usage_id=None, *, integrity=False):
     purchase = PurchaseV2.query.get(purchase_id) if purchase_id else None
     if (not purchase) or purchase.is_void:
         return 0.0
@@ -440,7 +462,7 @@ def _purchase_v2_available_in_scope_qty(purchase_id, project_id, stage_id, exclu
         purchase.material_id,
         project_id,
         stage_id,
-        exclude_usage_id=exclude_usage_id
+        exclude_usage_id=exclude_usage_id, integrity=integrity
     )
     return float(remaining_map.get(int(purchase.id), 0.0) or 0.0)
 
@@ -508,6 +530,6 @@ def validate_delivery_reduction(delivery, new_quantity):
     if reduction <= 0:
         return
     available = _purchase_v2_available_in_scope_qty(
-        delivery.purchase_id, delivery.project_id, delivery.stage_id)
+        delivery.purchase_id, delivery.project_id, delivery.stage_id, integrity=True)
     if reduction > available + 1e-9:
         raise ValueError('Cannot reduce or void delivery: stock has already been used. Void the usage first.')
