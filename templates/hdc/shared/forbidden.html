@@ -1,0 +1,13 @@
+{% extends "shared/base.html" %}
+{% block title %}Access not granted{% endblock %}
+{% block page_heading %}Access not granted{% endblock %}
+{% block content %}
+<div class="container-fluid py-5">
+    <div class="card hdc-card mx-auto text-center p-4 p-md-5" style="max-width:620px">
+        <div class="display-4 text-warning mb-3"><i class="fas fa-lock" aria-hidden="true"></i></div>
+        <h2 class="h4">You don't have access to this page</h2>
+        <p class="text-muted mb-4">Your access is limited by your assigned role, page permissions, or project-stage access. Ask an administrator if you need this page.</p>
+        {% if hdc_page_allowed('dashboard', 'read') %}<a class="btn btn-primary align-self-center" href="{{ url_for('hdc_dashboard') }}"><i class="fas fa-house me-1"></i>Back to dashboard</a>{% endif %}
+    </div>
+</div>
+{% endblock %}

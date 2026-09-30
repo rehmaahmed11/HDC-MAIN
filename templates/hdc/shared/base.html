@@ -49,7 +49,12 @@
         </style>
     </noscript>
 </head>
-<body>
+{% set current_permission_page = hdc_page_id_for_path(request.path) %}
+<body data-hdc-custom-access="{{ 'true' if current_user.permissions_json else 'false' }}" data-hdc-page-write="{{ 'true' if hdc_page_allowed(current_permission_page, 'write') else 'false' }}">
+<style>
+body[data-hdc-custom-access="true"][data-hdc-page-write="false"] form[method="post"]:not([action="/hdc/logout"]),
+body[data-hdc-custom-access="true"][data-hdc-page-write="false"] form[method="POST"]:not([action="/hdc/logout"]) { display:none !important; }
+</style>
 <div id="wrapper">
     <!-- SIDEBAR (off-canvas: hidden by default, opened with the hamburger) -->
     <nav id="sidebar" class="collapsed" aria-label="Main navigation">
@@ -79,9 +84,9 @@
         {% set sidebar_role = (current_user.role or '')|trim|lower %}
         {% set sidebar_sections = [
             {'id': 'overview', 'label': 'Overview', 'icon': 'fa-gauge-high', 'roles': [], 'links': [
-                {'label': 'Dashboard', 'icon': 'fa-tachometer-alt', 'href': url_for('hdc_dashboard'),
+                {'label': 'Dashboard', 'icon': 'fa-tachometer-alt', 'href': url_for('hdc_dashboard'), 'permission': 'dashboard',
                  'match': ['/hdc/', '/hdc/kpi']},
-                {'label': 'Alerts', 'icon': 'fa-bell', 'href': url_for('hdc_alerts'),
+                {'label': 'Alerts', 'icon': 'fa-bell', 'href': url_for('hdc_alerts'), 'permission': 'alerts',
                  'match': ['/hdc/alerts']},
             ]},
             {'id': 'projects', 'label': 'Projects & Estimation', 'icon': 'fa-project-diagram', 'roles': [], 'links': [
@@ -97,7 +102,7 @@
             {'id': 'workforce', 'label': 'Workforce', 'icon': 'fa-people-group', 'roles': [], 'links': [
                 {'label': 'Subcontractors', 'icon': 'fa-hard-hat', 'href': url_for('hdc_subcontractors'),
                  'match': ['/hdc/subcontractor']},
-                {'label': 'Workers', 'icon': 'fa-users-cog', 'href': url_for('hdc_workers'),
+                {'label': 'Workers', 'icon': 'fa-users-cog', 'href': url_for('hdc_workers'), 'permission': 'workers',
                  'match': ['/hdc/workers']},
                 {'label': 'Trades', 'icon': 'fa-people-carry-box', 'href': url_for('hdc_trades'),
                  'match': ['/hdc/trades']},
@@ -140,7 +145,7 @@
                  'match': ['/hdc/accounts/manage']},
                 {'label': 'All Entries', 'icon': 'fa-receipt', 'href': url_for('hdc_accounts_entries'),
                  'note': 'audit', 'match': ['/hdc/accounts/entries']},
-                {'label': 'Shared Expenses', 'icon': 'fa-users-rectangle', 'href': url_for('hdc_shared_expenses'),
+                {'label': 'Shared Expenses', 'icon': 'fa-users-rectangle', 'href': url_for('hdc_shared_expenses'), 'permission': 'shared_expenses',
                  'match': ['/hdc/accounts/shared']},
             ]},
             {'id': 'administration', 'label': 'Administration', 'icon': 'fa-user-gear',
@@ -153,12 +158,20 @@
                  'match': ['/hdc/settings']},
             ]},
         ] %}
-        {# Groups a signed-in role may not open are dropped before rendering, so
-           the drawer never advertises a page the role cannot use. #}
+        {# Apply both the role ceiling and the explicit per-user page matrix.
+           Custom users may receive selected finance links; admin-only routes
+           remain admin-only regardless of the sidebar setting. #}
         {% set sidebar_visible = [] %}
         {% for section in sidebar_sections %}
-            {% if not section.roles or sidebar_role in section.roles %}
-                {% set _ = sidebar_visible.append(section) %}
+            {% set role_can_see_section = (not section.roles or sidebar_role in section.roles or (current_user.permissions_json and section.id != 'administration')) %}
+            {% set visible_links = [] %}
+            {% for link in section.links %}
+                {% if role_can_see_section and hdc_page_allowed(link.permission, 'read') %}
+                    {% set _ = visible_links.append(link) %}
+                {% endif %}
+            {% endfor %}
+            {% if visible_links %}
+                {% set _ = sidebar_visible.append({'id': section.id, 'label': section.label, 'icon': section.icon, 'links': visible_links}) %}
             {% endif %}
         {% endfor %}
         {# Which row is the current page?  Longest matching URL prefix wins. #}
@@ -243,6 +256,7 @@
             </button>
             <div class="topbar-title">{% block page_heading %}{% endblock %}</div>
             <div class="topbar-right">
+                {% if hdc_page_allowed('alerts', 'read') %}
                 <a href="{{ url_for('hdc_alerts') }}" class="btn-theme position-relative" title="Alerts">
                     <i class="fas fa-bell"></i>
                     {% if alert_count and alert_count > 0 %}
@@ -251,6 +265,7 @@
                     </span>
                     {% endif %}
                 </a>
+                {% endif %}
                 <button id="themeToggle" class="btn-theme" title="Toggle Dark/Light Mode">
                     <i class="fas fa-moon" id="themeIcon"></i>
                 </button>
@@ -362,6 +377,18 @@ function hdcJumpToPage(event) {
 }
 </script>
 {% block extra_js %}{% endblock %}
+<script>
+// Remove common edit/mutation shortcuts from read-only custom pages. The POST
+// forms are also hidden in server-rendered CSS; server authorization is the
+// actual boundary and is enforced independently of this convenience layer.
+(function(){
+  var body=document.body;
+  if(!body || body.dataset.hdcCustomAccess!=='true' || body.dataset.hdcPageWrite!=='false') return;
+  var actionPath=/(?:\/edit|\/delete|\/void|\/restore|\/remove|\/toggle|\/suspend|\/activate|\/payment|\/pay|\/advance|\/rate|\/status|\/sub-progress|\/add_subcontractor|\/stage\/add|\/bulk_stages|\/return|\/transfer|\/scrap|\/purchase)(?:\/|$|[?#])/i;
+  document.querySelectorAll('a[href]').forEach(function(link){
+    if(actionPath.test(new URL(link.href,window.location.href).pathname)) link.hidden=true;
+  });
+})();
+</script>
 </body>
 </html>
-

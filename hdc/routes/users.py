@@ -5,6 +5,7 @@ original @app.route decorator and endpoint name.
 """
 
 from datetime import datetime
+import json
 
 from flask import flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
@@ -12,7 +13,45 @@ from werkzeug.security import generate_password_hash
 
 from hdc.extensions import _admin_only, db
 from hdc.models.auth import ActivityLog, HDCUser
+from hdc.models.projects import Project, Stage
+from hdc.services.permissions import PAGE_CATALOG, PAGE_TREE, parse_permissions
 from hdc.utils.format import _is_strong_password, _parse_date
+
+
+def _permissions_from_form(form):
+    permissions = {}
+    for page in PAGE_CATALOG:
+        read = form.get(f'read_{page["id"]}') == '1'
+        write = read and form.get(f'write_{page["id"]}') == '1'
+        permissions[page['id']] = {'read': read, 'write': write}
+    return permissions
+
+
+def _selected_stage_ids_from_json(raw):
+    try:
+        return {int(value) for value in json.loads(raw or '[]') if str(value).isdigit()}
+    except (TypeError, ValueError):
+        return set()
+
+
+def _selected_stage_ids(form, field_name):
+    values = form.getlist(field_name)
+    result = set()
+    for value in values:
+        try:
+            result.add(int(value))
+        except (TypeError, ValueError):
+            continue
+    if result:
+        valid = {row[0] for row in Stage.query.with_entities(Stage.id).filter(Stage.id.in_(result)).all()}
+        result.intersection_update(valid)
+    return sorted(result)
+
+
+def _stage_access_from_form(form):
+    write_ids = set(_selected_stage_ids(form, 'write_stage_ids'))
+    read_ids = set(_selected_stage_ids(form, 'read_stage_ids')) | write_ids
+    return sorted(read_ids), sorted(write_ids)
 
 def register(app):
     """Register User management and event recorder."""
@@ -34,10 +73,21 @@ def register(app):
                 elif not ok_pwd:
                     flash(pwd_msg, 'danger')
                 else:
-                    db.session.add(HDCUser(
+                    role = (request.form.get('role') or 'manager').strip().lower()
+                    if role not in {'admin', 'manager', 'accountant', 'staff'}:
+                        role = 'manager'
+                    user = HDCUser(
                         username=uname,
                         password_hash=generate_password_hash(raw_pwd),
-                        role=request.form.get('role','manager')))
+                        role=role)
+                    if request.form.get('custom_permissions') == '1':
+                        user.permissions_json = json.dumps(_permissions_from_form(request.form), separators=(',', ':'))
+                    if request.form.get('stage_scope_enabled') == '1':
+                        user.stage_scope_enabled = True
+                        read_ids, write_ids = _stage_access_from_form(request.form)
+                        user.allowed_stage_ids_json = json.dumps(read_ids)
+                        user.write_stage_ids_json = json.dumps(write_ids)
+                    db.session.add(user)
                     db.session.commit()
                     flash(f'User "{uname}" created.', 'success')
             elif action == 'delete':
@@ -48,6 +98,45 @@ def register(app):
                     flash('User deleted.', 'success')
                 else:
                     flash("Cannot delete your own account.", 'warning')
+            elif action == 'configure_permissions':
+                uid = request.form.get('user_id', type=int)
+                user = db.session.get(HDCUser, uid) if uid else None
+                if not user:
+                    flash('User not found.', 'danger')
+                else:
+                    new_role = (request.form.get('role') or '').strip().lower()
+                    if new_role in {'admin', 'manager', 'accountant', 'staff'}:
+                        if user.id == current_user.id and new_role != (user.role or '').strip().lower():
+                            flash('You cannot change your own role.', 'warning')
+                        elif user.id != current_user.id:
+                            user.role = new_role
+                    if request.form.get('custom_permissions') != '1':
+                        user.permissions_json = None
+                        user.stage_scope_enabled = request.form.get('stage_scope_enabled') == '1'
+                        if user.stage_scope_enabled:
+                            read_ids, write_ids = _stage_access_from_form(request.form)
+                            user.allowed_stage_ids_json = json.dumps(read_ids)
+                            user.write_stage_ids_json = json.dumps(write_ids)
+                        else:
+                            user.allowed_stage_ids_json = None
+                            user.write_stage_ids_json = None
+                        db.session.commit()
+                        if user.stage_scope_enabled:
+                            flash(f'Role defaults restored with a stage limit for {user.username}.', 'success')
+                        else:
+                            flash(f'Role defaults restored for {user.username}.', 'success')
+                    else:
+                        user.permissions_json = json.dumps(_permissions_from_form(request.form), separators=(',', ':'))
+                        user.stage_scope_enabled = request.form.get('stage_scope_enabled') == '1'
+                        if user.stage_scope_enabled:
+                            read_ids, write_ids = _stage_access_from_form(request.form)
+                            user.allowed_stage_ids_json = json.dumps(read_ids)
+                            user.write_stage_ids_json = json.dumps(write_ids)
+                        else:
+                            user.allowed_stage_ids_json = None
+                            user.write_stage_ids_json = None
+                        db.session.commit()
+                        flash(f'Access saved for {user.username}.', 'success')
             elif action == 'reset_password':
                 uid = request.form.get('user_id', type=int)
                 u   = HDCUser.query.get(uid)
@@ -62,7 +151,20 @@ def register(app):
                         flash(f'Password reset for {u.username}.', 'success')
             return redirect(url_for('hdc_users'))
         users = HDCUser.query.order_by(HDCUser.created_at).all()
-        return render_template('users/users.html', users=users)
+        stages = (db.session.query(Stage, Project)
+                  .join(Project, Project.id == Stage.project_id)
+                  .order_by(Project.name.asc(), Stage.name.asc(), Stage.id.asc()).all())
+        read_stage_ids_by_user = {}
+        write_stage_ids_by_user = {}
+        for user in users:
+            write_ids = _selected_stage_ids_from_json(user.write_stage_ids_json)
+            read_stage_ids_by_user[user.id] = _selected_stage_ids_from_json(user.allowed_stage_ids_json) | write_ids
+            write_stage_ids_by_user[user.id] = write_ids
+        return render_template('users/users.html', users=users, stages=stages,
+            page_tree=PAGE_TREE,
+            permissions_by_user={user.id: parse_permissions(user) for user in users},
+            read_stage_ids_by_user=read_stage_ids_by_user,
+            write_stage_ids_by_user=write_stage_ids_by_user)
 
 
     @app.route('/hdc/event-recorder')
