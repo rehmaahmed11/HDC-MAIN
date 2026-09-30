@@ -63,9 +63,11 @@
         <div class="card hdc-card">
             <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
                 <span><i class="fas fa-list me-2"></i>Recent Records (60)</span>
+                {% if hdc_report_allowed('report_exports') %}
                 <a href="{{ url_for('hdc_export_salary') }}" class="btn btn-sm btn-outline-secondary">
                     <i class="fas fa-download me-1"></i>Export CSV
                 </a>
+                {% endif %}
             </div>
             <div class="table-responsive">
                 <table class="table hdc-table table-sm">

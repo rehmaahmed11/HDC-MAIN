@@ -17,7 +17,7 @@ from hdc.models.auth import ActivityLog, HDCUser
 from hdc.models.projects import Project, Stage
 from hdc.services.permissions import PAGE_CATALOG, PAGE_TREE, permission_editor_grants
 from hdc.services.record_permissions import (record_catalog, record_grant_cards, record_label,
-    record_models, record_permissions_from_form)
+    record_models, record_permissions_from_form, parse_report_sections, report_section_page_grants)
 from hdc.utils.format import _is_strong_password, _parse_date
 
 
@@ -58,11 +58,26 @@ def _stage_access_from_form(form):
 
 def _save_access_from_form(user, form):
     user.record_scope_enabled = form.get('record_scope_enabled') == '1'
-    user.record_permissions_json = (json.dumps(record_permissions_from_form(form), separators=(',', ':'))
-                                    if user.record_scope_enabled else None)
+    record_grants = (record_permissions_from_form(form)
+                     if user.record_scope_enabled else None)
+    user.record_permissions_json = (json.dumps(record_grants, separators=(',', ':'))
+                                    if record_grants is not None else None)
     # Strict data mode must never silently inherit broad role/page defaults.
     custom = form.get('custom_permissions') == '1' or user.record_scope_enabled
-    user.permissions_json = json.dumps(_permissions_from_form(form), separators=(',', ':')) if custom else None
+    if custom:
+        permissions = _permissions_from_form(form)
+        # Cascade reporting sections keep their report pages reachable; the
+        # page map is saved in sync so both gates agree after one save.
+        if user.record_scope_enabled and record_grants:
+            for page, flags in report_section_page_grants(record_grants).items():
+                entry = permissions.setdefault(page, {'read': False, 'write': False})
+                entry['read'] = entry['read'] or flags['read']
+                entry['write'] = entry['write'] or flags['write']
+                if entry['write']:
+                    entry['read'] = True
+        user.permissions_json = json.dumps(permissions, separators=(',', ':'))
+    else:
+        user.permissions_json = None
     user.stage_scope_enabled = form.get('stage_scope_enabled') == '1'
     if user.stage_scope_enabled:
         read_ids, write_ids = _stage_access_from_form(form)
@@ -71,6 +86,77 @@ def _save_access_from_form(user, form):
     else:
         user.allowed_stage_ids_json = None
         user.write_stage_ids_json = None
+
+
+def _cascade_options():
+    """Dropdown data for the Project access cascade on the users page."""
+    projects = Project.query.order_by(Project.project_code.asc(), Project.name.asc()).all()
+    project_options = [
+        {'id': p.id, 'label': f'{p.project_code} · {p.name}' if getattr(p, 'project_code', None) else p.name}
+        for p in projects]
+    stage_rows = db.session.query(Stage.id, Stage.project_id, Stage.name).order_by(
+        Stage.name.asc(), Stage.id.asc()).all()
+    stages_by_project = {}
+    stage_projects = {}
+    stage_labels = {}
+    for stage_id, project_id, name in stage_rows:
+        stage_projects[stage_id] = project_id
+        stage_labels[stage_id] = name
+        stages_by_project.setdefault(project_id, []).append({'id': stage_id, 'label': name})
+    return project_options, stages_by_project, stage_projects, stage_labels
+
+
+def _cascade_branches(user, cards, project_options, stages_by_project, stage_projects, stage_labels):
+    """Rebuild project → stage → reporting branches from saved grants."""
+    project_card = next((card for card in cards if card.get('id') == 'hdc_project'), None)
+    stage_card = next((card for card in cards if card.get('id') == 'hdc_stage'), None)
+    project_rows = {int(row['id']): row for row in (project_card['records'] if project_card else [])}
+    stage_rows = {int(row['id']): row for row in (stage_card['records'] if stage_card else [])}
+    sections = parse_report_sections(user)
+    project_labels = {option['id']: option['label'] for option in project_options}
+    used = (set(project_rows) | set(sections) |
+            {stage_projects[sid] for sid in stage_rows if sid in stage_projects})
+    branches = []
+    ordered_pids = [pid for pid in (option['id'] for option in project_options) if pid in used]
+    ordered_pids += sorted(pid for pid in used if pid not in project_labels)
+    for pid in ordered_pids:
+        project_row = project_rows.get(pid)
+        section_map = sections.get(pid, {})
+        known_stage_ids = [stage['id'] for stage in stages_by_project.get(pid, [])]
+        granted_stage_ids = [sid for sid in stage_rows if stage_projects.get(sid) == pid]
+        stage_ids = [sid for sid in known_stage_ids
+                     if sid in granted_stage_ids or sid in section_map]
+        stage_ids += sorted(sid for sid in granted_stage_ids if sid not in known_stage_ids)
+        stage_entries = []
+        for sid in stage_ids:
+            stage_row = stage_rows.get(sid)
+            stage_entries.append({
+                'id': sid, 'label': stage_labels.get(sid, f'#{sid} (record no longer exists)'),
+                'read': bool(stage_row and stage_row.get('read')),
+                'write': bool(stage_row and stage_row.get('write')),
+                'delete': bool(stage_row and stage_row.get('delete')),
+                'sections': section_map.get(sid, {})})
+        if 0 in section_map:
+            stage_entries.append({'id': 0, 'label': '(Whole project)', 'read': False,
+                                  'write': False, 'delete': False, 'sections': section_map[0]})
+        branches.append({
+            'id': pid, 'label': project_labels.get(pid, f'#{pid} (record no longer exists)'),
+            'exists': pid in project_labels,
+            'read': bool(project_row and project_row.get('read')),
+            'write': bool(project_row and project_row.get('write')),
+            'delete': bool(project_row and project_row.get('delete')),
+            'stages': stage_entries})
+    orphan_stages = sorted(sid for sid in stage_rows if sid not in stage_projects)
+    if orphan_stages:
+        branches.append({
+            'id': None, 'label': 'Removed stages (no longer exist)', 'exists': False,
+            'read': False, 'write': False, 'delete': False,
+            'stages': [{'id': sid, 'label': stage_rows[sid].get('label') or f'#{sid}',
+                        'read': bool(stage_rows[sid].get('read')),
+                        'write': bool(stage_rows[sid].get('write')),
+                        'delete': bool(stage_rows[sid].get('delete')),
+                        'sections': {}} for sid in orphan_stages]})
+    return branches
 
 
 def register(app):
@@ -158,9 +244,17 @@ def register(app):
             read_stage_ids_by_user[user.id] = _selected_stage_ids_from_json(user.allowed_stage_ids_json) | write_ids
             write_stage_ids_by_user[user.id] = write_ids
         catalog = record_catalog()
+        record_cards_by_user = {user.id: record_grant_cards(user, catalog) for user in users}
+        project_options, stages_by_project, stage_projects, stage_labels = _cascade_options()
         return render_template('users/users.html', users=users, stages=stages,
             record_catalog=catalog,
-            record_cards_by_user={user.id: record_grant_cards(user, catalog) for user in users},
+            record_cards_by_user=record_cards_by_user,
+            project_options=project_options,
+            stages_by_project=stages_by_project,
+            cascade_branches_by_user={
+                user.id: _cascade_branches(user, record_cards_by_user[user.id], project_options,
+                                           stages_by_project, stage_projects, stage_labels)
+                for user in users},
             page_tree=PAGE_TREE,
             permissions_by_user={user.id: permission_editor_grants(user) for user in users},
             read_stage_ids_by_user=read_stage_ids_by_user,

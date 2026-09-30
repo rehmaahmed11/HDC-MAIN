@@ -234,14 +234,33 @@ record gate.
 
 1. Select the pages the user may read or write. Strict mode always requires an
    explicit page map and never restores broad role defaults.
-2. Choose a data type, search by name, code, date or `#ID`, and select individual
-   records. The picker is paginated and available only to administrators.
+2. For **Projects** / **Stages**, use the guided **Project access** cascade:
+   tick **Read** or **Write** at the top to reveal all projects, then pick a
+   project, its stages (or *Whole project*), and finally each reporting section
+   (**Project report**, **Stage cost report**, **Glance report**, **Report
+   exports**) with its own Read / Write. Every level is stored explicitly —
+   revealing a project never grants its stages for you. For all other data
+   types, search by name, code, date or `#ID` and select individual records;
+   that picker is paginated and available only to administrators.
 3. Set **Read**, **Edit**, and **Delete/void** for each selected record. Edit and
    Delete/void include Read, but do not include each other.
 4. Leave **Create new** unchecked unless this user may create records of that
    type. Creation does not grant existing records, related records, or permanent
    access to new records; assign their IDs separately for later visits.
 5. Save access. Changes apply on the user's next request.
+
+**Reporting sections.** Section grants are stored inside the exact-data JSON
+under a reserved key (no schema migration). A grant under any stage of a
+project covers that project's report; a *Whole project* entry covers all of
+its stages; Glance and Exports are enabled once granted anywhere. Saving a
+section automatically keeps the matching report page switches (Reports,
+Glance, Report exports) on in the page map — both gates still apply, and
+revoking the page or the section is enough to block it. Strict users saved
+**before** the cascade existed keep their previous page+record behavior until
+the first reporting section is stored for them, so existing accounts and the
+older regressions are unaffected. Report views, exports and stage rows are
+enforced server-side; the reports landing cards, project dropdowns, export
+buttons and per-project report links hide what the user cannot open.
 
 **Example: one project only.** Enable strict mode, allow Read on Projects and
 Project details, then select that one project with Read. Leave other pages,

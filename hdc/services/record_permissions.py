@@ -26,6 +26,24 @@ _GROUPS = {
     'accounts': 'Accounts & Expenses', 'cashflow': 'Cash Flow',
     'loans': 'Loans', 'shared_expenses': 'Shared Expenses',
 }
+# Cascade reporting sections (Users → Access → Project access). Stored inside
+# record_permissions_json under a reserved key so no schema migration is needed.
+REPORT_SECTIONS = {
+    'project_report': 'Project report',
+    'stage_report': 'Stage cost report',
+    'glance_report': 'Glance report',
+    'report_exports': 'Report exports',
+}
+REPORT_SECTIONS_KEY = '__report_sections__'
+# Each section keeps its report page bucket reachable; page Read/Write in the
+# access map still applies as the first gate.
+_REPORT_SECTION_PAGES = {
+    'project_report': ('reports', 'report_exports'),
+    'stage_report': ('reports',),
+    'glance_report': ('glance_report',),
+    'report_exports': ('report_exports',),
+}
+
 _LABELS = {
     'hdc_project': 'Projects', 'hdc_stage': 'Stages',
     'hdc_stage_definition': 'Stage library definitions',
@@ -100,6 +118,18 @@ def _ids(values):
     return result
 
 
+def _int_key(value, minimum=0):
+    """Validation-safe integer map key (stage key 0 = whole project)."""
+    if isinstance(value, bool) or not isinstance(value, (str, int)):
+        return None
+    text = str(value)
+    if len(text) <= 19 and text.isascii() and text.isdigit():
+        number = int(text)
+        if minimum <= number <= 9223372036854775807:
+            return number
+    return None
+
+
 def parse_record_permissions(user):
     try:
         value = json.loads(getattr(user, 'record_permissions_json', None) or '{}')
@@ -109,7 +139,8 @@ def parse_record_permissions(user):
         return {}
     result = {}
     for table, grant in value.items():
-        if not isinstance(grant, dict):
+        # Reserved non-table keys (reporting sections) never grant rows.
+        if not isinstance(grant, dict) or str(table).startswith('__'):
             continue
         write_ids = _ids(grant.get('write'))
         delete_ids = _ids(grant.get('delete'))
@@ -119,6 +150,55 @@ def parse_record_permissions(user):
             'create': grant.get('create') is True,
         }
     return result
+
+
+def _normalize_report_sections(raw):
+    """{project_id: {stage_id: {section: {'read', 'write'}}}}, deny-by-default."""
+    if not isinstance(raw, dict):
+        return {}
+    result = {}
+    for pid, stages in raw.items():
+        pkey = _int_key(pid, minimum=1)
+        if pkey is None or not isinstance(stages, dict):
+            continue
+        stage_map = {}
+        for sid, flags in stages.items():
+            skey = _int_key(sid, minimum=0)
+            if skey is None or not isinstance(flags, dict):
+                continue
+            clean = {}
+            for section, grant in flags.items():
+                if section not in REPORT_SECTIONS or not isinstance(grant, dict):
+                    continue
+                write = grant.get('write') is True
+                read = grant.get('read') is True or write
+                if read:
+                    clean[section] = {'read': True, 'write': write}
+            if clean:
+                stage_map[skey] = clean
+        if stage_map:
+            result[pkey] = stage_map
+    return result
+
+
+def parse_report_sections(user):
+    """Cascade reporting grants for a user; {} means none stored."""
+    user = _unwrap(user)
+    if has_request_context():
+        policy = g.get('_hdc_record_policy')
+        if (policy and policy['user'] is user and policy.get('active')
+                and '_hdc_report_sections' in g):
+            return g._hdc_report_sections
+    try:
+        value = json.loads(getattr(user, 'record_permissions_json', None) or '{}')
+    except (TypeError, ValueError):
+        value = {}
+    sections = _normalize_report_sections(value.get(REPORT_SECTIONS_KEY)) if isinstance(value, dict) else {}
+    if has_request_context():
+        policy = g.get('_hdc_record_policy')
+        if policy and policy['user'] is user and policy.get('active'):
+            g._hdc_report_sections = sections
+    return sections
 
 
 def _request_user():
@@ -134,6 +214,7 @@ def _request_user():
         g._hdc_record_policy = {'user': user, 'active': active}
         if active:
             g._hdc_exact_record_grants = parse_record_permissions(user)
+            parse_report_sections(user)  # warms g._hdc_report_sections
     return user if g._hdc_record_policy['active'] else None
 
 
@@ -205,7 +286,121 @@ def record_permissions_from_form(form):
         if valid or create:
             result[table] = {'read': sorted(all_ids & valid), 'write': sorted(write_ids & valid),
                              'delete': sorted(delete_ids & valid), 'create': create}
+    sections = report_sections_from_form(form)
+    if sections:
+        result[REPORT_SECTIONS_KEY] = sections
     return result
+
+
+def report_sections_from_form(form):
+    """Validate cascade reporting-section boxes against existing rows.
+
+    Field names are report_read_<project>_<stage>_<section> (stage 0 = the
+    whole project). Unchecked boxes are simply absent → deny.
+    """
+    found = {}
+    for mode in ('read', 'write'):
+        prefix = 'report_' + mode + '_'
+        for field in form.keys():
+            if not field.startswith(prefix) or form.get(field) != '1':
+                continue
+            parts = field[len(prefix):].split('_', 2)
+            if len(parts) != 3:
+                continue
+            pid = _int_key(parts[0], minimum=1)
+            sid = _int_key(parts[1], minimum=0)
+            if pid is None or sid is None or parts[2] not in REPORT_SECTIONS:
+                continue
+            found.setdefault((pid, sid, parts[2]), {'read': False, 'write': False})[mode] = True
+    if not found:
+        return {}
+    models = record_models()
+    project_model, stage_model = models.get('hdc_project'), models.get('hdc_stage')
+    if project_model is None or stage_model is None:
+        return {}
+    pids = sorted({key[0] for key in found})
+    sids = sorted({key[1] for key in found if key[1]})
+    valid_projects = {row[0] for row in db.session.query(project_model.id)
+                      .filter(project_model.id.in_(pids)).all()}
+    valid_stages = ({(row[0], row[1]) for row in db.session.query(stage_model.id, stage_model.project_id)
+                     .filter(stage_model.id.in_(sids)).all()} if sids else set())
+    result = {}
+    for (pid, sid, section), flags in found.items():
+        if pid not in valid_projects:
+            continue
+        if sid and (sid, pid) not in valid_stages:
+            continue
+        write = flags['write']
+        result.setdefault(pid, {}).setdefault(sid, {})[section] = {
+            'read': flags['read'] or write, 'write': write}
+    return result
+
+
+def report_section_page_grants(record_permissions):
+    """Page buckets kept reachable by stored cascade reporting sections."""
+    if isinstance(record_permissions, str):
+        try:
+            record_permissions = json.loads(record_permissions or '{}')
+        except (TypeError, ValueError):
+            return {}
+    if not isinstance(record_permissions, dict):
+        return {}
+    sections = _normalize_report_sections(record_permissions.get(REPORT_SECTIONS_KEY))
+    pages = {}
+    for stages in sections.values():
+        for flags in stages.values():
+            for section, grant in flags.items():
+                for page in _REPORT_SECTION_PAGES.get(section, ()):
+                    entry = pages.setdefault(page, {'read': False, 'write': False})
+                    entry['read'] = entry['read'] or grant['read']
+                    entry['write'] = entry['write'] or grant['write']
+    for entry in pages.values():
+        if entry['write']:
+            entry['read'] = True
+    return pages
+
+
+def report_section_active(user):
+    """True when this strict user's access is refined by cascade sections."""
+    user = _unwrap(user)
+    return bool(exact_access_enabled(user) and parse_report_sections(user))
+
+
+def report_section_allowed(user, section, project_id=None, stage_id=None, mode='read'):
+    """Deny-by-default gate for the cascade reporting sections.
+
+    Strict users saved before the cascade existed keep page+record behavior
+    until a reporting grant is stored for them (backward compatibility).
+    A whole-project entry (stage key 0) covers every stage of that project.
+    """
+    user = _unwrap(user)
+    if section not in REPORT_SECTIONS or not exact_access_enabled(user):
+        return True
+    sections = parse_report_sections(user)
+    if not sections:
+        return True  # legacy strict user: page + record gates only
+    want_write = mode == 'write'
+
+    def granted(flags):
+        entry = flags.get(section) if flags else None
+        return bool(entry) and (entry['write'] if want_write else entry['read'])
+
+    if section in ('glance_report', 'report_exports'):
+        return any(granted(flags) for stages in sections.values() for flags in stages.values())
+    pid = _int_key(project_id, minimum=1) if project_id not in (None, '') else None
+    sid = _int_key(stage_id, minimum=0) if stage_id not in (None, '') else None
+    if section == 'project_report':
+        if pid is None:
+            return any(granted(flags) for stages in sections.values() for flags in stages.values())
+        return any(granted(flags) for flags in sections.get(pid, {}).values())
+    # stage cost report: exact stage, else the project's whole-project entry,
+    # else any stage of the project (hub listing), else any grant at all.
+    if pid is not None and sid is not None:
+        stages = sections.get(pid, {})
+        return granted(stages.get(sid)) or granted(stages.get(0))
+    if pid is not None:
+        return any(granted(flags) for flags in sections.get(pid, {}).values())
+    return any(granted(flags) for stages in sections.values() for flags in stages.values())
 
 
 def record_grant_cards(user, catalog=None):
@@ -842,3 +1037,5 @@ def install_record_template_helpers(application):
     application.jinja_env.globals['hdc_record_allowed'] = lambda table, row_id=None, mode='read': record_allowed(
         current_user, table, row_id, mode)
     application.jinja_env.globals['hdc_exact_access'] = lambda: exact_access_enabled(current_user)
+    application.jinja_env.globals['hdc_report_allowed'] = lambda section, project_id=None, stage_id=None, mode='read': report_section_allowed(
+        current_user, section, project_id, stage_id, mode)
