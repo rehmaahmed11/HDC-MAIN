@@ -112,7 +112,13 @@ def _audit_change_map(obj):
                 continue
             old_val = hist.deleted[0] if hist.deleted else None
             new_val = hist.added[0] if hist.added else getattr(obj, key, None)
-            changed[key] = {'old': _audit_repr(old_val), 'new': _audit_repr(new_val)}
+            # Password hashes must never be copied into an audit log. They
+            # are not usable as the user's password, but leaking them would
+            # still enable offline guessing and extend their lifetime.
+            if key == 'password_hash':
+                changed[key] = {'old': '[redacted]', 'new': '[redacted]'}
+            else:
+                changed[key] = {'old': _audit_repr(old_val), 'new': _audit_repr(new_val)}
     except Exception:
         return {}
     return changed

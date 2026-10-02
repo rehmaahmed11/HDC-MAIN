@@ -47,6 +47,8 @@ def _bootstrap_hdc():
     _run_migrations()
     from hdc.core.schema import _ensure_table_columns_sqlite
     _ensure_table_columns_sqlite('hdc_user', {
+        'is_active': 'is_active BOOLEAN NOT NULL DEFAULT 1',
+        'auth_version': 'auth_version INTEGER NOT NULL DEFAULT 0',
         'permissions_json': 'permissions_json TEXT',
         'stage_scope_enabled': 'stage_scope_enabled BOOLEAN NOT NULL DEFAULT 0',
         'allowed_stage_ids_json': 'allowed_stage_ids_json TEXT',

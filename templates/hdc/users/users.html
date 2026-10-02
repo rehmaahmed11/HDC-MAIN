@@ -12,6 +12,10 @@
 .access-check{display:flex;align-items:center;gap:.42rem;margin:0;cursor:pointer}.access-check .form-check-input{margin:0}.access-matrix select[multiple]{min-height:135px}
 @media(max-width:520px){.access-row{grid-template-columns:minmax(120px,1fr) 68px 68px;font-size:.82rem}}
 </style>
+<div class="alert alert-info mt-3 mb-0" role="note">
+    <i class="fas fa-shield-halved me-2"></i><strong>Password privacy and recovery:</strong>
+    passwords are stored as one-way hashes, so the current password cannot be viewed. If someone forgets it, an administrator can set a new password from that user's Password settings. Use a trusted channel to share the new password.
+</div>
 <div class="row g-3 mt-1">
     <div class="col-xl-4">
         <div class="card hdc-card">
@@ -20,7 +24,7 @@
                 <form method="POST">
                     <input type="hidden" name="action" value="add">
                     <div class="mb-3"><label class="form-label">Username *</label><input type="text" name="username" class="form-control" placeholder="e.g. manager_ali" required></div>
-                    <div class="mb-3"><label class="form-label">Password *</label><input type="password" name="password" class="form-control" placeholder="Minimum 6 characters" required></div>
+                    <div class="mb-3"><label class="form-label">Password *</label><input type="password" name="password" class="form-control" placeholder="8+ characters with upper/lower, number and symbol" autocomplete="new-password" minlength="8" required></div>
                     <div class="mb-3">
                         <label class="form-label">Base role</label>
                         <select name="role" class="form-select">
@@ -51,7 +55,7 @@
             <div class="card-header hdc-card-header d-flex justify-content-between align-items-center"><span><i class="fas fa-users me-2"></i>All Users</span><span class="badge bg-light text-dark">{{ users|length }}</span></div>
             <div class="table-responsive">
                 <table class="table hdc-table table-sm align-middle mb-0">
-                    <thead><tr><th>#</th><th>Username</th><th>Role / Access</th><th>Created</th><th>Account actions</th></tr></thead>
+                    <thead><tr><th>#</th><th>Username</th><th>Role / Access</th><th>Status</th><th>Created</th><th>Account actions</th></tr></thead>
                     <tbody>
                     {% for u in users %}
                     <tr {{ u|hdc_row_attrs }} class="{% if u.id == current_user.id %}table-active{% endif %}">
@@ -63,26 +67,55 @@
                             {% if u.record_scope_enabled and u.role != 'admin' %}<div class="small text-primary mt-1"><i class="fas fa-shield-halved me-1"></i>Exact data only</div>{% endif %}
                             {% if u.stage_scope_enabled %}<div class="small text-warning-emphasis mt-1"><i class="fas fa-layer-group me-1"></i>Stage-limited</div>{% endif %}
                         </td>
+                        <td>
+                            {% if u.is_active %}<span class="badge bg-success"><i class="fas fa-circle-check me-1"></i>Active</span>
+                            {% else %}<span class="badge bg-secondary"><i class="fas fa-circle-pause me-1"></i>Suspended</span>{% endif %}
+                        </td>
                         <td class="text-muted small">{{ u.created_at.strftime('%Y-%m-%d') if u.created_at else '—' }}</td>
                         <td class="text-nowrap">
-                            <button class="btn btn-sm btn-outline-primary" type="button" data-bs-toggle="collapse" data-bs-target="#access-{{ u.id }}" aria-expanded="false"><i class="fas fa-sliders me-1"></i>Access</button>
-                            <button class="btn btn-sm btn-outline-warning" type="button" data-bs-toggle="collapse" data-bs-target="#reset-{{ u.id }}"><i class="fas fa-key me-1"></i>Password</button>
+                            <button class="btn btn-sm btn-outline-primary" type="button" data-bs-toggle="collapse" data-bs-target="#access-{{ u.id }}" aria-expanded="false" aria-controls="access-{{ u.id }}"><i class="fas fa-sliders me-1"></i>Access</button>
+                            <button class="btn btn-sm btn-outline-warning" type="button" data-bs-toggle="collapse" data-bs-target="#password-settings-{{ u.id }}" aria-expanded="false" aria-controls="password-settings-{{ u.id }}" title="View password status and reset options"><i class="fas fa-key me-1"></i>Password / reset</button>
                             {% if u.id != current_user.id %}
-                            <form method="POST" class="d-inline ms-1" onsubmit="return confirm('Delete user {{ u.username }}?')">
-                                <input type="hidden" name="action" value="delete"><input type="hidden" name="user_id" value="{{ u.id }}">
-                                <button type="submit" class="btn btn-sm btn-outline-danger" aria-label="Delete {{ u.username }}"><i class="fas fa-trash"></i></button>
+                            <form method="POST" class="d-inline ms-1" onsubmit="{% if u.is_active %}return confirm('Suspend this account? The user will be signed out.');{% else %}return true;{% endif %}">
+                                <input type="hidden" name="action" value="set_status"><input type="hidden" name="user_id" value="{{ u.id }}">
+                                <input type="hidden" name="status" value="{{ 'suspended' if u.is_active else 'active' }}">
+                                <button type="submit" class="btn btn-sm {% if u.is_active %}btn-outline-danger{% else %}btn-outline-success{% endif %}" aria-label="{{ 'Suspend' if u.is_active else 'Activate' }} {{ u.username }}" title="{{ 'Suspend login' if u.is_active else 'Reactivate account' }}">
+                                    <i class="fas {% if u.is_active %}fa-user-slash{% else %}fa-user-check{% endif %} me-1"></i>{{ 'Suspend' if u.is_active else 'Activate' }}
+                                </button>
                             </form>
+                            <form method="POST" class="d-inline ms-1" onsubmit="return confirm('Delete this user permanently?')">
+                                <input type="hidden" name="action" value="delete"><input type="hidden" name="user_id" value="{{ u.id }}">
+                                <button type="submit" class="btn btn-sm btn-outline-danger" aria-label="Delete {{ u.username }}" title="Delete user"><i class="fas fa-trash"></i></button>
+                            </form>
+                            {% else %}
+                            <span class="small text-muted ms-1">Your account</span>
                             {% endif %}
-                            <div class="collapse mt-2" id="reset-{{ u.id }}">
-                                <form method="POST" class="d-flex gap-2">
-                                    <input type="hidden" name="action" value="reset_password"><input type="hidden" name="user_id" value="{{ u.id }}">
-                                    <input type="password" name="new_password" class="form-control form-control-sm" placeholder="New password" required>
-                                    <button type="submit" class="btn btn-warning btn-sm">Set</button>
-                                </form>
+                            <div class="collapse mt-2" id="password-settings-{{ u.id }}">
+                                <div class="p-3 border rounded bg-body-tertiary" style="min-width:280px;max-width:650px;white-space:normal">
+                                    <div class="fw-semibold mb-1"><i class="fas fa-lock me-1"></i>Password settings for {{ u.username }}</div>
+                                    <p class="small text-muted mb-2">Current password: <strong>not viewable</strong>. It is protected with a one-way hash. If this user forgot it, set a new password below; the old one cannot be recovered.</p>
+                                    <form method="POST">
+                                        <input type="hidden" name="action" value="reset_password"><input type="hidden" name="user_id" value="{{ u.id }}">
+                                        <div class="row g-2">
+                                            <div class="col-md-6">
+                                                <label class="form-label small mb-1" for="new-password-{{ u.id }}">New password</label>
+                                                <input type="password" id="new-password-{{ u.id }}" name="new_password" class="form-control form-control-sm" placeholder="8+ chars, upper/lower, number, symbol" autocomplete="new-password" minlength="8" data-managed-password required>
+                                            </div>
+                                            <div class="col-md-6">
+                                                <label class="form-label small mb-1" for="confirm-password-{{ u.id }}">Confirm new password</label>
+                                                <input type="password" id="confirm-password-{{ u.id }}" name="confirm_password" class="form-control form-control-sm" placeholder="Enter it again" autocomplete="new-password" minlength="8" data-managed-password required>
+                                            </div>
+                                        </div>
+                                        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mt-2">
+                                            <label class="form-check small mb-0"><input class="form-check-input" type="checkbox" data-password-reveal><span class="form-check-label">Show typed password</span></label>
+                                            <button type="submit" class="btn btn-warning btn-sm"><i class="fas fa-key me-1"></i>Set new password</button>
+                                        </div>
+                                    </form>
+                                </div>
                             </div>
                         </td>
                     </tr>
-                    <tr class="collapse" id="access-{{ u.id }}"><td colspan="5" class="p-0 border-0">
+                    <tr class="collapse" id="access-{{ u.id }}"><td colspan="6" class="p-0 border-0">
                         <form method="POST" class="p-3 bg-body-tertiary border-bottom">
                             <input type="hidden" name="action" value="configure_permissions"><input type="hidden" name="user_id" value="{{ u.id }}">
                             <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
@@ -118,6 +151,12 @@
 </div>
 <script>
 (function(){
+  document.querySelectorAll('[data-password-reveal]').forEach(function(toggle){
+    toggle.addEventListener('change',function(){
+      var form=toggle.closest('form');
+      form.querySelectorAll('[data-managed-password]').forEach(function(input){input.type=toggle.checked?'text':'password';});
+    });
+  });
   document.querySelectorAll('[data-access-search]').forEach(function(input){input.addEventListener('input',function(){
     var q=input.value.trim().toLowerCase(), form=input.closest('form');
     form.querySelectorAll('.access-section').forEach(function(section){

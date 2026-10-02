@@ -15,6 +15,7 @@ from werkzeug.security import generate_password_hash
 from hdc.extensions import _admin_only, db
 from hdc.models.auth import ActivityLog, HDCUser
 from hdc.models.projects import Project, Stage
+from hdc.services.audit import log_action
 from hdc.services.permissions import PAGE_CATALOG, PAGE_TREE, permission_editor_grants
 from hdc.services.record_permissions import (record_catalog, record_grant_cards, record_label,
     record_models, record_permissions_from_form, parse_report_sections, report_section_page_grants)
@@ -198,6 +199,35 @@ def register(app):
                     flash('User deleted.', 'success')
                 else:
                     flash("Cannot delete your own account.", 'warning')
+            elif action == 'set_status':
+                uid = request.form.get('user_id', type=int)
+                user = db.session.get(HDCUser, uid) if uid else None
+                requested_status = (request.form.get('status') or '').strip().lower()
+                if not user:
+                    flash('User not found.', 'danger')
+                elif requested_status not in {'active', 'suspended'}:
+                    flash('Choose a valid account status.', 'warning')
+                elif user.id == current_user.id and requested_status == 'suspended':
+                    flash('You cannot suspend your own account.', 'warning')
+                else:
+                    should_be_active = requested_status == 'active'
+                    if user.is_active == should_be_active:
+                        flash(f'{user.username} is already {requested_status}.', 'info')
+                    elif (not should_be_active and (user.role or '').strip().lower() == 'admin' and
+                          HDCUser.query.filter_by(role='admin', is_active=True).count() <= 1):
+                        flash('The last active administrator cannot be suspended.', 'warning')
+                    else:
+                        user.is_active = should_be_active
+                        # Invalidate already-issued sessions when suspending;
+                        # they stay invalid even after later reactivation.
+                        if not should_be_active:
+                            user.auth_version = int(user.auth_version or 0) + 1
+                        verb = 'activated' if should_be_active else 'suspended'
+                        log_action(current_user, 'update',
+                                   f'Account for {user.username} was {verb}.',
+                                   'user_account', user.id)
+                        db.session.commit()
+                        flash(f'User "{user.username}" {verb}.', 'success')
             elif action == 'configure_permissions':
                 uid = request.form.get('user_id', type=int)
                 user = db.session.get(HDCUser, uid) if uid else None
@@ -222,16 +252,25 @@ def register(app):
                         flash(f'Role defaults restored for {user.username}.', 'success')
             elif action == 'reset_password':
                 uid = request.form.get('user_id', type=int)
-                u   = HDCUser.query.get(uid)
-                if u:
+                user = db.session.get(HDCUser, uid) if uid else None
+                if not user:
+                    flash('User not found.', 'danger')
+                else:
                     new_pwd = request.form.get('new_password', '')
+                    confirm_pwd = request.form.get('confirm_password', '')
                     ok_pwd, pwd_msg = _is_strong_password(new_pwd)
                     if not ok_pwd:
                         flash(pwd_msg, 'danger')
+                    elif new_pwd != confirm_pwd:
+                        flash('The new password and confirmation do not match.', 'danger')
                     else:
-                        u.password_hash = generate_password_hash(new_pwd)
+                        user.password_hash = generate_password_hash(new_pwd)
+                        user.auth_version = int(user.auth_version or 0) + 1
+                        log_action(current_user, 'update',
+                                   f'Password reset for user {user.username}.',
+                                   'user_account', user.id)
                         db.session.commit()
-                        flash(f'Password reset for {u.username}.', 'success')
+                        flash(f'Password reset for {user.username}. Share the new password securely.', 'success')
             return redirect(url_for('hdc_users'))
         users = HDCUser.query.order_by(HDCUser.created_at).all()
         stages = (db.session.query(Stage, Project)

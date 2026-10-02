@@ -126,6 +126,7 @@ def main():
             action = 'created'
         else:
             user.password_hash = generate_password_hash(password)
+            user.auth_version = int(user.auth_version or 0) + 1
             action = 'password updated'
             if args.role:
                 user.role = args.role
