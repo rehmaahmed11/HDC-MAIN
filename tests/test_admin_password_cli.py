@@ -69,6 +69,26 @@ class ResetAdminPasswordTest(unittest.TestCase):
         finally:
             con.close()
 
+    def viewable(self, username):
+        """What an administrator would be shown for ``username``.
+
+        Returns ``(stored_token, password)``; the token is decrypted here, in the
+        test process, with the same key the script was given.
+        """
+        from types import SimpleNamespace
+        con = sqlite3.connect(self.db_path)
+        try:
+            row = con.execute('SELECT password_hash, password_vault FROM hdc_user '
+                              'WHERE username=?', (username,)).fetchone()
+        finally:
+            con.close()
+        shell = flask.Flask('vault-check')
+        shell.config['SECRET_KEY'] = self.env['HDC_SECRET_KEY']
+        with shell.app_context():
+            from hdc.services.password_vault import viewable_password
+            return row[1], viewable_password(
+                SimpleNamespace(password_hash=row[0], password_vault=row[1]))
+
     # -- behaviour -------------------------------------------------------
 
     def test_show_identifies_the_database_and_users(self):
@@ -163,6 +183,27 @@ class ResetAdminPasswordTest(unittest.TestCase):
         finally:
             con.close()
         self.assertEqual(rows.get('sitekeeper'), 'manager')
+
+    def test_the_viewable_copy_follows_every_change_the_script_makes(self):
+        # Running the script bootstraps the first admin from the environment...
+        self.run_cli('--show')
+        self.assertEqual(self.viewable('admin')[1], 'Boot@12345')
+        # ...an update replaces it, stored encrypted rather than as typed...
+        self.run_cli('--username', 'admin', '--password', STRONG)
+        token, shown = self.viewable('admin')
+        self.assertEqual(shown, STRONG)
+        self.assertNotIn(STRONG, token)
+        self.run_cli('--username', 'admin', '--password', 'Another#Pass2026')
+        self.assertEqual(self.viewable('admin')[1], 'Another#Pass2026')
+        # ...and an account the script creates is viewable too.
+        self.run_cli('--username', 'sitekeeper', '--password', 'Manager#2026x', '--role', 'manager')
+        self.assertEqual(self.viewable('sitekeeper')[1], 'Manager#2026x')
+
+    def test_a_refused_password_leaves_the_viewable_copy_alone(self):
+        self.run_cli('--username', 'admin', '--password', STRONG)
+        before = self.viewable('admin')
+        self.run_cli('--username', 'admin', '--password', 'short')
+        self.assertEqual(self.viewable('admin'), before)
 
     def test_role_is_left_alone_when_not_requested(self):
         self.run_cli('--username', 'admin', '--password', STRONG)

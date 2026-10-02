@@ -18,14 +18,17 @@ class ParallelBootstrapTest(unittest.TestCase):
             env=dict(os.environ,HDC_ENV='prod',HDC_SECRET_KEY='bootstrap-race-test-only',
                      HDC_BOOTSTRAP_ADMIN_PASSWORD='Bootstrap-Race-Only-123',
                      HDC_INSTANCE_DIR=tmp,HDC_DB_PATH=str(path))
+            # Hashing the first admin's password happens in assign_password(), the
+            # one place that sets a password (hash + administrator-viewable copy),
+            # so that is where the race window is stretched.
             script='''
 import time
-from hdc.core import bootstrap
-original = bootstrap.generate_password_hash
+from hdc.services import password_vault
+original = password_vault.generate_password_hash
 def slow_hash(*args, **kwargs):
     time.sleep(0.3)
     return original(*args, **kwargs)
-bootstrap.generate_password_hash = slow_hash
+password_vault.generate_password_hash = slow_hash
 from hdc.app import create_app
 app = create_app()
 with app.test_client() as client:

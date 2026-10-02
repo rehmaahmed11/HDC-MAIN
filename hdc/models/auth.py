@@ -15,6 +15,11 @@ class HDCUser(UserMixin, db.Model):
     id            = db.Column(db.Integer, primary_key=True)
     username      = db.Column(db.String(80), unique=True, nullable=False)
     password_hash = db.Column(db.String(200), nullable=False)
+    # Encrypted, administrator-viewable copy of the password (Fernet token; see
+    # hdc.services.password_vault). Login never reads it - it authenticates
+    # against password_hash only. NULL for passwords set before this column
+    # existed, or when the vault could not be used; never plain text.
+    password_vault = db.Column(db.Text, nullable=True)
     role          = db.Column(db.String(20), default='admin')   # admin/manager/accountant
     # Flask-Login honors this flag both when establishing and restoring a
     # session. Suspended users stay in the database (and keep their history)

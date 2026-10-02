@@ -13,9 +13,17 @@
 @media(max-width:520px){.access-row{grid-template-columns:minmax(120px,1fr) 68px 68px;font-size:.82rem}}
 </style>
 <div class="alert alert-info mt-3 mb-0" role="note">
-    <i class="fas fa-shield-halved me-2"></i><strong>Password privacy and recovery:</strong>
-    passwords are stored as one-way hashes, so the current password cannot be viewed. If someone forgets it, an administrator can set a new password from that user's Password settings. Use a trusted channel to share the new password.
+    <i class="fas fa-shield-halved me-2"></i><strong>Viewing passwords:</strong>
+    use the <i class="fas fa-eye mx-1"></i> button in the Password column to show an account's current password. Login still checks a one-way hash; the viewable copy is stored encrypted on the server, and every view is recorded in the Event Recorder.
+    A password set before this feature existed shows <em>Not saved yet</em>: it cannot be read back from its hash, so set a new password once (<em>Password / reset</em>) to make it viewable.
+    Anyone with admin access can see every password, so keep admin accounts to people you trust and share passwords over a trusted channel.
 </div>
+{% if password_vault_problem %}
+<div class="alert alert-warning mt-2 mb-0" role="alert">
+    <i class="fas fa-triangle-exclamation me-2"></i><strong>Password viewing is off on this server.</strong> {{ password_vault_problem }}
+    Logins and password resets still work; new passwords just won't be viewable until this is fixed.
+</div>
+{% endif %}
 <div class="row g-3 mt-1">
     <div class="col-xl-4">
         <div class="card hdc-card">
@@ -55,12 +63,23 @@
             <div class="card-header hdc-card-header d-flex justify-content-between align-items-center"><span><i class="fas fa-users me-2"></i>All Users</span><span class="badge bg-light text-dark">{{ users|length }}</span></div>
             <div class="table-responsive">
                 <table class="table hdc-table table-sm align-middle mb-0">
-                    <thead><tr><th>#</th><th>Username</th><th>Role / Access</th><th>Status</th><th>Created</th><th>Account actions</th></tr></thead>
+                    <thead><tr><th>#</th><th>Username</th><th>Password</th><th>Role / Access</th><th>Status</th><th>Created</th><th>Account actions</th></tr></thead>
                     <tbody>
                     {% for u in users %}
                     <tr {{ u|hdc_row_attrs }} class="{% if u.id == current_user.id %}table-active{% endif %}">
                         <td class="text-muted">{{ loop.index }}</td>
                         <td><strong>{{ u.username }}</strong>{% if u.id == current_user.id %}<span class="badge bg-primary ms-1">You</span>{% endif %}</td>
+                        <td style="min-width:10.5rem" data-password-cell data-username="{{ u.username }}" data-password-url="{{ url_for('hdc_user_password_reveal', user_id=u.id) }}">
+                            {% if password_vault_problem %}
+                            <span class="small text-muted" title="{{ password_vault_problem }}">Unavailable</span>
+                            {% elif u.password_vault %}
+                            <span class="font-monospace text-muted" data-password-mask>••••••••</span><code class="user-select-all text-body text-break" data-password-value hidden></code>
+                            <button type="button" class="btn btn-sm btn-outline-secondary ms-1" data-password-toggle aria-pressed="false" aria-label="Show password for {{ u.username }}" title="Show password"><i class="fas fa-eye"></i></button>
+                            <div class="small text-danger text-wrap" style="max-width:220px" data-password-error role="alert" hidden></div>
+                            {% else %}
+                            <span class="small text-muted" title="This password was set before password viewing existed. Set a new password (Password / reset) to make it viewable.">Not saved yet</span>
+                            {% endif %}
+                        </td>
                         <td>
                             <span class="badge {% if u.role == 'admin' %}bg-danger{% elif u.role == 'manager' %}bg-success{% else %}bg-info text-dark{% endif %}">{{ u.role|title }}</span>
                             {% if u.permissions_json %}<span class="badge bg-primary">Custom</span>{% else %}<span class="badge bg-secondary">Role defaults</span>{% endif %}
@@ -74,7 +93,7 @@
                         <td class="text-muted small">{{ u.created_at.strftime('%Y-%m-%d') if u.created_at else '—' }}</td>
                         <td class="text-nowrap">
                             <button class="btn btn-sm btn-outline-primary" type="button" data-bs-toggle="collapse" data-bs-target="#access-{{ u.id }}" aria-expanded="false" aria-controls="access-{{ u.id }}"><i class="fas fa-sliders me-1"></i>Access</button>
-                            <button class="btn btn-sm btn-outline-warning" type="button" data-bs-toggle="collapse" data-bs-target="#password-settings-{{ u.id }}" aria-expanded="false" aria-controls="password-settings-{{ u.id }}" title="View password status and reset options"><i class="fas fa-key me-1"></i>Password / reset</button>
+                            <button class="btn btn-sm btn-outline-warning" type="button" data-bs-toggle="collapse" data-bs-target="#password-settings-{{ u.id }}" aria-expanded="false" aria-controls="password-settings-{{ u.id }}" title="Set a new password for this account"><i class="fas fa-key me-1"></i>Password / reset</button>
                             {% if u.id != current_user.id %}
                             <form method="POST" class="d-inline ms-1" onsubmit="{% if u.is_active %}return confirm('Suspend this account? The user will be signed out.');{% else %}return true;{% endif %}">
                                 <input type="hidden" name="action" value="set_status"><input type="hidden" name="user_id" value="{{ u.id }}">
@@ -93,7 +112,7 @@
                             <div class="collapse mt-2" id="password-settings-{{ u.id }}">
                                 <div class="p-3 border rounded bg-body-tertiary" style="min-width:280px;max-width:650px;white-space:normal">
                                     <div class="fw-semibold mb-1"><i class="fas fa-lock me-1"></i>Password settings for {{ u.username }}</div>
-                                    <p class="small text-muted mb-2">Current password: <strong>not viewable</strong>. It is protected with a one-way hash. If this user forgot it, set a new password below; the old one cannot be recovered.</p>
+                                    <p class="small text-muted mb-2">Set a new password for this account. The old one stops working immediately and the user is signed out. The new password is also saved (encrypted) so it can be viewed from the Password column.</p>
                                     <form method="POST">
                                         <input type="hidden" name="action" value="reset_password"><input type="hidden" name="user_id" value="{{ u.id }}">
                                         <div class="row g-2">
@@ -115,7 +134,7 @@
                             </div>
                         </td>
                     </tr>
-                    <tr class="collapse" id="access-{{ u.id }}"><td colspan="6" class="p-0 border-0">
+                    <tr class="collapse" id="access-{{ u.id }}"><td colspan="7" class="p-0 border-0">
                         <form method="POST" class="p-3 bg-body-tertiary border-bottom">
                             <input type="hidden" name="action" value="configure_permissions"><input type="hidden" name="user_id" value="{{ u.id }}">
                             <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">

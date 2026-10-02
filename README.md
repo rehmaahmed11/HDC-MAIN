@@ -304,6 +304,40 @@ coverage is in `tests/test_money_permissions.py`:
 .venv/bin/python -m unittest discover -s tests -p 'test_money_permissions.py' -v
 ```
 
+## Viewing user passwords
+
+Administrators can see any account's current password on **User Management**
+(`/hdc/users`, the eye button in the *Password* column). That is a deliberate
+convenience trade-off, so it is built to keep the risk small:
+
+- **Login is unchanged.** It checks the one-way `password_hash`. The viewable
+  copy (`hdc_user.password_vault`) is a separate *encrypted* token (Fernet, from
+  the `cryptography` package) that only the admin reveal route decrypts. The key
+  is `HDC_PASSWORD_VAULT_KEY`, or - when that is unset - derived from
+  `HDC_SECRET_KEY`, so a copy of the database or a backup does not reveal any
+  password on its own.
+- **Admins only**, through `POST /hdc/users/<id>/password` with a CSRF token; the
+  response is `no-store`. The page never contains a password: it is fetched on
+  click and hides again after 30 seconds.
+- **Every view is logged** in the Event Recorder (filter *Event type -> View*):
+  who looked at whose account, never the password itself.
+- **Existing passwords cannot be recovered.** They were saved only as one-way
+  hashes, so accounts created before this feature show *Not saved yet* until an
+  admin sets a new password once (*Password / reset*). Passwords set by the app
+  from now on - new user, reset, first admin, `scripts/reset_admin_password.py` -
+  are viewable. A copy is only shown while it still matches the account's
+  current hash, so a stale password is never displayed.
+- **Missing library or key.** Without the `cryptography` package or a key the
+  site keeps working (logins, creating users, resets) and the page says why
+  viewing is off. Install with `pip install -r requirements.txt`; the deploy
+  webhook only pulls and reloads (see `helpbook.txt` section 1).
+- **Rotating the key** (or `HDC_SECRET_KEY` when no dedicated key is set) makes
+  the saved copies unreadable. Logins are unaffected, and an account is viewable
+  again once its password is set again.
+
+Anyone with admin access can see every password, so keep admin accounts to
+people you trust. Tests: `tests/test_password_viewing.py`.
+
 ## Run
 
 ```bash
@@ -329,7 +363,8 @@ fallback admin password is not used when `HDC_ENV=prod`.
 Config is environment-driven: `HDC_ENV`, `HDC_DB_PATH`, `HDC_INSTANCE_DIR`,
 `HDC_SECRET_KEY`, `HDC_BOOTSTRAP_ADMIN_USERNAME`,
 `HDC_BOOTSTRAP_ADMIN_PASSWORD`, `HDC_DEFAULT_ADMIN_PASSWORD` (development
-only), `PORT`, plus an optional `.env` file for local development. Session cookies are HttpOnly,
+only), `HDC_PASSWORD_VAULT_KEY` (optional, see *Viewing user passwords*), `PORT`,
+plus an optional `.env` file for local development. Session cookies are HttpOnly,
 SameSite=Lax, and Secure in production. Never commit a real database or
 backup archive (see `.gitignore`).
 

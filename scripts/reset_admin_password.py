@@ -52,6 +52,7 @@ from hdc.app import create_app                                     # noqa: E402
 from hdc.config import get_runtime_settings                        # noqa: E402
 from hdc.extensions import db                                      # noqa: E402
 from hdc.models.auth import HDCUser                                # noqa: E402
+from hdc.services.password_vault import assign_password            # noqa: E402
 from hdc.utils.format import _is_strong_password                   # noqa: E402
 
 
@@ -113,19 +114,17 @@ def main():
             print(f"error        : {msg}")
             return 2
 
-        from werkzeug.security import generate_password_hash
-
         username = args.username.strip()
         user = HDCUser.query.filter_by(username=username).first()
         if user is None:
             role = args.role or 'admin'
-            user = HDCUser(username=username,
-                           password_hash=generate_password_hash(password),
-                           role=role)
+            user = HDCUser(username=username, role=role)
+            assign_password(user, password)
             db.session.add(user)
             action = 'created'
         else:
-            user.password_hash = generate_password_hash(password)
+            # Updates the login hash and the administrator-viewable copy together.
+            assign_password(user, password)
             user.auth_version = int(user.auth_version or 0) + 1
             action = 'password updated'
             if args.role:

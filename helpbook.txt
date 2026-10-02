@@ -77,6 +77,17 @@ PythonAnywhere. Wait about 30 seconds, then open in your browser:
 You should see a new line like:
     2026-09-13 14:02:11  OK deployed a1b2c3d: Fast-forward
 
+If the change added a package (requirements.txt changed):
+the webhook only pulls and reloads - it does NOT install packages.
+The password-viewing feature needs the "cryptography" package, so after
+the first deploy that includes it, run this ONCE in a Bash console:
+
+    ~/.virtualenvs/hdc/bin/pip install -r ~/HDC-MAIN/requirements.txt
+    touch /var/www/<you>_pythonanywhere_com_wsgi.py
+
+Until then the site works normally; User Management just shows a yellow
+notice saying password viewing is off.
+
 "Starting a fresh copy on a new computer"? Just clone the repository
 there, commit, and push as above. You do NOT copy .env,
 deploy_secret.txt or the database between computers - the server
@@ -198,6 +209,15 @@ Which secret does what:
 
     HDC_SECRET_KEY                  app/session key.
                                     Changing it logs ALL users out.
+    HDC_PASSWORD_VAULT_KEY          OPTIONAL. Protects the saved, viewable
+                                    copies of user passwords. If you leave
+                                    it out, it is derived from
+                                    HDC_SECRET_KEY - so changing the secret
+                                    key also makes the saved copies
+                                    unreadable (logins still work; set a
+                                    user's password again to make it
+                                    viewable). Give it its own long random
+                                    string to change the two separately.
     HDC_BOOTSTRAP_ADMIN_PASSWORD    only used while the database has
                                     no users yet (fresh install).
                                     To change a login that already
@@ -300,6 +320,8 @@ Locked out of an existing admin login:
     --show prints which database file it is about to touch. It refuses
     weak passwords, never echoes what you type, and --role admin also
     promotes the account. Reload the site afterwards, then log in.
+    The new password is also saved (encrypted) like any password set in
+    the app, so an admin can view it later in User Management.
 
 After any fix, verify the two URLs:
     https://<you>.pythonanywhere.com/hdc/login

@@ -5,3 +5,4 @@ SQLAlchemy>=2,<3
 Werkzeug>=3,<4
 openpyxl>=3.1,<4
 gunicorn>=21,<24
+cryptography>=42
