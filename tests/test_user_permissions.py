@@ -160,13 +160,20 @@ class UserPermissionsTestCase(unittest.TestCase):
             self.assertEqual(json.loads(user.allowed_stage_ids_json), [self.allowed_stage_id])
             self.assertEqual(json.loads(user.write_stage_ids_json), [self.allowed_stage_id])
 
-    def test_admin_page_explains_password_privacy_and_recovery(self):
+    def test_admin_page_explains_password_viewing_and_recovery(self):
+        # Passwords used to be unviewable one-way hashes; administrators can now
+        # view them (encrypted copy, see tests/test_password_viewing.py). The
+        # reset flow from the previous change is still there for forgotten ones.
         self._sign_in_as_admin()
         response = self.client.get('/hdc/users')
         self.assertEqual(response.status_code, 200)
         body = response.get_data(as_text=True)
-        self.assertIn('passwords are stored as one-way hashes', body)
-        self.assertIn('Current password: <strong>not viewable</strong>', body)
+        self.assertIn('Viewing passwords:', body)
+        self.assertIn('<th>Password</th>', body)
+        # This fixture account only has a hash, so it has nothing to show yet.
+        self.assertIn('Not saved yet', body)
+        self.assertNotIn('not viewable', body)
+        self.assertNotIn('passwords are stored as one-way hashes', body)
         self.assertIn('Password / reset', body)
         self.assertIn('Confirm new password', body)
         self.assertIn('Suspend', body)
@@ -211,6 +218,9 @@ class UserPermissionsTestCase(unittest.TestCase):
             self.assertIsNotNone(change)
             changed = json.loads(change.changed_fields)
             self.assertEqual(changed['password_hash'], {'old': '[redacted]', 'new': '[redacted]'})
+            # The encrypted viewable copy is redacted for the same reason.
+            self.assertEqual(changed['password_vault'], {'old': '[redacted]', 'new': '[redacted]'})
+            self.assertNotIn(user.password_vault, change.changed_fields)
             event = ActivityLog.query.filter_by(entity_type='user_account', entity_id=str(self.user_id)).order_by(ActivityLog.id.desc()).first()
             self.assertIsNotNone(event)
             self.assertNotIn(old_hash, event.description)

@@ -476,3 +476,79 @@
         });
     });
 })();
+
+/* Password viewer (User Management): an administrator's eye button.
+ *
+ * Nothing is rendered into the page up front. The password is requested from
+ * the server only when the button is pressed (POST, CSRF header added by the
+ * shared fetch wrapper), written with textContent, and hidden again by a second
+ * press or after AUTO_HIDE_MS so it is not left on screen. */
+(function () {
+    'use strict';
+
+    var AUTO_HIDE_MS = 30000;
+
+    document.querySelectorAll('[data-password-cell]').forEach(function (cell) {
+        var toggle = cell.querySelector('[data-password-toggle]');
+        var mask = cell.querySelector('[data-password-mask]');
+        var value = cell.querySelector('[data-password-value]');
+        var error = cell.querySelector('[data-password-error]');
+        if (!toggle || !mask || !value || !error) return;
+
+        var icon = toggle.querySelector('i');
+        var username = cell.getAttribute('data-username') || 'this user';
+        var timer = null;
+        var loading = false;
+
+        function setShown(shown) {
+            value.hidden = !shown;
+            mask.hidden = shown;
+            toggle.setAttribute('aria-pressed', shown ? 'true' : 'false');
+            toggle.setAttribute('aria-label', (shown ? 'Hide' : 'Show') + ' password for ' + username);
+            toggle.title = shown ? 'Hide password' : 'Show password';
+            if (icon) icon.className = shown ? 'fas fa-eye-slash' : 'fas fa-eye';
+        }
+        function hide() {
+            window.clearTimeout(timer);
+            value.textContent = '';
+            setShown(false);
+        }
+        function show(password) {
+            window.clearTimeout(timer);
+            error.hidden = true;
+            value.textContent = password;
+            setShown(true);
+            timer = window.setTimeout(hide, AUTO_HIDE_MS);
+        }
+        function fail(message) {
+            error.textContent = message || 'The password could not be loaded.';
+            error.hidden = false;
+        }
+
+        toggle.addEventListener('click', function () {
+            if (!value.hidden) { hide(); return; }
+            if (loading) return;
+            loading = true;
+            toggle.disabled = true;
+            error.hidden = true;
+            fetch(cell.getAttribute('data-password-url'), {
+                method: 'POST',
+                credentials: 'same-origin',
+                cache: 'no-store',
+                headers: { 'Accept': 'application/json' }
+            }).then(function (response) {
+                return response.json().catch(function () {
+                    throw new Error('Unexpected response from the server (HTTP ' + response.status + ').');
+                });
+            }).then(function (data) {
+                if (!data || !data.ok) throw new Error(data && data.message);
+                show(String(data.password));
+            }).catch(function (problem) {
+                fail(problem && problem.message);
+            }).finally(function () {
+                loading = false;
+                toggle.disabled = false;
+            });
+        });
+    });
+})();

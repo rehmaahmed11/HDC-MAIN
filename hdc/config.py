@@ -172,6 +172,11 @@ def get_flask_config(settings=None):
         # set it to a CSP source list (e.g. "'self' https://portal.example") to
         # allow embedding the app in a frame on those origins instead.
         'HDC_FRAME_ANCESTORS': (os.environ.get('HDC_FRAME_ANCESTORS') or '').strip(),
+        # Optional dedicated key for the administrator-viewable password copies
+        # (hdc.services.password_vault).  Empty derives the key from SECRET_KEY,
+        # which means rotating SECRET_KEY also makes the stored copies
+        # unreadable; set this to rotate the two independently.
+        'HDC_PASSWORD_VAULT_KEY': (os.environ.get('HDC_PASSWORD_VAULT_KEY') or '').strip(),
         'SESSION_COOKIE_HTTPONLY': True,
         'SESSION_COOKIE_SAMESITE': 'Lax',
         'SESSION_COOKIE_SECURE': secure_cookie,

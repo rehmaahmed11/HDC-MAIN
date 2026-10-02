@@ -9,7 +9,6 @@ from contextlib import contextmanager
 
 from flask import current_app
 from sqlalchemy import func, inspect as sa_inspect
-from werkzeug.security import generate_password_hash
 
 from hdc.config import get_runtime_settings
 from hdc.core.flags import _runtime_flag_get, _runtime_flag_set
@@ -21,6 +20,7 @@ from hdc.models.workforce import WorkerTrade
 from hdc.services.account_classification import backfill_account_classification
 from hdc.services.accounts import _backfill_accounts_scope_from_references, _backfill_owner_payment_receiving_accounts, _bootstrap_accounts_backfill_once, _mark_auto_generated_person_accounts
 from hdc.services.cashflow_register import _ensure_cashflow_seed_data
+from hdc.services.password_vault import assign_password
 from hdc.services.subcontract import _ensure_subcontract_labour_attendance_schema, _ensure_subcontract_payment_void_schema
 from hdc.services.timekeeping import _migrate_attendance_to_time_entries, _reconcile_all_time_entries_once
 from hdc.utils.format import _is_strong_password
@@ -47,6 +47,7 @@ def _bootstrap_hdc():
     _run_migrations()
     from hdc.core.schema import _ensure_table_columns_sqlite
     _ensure_table_columns_sqlite('hdc_user', {
+        'password_vault': 'password_vault TEXT',
         'is_active': 'is_active BOOLEAN NOT NULL DEFAULT 1',
         'auth_version': 'auth_version INTEGER NOT NULL DEFAULT 0',
         'permissions_json': 'permissions_json TEXT',
@@ -86,10 +87,9 @@ def _bootstrap_hdc():
         ok_pwd, pwd_msg = _is_strong_password(admin_pwd)
         if not ok_pwd:
             raise RuntimeError(f'Invalid bootstrap admin password: {pwd_msg}')
-        db.session.add(HDCUser(
-            username=admin_username,
-            password_hash=generate_password_hash(admin_pwd),
-            role='admin'))
+        first_admin = HDCUser(username=admin_username, role='admin')
+        assign_password(first_admin, admin_pwd)
+        db.session.add(first_admin)
         db.session.commit()
         print(f"[HDC ERP] Initial admin created: {admin_username}")
     if not WorkerTrade.query.filter_by(active_status=True).first():

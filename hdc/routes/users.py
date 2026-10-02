@@ -10,16 +10,25 @@ import json
 from flask import abort, flash, jsonify, redirect, render_template, request, url_for
 from sqlalchemy import String, cast, or_
 from flask_login import current_user, login_required
-from werkzeug.security import generate_password_hash
 
 from hdc.extensions import _admin_only, db
 from hdc.models.auth import ActivityLog, HDCUser
 from hdc.models.projects import Project, Stage
 from hdc.services.audit import log_action
+from hdc.services.password_vault import assign_password, vault_problem, viewable_password
 from hdc.services.permissions import PAGE_CATALOG, PAGE_TREE, permission_editor_grants
 from hdc.services.record_permissions import (record_catalog, record_grant_cards, record_label,
     record_models, record_permissions_from_form, parse_report_sections, report_section_page_grants)
 from hdc.utils.format import _is_strong_password, _parse_date
+
+
+def _private_json(payload, status=200):
+    """JSON response that no browser or proxy may keep (it can carry a password)."""
+    response = jsonify(payload)
+    response.status_code = status
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, private'
+    response.headers['Pragma'] = 'no-cache'
+    return response
 
 
 def _permissions_from_form(form):
@@ -183,10 +192,8 @@ def register(app):
                     role = (request.form.get('role') or 'manager').strip().lower()
                     if role not in {'admin', 'manager', 'accountant', 'staff'}:
                         role = 'manager'
-                    user = HDCUser(
-                        username=uname,
-                        password_hash=generate_password_hash(raw_pwd),
-                        role=role)
+                    user = HDCUser(username=uname, role=role)
+                    assign_password(user, raw_pwd)
                     _save_access_from_form(user, request.form)
                     db.session.add(user)
                     db.session.commit()
@@ -264,7 +271,7 @@ def register(app):
                     elif new_pwd != confirm_pwd:
                         flash('The new password and confirmation do not match.', 'danger')
                     else:
-                        user.password_hash = generate_password_hash(new_pwd)
+                        assign_password(user, new_pwd)
                         user.auth_version = int(user.auth_version or 0) + 1
                         log_action(current_user, 'update',
                                    f'Password reset for user {user.username}.',
@@ -286,6 +293,7 @@ def register(app):
         record_cards_by_user = {user.id: record_grant_cards(user, catalog) for user in users}
         project_options, stages_by_project, stage_projects, stage_labels = _cascade_options()
         return render_template('users/users.html', users=users, stages=stages,
+            password_vault_problem=vault_problem(),
             record_catalog=catalog,
             record_cards_by_user=record_cards_by_user,
             project_options=project_options,
@@ -298,6 +306,39 @@ def register(app):
             permissions_by_user={user.id: permission_editor_grants(user) for user in users},
             read_stage_ids_by_user=read_stage_ids_by_user,
             write_stage_ids_by_user=write_stage_ids_by_user)
+
+
+    @app.route('/hdc/users/<int:user_id>/password', methods=['POST'])
+    @login_required
+    def hdc_user_password_reveal(user_id):
+        """Show one account's current password to an administrator (JSON).
+
+        POST-only so it needs the CSRF token and can never be triggered by a
+        link, a prefetch or a crawler.  Each successful view is written to the
+        event recorder *before* the password leaves the server; the log entry
+        names who looked at whose account but never contains the password.
+        """
+        if (getattr(current_user, 'role', '') or '').strip().lower() != 'admin':
+            return _private_json({'ok': False, 'message': 'Admin access required.'}, 403)
+        user = db.session.get(HDCUser, user_id)
+        if user is None:
+            return _private_json({'ok': False, 'message': 'User not found.'}, 404)
+        password = viewable_password(user)
+        if password is None:
+            problem = vault_problem()
+            if problem:
+                message = 'Password viewing is unavailable. ' + problem
+            elif not user.password_vault:
+                message = (f'No viewable copy is saved for {user.username}: the password was set before '
+                           'password viewing existed. Set a new password to make it viewable.')
+            else:
+                message = (f'The saved copy for {user.username} no longer matches the current password. '
+                           'Set a new password to make it viewable.')
+            return _private_json({'ok': False, 'message': message}, 409)
+        log_action(current_user, 'view', f'Password viewed for user {user.username}.',
+                   'user_account', user.id)
+        db.session.commit()
+        return _private_json({'ok': True, 'password': password})
 
 
     @app.route('/hdc/users/access-data')
@@ -359,7 +400,7 @@ def register(app):
 
         logs = q.order_by(ActivityLog.created_at.desc(), ActivityLog.id.desc()).limit(600).all()
         users = HDCUser.query.order_by(HDCUser.username.asc()).all()
-        event_options = ['create', 'update', 'void', 'login', 'logout', 'payment', 'delivery', 'usage']
+        event_options = ['create', 'update', 'void', 'login', 'logout', 'view', 'payment', 'delivery', 'usage']
 
         return render_template('users/event_recorder.html',
             logs=logs,

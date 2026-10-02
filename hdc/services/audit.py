@@ -44,6 +44,10 @@ _AUDIT_NOISY_UPDATE_FIELDS = {
     'hdc_time_entry': {'attendance_id', 'check_in', 'check_out', 'overtime', 'wage_calculated', 'activity_at'}
 }
 
+# Columns whose values must never be copied into the audit log, not even in
+# truncated form: the login hash and the encrypted administrator-viewable copy.
+_AUDIT_REDACTED_FIELDS = frozenset({'password_hash', 'password_vault'})
+
 
 @contextmanager
 def _audit_paused():
@@ -114,8 +118,10 @@ def _audit_change_map(obj):
             new_val = hist.added[0] if hist.added else getattr(obj, key, None)
             # Password hashes must never be copied into an audit log. They
             # are not usable as the user's password, but leaking them would
-            # still enable offline guessing and extend their lifetime.
-            if key == 'password_hash':
+            # still enable offline guessing and extend their lifetime. The
+            # same goes for the encrypted viewable copy: it is only as safe
+            # as the key, and the log is a second place it must not live.
+            if key in _AUDIT_REDACTED_FIELDS:
                 changed[key] = {'old': '[redacted]', 'new': '[redacted]'}
             else:
                 changed[key] = {'old': _audit_repr(old_val), 'new': _audit_repr(new_val)}

@@ -45,6 +45,38 @@ URLs or database schema.
 - Login is still required before any of the above, and admin-only restrictions
   inside Accounts and Settings are unchanged.
 
+## Viewable passwords (a deliberate trade-off)
+
+Administrators can view an account's current password (User Management ->
+Password column). This is the opposite of the usual rule - passwords are normally
+unrecoverable - so it is contained rather than done the obvious way:
+
+- **Not a plain text column.** `hdc_user.password_vault` holds a Fernet token. The
+  key comes from `HDC_PASSWORD_VAULT_KEY` or, when unset, is derived (HKDF) from
+  `HDC_SECRET_KEY`. This repository has already had a production database
+  committed to it once (see *repository hygiene* below); with encrypted copies
+  that kind of leak, or a stray backup, exposes no password by itself.
+- **Login never touches it.** Authentication still uses `password_hash`.
+- **Only the admin role**, `POST`-only with CSRF, `Cache-Control: no-store`. A
+  user holding a custom grant of the user-management page still cannot use it
+  (administration is not delegable).
+- **Audited without leaking.** Each view writes an Event Recorder row; the audit
+  listener redacts both `password_hash` and `password_vault`, and a test checks
+  the database file contains no plain text password anywhere.
+- **Never wrong, never silent.** A copy is shown only if it still matches the
+  current hash. Without the `cryptography` package or a key nothing is stored
+  (no downgrade to plain text), the old copy is cleared on the next password
+  change, and the page says why viewing is off.
+- **Honest about history.** One-way hashes cannot be reversed: accounts created
+  before this change show *Not saved yet* until their password is set again. The
+  app deliberately does **not** harvest passwords at login to backfill them.
+
+Residual risk, accepted by choice: anyone with admin access (or an admin
+session) can read every user's password, and the server's key plus a database
+copy together recover them all. Password reuse by users elsewhere makes that
+worse. Use a trusted channel to hand passwords over, keep the admin role to
+trusted people, and rotate a password (Password / reset) if it was exposed.
+
 ## Money-flow policy decisions
 
 - **Large day-close differences need a reason.** `lock_cash_day()` refuses to
