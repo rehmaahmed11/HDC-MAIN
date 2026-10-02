@@ -393,11 +393,3 @@ function hdcJumpToPage(event) {
 </script>
 </body>
 </html>
-stages|\/return|\/transfer|\/scrap|\/purchase)(?:\/|$|[?#])/i;
-  document.querySelectorAll('a[href]').forEach(function(link){
-    if(actionPath.test(new URL(link.href,window.location.href).pathname)) link.hidden=true;
-  });
-})();
-</script>
-</body>
-</html>
