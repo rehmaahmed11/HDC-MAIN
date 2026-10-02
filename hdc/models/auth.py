@@ -16,6 +16,13 @@ class HDCUser(UserMixin, db.Model):
     username      = db.Column(db.String(80), unique=True, nullable=False)
     password_hash = db.Column(db.String(200), nullable=False)
     role          = db.Column(db.String(20), default='admin')   # admin/manager/accountant
+    # Flask-Login honors this flag both when establishing and restoring a
+    # session. Suspended users stay in the database (and keep their history)
+    # but cannot authenticate until an administrator reactivates them.
+    is_active     = db.Column(db.Boolean, default=True, nullable=False)
+    # Increment to revoke all previously issued browser sessions after a
+    # suspension or password reset. Older sessions start at version zero.
+    auth_version  = db.Column(db.Integer, default=0, nullable=False)
     # NULL permissions preserve the role-based access policy for upgraded users.
     # A JSON object means this account uses the explicit per-page permission map.
     permissions_json = db.Column(db.Text, nullable=True)

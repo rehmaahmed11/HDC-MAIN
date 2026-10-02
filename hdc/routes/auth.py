@@ -8,7 +8,7 @@ import os
 import threading
 import time
 
-from flask import flash, redirect, render_template, request, url_for
+from flask import flash, redirect, render_template, request, session, url_for
 from flask_login import current_user, login_required, login_user, logout_user
 from werkzeug.security import check_password_hash
 
@@ -69,9 +69,11 @@ def register(app):
                 flash('Too many failed login attempts. Please try again later.', 'danger')
                 return render_template('auth/login.html')
             u = HDCUser.query.filter_by(username=request.form.get('username','').strip()).first()
-            if u and check_password_hash(u.password_hash, request.form.get('password','')):
+            if (u and bool(getattr(u, 'is_active', True)) and
+                    check_password_hash(u.password_hash, request.form.get('password',''))):
                 _clear_login_failures(login_key)
                 login_user(u)
+                session['_hdc_auth_version'] = int(getattr(u, 'auth_version', 0) or 0)
                 log_action(u, 'login', f'User {u.username} logged in.', 'session', u.id)
                 _record_user_activity(
                     event_type='login',
@@ -100,6 +102,7 @@ def register(app):
             force_commit=True
         )
         logout_user()
+        session.pop('_hdc_auth_version', None)
         return redirect(url_for('hdc_login'))
 
 

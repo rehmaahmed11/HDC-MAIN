@@ -10,8 +10,9 @@ os.environ.setdefault('HDC_BOOTSTRAP_ADMIN_PASSWORD', 'Admin@1234')
 
 from hdc.app import create_app
 from hdc.extensions import db
-from hdc.models.auth import HDCUser
+from hdc.models.auth import ActivityLog, HDCUser, UserActivity
 from hdc.models.projects import Project, Stage
+from werkzeug.security import check_password_hash, generate_password_hash
 
 
 class UserPermissionsTestCase(unittest.TestCase):
@@ -61,6 +62,12 @@ class UserPermissionsTestCase(unittest.TestCase):
             db.session.remove()
             db.engine.dispose()
         self.tmp.cleanup()
+
+    def _sign_in_as_admin(self):
+        with self.client.session_transaction() as session:
+            session['_user_id'] = str(self.admin_id)
+            session['_fresh'] = True
+            session['_csrf_token'] = self.csrf
 
     def test_custom_page_read_is_enforced_and_write_is_separate(self):
         self.assertEqual(self.client.get('/hdc/stages').status_code, 200)
@@ -152,6 +159,124 @@ class UserPermissionsTestCase(unittest.TestCase):
             self.assertTrue(user.stage_scope_enabled)
             self.assertEqual(json.loads(user.allowed_stage_ids_json), [self.allowed_stage_id])
             self.assertEqual(json.loads(user.write_stage_ids_json), [self.allowed_stage_id])
+
+    def test_admin_page_explains_password_privacy_and_recovery(self):
+        self._sign_in_as_admin()
+        response = self.client.get('/hdc/users')
+        self.assertEqual(response.status_code, 200)
+        body = response.get_data(as_text=True)
+        self.assertIn('passwords are stored as one-way hashes', body)
+        self.assertIn('Current password: <strong>not viewable</strong>', body)
+        self.assertIn('Password / reset', body)
+        self.assertIn('Confirm new password', body)
+        self.assertIn('Suspend', body)
+        self.assertIn('Active', body)
+
+    def test_admin_resets_password_with_confirmation_and_audit_redaction(self):
+        old_password = 'Old#Password2026'
+        new_password = 'New#Password2026'
+        with self.app.app_context():
+            user = db.session.get(HDCUser, self.user_id)
+            user.password_hash = generate_password_hash(old_password)
+            db.session.commit()
+            old_hash = user.password_hash
+            old_auth_version = user.auth_version
+        self._sign_in_as_admin()
+
+        mismatch = self.client.post('/hdc/users', data={
+            '_csrf_token': self.csrf, 'action': 'reset_password',
+            'user_id': str(self.user_id), 'new_password': new_password,
+            'confirm_password': 'Other#Password2026',
+        }, follow_redirects=True)
+        self.assertIn('do not match', mismatch.get_data(as_text=True))
+        with self.app.app_context():
+            user = db.session.get(HDCUser, self.user_id)
+            self.assertTrue(check_password_hash(user.password_hash, old_password))
+
+        response = self.client.post('/hdc/users', data={
+            '_csrf_token': self.csrf, 'action': 'reset_password',
+            'user_id': str(self.user_id), 'new_password': new_password,
+            'confirm_password': new_password,
+        })
+        self.assertEqual(response.status_code, 302)
+        with self.app.app_context():
+            user = db.session.get(HDCUser, self.user_id)
+            self.assertTrue(check_password_hash(user.password_hash, new_password))
+            self.assertFalse(check_password_hash(user.password_hash, old_password))
+            self.assertEqual(user.auth_version, old_auth_version + 1)
+            new_hash = user.password_hash
+            change = (UserActivity.query
+                      .filter_by(entity_type='hdc_user', entity_id=str(self.user_id), event_type='update')
+                      .order_by(UserActivity.id.desc()).first())
+            self.assertIsNotNone(change)
+            changed = json.loads(change.changed_fields)
+            self.assertEqual(changed['password_hash'], {'old': '[redacted]', 'new': '[redacted]'})
+            event = ActivityLog.query.filter_by(entity_type='user_account', entity_id=str(self.user_id)).order_by(ActivityLog.id.desc()).first()
+            self.assertIsNotNone(event)
+            self.assertNotIn(old_hash, event.description)
+            self.assertNotIn(new_hash, event.description)
+
+    def test_suspend_blocks_new_login_and_invalidates_existing_session(self):
+        password = 'Staff#Password2026'
+        with self.app.app_context():
+            user = db.session.get(HDCUser, self.user_id)
+            user.password_hash = generate_password_hash(password)
+            user.is_active = True
+            user.permissions_json = None
+            db.session.commit()
+
+        user_client = self.app.test_client()
+        user_client.get('/hdc/login')
+        with user_client.session_transaction() as session:
+            login_csrf = session['_csrf_token']
+        login_response = user_client.post('/hdc/login', data={
+            '_csrf_token': login_csrf, 'username': 'stage-supervisor', 'password': password,
+        })
+        self.assertEqual(login_response.status_code, 302)
+        with user_client.session_transaction() as session:
+            self.assertEqual(session.get('_user_id'), str(self.user_id))
+
+        self._sign_in_as_admin()
+        response = self.client.post('/hdc/users', data={
+            '_csrf_token': self.csrf, 'action': 'set_status',
+            'user_id': str(self.user_id), 'status': 'suspended',
+        })
+        self.assertEqual(response.status_code, 302)
+        with self.app.app_context():
+            self.assertFalse(db.session.get(HDCUser, self.user_id).is_active)
+
+        # The suspended account's already-open session is no longer restored.
+        self.assertEqual(user_client.get('/hdc/users').status_code, 302)
+        fresh_client = self.app.test_client()
+        fresh_client.get('/hdc/login')
+        with fresh_client.session_transaction() as session:
+            fresh_csrf = session['_csrf_token']
+        failed = fresh_client.post('/hdc/login', data={
+            '_csrf_token': fresh_csrf, 'username': 'stage-supervisor', 'password': password,
+        })
+        self.assertEqual(failed.status_code, 200)
+        self.assertIn('Invalid username or password', failed.get_data(as_text=True))
+
+        self.client.post('/hdc/users', data={
+            '_csrf_token': self.csrf, 'action': 'set_status',
+            'user_id': str(self.user_id), 'status': 'active',
+        })
+        with self.app.app_context():
+            self.assertTrue(db.session.get(HDCUser, self.user_id).is_active)
+        reactivated = fresh_client.post('/hdc/login', data={
+            '_csrf_token': fresh_csrf, 'username': 'stage-supervisor', 'password': password,
+        })
+        self.assertEqual(reactivated.status_code, 302)
+
+    def test_admin_cannot_suspend_own_account(self):
+        self._sign_in_as_admin()
+        response = self.client.post('/hdc/users', data={
+            '_csrf_token': self.csrf, 'action': 'set_status',
+            'user_id': str(self.admin_id), 'status': 'suspended',
+        }, follow_redirects=True)
+        self.assertIn('cannot suspend your own account', response.get_data(as_text=True))
+        with self.app.app_context():
+            self.assertTrue(db.session.get(HDCUser, self.admin_id).is_active)
 
     def test_admin_can_open_the_permissions_editor(self):
         with self.client.session_transaction() as session:

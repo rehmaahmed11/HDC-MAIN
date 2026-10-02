@@ -86,6 +86,14 @@ class ResetAdminPasswordTest(unittest.TestCase):
 
         hashes = self.users()
         self.assertIn('admin', hashes)
+        con = sqlite3.connect(self.db_path)
+        try:
+            auth_version = con.execute(
+                'SELECT auth_version FROM hdc_user WHERE username = ?', ('admin',)
+            ).fetchone()[0]
+        finally:
+            con.close()
+        self.assertEqual(auth_version, 1)
         from werkzeug.security import check_password_hash
         self.assertTrue(check_password_hash(hashes['admin'], STRONG))
         self.assertFalse(check_password_hash(hashes['admin'], 'Boot@12345'))

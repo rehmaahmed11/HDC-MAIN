@@ -255,4 +255,16 @@ def _role_may_read(path):
 # --- Login Manager ---------------------------------------------------------
 def load_user(uid):
     from hdc.models.auth import HDCUser
-    return db.session.get(HDCUser, int(uid))
+    user = db.session.get(HDCUser, int(uid))
+    # Do not restore a suspended user's existing Flask-Login session. Merely
+    # blocking future logins would leave already-open sessions usable.
+    if user is None or not bool(getattr(user, 'is_active', True)):
+        return None
+    try:
+        presented_version = int(session.get('_hdc_auth_version', 0) or 0)
+        current_version = int(getattr(user, 'auth_version', 0) or 0)
+    except (TypeError, ValueError):
+        return None
+    if presented_version != current_version:
+        return None
+    return user
