@@ -65,7 +65,7 @@ EXPECTED_GROUPS = (
     ('parties', 'Parties', ('/hdc/parties',)),
     ('reports', 'Reports', ('/hdc/reports', '/hdc/reports/glance')),
     ('accounts', 'Accounts & Cash',
-     ('/hdc/accounts/hub', '/hdc/accounts/manage', '/hdc/accounts/entries',
+     ('/hdc/accounts/hub', '/hdc/accounts/money-center', '/hdc/accounts/entries',
       '/hdc/accounts/shared')),
     ('administration', 'Administration',
      ('/hdc/users', '/hdc/event-recorder', '/hdc/settings')),
@@ -102,7 +102,8 @@ HIGHLIGHT_CASES = (
     ('/hdc/reports', '/hdc/reports', 'reports'),
     ('/hdc/reports/glance', '/hdc/reports/glance', 'reports'),
     ('/hdc/accounts/hub', '/hdc/accounts/hub', 'accounts'),
-    ('/hdc/accounts/manage', '/hdc/accounts/manage', 'accounts'),
+    ('/hdc/accounts/money-center', '/hdc/accounts/money-center', 'accounts'),
+    ('/hdc/accounts/manage', '/hdc/accounts/hub', 'accounts'),
     ('/hdc/accounts/entries', '/hdc/accounts/entries', 'accounts'),
     ('/hdc/accounts/shared/report', '/hdc/accounts/shared', 'accounts'),
     ('/hdc/accounts/cashflow', '/hdc/accounts/hub', 'accounts'),
@@ -208,10 +209,10 @@ class SidebarNavigationTestCase(unittest.TestCase):
             self.assertEqual([m.group('href') for m in self._items(group.group('body'))],
                              list(options), group_id)
 
-    def test_accounts_group_states_the_money_badge(self):
+    def test_accounts_group_states_the_audit_note(self):
         nav = self._nav('/hdc/')
-        self.assertIn('Money</span>', nav)          # badge kept from the old nav
-        self.assertIn('audit</span>', nav)          # All Entries note kept
+        self.assertIn('Record Money</span>', nav)   # simplified entry point
+        self.assertIn('audit</span>', nav)          # All Entries note kept (admin)
 
     # ── collapse plumbing ────────────────────────────────────────────────
     def test_every_heading_owns_its_collapse_target(self):
@@ -249,8 +250,8 @@ class SidebarNavigationTestCase(unittest.TestCase):
                              % re.escape(href))
 
     def test_child_page_beats_its_parent(self):
-        nav = self._nav('/hdc/accounts/manage')
-        self.assertIn('<a href="/hdc/accounts/manage" aria-current="page"', nav)
+        nav = self._nav('/hdc/accounts/money-center')
+        self.assertIn('<a href="/hdc/accounts/money-center" aria-current="page"', nav)
         self.assertNotIn('<a href="/hdc/accounts/hub" aria-current="page"', nav)
 
     def test_page_without_its_own_row_highlights_its_entry_point(self):
@@ -272,6 +273,9 @@ class SidebarNavigationTestCase(unittest.TestCase):
                 for option in options:
                     self.assertIn(option, hrefs, (role, option))
             self.assertEqual('/hdc/accounts/hub' in hrefs, 'accounts' in extra, role)
+            # audit/advanced rows are admin-only even inside the accounts group
+            self.assertEqual('/hdc/accounts/entries' in hrefs, role == 'admin', role)
+            self.assertEqual('/hdc/accounts/shared' in hrefs, role == 'admin', role)
             self.assertEqual('/hdc/settings' in hrefs, role == 'admin', role)
 
     # ── assets ───────────────────────────────────────────────────────────

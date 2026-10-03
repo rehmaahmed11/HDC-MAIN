@@ -404,7 +404,7 @@ class ToolTrackingTestCase(unittest.TestCase):
         self.assertIn('Total Owned (Inventory)', html)
         self.assertIn('Sent to Own Projects', html)
         self.assertIn('Sent to Other Customers', html)
-        self.assertIn('Total Sent Out', html)
+        self.assertIn('Rent Pending', html)
         self.assertIn('Balanced', html)
         self.assertIn('Site A', html)
         self.assertIn('Ali Traders', html)
