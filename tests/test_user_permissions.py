@@ -139,6 +139,50 @@ class UserPermissionsTestCase(unittest.TestCase):
         self.assertNotIn('Payroll', body)
         self.assertNotIn('Accounts &amp; Cash', body)
 
+    def test_tool_rental_hub_is_simple_for_everyday_users(self):
+        """Keep routine rental actions visible and admin detail tucked away."""
+        with self.app.app_context():
+            user = HDCUser(username='rental-operator', password_hash='unused', role='manager')
+            db.session.add(user)
+            db.session.commit()
+            user_id = user.id
+        with self.client.session_transaction() as session:
+            session['_user_id'] = str(user_id)
+            session['_fresh'] = True
+            session['_csrf_token'] = self.csrf
+
+        response = self.client.get('/hdc/tool-rental')
+        self.assertEqual(response.status_code, 200)
+        body = response.get_data(as_text=True)
+        self.assertIn('Rentals in progress', body)
+        self.assertIn('Tools still out', body)
+        self.assertIn('Rent still due (PKR)', body)
+        self.assertIn('Find a rental', body)
+        self.assertIn('name="q"', body)
+        self.assertIn('name="status"', body)
+        self.assertNotIn('id="createRentalForm"', body)
+        self.assertNotIn('class="tool-admin-panel mb-3"', body)
+        self.assertNotIn('name="date_from"', body)
+        self.assertNotIn('name="payment_status"', body)
+
+        self._sign_in_as_admin()
+        admin_body = self.client.get('/hdc/tool-rental').get_data(as_text=True)
+        self.assertIn('id="createRentalForm"', admin_body)
+        self.assertIn('class="tool-admin-panel mb-3"', admin_body)
+        self.assertIn('name="date_from"', admin_body)
+        self.assertIn('name="payment_status"', admin_body)
+
+        opened = self.client.get('/hdc/tool-rental?create=1').get_data(as_text=True)
+        self.assertRegex(opened, r'<details id="createRentalCard"[^>]*\bopen\b')
+        failed_create = self.client.post('/hdc/tool-rental/create', data={
+            '_csrf_token': self.csrf, 'renter_type': 'internal',
+            'billing_type': 'fixed_fee',
+        }, follow_redirects=True)
+        self.assertIn('Select a project/site for internal rental.',
+                      failed_create.get_data(as_text=True))
+        self.assertRegex(failed_create.get_data(as_text=True),
+                         r'<details id="createRentalCard"[^>]*\bopen\b')
+
     def test_admin_saves_page_grants_and_stage_scope(self):
         with self.client.session_transaction() as session:
             session['_user_id'] = str(self.admin_id)
