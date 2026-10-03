@@ -29,7 +29,6 @@ from flask import flash, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 
 from hdc.extensions import _admin_only, db
-from hdc.models.accounts import AccountTransaction
 from hdc.services.accounts import (
     _account_intent_field_matrix,
     _create_accounts_transaction_with_sync,
@@ -95,10 +94,8 @@ def _money_center_context():
 
     recent_txns = []
     try:
-        recent_txns = (AccountTransaction.query
-                       .filter(AccountTransaction.is_void == False)  # noqa: E712
-                       .order_by(AccountTransaction.id.desc())
-                       .limit(10).all())
+        from hdc.services.cashflow import _cashflow_load_rows
+        recent_txns = _cashflow_load_rows(limit=5)
     except Exception:
         pass
 
@@ -279,12 +276,11 @@ def register(app):
 
             clear_entry_form()
             if not created:
-                flash('That transaction was already recorded (duplicate submission ignored).',
-                      'info')
+                flash('Already recorded. This duplicate was not saved again.', 'info')
             else:
                 flash(
-                    f"{CF_DIRECTION_LABELS.get(entry.direction, entry.direction)} recorded: "
-                    f"{entry.amount:,.2f} PKR (entry #{entry.id}).",
+                    f"{CF_DIRECTION_LABELS.get(entry.direction, entry.direction)}: "
+                    f"Rs. {entry.amount:,.2f} saved.",
                     'success',
                 )
             return redirect(url_for('hdc_money_center'))

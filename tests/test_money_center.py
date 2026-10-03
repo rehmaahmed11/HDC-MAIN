@@ -112,6 +112,7 @@ class MoneyCenterOptionsTestCase(unittest.TestCase):
                        'id="txnProject"', 'txnNewAccountModal', 'txnNewPartyModal',
                        'txnNewProjectModal', 'name="action" value="create_entry"'):
             self.assertIn(needle, html, needle)
+        self.assertIn('action="/hdc/accounts/money-center"', html)
         self.assertIn('/hdc_static/js/pages/new_transaction.js', html)
         self.assertIn('/hdc_static/css/new_transaction.css', html)
 
@@ -189,6 +190,23 @@ class MoneyCenterOptionsTestCase(unittest.TestCase):
         # The same idempotency key means a double-click cannot post twice.
         self.client.post('/hdc/accounts/money-center', data=payload)
         self.assertEqual(CashFlowEntry.query.count(), before + 1)
+
+    def test_recent_receipt_is_clearly_shown_as_money_in(self):
+        account = Account.query.filter_by(name='Company Cash').first()
+        category = CashFlowCategory.query.filter_by(name='Other Income').first()
+        payload = {
+            'action': 'create_entry', 'direction': 'in', 'date': '2026-02-02',
+            'amount': '500', 'account_id': account.id, 'category_id': category.id,
+            'party_name': 'Test Customer',
+        }
+        payload.update(self._form_tokens())
+        response = self.client.post('/hdc/accounts/money-center', data=payload)
+        self.assertEqual(response.status_code, 302)
+
+        html = self._page()
+        self.assertIn('rm-entry-dot in', html)
+        self.assertIn('+Rs. 500.00', html)
+        self.assertIn('Test Customer', html)
 
     def test_open_balances_link_to_the_page_that_settles_them(self):
         """A pending row must point at the entry that clears it — a supplier

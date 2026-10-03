@@ -80,11 +80,11 @@ def register(app):
 
             clear_entry_form()
             if not created:
-                flash('That transaction was already recorded (duplicate submission ignored).', 'info')
+                flash('Already recorded. This duplicate was not saved again.', 'info')
             else:
                 flash(
-                    f"{CF_DIRECTION_LABELS.get(entry.direction, entry.direction)} recorded: "
-                    f"{entry.amount:,.2f} PKR (entry #{entry.id}).",
+                    f"{CF_DIRECTION_LABELS.get(entry.direction, entry.direction)}: "
+                    f"Rs. {entry.amount:,.2f} saved.",
                     'success',
                 )
             return redirect(url_for(NEW_TXN_ENDPOINT))

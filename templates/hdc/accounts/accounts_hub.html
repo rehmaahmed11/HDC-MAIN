@@ -3,76 +3,40 @@
 {% block page_heading %}Accounts{% endblock %}
 
 {% block content %}
-{# Accounts landing page — kept deliberately SIMPLE.
-   Everyone sees: today's numbers + three big actions
-   (Record Money / Accounts & Balances / Daily Report).
-   Admin additionally sees the "Advanced" block with the audit/close tools
-   (Day Close, CF Register, All Entries, Transactions Workspace,
-   Reconciliation, Shared Expenses, Personal Management). #}
 {% set is_admin = (current_user.role or '')|trim|lower == 'admin' %}
 
 <style>
-.hub-action-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px,1fr)); gap: 12px; }
-.hub-big-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px,1fr)); gap: 14px; }
-.hub-action-card {
-  border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px;
-  background: #fff; transition: all 0.18s; position: relative; overflow: hidden;
-  text-decoration: none; color: inherit; display: block;
-}
-.hub-action-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.08); border-color: #10b981; }
+.hub-big-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; }
 .hub-big-card {
-  border: 2px solid #e2e8f0; border-radius: 14px; padding: 22px 20px;
-  background: #fff; text-decoration: none; color: inherit; display: block;
-  transition: all 0.18s; text-align: center;
+  display:block; padding:18px; border:1px solid #e2e8f0; border-radius:12px;
+  background:#fff; color:inherit; text-decoration:none; transition:all .16s;
 }
-.hub-big-card:hover { transform: translateY(-3px); box-shadow: 0 10px 28px rgba(0,0,0,0.1); }
-.hub-big-card.green { border-color: #10b981; }
-.hub-big-card.green:hover { background: #f0fdf4; }
-.hub-big-card.blue { border-color: #3b82f6; }
-.hub-big-card.blue:hover { background: #eff6ff; }
-.hub-big-card.violet { border-color: #8b5cf6; }
-.hub-big-card.violet:hover { background: #f5f3ff; }
-.hub-big-icon {
-  width: 56px; height: 56px; border-radius: 14px; margin: 0 auto 12px;
-  display: flex; align-items: center; justify-content: center; font-size: 1.5rem;
-}
-.hub-big-card.green .hub-big-icon { background:#d1fae5; color:#065f46; }
-.hub-big-card.blue .hub-big-icon { background:#dbeafe; color:#1e40af; }
-.hub-big-card.violet .hub-big-icon { background:#ede9fe; color:#5b21b6; }
-.hub-action-icon { width:40px; height:40px; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:1.1rem; flex-shrink:0; }
-.hub-action-icon.emerald { background:#d1fae5; color:#065f46; }
-.hub-action-icon.blue { background:#dbeafe; color:#1e40af; }
-.hub-action-icon.rose { background:#ffe4e6; color:#881337; }
-.hub-action-icon.amber { background:#fef3c7; color:#92400e; }
-.hub-action-icon.slate { background:#f1f5f9; color:#334155; }
-.hub-action-icon.cyan { background:#cffafe; color:#155e75; }
-details.hub-advanced > summary {
-  cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px;
-  padding: 12px 16px; border: 1px solid #e2e8f0; border-radius: 12px; background: #f8fafc;
-  font-weight: 600; color: #334155; user-select: none;
-}
-details.hub-advanced > summary::-webkit-details-marker { display: none; }
-details.hub-advanced[open] > summary { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
-details.hub-advanced > .hub-advanced-body {
-  border: 1px solid #e2e8f0; border-top: 0; border-radius: 0 0 12px 12px; padding: 14px; background: #fff;
-}
+.hub-big-card:hover { transform:translateY(-2px); box-shadow:0 8px 24px rgba(0,0,0,.08); border-color:#10b981; }
+.hub-big-icon { display:flex; align-items:center; justify-content:center; width:42px; height:42px; margin-bottom:10px; border-radius:11px; background:#ecfdf5; color:#047857; font-size:1.15rem; }
+.hub-big-card.blue .hub-big-icon { background:#eff6ff; color:#1d4ed8; }
+.hub-big-card.violet .hub-big-icon { background:#f5f3ff; color:#6d28d9; }
+.hub-small-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:9px; }
+.hub-tool-link { display:block; padding:12px; border:1px solid #e2e8f0; border-radius:10px; color:inherit; text-decoration:none; background:#fff; }
+.hub-tool-link:hover { border-color:#94a3b8; background:#f8fafc; }
+.hub-tool-link .small { display:block; margin-top:3px; }
+details.hub-advanced > summary { cursor:pointer; list-style:none; display:flex; align-items:center; gap:8px; padding:11px 14px; border:1px solid #e2e8f0; border-radius:10px; background:#f8fafc; font-weight:700; color:#334155; }
+details.hub-advanced > summary::-webkit-details-marker { display:none; }
+details.hub-advanced[open] > summary { border-bottom-left-radius:0; border-bottom-right-radius:0; }
+.hub-advanced-body { border:1px solid #e2e8f0; border-top:0; border-radius:0 0 10px 10px; padding:12px; background:#fff; }
+[data-theme="dark"] .hub-big-card, [data-theme="dark"] .hub-tool-link, [data-theme="dark"] .hub-advanced-body { background:var(--card-bg); border-color:var(--card-border); color:var(--text); }
+[data-theme="dark"] details.hub-advanced > summary { background:var(--card-header-bg); border-color:var(--card-border); color:var(--text); }
+@media (max-width:575.98px) { .hub-big-card { padding:15px; } }
 </style>
 
 <div class="acc-page-header">
     <div>
         <h2><i class="fas fa-wallet me-2"></i>Accounts</h2>
-        <div class="acc-subtitle">Record money in or out, check account balances, and see the daily report — all from this page.</div>
-    </div>
-    <div class="acc-toolbar d-flex gap-2 flex-wrap">
-        <a href="{{ url_for('hdc_money_center') }}" class="btn btn-success">
-            <i class="fas fa-plus me-1"></i>Record Money
-        </a>
+        <div class="acc-subtitle">Record money, find a transaction, or check balances.</div>
     </div>
 </div>
 
-{# ── Today at a glance ───────────────────────────────────────────────────── #}
 <div class="row g-3 mb-4">
-    <div class="col-6 col-xl-3">
+    <div class="col-12 col-md-4">
         <a class="acc-stat acc-emerald" href="{{ url_for('hdc_accounts_manage') }}">
             <div class="acc-stat-label"><i class="fas fa-building-columns me-1"></i>Total Balance</div>
             <div class="acc-stat-value"><small>Rs.</small> {{ "{:,.0f}".format(kpis.company_owned_total or 0) }}</div>
@@ -80,208 +44,112 @@ details.hub-advanced > .hub-advanced-body {
             <i class="fas fa-sack-dollar acc-stat-icon"></i>
         </a>
     </div>
-    <div class="col-6 col-xl-3">
-        <a class="acc-stat acc-cyan" href="{{ url_for('hdc_cashflow') }}">
-            <div class="acc-stat-label"><i class="fas fa-arrow-down me-1"></i>Money In — Today</div>
+    <div class="col-6 col-md-4">
+        <a class="acc-stat acc-cyan" href="{{ url_for('hdc_cashflow_register', direction='in') }}">
+            <div class="acc-stat-label"><i class="fas fa-arrow-down me-1"></i>Received Today</div>
             <div class="acc-stat-value"><small>Rs.</small> {{ "{:,.0f}".format(today_summary.total_in or 0) }}</div>
-            <div class="acc-stat-sub">{{ today_summary.count or 0 }} entr{{ 'y' if (today_summary.count or 0) == 1 else 'ies' }} today</div>
+            <div class="acc-stat-sub">Total money received today</div>
             <i class="fas fa-hand-holding-dollar acc-stat-icon"></i>
         </a>
     </div>
-    <div class="col-6 col-xl-3">
-        <a class="acc-stat acc-rose" href="{{ url_for('hdc_cashflow') }}">
-            <div class="acc-stat-label"><i class="fas fa-arrow-up me-1"></i>Money Out — Today</div>
+    <div class="col-6 col-md-4">
+        <a class="acc-stat acc-rose" href="{{ url_for('hdc_cashflow_register', direction='out') }}">
+            <div class="acc-stat-label"><i class="fas fa-arrow-up me-1"></i>Spent Today</div>
             <div class="acc-stat-value"><small>Rs.</small> {{ "{:,.0f}".format(today_summary.total_out or 0) }}</div>
-            <div class="acc-stat-sub">Transfers: {{ "{:,.0f}".format(today_summary.total_transfer or 0) }}</div>
-            <i class="fas fa-money-bill-transfer acc-stat-icon"></i>
-        </a>
-    </div>
-    <div class="col-6 col-xl-3">
-        <a class="acc-stat {{ 'acc-amber' if (today_summary.net or 0) < 0 else 'acc-blue' }}"
-           href="{{ url_for('hdc_cashflow') }}">
-            <div class="acc-stat-label"><i class="fas fa-coins me-1"></i>Net — Today</div>
-            <div class="acc-stat-value"><small>Rs.</small> {{ "{:,.0f}".format(today_summary.net or 0) }}</div>
-            <div class="acc-stat-sub">Money in minus money out</div>
-            <i class="fas fa-scale-balanced acc-stat-icon"></i>
+            <div class="acc-stat-sub">Money paid out today</div>
+            <i class="fas fa-money-bill-wave acc-stat-icon"></i>
         </a>
     </div>
 </div>
 
-{# ── Attention strip — only things a normal user must act on.
-     Admin additionally sees day-close / classification warnings. ─────────── #}
 {% set needs_attention = [] %}
-{% if summary.negative_count %}{% set _ = needs_attention.append(('rose', 'fa-triangle-exclamation', summary.negative_count ~ ' account(s) have gone below zero — ' ~ summary.negative_accounts|map(attribute='name')|join(', '), url_for('hdc_accounts_manage', show='active'))) %}{% endif %}
-{% if is_admin %}
-    {% if summary.unclassified_count %}{% set _ = needs_attention.append(('amber', 'fa-tags', summary.unclassified_count ~ ' account(s) are not classified yet', url_for('hdc_accounts_manage', show='active'))) %}{% endif %}
-    {% if not lock_yesterday %}{% set _ = needs_attention.append(('amber', 'fa-calendar-xmark', 'Yesterday (' ~ yesterday ~ ') has not been closed yet', url_for('hdc_cashflow_reconciliation'))) %}{% endif %}
-{% endif %}
-
+{% if summary.negative_count %}{% set balance_label = 'account balance is' if summary.negative_count == 1 else 'account balances are' %}{% set _ = needs_attention.append((summary.negative_count ~ ' ' ~ balance_label ~ ' below zero: ' ~ summary.negative_accounts|map(attribute='name')|join(', '), url_for('hdc_accounts_manage', show='active'))) %}{% endif %}
+{% if is_admin and not lock_yesterday %}{% set _ = needs_attention.append(("Yesterday's cash has not been checked yet.", url_for('hdc_cashflow_reconciliation'))) %}{% endif %}
 {% if needs_attention %}
-<div class="acc-section">
-    <div class="acc-section-head">
-        <h5><i class="fas fa-bell me-2" style="color:#f59e0b;"></i>Needs Attention</h5>
-        <span class="small text-muted">{{ needs_attention|length }} item{{ '' if needs_attention|length == 1 else 's' }}</span>
-    </div>
-    <div class="acc-section-body">
-        <div class="row g-2">
-            {% for tone, icon, text, link in needs_attention %}
-            <div class="col-12 col-md-6 col-xl-4">
-                <a class="acc-guide" href="{{ link }}">
-                    <div class="acc-guide-icon"><i class="fas {{ icon }}"></i></div>
-                    <div>
-                        <div class="acc-guide-text">{{ text }}</div>
-                        <div class="acc-guide-meta">Open <i class="fas fa-arrow-right ms-1"></i></div>
-                    </div>
-                </a>
-            </div>
-            {% endfor %}
-        </div>
-    </div>
+<div class="alert alert-warning py-2 mb-3">
+    <strong><i class="fas fa-triangle-exclamation me-1" aria-hidden="true"></i>Needs attention</strong>
+    <ul class="mb-0 mt-1">
+        {% for text, link in needs_attention %}<li>{{ text }} <a href="{{ link }}">Open</a></li>{% endfor %}
+    </ul>
 </div>
 {% endif %}
 
-{# ── The three things people actually do here ────────────────────────────── #}
 <div class="acc-section">
-    <div class="acc-section-head">
-        <h5><i class="fas fa-hand-pointer me-2" style="color:#10b981;"></i>What do you want to do?</h5>
-    </div>
+    <div class="acc-section-head"><h5><i class="fas fa-hand-pointer me-2" style="color:#10b981;"></i>Choose an action</h5></div>
     <div class="acc-section-body">
         <div class="hub-big-grid">
-            <a class="hub-big-card green" href="{{ url_for('hdc_money_center') }}">
-                <div class="hub-big-icon"><i class="fas fa-sack-dollar"></i></div>
+            <a class="hub-big-card" href="{{ url_for('hdc_money_center') }}">
+                <div class="hub-big-icon"><i class="fas fa-sack-dollar" aria-hidden="true"></i></div>
                 <div class="fw-bold fs-5">Record Money</div>
-                <div class="small text-muted mt-1">Money came in, went out, or moved between cash and bank? Record it here with one simple form.</div>
-                <span class="btn btn-success btn-sm mt-3"><i class="fas fa-plus me-1"></i>Open</span>
+                <div class="small text-muted mt-1">Add money received, spent, or transferred.</div>
+                <span class="btn btn-success btn-sm mt-3"><i class="fas fa-plus me-1"></i>Start</span>
+            </a>
+            <a class="hub-big-card blue" href="{{ url_for('hdc_cashflow_register') }}">
+                <div class="hub-big-icon"><i class="fas fa-receipt" aria-hidden="true"></i></div>
+                <div class="fw-bold fs-5">Transaction History</div>
+                <div class="small text-muted mt-1">Find or correct a record.</div>
+                <div class="small text-muted mt-2">{{ "{:,.0f}".format(entry_total or 0) }} record{{ '' if (entry_total or 0) == 1 else 's' }}</div>
+                <span class="btn btn-primary btn-sm mt-2"><i class="fas fa-arrow-right me-1"></i>Open</span>
             </a>
             <a class="hub-big-card blue" href="{{ url_for('hdc_accounts_manage') }}">
-                <div class="hub-big-icon"><i class="fas fa-list"></i></div>
-                <div class="fw-bold fs-5">Accounts &amp; Balances</div>
-                <div class="small text-muted mt-1">See every account and how much is in it right now. Add a new account or edit one.</div>
+                <div class="hub-big-icon"><i class="fas fa-building-columns" aria-hidden="true"></i></div>
+                <div class="fw-bold fs-5">Balances</div>
+                <div class="small text-muted mt-1">See cash and bank balances.</div>
                 <div class="small text-muted mt-2">{{ summary.active_count }} active account{{ '' if summary.active_count == 1 else 's' }}</div>
                 <span class="btn btn-primary btn-sm mt-2"><i class="fas fa-arrow-right me-1"></i>Open</span>
             </a>
             <a class="hub-big-card violet" href="{{ url_for('hdc_cashflow') }}">
-                <div class="hub-big-icon"><i class="fas fa-chart-line"></i></div>
+                <div class="hub-big-icon"><i class="fas fa-chart-line" aria-hidden="true"></i></div>
                 <div class="fw-bold fs-5">Daily Report</div>
-                <div class="small text-muted mt-1">How much came in and went out — day by day, with totals you can download.</div>
-                <span class="btn btn-sm mt-3" style="background:#8b5cf6; color:#fff;"><i class="fas fa-arrow-right me-1"></i>Open</span>
+                <div class="small text-muted mt-1">Review totals by day.</div>
+                <span class="btn btn-sm mt-3" style="background:#8b5cf6;color:#fff;"><i class="fas fa-arrow-right me-1"></i>Open</span>
             </a>
         </div>
     </div>
 </div>
 
-{# ── Advanced tools — admin only ─────────────────────────────────────────── #}
 {% if is_admin %}
 <details class="hub-advanced mb-3">
-    <summary>
-        <i class="fas fa-user-gear"></i> Advanced (admin only)
-        <span class="small text-muted ms-1">— day close, history and checking tools</span>
-        <i class="fas fa-chevron-down ms-auto"></i>
-    </summary>
+    <summary><i class="fas fa-user-gear" aria-hidden="true"></i>Admin tools <i class="fas fa-chevron-down ms-auto" aria-hidden="true"></i></summary>
     <div class="hub-advanced-body">
-        <div class="hub-action-grid">
-            <a class="hub-action-card" href="{{ url_for('hdc_cashflow_reconciliation') }}">
-                <div class="d-flex gap-3 align-items-start">
-                    <div class="hub-action-icon amber"><i class="fas fa-scale-balanced"></i></div>
-                    <div>
-                        <div class="fw-bold">Day Close</div>
-                        <div class="small text-muted">Count the cash at the end of the day, compare it with the system, and lock the day.</div>
-                        <div class="small mt-1">
-                            {% if lock_today %}<span class="badge bg-success"><i class="fas fa-lock me-1"></i>{{ today }} locked</span>
-                            {% else %}<span class="badge bg-warning text-dark"><i class="fas fa-lock-open me-1"></i>{{ today }} not closed yet</span>{% endif %}
-                        </div>
-                    </div>
-                </div>
+        <div class="hub-small-grid">
+            <a class="hub-tool-link" href="{{ url_for('hdc_cashflow_reconciliation') }}">
+                <strong>Day Close</strong><span class="small text-muted">Count cash and bank at day's end.</span>
+                <span class="small mt-1">{% if lock_today %}<span class="badge bg-success">{{ today }} checked</span>{% else %}<span class="badge bg-warning text-dark">{{ today }} not checked</span>{% endif %}</span>
             </a>
-            <a class="hub-action-card" href="{{ url_for('hdc_accounts_entries') }}">
-                <div class="d-flex gap-3 align-items-start">
-                    <div class="hub-action-icon slate"><i class="fas fa-receipt"></i></div>
-                    <div>
-                        <div class="fw-bold">All Entries</div>
-                        <div class="small text-muted">Every entry with its receipt. Void or restore one when it was a mistake.</div>
-                        <div class="small text-muted mt-1"><strong>{{ "{:,.0f}".format(txn_total or 0) }}</strong> entries</div>
-                    </div>
-                </div>
+            <a class="hub-tool-link" href="{{ url_for('hdc_accounts_entries') }}">
+                <strong>Detailed Ledger</strong><span class="small text-muted">View account entries and receipts.</span>
             </a>
-            <a class="hub-action-card" href="{{ url_for('hdc_cashflow_register') }}">
-                <div class="d-flex gap-3 align-items-start">
-                    <div class="hub-action-icon cyan"><i class="fas fa-book"></i></div>
-                    <div>
-                        <div class="fw-bold">Cash Flow Register</div>
-                        <div class="small text-muted">Where money is recorded: one document per movement, with its full history.</div>
-                        <div class="small text-muted mt-1"><strong>{{ "{:,.0f}".format(entry_total or 0) }}</strong> documents</div>
-                    </div>
-                </div>
+            <a class="hub-tool-link" href="{{ url_for('hdc_accounts_reconciliation') }}">
+                <strong>Data Check</strong><span class="small text-muted">Look for duplicate or incomplete records.</span>
             </a>
-            <a class="hub-action-card" href="{{ url_for('hdc_accounts') }}">
-                <div class="d-flex gap-3 align-items-start">
-                    <div class="hub-action-icon slate"><i class="fas fa-wallet"></i></div>
-                    <div>
-                        <div class="fw-bold">Transactions Workspace</div>
-                        <div class="small text-muted">The detailed accounts screen: every balance, the edit form and the breakdown behind each number.</div>
-                    </div>
-                </div>
+            <a class="hub-tool-link" href="{{ url_for('hdc_shared_expenses') }}">
+                <strong>Shared Expenses</strong><span class="small text-muted">Split a bill between business and home.</span>
             </a>
-            <a class="hub-action-card" href="{{ url_for('hdc_accounts_reconciliation') }}">
-                <div class="d-flex gap-3 align-items-start">
-                    <div class="hub-action-icon rose"><i class="fas fa-stethoscope"></i></div>
-                    <div>
-                        <div class="fw-bold">Data Health Check</div>
-                        <div class="small text-muted">Checks the entries for duplicates and records with no source. Use it when a total looks wrong.</div>
-                    </div>
-                </div>
-            </a>
-            <a class="hub-action-card" href="{{ url_for('hdc_shared_expenses') }}">
-                <div class="d-flex gap-3 align-items-start">
-                    <div class="hub-action-icon amber"><i class="fas fa-users-rectangle"></i></div>
-                    <div>
-                        <div class="fw-bold">Shared Expenses</div>
-                        <div class="small text-muted">One bill (fuel, utilities) split between FBM / HDC / Home, with a share report.</div>
-                    </div>
-                </div>
-            </a>
-            <a class="hub-action-card" href="{{ url_for('hdc_personal_management') }}">
-                <div class="d-flex gap-3 align-items-start">
-                    <div class="hub-action-icon slate"><i class="fas fa-handshake"></i></div>
-                    <div>
-                        <div class="fw-bold">Personal Management</div>
-                        <div class="small text-muted">Owner / personal expenses kept separate from business costs.</div>
-                    </div>
-                </div>
+            <a class="hub-tool-link" href="{{ url_for('hdc_personal_management') }}">
+                <strong>Personal Expenses</strong><span class="small text-muted">Keep owner expenses separate.</span>
             </a>
         </div>
 
-        {# Recent day closes — small, inside Advanced #}
-        <div class="mt-3">
-            <div class="d-flex justify-content-between align-items-center mb-2">
-                <h6 class="mb-0"><i class="fas fa-calendar-check me-2" style="color:#10b981;"></i>Recent Day Closes</h6>
-                <a href="{{ url_for('hdc_cashflow_reconciliation') }}" class="btn btn-sm btn-outline-secondary">Open Day Close</a>
+        <details class="mt-3">
+            <summary class="small fw-semibold text-muted" style="cursor:pointer;">Recent day closes</summary>
+            <div class="table-responsive mt-2">
+                <table class="table acc-table table-sm mb-0">
+                    <thead><tr><th>Date</th><th class="text-end">Expected</th><th class="text-end">Counted</th><th class="text-end">Difference</th><th>Checked By</th></tr></thead>
+                    <tbody>
+                        {% for l in lock_history %}
+                        <tr {% if day_close_threshold > 0 and (l.difference or 0)|abs > day_close_threshold %}class="table-warning"{% endif %}>
+                            <td class="acc-name">{{ l.lock_date.isoformat() }}</td>
+                            <td class="text-end acc-muted-amount">{{ "{:,.2f}".format(l.total_expected or 0) }}</td>
+                            <td class="text-end acc-muted-amount">{{ "{:,.2f}".format(l.total_counted or 0) }}</td>
+                            <td class="text-end acc-amount {{ 'neg' if (l.difference or 0) != 0 else 'pos' }}">{{ "{:,.2f}".format(l.difference or 0) }}</td>
+                            <td class="acc-meta">{{ l.locked_by or '—' }}</td>
+                        </tr>
+                        {% else %}<tr><td colspan="5" class="text-center text-muted py-3">No day closes yet.</td></tr>{% endfor %}
+                    </tbody>
+                </table>
             </div>
-            <table class="table acc-table table-sm mb-0">
-                <thead>
-                    <tr>
-                        <th>Date</th>
-                        <th class="text-end">Expected</th>
-                        <th class="text-end">Counted</th>
-                        <th class="text-end">Difference</th>
-                        <th>Locked By</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for l in lock_history %}
-                    <tr {% if day_close_threshold > 0 and (l.difference or 0)|abs > day_close_threshold %}class="table-warning"{% endif %}>
-                        <td class="acc-name">{{ l.lock_date.isoformat() }}</td>
-                        <td class="text-end acc-muted-amount">{{ "{:,.2f}".format(l.total_expected or 0) }}</td>
-                        <td class="text-end acc-muted-amount">{{ "{:,.2f}".format(l.total_counted or 0) }}</td>
-                        <td class="text-end acc-amount {{ 'neg' if (l.difference or 0) != 0 else 'pos' }}">{{ "{:,.2f}".format(l.difference or 0) }}</td>
-                        <td class="acc-meta">{{ l.locked_by or '—' }}</td>
-                    </tr>
-                    {% else %}
-                    <tr><td colspan="5" class="text-center text-muted py-3">No day has been closed yet.</td></tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
+        </details>
     </div>
 </details>
 {% endif %}

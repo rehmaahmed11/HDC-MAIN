@@ -247,7 +247,7 @@ class CashFlowTestCase(unittest.TestCase):
         self.assertEqual(res.status_code, 200)
         html = res.get_data(as_text=True)
         self.assertIn('Daily Records', html)
-        self.assertIn('Money In', html)
+        self.assertIn('Received', html)
         self.assertIn('#%d' % (AccountTransaction.query.order_by(AccountTransaction.id.desc()).first().id), html)
 
     def test_quick_entry_money_in(self):

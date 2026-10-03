@@ -27,6 +27,7 @@ from flask_login import current_user, login_required
 
 from hdc.extensions import _admin_only, db
 from hdc.models.cashflow import CashFlowEntry
+from hdc.models.projects import Project
 from hdc.services.cashflow_register import (
     CF_DIRECTIONS,
     CF_DIRECTION_LABELS,
@@ -118,16 +119,16 @@ def register(app):
                     db.session.commit()
                     clear_entry_form()
                     if not created:
-                        flash('That entry was already recorded (duplicate submission ignored).', 'info')
+                        flash('Already recorded. This duplicate was not saved again.', 'info')
                     else:
-                        flash(f"{CF_DIRECTION_LABELS.get(entry.direction, entry.direction)} recorded: "
-                              f"{entry.amount:,.2f} PKR (entry #{entry.id}).", 'success')
+                        flash(f"{CF_DIRECTION_LABELS.get(entry.direction, entry.direction)}: "
+                              f"Rs. {entry.amount:,.2f} saved (record #{entry.id}).", 'success')
 
                 elif action == 'amend_entry':
                     entry = CashFlowEntry.query.get(_payload_int(request.form, 'entry_id') or 0)
                     reason = (request.form.get('reason') or '').strip()
                     if not reason:
-                        flash('A reason is required to amend an entry.', 'danger')
+                        flash('Enter a reason for this correction.', 'danger')
                         return redirect(url_for('hdc_cashflow_register'))
                     new_entry, old_entry = amend_manual_cash_flow_entry(
                         entry,
@@ -148,24 +149,24 @@ def register(app):
                         actor=current_user,
                     )
                     db.session.commit()
-                    flash(f'Entry #{old_entry.id} voided and replaced by #{new_entry.id}. '
-                          f'Both records and the audit trail were kept.', 'success')
+                    flash(f'Transaction #{old_entry.id} corrected. The original remains in history '
+                          f'(new record #{new_entry.id}).', 'success')
 
                 elif action == 'void_entry':
                     entry = CashFlowEntry.query.get(_payload_int(request.form, 'entry_id') or 0)
                     reason = (request.form.get('reason') or '').strip()
                     if not reason:
-                        flash('A reason is required to void an entry.', 'danger')
+                        flash('Enter a reason to cancel this transaction.', 'danger')
                         return redirect(url_for('hdc_cashflow_register'))
                     void_manual_cash_flow_entry(entry, reason=reason, actor=current_user)
                     db.session.commit()
-                    flash(f'Entry #{entry.id} voided. The record and its history were retained.', 'success')
+                    flash(f'Transaction #{entry.id} cancelled. It remains in history.', 'success')
 
                 elif action == 'restore_entry':
                     entry = CashFlowEntry.query.get(_payload_int(request.form, 'entry_id') or 0)
                     restore_manual_cash_flow_entry(entry, actor=current_user)
                     db.session.commit()
-                    flash(f'Entry #{entry.id} restored.', 'success')
+                    flash(f'Transaction #{entry.id} restored.', 'success')
 
                 elif action in ('add_category', 'add_subcategory', 'add_party'):
                     _handle_vocabulary_action(action, request.form)
@@ -217,6 +218,7 @@ def register(app):
             filter_direction=flt['direction'],
             filter_category_id=flt['category_id'] or '',
             filter_project_id=flt['project_id'] or '',
+            filter_projects=Project.query.order_by(Project.name.asc()).all(),
             filter_search=flt['search'],
             show_void=flt['show_void'],
             pg_page=page,

@@ -119,9 +119,11 @@
         var host = form.querySelector('#txnActionHint');
         if (!host) return;
         host.textContent = text;
+        host.hidden = false;
         host.classList.add('hdc-txn-actions-note-flash');
         window.setTimeout(function () {
             host.classList.remove('hdc-txn-actions-note-flash');
+            host.hidden = true;
         }, 4000);
     }
 
@@ -139,10 +141,12 @@
         var toInput = byId('txnToAccountInput');
         var toSelect = byId('txnToAccount');
         var categoryBlock = byId('txnCategoryBlock');
-        var categoryLegend = byId('txnCategoryLegend');
+        var categoryLabel = byId('txnCategoryLabel');
         var categorySelect = byId('txnCategory');
+        var subcategoryField = byId('txnSubcategoryField');
         var subcategorySelect = byId('txnSubcategory');
         var subcategoryHint = byId('txnSubcategoryHint');
+        var moreDetails = byId('txnMoreDetails');
         var whoBlock = byId('txnWhoBlock');
         var partyField = byId('txnPartyField');
         var partySelect = byId('txnParty');
@@ -162,7 +166,6 @@
         var saveButton = byId('txnSaveBtn');
         var resetButton = byId('txnResetBtn');
         var actionHint = byId('txnActionHint');
-        var amountLegend = byId('txnAmountLegend');
 
         var combos = {};
         var pendingAdd = null;   /* 'account' | 'party' | 'project' */
@@ -205,22 +208,29 @@
             /* Progressive reveal: no direction yet → one decision only. */
             if (body) body.hidden = !knowsDirection;
             if (!knowsDirection) {
-                if (actionHint) actionHint.textContent = 'Choose a direction to start.';
+                if (actionHint) {
+                    actionHint.textContent = '';
+                    actionHint.hidden = true;
+                }
                 if (resetButton) resetButton.hidden = true;
                 return;
             }
             if (resetButton) resetButton.hidden = false;
+            if (actionHint) {
+                actionHint.textContent = '';
+                actionHint.hidden = true;
+            }
 
             /* Account vs From/To */
             if (accountField) accountField.hidden = false;
             if (accountLabel) {
-                accountLabel.innerHTML = (isTransfer ? 'From account' : 'Account') +
+                accountLabel.innerHTML = (direction === DIRECTION_IN ? 'To account' : 'From account') +
                     ' <span class="hdc-req" aria-hidden="true">*</span>';
             }
             if (accountInput) {
                 accountInput.placeholder = isTransfer
-                    ? 'Search the account money leaves…'
-                    : 'Search account… (e.g. MCB, cash)';
+                    ? 'Search source account'
+                    : 'Search cash or bank account';
             }
             if (accountSelect) accountSelect.required = true;
             if (toField) toField.hidden = !isTransfer;
@@ -243,18 +253,8 @@
                 setFieldVisible('project', false);
             }
 
-            if (amountLegend) {
-                amountLegend.textContent = isTransfer
-                    ? 'Amount and the two accounts'
-                    : 'Amount and account';
-            }
-            if (categoryLegend) {
-                categoryLegend.textContent = direction === DIRECTION_IN ? 'Income category' : 'Expense category';
-            }
-            if (actionHint) {
-                actionHint.textContent = isTransfer
-                    ? 'Money moves between two of our own accounts — no category or party is needed.'
-                    : 'Category drives the subcategory list. Party and project are optional.';
+            if (categoryLabel && categoryLabel.firstChild) {
+                categoryLabel.firstChild.textContent = direction === DIRECTION_IN ? 'Received as ' : 'Spent on ';
             }
 
             filterCategories();
@@ -420,17 +420,17 @@
             }
             if (partyTypeField) partyTypeField.value = 'client';
             setFieldHint(partyHint, owner
-                ? 'Taken from the project — this receipt is booked against ' + owner + '.'
+                ? 'Client: ' + owner + ' (from this project).'
                 : (projectSelect && projectSelect.value
-                    ? 'This project has no client saved. Add one on the project so receipts are attributed.'
-                    : 'Pick the project and its owner is filled in automatically.'));
+                    ? 'Add a client to this project first.'
+                    : 'Choose a project to fill this in.'));
         }
 
         /* Undo the read-only state when the category is no longer a receipt. */
         function releaseOwnerField() {
             if (!partyInput) return;
             partyInput.readOnly = false;
-            partyInput.placeholder = 'Search party or person… (e.g. abd)';
+            partyInput.placeholder = 'Search a name';
         }
 
         function applyCategoryRules() {
@@ -440,7 +440,7 @@
                 setRequiredMark(partyReq, false);
                 setRequiredMark(projectReq, false);
                 releaseOwnerField();
-                if (partyLabelText) partyLabelText.textContent = 'Party / Person';
+                if (partyLabelText) partyLabelText.textContent = 'Person / business';
                 if (rulesHelp) { rulesHelp.textContent = ''; rulesHelp.hidden = true; }
                 return;
             }
@@ -457,6 +457,7 @@
 
             var partyRequired = showParty && partyMode === 'required';
             var projectRequired = showProject && projectMode === 'required';
+            if (moreDetails && (partyRequired || projectRequired)) moreDetails.open = true;
             if (partySelect) partySelect.required = partyRequired;
             if (projectSelect) projectSelect.required = projectRequired;
             setRequiredMark(partyReq, partyRequired);
@@ -467,7 +468,7 @@
                typed differently from the project master. */
             var receipt = hasCategory && isProjectReceipt();
             if (partyLabelText) {
-                partyLabelText.textContent = receipt ? 'Owner / Client' : 'Party / Person';
+                partyLabelText.textContent = receipt ? 'Client (from project)' : 'Person / business';
             }
             if (receipt) {
                 filterPartyTypes(['client']);
@@ -478,32 +479,22 @@
                     filterPartyTypes(allowed);
                     var names = allowed.map(partyTypeLabel).join(' / ');
                     setFieldHint(partyHint, partyRequired
-                        ? 'Required for this category — pick the ' + names + '.'
-                        : 'For this category the party is usually the ' + names + '.');
+                        ? 'Choose the ' + names + ' for this transaction.'
+                        : 'Optional: choose a ' + names + '.');
                 } else {
                     filterPartyTypes([]);
                     setFieldHint(partyHint, '');
                 }
             }
             setFieldHint(projectHint, receipt
-                ? 'Required — this receipt is credited to the project’s account, and its owner is filled in for you.'
-                : (projectRequired
-                    ? 'Required for this category — the cost or receipt must land on a project.'
-                    : ''));
+                ? 'Required. The client is filled from this project.'
+                : (projectRequired ? 'Choose a project for this transaction.' : ''));
             if (rulesHelp) {
-                var explained = [];
-                if (loanEffect === 'take') explained.push('money received as a loan — the person is a Loan Giver');
-                if (loanEffect === 'give') explained.push('money given as a loan — the person is a Loan Taker');
-                if (loanEffect === 'repay') explained.push('repaying a loan we took');
-                if (loanEffect === 'recover') explained.push('a borrower paying us back');
                 if (receipt) {
-                    rulesHelp.textContent = 'Project ledger: this is the owner paying for the ' +
-                        'project. It is added to that project’s Received total and reduces its ' +
-                        'remaining amount (Projects → the project).';
+                    rulesHelp.textContent = 'This updates the project’s received total.';
                     rulesHelp.hidden = false;
-                } else if (explained.length) {
-                    rulesHelp.textContent = 'Loan ledger: ' + explained.join('; ') +
-                        '. The amount is tracked against that person’s loan (Accounts → Loans).';
+                } else if (loanEffect) {
+                    rulesHelp.textContent = 'This updates the person’s loan balance.';
                     rulesHelp.hidden = false;
                 } else {
                     rulesHelp.textContent = '';
@@ -529,17 +520,15 @@
             if (selected && selected.value && (selected.hidden || selected.disabled)) {
                 subcategorySelect.value = '';
             }
+            if (subcategoryField) {
+                subcategoryField.hidden = !visible || currentDirection() === DIRECTION_TRANSFER;
+            }
+            if (subcategorySelect) {
+                subcategorySelect.disabled = currentDirection() === DIRECTION_TRANSFER || !visible;
+            }
             if (subcategoryHint) {
-                if (!categoryId) {
-                    subcategoryHint.textContent = 'Pick a category first.';
-                    subcategoryHint.hidden = false;
-                } else if (!visible) {
-                    subcategoryHint.textContent = 'No subcategories for this category yet.';
-                    subcategoryHint.hidden = false;
-                } else {
-                    subcategoryHint.textContent = '';
-                    subcategoryHint.hidden = true;
-                }
+                subcategoryHint.textContent = '';
+                subcategoryHint.hidden = true;
             }
             setFieldError(form, 'subcategory_id', '');
         }
@@ -833,7 +822,7 @@
 
             var direction = currentDirection();
             if (!direction) {
-                fail('direction', 'Choose Money In, Money Out or Internal Transfer.', directionSelect);
+                fail('direction', 'Choose Received, Spent or Transfer.', directionSelect);
             }
 
             if (!dateInput || !dateInput.value) fail('date', 'Date is required.', dateInput);
@@ -853,15 +842,13 @@
 
             if (direction === DIRECTION_TRANSFER) {
                 var toId = toSelect ? toSelect.value : '';
-                if (!toId) fail('destination_account_id', 'Choose the account the money goes to.', toInput);
+                if (!toId) fail('destination_account_id', 'Choose where the money is going.', toInput);
                 else if (toId === accountId) {
                     fail('destination_account_id', 'From and To must be different accounts.', toInput);
                 }
             } else if (direction) {
                 if (categorySelect && !categorySelect.value) {
-                    fail('category_id',
-                        direction === DIRECTION_IN ? 'Choose an income category.' : 'Choose an expense category.',
-                        categorySelect);
+                    fail('category_id', 'Choose a category.', categorySelect);
                 }
                 var sub = subcategorySelect && subcategorySelect.value
                     ? subcategorySelect.options[subcategorySelect.selectedIndex] : null;
@@ -878,12 +865,11 @@
                 if (option) {
                     if (option.getAttribute('data-project-mode') === 'required'
                         && (!projectSelect || !projectSelect.value)) {
-                        fail('project_id', 'This category needs a project — pick one.', projectInput);
+                        fail('project_id', 'Choose a project.', projectInput);
                     }
                     if (option.getAttribute('data-party-mode') === 'required'
                         && (!partySelect || !partySelect.value)) {
-                        fail('party_name', 'This category needs a party — choose who it is for.',
-                            partyInput);
+                        fail('party_name', 'Choose a person or business.', partyInput);
                     }
                 }
             }
@@ -959,6 +945,7 @@
         if (resetButton) {
             resetButton.addEventListener('click', function () {
                 form.reset();
+                if (moreDetails) moreDetails.open = false;
                 clearErrors(form);
                 setDirection('', { silent: true });
                 ensureCombos();
@@ -975,7 +962,7 @@
         form.addEventListener('submit', function (event) {
             event.preventDefault();
             if (!validate()) {
-                flashPickerMessage(form, 'Some details need fixing — see the highlighted fields.');
+                flashPickerMessage(form, 'Check the highlighted fields.');
                 return;
             }
             submitState(true);
@@ -998,9 +985,29 @@
         var bankMode = byId('txnNaMode');
         if (bankMode) bankMode.addEventListener('change', syncBankFields);
 
+        if (moreDetails) {
+            moreDetails.addEventListener('toggle', function () {
+                if (moreDetails.open) return;
+                var option = selectedCategoryOption();
+                var requiresMore = option && (
+                    option.getAttribute('data-party-mode') === 'required' ||
+                    option.getAttribute('data-project-mode') === 'required'
+                );
+                if (requiresMore) moreDetails.open = true;
+            });
+        }
+
         ensureCombos();
         applyDirection();
         applyCategoryRules();
+        if (moreDetails && moreDetails.getAttribute('data-has-values') !== 'true') {
+            var selected = selectedCategoryOption();
+            var requiresMore = selected && (
+                selected.getAttribute('data-party-mode') === 'required' ||
+                selected.getAttribute('data-project-mode') === 'required'
+            );
+            if (!requiresMore) moreDetails.open = false;
+        }
     }
 
     function boot() {
