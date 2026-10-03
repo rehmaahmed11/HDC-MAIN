@@ -348,6 +348,9 @@ FORM.appendChild(directionGroup);
 
 const body = node('div', 'txnBody', { hidden: true });
 FORM.appendChild(body);
+const moreDetails = node('details', 'txnMoreDetails', { open: true });
+moreDetails.setAttribute('data-has-values', 'false');
+body.appendChild(moreDetails);
 
 const dateInput = node('input', 'txnDate');
 dateInput.value = '2026-09-21';
@@ -400,9 +403,9 @@ const categoryBlock = node('fieldset', 'txnCategoryBlock');
 categoryBlock.appendChild(node('span', 'txnCategoryLegend'));
 const categorySelect = node('select', 'txnCategory', { name: 'category_id' });
 option(categorySelect, '', 'Choose…');
-option(categorySelect, '10', 'Material & Purchase', { 'data-direction': 'out' });
-option(categorySelect, '11', 'Labour & Wages', { 'data-direction': 'out' });
-option(categorySelect, '20', 'Owner / Client Receipt', { 'data-direction': 'in' });
+option(categorySelect, '10', 'Material & Purchase', { 'data-direction': 'out', 'data-party-mode': 'optional', 'data-project-mode': 'optional' });
+option(categorySelect, '11', 'Labour & Wages', { 'data-direction': 'out', 'data-party-mode': 'optional', 'data-project-mode': 'optional' });
+option(categorySelect, '20', 'Owner / Client Receipt', { 'data-direction': 'in', 'data-party-mode': 'optional', 'data-project-mode': 'required', 'data-project-effect': 'receipt', 'data-party-types': 'client' });
 categoryBlock.appendChild(categorySelect);
 const subcategorySelect = node('select', 'txnSubcategory', { name: 'subcategory_id' });
 option(subcategorySelect, '', 'Choose…');
@@ -558,8 +561,10 @@ function check(name, fn) { checks.push({ name, fn }); }
 
 check('nothing but the direction is shown until one is chosen', () => {
   assert.equal(body.hidden, true, 'the field body must stay hidden');
-  assert.equal(actionHint.textContent, 'Choose a direction to start.');
-  assert.equal(directionGroup.hidden, false, 'the segmented buttons replace the select');
+  assert.equal(actionHint.textContent, '');
+  assert.equal(actionHint.hidden, true, 'no instruction is shown until needed');
+  assert.equal(moreDetails.open, false, 'optional fields start collapsed');
+  assert.equal(directionGroup.hidden, false, 'the buttons replace the select');
 });
 
 check('Money Out shows category/party/project and no To account', () => {
@@ -571,8 +576,8 @@ check('Money Out shows category/party/project and no To account', () => {
   assert.equal(toField.hidden, true);
   assert.equal(toSelect.disabled, true, 'an unused To account must never be postable');
   assert.equal(categorySelect.disabled, false);
-  assert.match(accountLabel.innerHTML, /Account/);
-  assert.equal(actionHint.textContent.indexOf('Category drives the subcategory list') !== -1, true);
+  assert.match(accountLabel.innerHTML, /From account/);
+  assert.equal(actionHint.textContent, '', 'the form does not repeat instructions below the buttons');
 });
 
 check('a transfer hides category and party and asks for the second account', () => {
@@ -616,6 +621,7 @@ check('selecting a subcategory then switching category clears it', () => {
 check('the wrong-direction category is not offered for Money In', () => {
   direction.value = 'in';
   change(direction);
+  assert.match(accountLabel.innerHTML, /To account/);
   assert.equal(categorySelect.options.find(o => o.value === '10').disabled, true,
     'an expense category must not be selectable on a receipt');
   assert.equal(categorySelect.options.find(o => o.value === '20').disabled, false);
@@ -623,6 +629,19 @@ check('the wrong-direction category is not offered for Money In', () => {
   change(direction);
   assert.equal(categorySelect.options.find(o => o.value === '20').disabled, true);
   assert.equal(categorySelect.options.find(o => o.value === '10').disabled, false);
+});
+
+check('a required project field opens the optional details section', () => {
+  moreDetails.open = false;
+  direction.value = 'in';
+  change(direction);
+  categorySelect.value = '20';
+  change(categorySelect);
+  assert.equal(moreDetails.open, true);
+  direction.value = 'out';
+  change(direction);
+  categorySelect.value = '10';
+  change(categorySelect);
 });
 
 // ── 3. Validation keeps the message next to the field ───────────────────────
@@ -640,7 +659,7 @@ check('an empty/invalid form cannot be submitted and the errors sit by the field
   assert.equal(dateError.hidden, false);
   assert.equal(amountError.textContent, 'Amount must be greater than 0.');
   assert.equal(accountError.textContent, 'Choose the account.');
-  assert.equal(categoryError.textContent, 'Choose an expense category.');
+  assert.equal(categoryError.textContent, 'Choose a category.');
 });
 
 check('a valid Money Out posts once and locks the button while it does', () => {

@@ -681,6 +681,13 @@ class CashFlowRegisterTestCase(unittest.TestCase):
             res = self.client.get(url)
             self.assertEqual(res.status_code, 200, url)
 
+    def test_register_has_a_simple_history_and_project_filter(self):
+        html = self.client.get('/hdc/accounts/cashflow/register').get_data(as_text=True)
+        self.assertIn('Transaction History', html)
+        self.assertIn('More filters', html)
+        self.assertIn('name="project_id"', html)
+        self.assertIn('action="/hdc/accounts/cashflow/register"', html)
+
     def test_route_creates_entry_from_the_form(self):
         cats = self._categories()
         res = self._post('/hdc/accounts/cashflow/register', {
@@ -714,7 +721,7 @@ class CashFlowRegisterTestCase(unittest.TestCase):
         self._post('/hdc/accounts/cashflow/register', {
             'action': 'void_entry', 'entry_id': entry.id, 'reason': ''})
         html = self.client.get('/hdc/accounts/cashflow/register').get_data(as_text=True)
-        self.assertIn('A reason is required', html)
+        self.assertIn('Enter a reason to cancel', html)
         self.assertFalse(entry.is_void)
 
     def test_route_voids_and_restores(self):

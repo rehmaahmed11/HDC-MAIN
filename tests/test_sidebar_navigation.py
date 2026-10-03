@@ -65,7 +65,7 @@ EXPECTED_GROUPS = (
     ('parties', 'Parties', ('/hdc/parties',)),
     ('reports', 'Reports', ('/hdc/reports', '/hdc/reports/glance')),
     ('accounts', 'Accounts & Cash',
-     ('/hdc/accounts/hub', '/hdc/accounts/money-center', '/hdc/accounts/entries',
+     ('/hdc/accounts/hub', '/hdc/accounts/money-center', '/hdc/accounts/cashflow/register',
       '/hdc/accounts/shared')),
     ('administration', 'Administration',
      ('/hdc/users', '/hdc/event-recorder', '/hdc/settings')),
@@ -103,8 +103,9 @@ HIGHLIGHT_CASES = (
     ('/hdc/reports/glance', '/hdc/reports/glance', 'reports'),
     ('/hdc/accounts/hub', '/hdc/accounts/hub', 'accounts'),
     ('/hdc/accounts/money-center', '/hdc/accounts/money-center', 'accounts'),
+    ('/hdc/accounts/cashflow/register', '/hdc/accounts/cashflow/register', 'accounts'),
     ('/hdc/accounts/manage', '/hdc/accounts/hub', 'accounts'),
-    ('/hdc/accounts/entries', '/hdc/accounts/entries', 'accounts'),
+    ('/hdc/accounts/entries', '/hdc/accounts/hub', 'accounts'),
     ('/hdc/accounts/shared/report', '/hdc/accounts/shared', 'accounts'),
     ('/hdc/accounts/cashflow', '/hdc/accounts/hub', 'accounts'),
     ('/hdc/users', '/hdc/users', 'administration'),
@@ -209,10 +210,11 @@ class SidebarNavigationTestCase(unittest.TestCase):
             self.assertEqual([m.group('href') for m in self._items(group.group('body'))],
                              list(options), group_id)
 
-    def test_accounts_group_states_the_audit_note(self):
+    def test_accounts_group_uses_plain_language_links(self):
         nav = self._nav('/hdc/')
-        self.assertIn('Record Money</span>', nav)   # simplified entry point
-        self.assertIn('audit</span>', nav)          # All Entries note kept (admin)
+        self.assertIn('Record Money</span>', nav)
+        self.assertIn('Transaction History</span>', nav)
+        self.assertNotIn('audit</span>', nav)
 
     # ── collapse plumbing ────────────────────────────────────────────────
     def test_every_heading_owns_its_collapse_target(self):
@@ -273,8 +275,8 @@ class SidebarNavigationTestCase(unittest.TestCase):
                 for option in options:
                     self.assertIn(option, hrefs, (role, option))
             self.assertEqual('/hdc/accounts/hub' in hrefs, 'accounts' in extra, role)
-            # audit/advanced rows are admin-only even inside the accounts group
-            self.assertEqual('/hdc/accounts/entries' in hrefs, role == 'admin', role)
+            # Transaction history and advanced account tools are admin-only.
+            self.assertEqual('/hdc/accounts/cashflow/register' in hrefs, role == 'admin', role)
             self.assertEqual('/hdc/accounts/shared' in hrefs, role == 'admin', role)
             self.assertEqual('/hdc/settings' in hrefs, role == 'admin', role)
 

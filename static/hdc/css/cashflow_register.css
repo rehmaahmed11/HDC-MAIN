@@ -1,0 +1,128 @@
+/* Transaction History: short summaries, simple filters and a readable ledger. */
+.cf-history-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+}
+.cf-history-header h2 { margin: 0 0 4px; font-weight: 800; letter-spacing: -.02em; }
+.cf-history-header .text-muted { font-size: .88rem; }
+
+.cf-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
+    gap: 10px;
+}
+.cf-summary-card {
+    min-width: 0;
+    padding: 11px 13px;
+    border: 1px solid var(--card-border);
+    border-radius: 11px;
+    background: var(--card-bg);
+    box-shadow: var(--shadow-card);
+}
+.cf-summary-label { color: var(--text-muted); font-size: .75rem; font-weight: 700; }
+.cf-summary-value { margin-top: 2px; color: var(--text); font-size: 1.12rem; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cf-summary-card.received .cf-summary-value { color: #059669; }
+.cf-summary-card.spent .cf-summary-value { color: #e11d48; }
+.cf-summary-value.negative { color: #e11d48; }
+[data-theme="dark"] .cf-summary-card.received .cf-summary-value { color: #34d399; }
+[data-theme="dark"] .cf-summary-card.spent .cf-summary-value,
+[data-theme="dark"] .cf-summary-value.negative { color: #fb7185; }
+
+.cf-add-entry > summary,
+.cf-advanced-filters > summary,
+.cf-row-details > summary,
+.cf-row-actions > summary {
+    cursor: pointer;
+    list-style: none;
+}
+.cf-add-entry > summary::-webkit-details-marker,
+.cf-advanced-filters > summary::-webkit-details-marker,
+.cf-row-details > summary::-webkit-details-marker,
+.cf-row-actions > summary::-webkit-details-marker { display: none; }
+.cf-add-entry > summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+.cf-add-entry > summary::after,
+.cf-advanced-filters > summary::after,
+.cf-row-details > summary::after,
+.cf-row-actions > summary::after {
+    content: '+';
+    margin-inline-start: 7px;
+    color: var(--accent-strong);
+    font-weight: 800;
+}
+.cf-add-entry[open] > summary::after,
+.cf-advanced-filters[open] > summary::after,
+.cf-row-details[open] > summary::after,
+.cf-row-actions[open] > summary::after { content: '−'; }
+.cf-add-entry > summary .small { white-space: nowrap; }
+
+.cf-advanced-filters {
+    padding-top: 2px;
+    border-top: 1px solid var(--card-border);
+}
+.cf-advanced-filters > summary { display: inline-flex; align-items: center; color: var(--accent-strong); font-size: .82rem; font-weight: 700; }
+
+.cf-history-table { min-width: 940px; }
+.cf-history-table th { white-space: nowrap; font-size: .8rem; }
+.cf-history-table td { font-size: .86rem; }
+.cf-history-table tbody tr { border-color: var(--card-border); }
+.cf-history-table .cf-row-title { margin-top: 4px; font-weight: 700; color: var(--text); }
+.cf-row-amount { font-weight: 800; font-variant-numeric: tabular-nums; }
+.cf-row-amount.received { color: #059669; }
+.cf-row-amount.spent { color: #e11d48; }
+[data-theme="dark"] .cf-row-amount.received { color: #34d399; }
+[data-theme="dark"] .cf-row-amount.spent { color: #fb7185; }
+.cf-void-row { background: var(--card-header-bg); color: var(--text-muted); }
+.cf-void-row .cf-row-title { color: var(--text-muted); }
+
+.cf-row-tools { display: flex; align-items: flex-start; gap: 10px; }
+.cf-row-details,
+.cf-row-actions { position: relative; font-size: .78rem; }
+.cf-row-details > summary,
+.cf-row-actions > summary { display: inline-flex; align-items: center; color: var(--accent-strong); font-weight: 700; }
+.cf-row-detail-popover,
+.cf-row-action-list {
+    min-width: 190px;
+    margin-top: 5px;
+    padding: 8px 10px;
+    border: 1px solid var(--card-border);
+    border-radius: 8px;
+    background: var(--card-bg);
+    box-shadow: var(--shadow-card);
+    white-space: normal;
+}
+.cf-row-detail-popover > div + div { margin-top: 4px; }
+.cf-row-action-list { display: grid; gap: 5px; }
+.cf-row-action-list a,
+.cf-row-action-list button {
+    display: inline-block;
+    width: fit-content;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--accent-strong);
+    font: inherit;
+    text-align: left;
+    text-decoration: none;
+    cursor: pointer;
+}
+.cf-row-action-list a:hover,
+.cf-row-action-list button:hover { text-decoration: underline; }
+.cf-row-action-list .text-danger { color: #dc2626 !important; }
+
+.cf-empty-state { padding: 38px 16px; text-align: center; color: var(--text-muted); }
+.cf-empty-state > i { color: var(--accent-strong); font-size: 1.25rem; }
+
+@media (max-width: 575.98px) {
+    .cf-history-header h2 { font-size: 1.25rem; }
+    .cf-summary-value { font-size: 1rem; }
+    .cf-add-entry > summary .small { display: none; }
+}

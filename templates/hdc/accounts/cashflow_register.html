@@ -1,235 +1,238 @@
 {% extends "shared/base.html" %}
-{% block title %}Cash Flow Register{% endblock %}
-{% block page_heading %}Cash Flow Register{% endblock %}
+{% block title %}Transaction History{% endblock %}
+{% block page_heading %}Transaction History{% endblock %}
 
 {% block content %}
+<link rel="stylesheet" href="/hdc_static/css/cashflow_register.css">
+<link rel="stylesheet" href="/hdc_static/css/new_transaction.css">
 
-{# ── Summary ─────────────────────────────────────────────────────────────── #}
-<div class="row g-2 mb-3">
-    <div class="col-6 col-md-3">
-        <div class="card hdc-card h-100">
-            <div class="card-body py-2">
-                <div class="small text-muted">Money In</div>
-                <div class="h5 mb-0 text-success">{{ '{:,.2f}'.format(summary.total_in) }}</div>
-            </div>
-        </div>
+<div class="cf-history-header">
+    <div>
+        <h2><i class="fas fa-receipt me-2" aria-hidden="true"></i>Transaction History</h2>
+        <div class="text-muted">All money received, spent, or moved between accounts.</div>
     </div>
-    <div class="col-6 col-md-3">
-        <div class="card hdc-card h-100">
-            <div class="card-body py-2">
-                <div class="small text-muted">Money Out</div>
-                <div class="h5 mb-0 text-danger">{{ '{:,.2f}'.format(summary.total_out) }}</div>
-            </div>
-        </div>
+    <a href="{{ url_for('hdc_money_center') }}" class="btn btn-success">
+        <i class="fas fa-plus me-1" aria-hidden="true"></i>Record money
+    </a>
+</div>
+
+<div class="cf-summary-grid mb-3">
+    <div class="cf-summary-card received">
+        <div class="cf-summary-label">Received</div>
+        <div class="cf-summary-value">Rs. {{ '{:,.2f}'.format(summary.total_in) }}</div>
     </div>
-    <div class="col-6 col-md-3">
-        <div class="card hdc-card h-100">
-            <div class="card-body py-2">
-                <div class="small text-muted">Internal Transfers</div>
-                <div class="h5 mb-0">{{ '{:,.2f}'.format(summary.total_transfer) }}</div>
-            </div>
-        </div>
+    <div class="cf-summary-card spent">
+        <div class="cf-summary-label">Spent</div>
+        <div class="cf-summary-value">Rs. {{ '{:,.2f}'.format(summary.total_out) }}</div>
     </div>
-    <div class="col-6 col-md-3">
-        <div class="card hdc-card h-100">
-            <div class="card-body py-2">
-                <div class="small text-muted">Net Movement</div>
-                <div class="h5 mb-0 {{ 'text-success' if summary.net >= 0 else 'text-danger' }}">{{ '{:,.2f}'.format(summary.net) }}</div>
-            </div>
-        </div>
+    <div class="cf-summary-card">
+        <div class="cf-summary-label">Moved between accounts</div>
+        <div class="cf-summary-value">Rs. {{ '{:,.2f}'.format(summary.total_transfer) }}</div>
+    </div>
+    <div class="cf-summary-card net">
+        <div class="cf-summary-label">Net</div>
+        <div class="cf-summary-value {{ 'negative' if summary.net < 0 else '' }}">Rs. {{ '{:,.2f}'.format(summary.net) }}</div>
     </div>
 </div>
 
-{# ── Record an entry ──────────────────────────────────────────────────────── #}
-{#
-  The entry form is the shared New Transaction form
-  (templates/hdc/accounts/_new_transaction_form.html) — the same partial the
-  focused /hdc/accounts/new-transaction page renders, posting to the same
-  engine.  It used to be a flat 12-column row of every field at once; it is now
-  direction-first and progressive, with searchable Account / Party / Project
-  pickers that can create what is missing without leaving the page.
-#}
-<div class="hdc-txn-embed">
-    <link rel="stylesheet" href="/hdc_static/css/new_transaction.css">
-    <div class="card hdc-card mb-3">
-        <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
-            <span><i class="fas fa-plus-circle me-2" aria-hidden="true"></i>New Transaction</span>
-            <a href="{{ url_for('hdc_new_transaction') }}" class="btn btn-sm btn-outline-secondary">
-                <i class="fas fa-up-right-and-down-left-from-center me-1" aria-hidden="true"></i>Open full page
-            </a>
-        </div>
-        <div class="card-body">
-            {% include "accounts/_new_transaction_form.html" %}
-        </div>
+<details class="card hdc-card cf-add-entry mb-3" {% if txn_error or (txn_values and (txn_values.get('direction') or txn_values.get('amount'))) %}open{% endif %}>
+    <summary class="card-header hdc-card-header">
+        <span><i class="fas fa-plus-circle me-2" aria-hidden="true"></i>Record a transaction here</span>
+        <span class="small text-muted">Open form</span>
+    </summary>
+    <div class="card-body">
+        {% set form_action = url_for('hdc_cashflow_register') %}
+        {% include "accounts/_new_transaction_form.html" %}
     </div>
-</div>
+</details>
 
-{# ── Filters ──────────────────────────────────────────────────────────────── #}
-<div class="card hdc-card mb-3">
-    <div class="card-body py-3">
+<div class="card hdc-card mb-3 cf-filter-card">
+    <div class="card-body">
         <form method="GET" class="row g-2 align-items-end">
-            <div class="col-6 col-md-2">
-                <label class="form-label small mb-1">Date From</label>
-                <input type="date" name="date_from" class="form-control form-control-sm" value="{{ filter_date_from }}">
+            <div class="col-12 col-md-4">
+                <label class="form-label small mb-1" for="cfSearch">Search</label>
+                <input type="text" id="cfSearch" name="q" class="form-control form-control-sm"
+                       value="{{ filter_search }}" placeholder="Name, category or reference">
             </div>
-            <div class="col-6 col-md-2">
-                <label class="form-label small mb-1">Date To</label>
-                <input type="date" name="date_to" class="form-control form-control-sm" value="{{ filter_date_to }}">
+            <div class="col-12 col-md-5">
+                <label class="form-label small mb-1">Date range</label>
+                <div class="input-group input-group-sm">
+                    <input type="date" name="date_from" class="form-control" value="{{ filter_date_from }}" aria-label="From date">
+                    <span class="input-group-text">to</span>
+                    <input type="date" name="date_to" class="form-control" value="{{ filter_date_to }}" aria-label="To date">
+                </div>
             </div>
-            <div class="col-6 col-md-2">
-                <label class="form-label small mb-1">Account</label>
-                <select name="account_id" class="form-select form-select-sm">
-                    <option value="">All</option>
-                    {% for a in accounts %}
-                    <option value="{{ a.id }}" {% if filter_account_id == a.id %}selected{% endif %}>{{ a.name }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="col-6 col-md-2">
-                <label class="form-label small mb-1">Direction</label>
-                <select name="direction" class="form-select form-select-sm">
-                    <option value="">All</option>
-                    {% for value, label in directions %}
-                    <option value="{{ value }}" {% if filter_direction == value %}selected{% endif %}>{{ label }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="col-6 col-md-2">
-                <label class="form-label small mb-1">Category</label>
-                <select name="category_id" class="form-select form-select-sm">
-                    <option value="">All</option>
-                    {% for c in categories %}
-                    <option value="{{ c.id }}" {% if filter_category_id == c.id %}selected{% endif %}>{{ c.name }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="col-6 col-md-2">
-                <label class="form-label small mb-1">Search</label>
-                <input type="text" name="q" class="form-control form-control-sm" value="{{ filter_search }}" placeholder="party / note / ref">
-            </div>
-            <div class="col-12 col-md-4 d-flex gap-2">
-                <button type="submit" class="btn btn-sm btn-primary">Filter</button>
+            <div class="col-12 col-md-3 d-flex gap-2">
+                <button type="submit" class="btn btn-sm btn-primary"><i class="fas fa-magnifying-glass me-1" aria-hidden="true"></i>Search</button>
                 <a href="{{ url_for('hdc_cashflow_register') }}" class="btn btn-sm btn-outline-secondary">Clear</a>
-                <a href="{{ url_for('hdc_cashflow_register_export', **pg_query) }}" class="btn btn-sm btn-outline-success">
-                    <i class="fas fa-file-csv me-1"></i>CSV
-                </a>
-                {% if show_void %}
-                    <a href="{{ url_for('hdc_cashflow_register', **pg_query_no_void) }}" class="btn btn-sm btn-outline-secondary">Hide Voided</a>
-                {% else %}
-                    <a href="{{ url_for('hdc_cashflow_register', show_void='yes', **pg_query_no_void) }}" class="btn btn-sm btn-outline-secondary">Show Voided</a>
-                {% endif %}
+            </div>
+
+            <div class="col-12">
+                <details class="cf-advanced-filters" {% if filter_account_id or filter_direction or filter_category_id or filter_project_id %}open{% endif %}>
+                    <summary>More filters</summary>
+                    <div class="row g-2 pt-2">
+                        <div class="col-6 col-lg-3">
+                            <label class="form-label small mb-1">Account</label>
+                            <select name="account_id" class="form-select form-select-sm">
+                                <option value="">All accounts</option>
+                                {% for a in accounts %}
+                                <option value="{{ a.id }}" {% if filter_account_id == a.id %}selected{% endif %}>{{ a.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-6 col-lg-3">
+                            <label class="form-label small mb-1">Money movement</label>
+                            <select name="direction" class="form-select form-select-sm">
+                                <option value="">All</option>
+                                {% for value, label in directions %}
+                                <option value="{{ value }}" {% if filter_direction == value %}selected{% endif %}>{{ 'Received' if value == 'in' else ('Spent' if value == 'out' else 'Transfer') }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-6 col-lg-3">
+                            <label class="form-label small mb-1">Category</label>
+                            <select name="category_id" class="form-select form-select-sm">
+                                <option value="">All categories</option>
+                                {% for c in categories %}
+                                <option value="{{ c.id }}" {% if filter_category_id == c.id %}selected{% endif %}>{{ c.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-6 col-lg-3">
+                            <label class="form-label small mb-1">Project</label>
+                            <select name="project_id" class="form-select form-select-sm">
+                                <option value="">All projects</option>
+                                {% for p in filter_projects %}
+                                <option value="{{ p.id }}" {% if filter_project_id == p.id %}selected{% endif %}>{{ p.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                </details>
+            </div>
+            <div class="col-12 d-flex flex-wrap align-items-center justify-content-between gap-2">
+                <div class="small text-muted">
+                    <strong>{{ pg_total_items }}</strong> record{{ '' if pg_total_items == 1 else 's' }}
+                    {% if summary.void_count %}· {{ summary.void_count }} cancelled{% endif %}
+                </div>
+                <div class="d-flex flex-wrap gap-2">
+                    {% if show_void %}
+                    <a href="{{ url_for('hdc_cashflow_register', **pg_query_no_void) }}" class="btn btn-sm btn-outline-secondary">Hide cancelled</a>
+                    {% else %}
+                    <a href="{{ url_for('hdc_cashflow_register', show_void='yes', **pg_query_no_void) }}" class="btn btn-sm btn-outline-secondary">Show cancelled</a>
+                    {% endif %}
+                    <a href="{{ url_for('hdc_cashflow_register_export', **pg_query) }}" class="btn btn-sm btn-outline-success"><i class="fas fa-file-csv me-1" aria-hidden="true"></i>Download CSV</a>
+                </div>
             </div>
         </form>
     </div>
 </div>
 
-{# ── Register table ───────────────────────────────────────────────────────── #}
 <div class="card hdc-card">
     <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
-        <span><i class="fas fa-book me-2"></i>Entries</span>
-        <span class="small text-muted">{{ pg_total_items }} entries{% if summary.void_count %} · {{ summary.void_count }} voided{% endif %}</span>
+        <span><i class="fas fa-list me-2" aria-hidden="true"></i>Transactions</span>
+        <span class="small text-muted">Newest first</span>
     </div>
-    <div class="card-body p-0">
-        {% if rows %}
-        <div class="table-responsive">
-            <table class="table table-sm table-hover mb-0">
-                <thead class="table-light">
-                    <tr>
-                        <th>Date</th>
-                        <th>Direction</th>
-                        <th>Category</th>
-                        <th>Party</th>
-                        <th>Account</th>
-                        <th>Description / Note</th>
-                        <th>Ref</th>
-                        <th class="text-end">Amount (PKR)</th>
-                        <th>Entered By</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                {% set actors = actor_map(rows) %}
-                {% for r in rows %}
-                    <tr {{ r|hdc_row_attrs }} {% if r.is_void %}class="table-secondary text-muted" style="opacity:.65"{% endif %}>
-                        <td><small>{{ r.date.strftime('%d %b %Y') if r.date else '—' }}</small></td>
-                        <td>
-                            {% if r.direction == 'in' %}
-                                <span class="badge bg-success">In</span>
-                            {% elif r.direction == 'out' %}
-                                <span class="badge bg-danger">Out</span>
-                            {% else %}
-                                <span class="badge bg-secondary">Transfer</span>
-                            {% endif %}
-                        </td>
-                        <td>
-                            {{ r.category or '—' }}
-                            {% if r.subcategory %}<br><small class="text-muted">{{ r.subcategory }}</small>{% endif %}
-                        </td>
-                        <td>{{ r.party_name or '—' }}</td>
-                        <td>
-                            {{ r.account or '—' }}
-                            {% if r.destination_account %}<br><small class="text-muted">→ {{ r.destination_account }}</small>{% endif %}
-                        </td>
-                        <td>
-                            {{ r.description or '—' }}
-                            {% if r.note %}<br><small class="text-muted">{{ r.note }}</small>{% endif %}
-                            {% if r.is_void and r.void_reason %}
-                                <br><small class="text-danger">Void: {{ r.void_reason }}</small>
-                            {% endif %}
-                            {% if r.amends_entry_id %}
-                                <br><small class="text-muted"><i class="fas fa-code-branch me-1"></i>amends #{{ r.amends_entry_id }}</small>
-                            {% endif %}
-                            {% if r.superseded_by_entry_id %}
-                                <br><small class="text-warning"><i class="fas fa-forward me-1"></i>replaced by #{{ r.superseded_by_entry_id }}</small>
-                            {% endif %}
-                        </td>
-                        <td><small>{{ r.reference or '—' }}</small></td>
-                        <td class="text-end">{{ '{:,.2f}'.format(r.amount) }}</td>
-                        <td><small>{{ actors.get(r.id, {}).get('last_by') or r.created_by or '—' }}</small></td>
-                        <td class="text-nowrap">
-                            {% if r.is_void %}
-                                <form method="POST" class="d-inline">
-                                    <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
-                                    <input type="hidden" name="action" value="restore_entry">
-                                    <input type="hidden" name="entry_id" value="{{ r.id }}">
-                                    <button type="submit" class="btn btn-sm btn-outline-success" title="Restore">
-                                        <i class="fas fa-rotate-left"></i>
-                                    </button>
-                                </form>
-                            {% else %}
-                                <button type="button" class="btn btn-sm btn-outline-primary"
-                                        data-bs-toggle="modal" data-bs-target="#amendModal{{ r.id }}" title="Amend">
-                                    <i class="fas fa-pen"></i>
-                                </button>
-                                <button type="button" class="btn btn-sm btn-outline-danger"
-                                        data-bs-toggle="modal" data-bs-target="#voidModal{{ r.id }}" title="Void">
-                                    <i class="fas fa-ban"></i>
-                                </button>
-                            {% endif %}
-                        </td>
-                    </tr>
-                {% endfor %}
-                </tbody>
-                <tfoot class="table-light">
-                    <tr>
-                        <th colspan="7">Totals (active entries in current filter)</th>
-                        <th class="text-end">{{ '{:,.2f}'.format(summary.total_in - summary.total_out) }}</th>
-                        <th colspan="2" class="small fw-normal text-muted">net in − out</th>
-                    </tr>
-                </tfoot>
-            </table>
-        </div>
-        {% include "shared/_pagination.html" %}
-        {% else %}
-        <div class="alert alert-info m-3">
-            <i class="fas fa-info-circle me-2"></i>No cash flow entries match the current filters.
-        </div>
-        {% endif %}
+    {% if rows %}
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0 cf-history-table">
+            <thead class="table-light">
+                <tr>
+                    <th>Date</th>
+                    <th>Transaction</th>
+                    <th>Person / project</th>
+                    <th>Account</th>
+                    <th class="text-end">Amount</th>
+                    <th>Details / actions</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% set actors = actor_map(rows) %}
+            {% for r in rows %}
+                {% set description = r.description or '' %}
+                {% set auto_description = r.category and (description == r.category or description.startswith(r.category ~ ' — ')) %}
+                <tr {{ r|hdc_row_attrs }} class="{{ 'cf-void-row' if r.is_void else '' }}">
+                    <td class="text-nowrap">
+                        <div class="fw-semibold">{{ r.date.strftime('%d %b %Y') if r.date else '—' }}</div>
+                        <small class="text-muted">#{{ r.id }}</small>
+                    </td>
+                    <td>
+                        {% if r.direction == 'in' %}<span class="badge bg-success">Received</span>
+                        {% elif r.direction == 'out' %}<span class="badge bg-danger">Spent</span>
+                        {% else %}<span class="badge bg-secondary">Transfer</span>{% endif %}
+                        <div class="cf-row-title">{{ r.category or description or 'Transaction' }}</div>
+                        {% if r.subcategory %}<div class="small text-muted">{{ r.subcategory }}</div>{% endif %}
+                        {% if description and not auto_description %}<div class="small text-muted">{{ description }}</div>{% endif %}
+                        {% if r.is_void %}<span class="badge bg-secondary mt-1">Cancelled</span>{% endif %}
+                    </td>
+                    <td>
+                        <div>{{ r.party_name or '—' }}</div>
+                        {% if r.project %}<div class="small text-muted">{{ r.project }}</div>{% endif %}
+                    </td>
+                    <td>
+                        {% if r.direction == 'transfer' %}
+                        <div>{{ r.account or '—' }}</div>
+                        <div class="small text-muted">to {{ r.destination_account or '—' }}</div>
+                        {% else %}{{ r.account or '—' }}{% endif %}
+                    </td>
+                    <td class="text-end text-nowrap">
+                        <span class="cf-row-amount {{ 'received' if r.direction == 'in' else ('spent' if r.direction == 'out' else '') }}">
+                            {% if r.direction == 'in' %}+{% elif r.direction == 'out' %}−{% endif %}Rs. {{ '{:,.2f}'.format(r.amount) }}
+                        </span>
+                    </td>
+                    <td class="text-nowrap">
+                        <div class="cf-row-tools">
+                            <details class="cf-row-details">
+                                <summary>Details</summary>
+                                <div class="cf-row-detail-popover">
+                                    {% if r.reference %}<div><strong>Reference:</strong> {{ r.reference }}</div>{% endif %}
+                                    {% if r.note %}<div><strong>Note:</strong> {{ r.note }}</div>{% endif %}
+                                    {% if description and auto_description %}<div><strong>Description:</strong> {{ description }}</div>{% endif %}
+                                    {% if actors.get(r.id, {}).get('last_by') or r.created_by %}<div><strong>Entered by:</strong> {{ actors.get(r.id, {}).get('last_by') or r.created_by }}</div>{% endif %}
+                                    {% if r.amends_entry_id %}<div>Corrects record #{{ r.amends_entry_id }}</div>{% endif %}
+                                    {% if r.superseded_by_entry_id %}<div>Replaced by record #{{ r.superseded_by_entry_id }}</div>{% endif %}
+                                    {% if r.is_void %}<div class="text-danger"><strong>Cancellation reason:</strong> {{ r.void_reason or 'Not provided' }}{% if r.voided_by %} · {{ r.voided_by }}{% endif %}</div>{% endif %}
+                                    {% if not r.reference and not r.note and not description and not r.created_by and not r.is_void and not r.amends_entry_id and not r.superseded_by_entry_id %}<div class="text-muted">No extra details.</div>{% endif %}
+                                </div>
+                            </details>
+                            <details class="cf-row-actions">
+                                <summary>Actions</summary>
+                                <div class="cf-row-action-list">
+                                    {% if r.account_tx_id %}
+                                    <a href="{{ url_for('hdc_account_transaction_receipt', txn_id=r.account_tx_id) }}" target="_blank" rel="noopener">Receipt</a>
+                                    {% endif %}
+                                    {% if r.is_void %}
+                                    <form method="POST" class="m-0">
+                                        <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+                                        <input type="hidden" name="action" value="restore_entry">
+                                        <input type="hidden" name="entry_id" value="{{ r.id }}">
+                                        <button type="submit" class="btn btn-link p-0">Restore</button>
+                                    </form>
+                                    {% else %}
+                                    <button type="button" data-bs-toggle="modal" data-bs-target="#amendModal{{ r.id }}">Correct</button>
+                                    <button type="button" class="text-danger" data-bs-toggle="modal" data-bs-target="#voidModal{{ r.id }}">Cancel</button>
+                                    {% endif %}
+                                </div>
+                            </details>
+                        </div>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
     </div>
+    {% include "shared/_pagination.html" %}
+    {% else %}
+    <div class="cf-empty-state">
+        <i class="fas fa-magnifying-glass mb-2" aria-hidden="true"></i>
+        <div class="fw-semibold">No transactions found</div>
+        <div class="small text-muted">Clear the filters or try another search.</div>
+    </div>
+    {% endif %}
 </div>
 
-{# ── Amend / void modals ──────────────────────────────────────────────────── #}
 {% for r in rows %}
+    {% if not r.is_void %}
     <div class="modal fade" id="voidModal{{ r.id }}" tabindex="-1" aria-hidden="true">
         <div class="modal-dialog modal-dialog-centered">
             <form method="POST" class="modal-content">
@@ -237,21 +240,17 @@
                 <input type="hidden" name="action" value="void_entry">
                 <input type="hidden" name="entry_id" value="{{ r.id }}">
                 <div class="modal-header">
-                    <h6 class="modal-title">Void entry #{{ r.id }} — {{ '{:,.2f}'.format(r.amount) }} PKR</h6>
+                    <h6 class="modal-title">Cancel transaction #{{ r.id }}</h6>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
-                    <p class="small text-muted mb-2">
-                        The entry and its ledger posting are <strong>kept</strong>, not deleted — the record
-                        stays in the audit trail with your reason.
-                    </p>
-                    <label class="form-label">Reason <span class="text-danger">*</span></label>
-                    <input type="text" name="reason" class="form-control" maxlength="300" required
-                           placeholder="e.g. entered twice, wrong slip">
+                    <p class="small text-muted">It will no longer count toward totals. The record stays in history.</p>
+                    <label class="form-label">Why are you cancelling it? <span class="text-danger">*</span></label>
+                    <input type="text" name="reason" class="form-control" maxlength="300" required placeholder="e.g. entered twice">
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-sm btn-danger">Void entry</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Keep transaction</button>
+                    <button type="submit" class="btn btn-sm btn-danger">Cancel transaction</button>
                 </div>
             </form>
         </div>
@@ -263,59 +262,49 @@
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
                 <input type="hidden" name="action" value="amend_entry">
                 <input type="hidden" name="entry_id" value="{{ r.id }}">
+                <input type="hidden" name="note" value="{{ r.note }}">
                 <div class="modal-header">
-                    <h6 class="modal-title">Amend entry #{{ r.id }}</h6>
+                    <h6 class="modal-title">Correct transaction #{{ r.id }}</h6>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body row g-2">
-                    <p class="small text-muted">
-                        Correcting an entry <strong>voids the original and posts a replacement</strong>.
-                        Nothing is overwritten, and both rows stay linked for audit.
-                    </p>
+                    <p class="small text-muted">A corrected copy is saved. The original stays in history.</p>
                     <div class="col-6 col-md-3">
-                        <label class="form-label">Amount (PKR)</label>
+                        <label class="form-label">Amount (Rs.)</label>
                         <input type="text" name="amount" class="form-control" value="{{ '{:,.2f}'.format(r.amount) }}">
                     </div>
                     <div class="col-6 col-md-3">
                         <label class="form-label">Date</label>
                         <input type="date" name="date" class="form-control" value="{{ r.date.strftime('%Y-%m-%d') if r.date else today }}">
                     </div>
-                    <div class="col-6 col-md-3">
-                        <label class="form-label">Party</label>
+                    <div class="col-12 col-md-6">
+                        <label class="form-label">Person / business</label>
                         <input type="text" name="party_name" class="form-control" value="{{ r.party_name }}">
                     </div>
-                    <div class="col-6 col-md-3">
+                    <div class="col-12 col-md-6">
                         <label class="form-label">Reference</label>
                         <input type="text" name="reference" class="form-control" value="{{ r.reference }}">
                     </div>
                     <div class="col-12 col-md-6">
-                        <label class="form-label">Description</label>
+                        <label class="form-label">Details</label>
                         <input type="text" name="description" class="form-control" value="{{ r.description }}">
                     </div>
-                    <div class="col-12 col-md-6">
-                        <label class="form-label">Note</label>
-                        <input type="text" name="note" class="form-control" value="{{ r.note }}">
-                    </div>
                     <div class="col-12">
-                        <label class="form-label">Reason for change <span class="text-danger">*</span></label>
-                        <input type="text" name="reason" class="form-control" maxlength="300" required
-                               placeholder="e.g. wrong amount typed — actual was 5,000">
+                        <label class="form-label">Why are you correcting it? <span class="text-danger">*</span></label>
+                        <input type="text" name="reason" class="form-control" maxlength="300" required placeholder="e.g. amount should be 5,000">
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-sm btn-primary">Void &amp; post replacement</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Keep original</button>
+                    <button type="submit" class="btn btn-sm btn-primary">Save correction</button>
                 </div>
             </form>
         </div>
     </div>
+    {% endif %}
 {% endfor %}
-
 {% endblock %}
 
 {% block extra_js %}
-{# The direction / category / subcategory dependency and the searchable pickers
-   are the shared New Transaction controller — the same file the focused page
-   loads, so the two entry surfaces cannot behave differently. #}
 <script src="/hdc_static/js/pages/new_transaction.js"></script>
 {% endblock %}

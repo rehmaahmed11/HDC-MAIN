@@ -510,16 +510,13 @@ class AccountsManageRouteTestCase(unittest.TestCase):
     def test_edit_unknown_account_404s(self):
         self.assertEqual(self.client.get('/hdc/accounts/999999/edit').status_code, 404)
 
-    def test_hub_shows_the_simple_actions_and_admin_advanced_block(self):
-        # The hub was simplified: three plain-language actions for everyone,
-        # with the audit/close tools tucked into an admin-only Advanced block.
+    def test_hub_shows_simple_actions_and_hides_admin_tools(self):
         html = self.client.get('/hdc/accounts/hub').get_data(as_text=True)
-        self.assertIn('What do you want to do?', html)
-        for label in ('Record Money', 'Accounts &amp; Balances', 'Daily Report'):
+        self.assertIn('Choose an action', html)
+        for label in ('Record Money', 'Transaction History', 'Balances', 'Daily Report'):
             self.assertIn(label, html)
-        # admin (the signed-in role here) still reaches the advanced tools
-        self.assertIn('Advanced (admin only)', html)
-        for label in ('Day Close', 'All Entries', 'Cash Flow Register'):
+        self.assertIn('Admin tools', html)
+        for label in ('Day Close', 'Detailed Ledger', 'Data Check'):
             self.assertIn(label, html)
 
     def test_csv_export_returns_the_list(self):

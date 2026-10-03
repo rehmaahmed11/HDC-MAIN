@@ -1,21 +1,8 @@
 {% extends "shared/base.html" %}
-{% block title %}Record Money — Accounts{% endblock %}
+{% block title %}Record Money{% endblock %}
 {% block page_heading %}Record Money{% endblock %}
 
 {% block content %}
-{# ==========================================================================
-   Record Money — the Accounts section's entry page.
-
-   It renders the same shared form as /hdc/accounts/new-transaction and the
-   Cash Flow register (accounts/_new_transaction_form.html) and posts it to the
-   same engine, so every kind of transaction — money in, money out, internal
-   transfer — is recorded in exactly one place, in exactly one way.
-
-   Around the form: today's movement, the accounts, and what is still to be
-   paid or received.  A pending row links to the surface that owns that balance
-   (a worker's payment page writes the labour ledger; a project receipt comes
-   back here pre-filled), so recording money can never leave a balance behind.
-   ========================================================================== #}
 {% set t = pending.totals %}
 {% set to_pay = (t.workers_pending or 0) + (t.suppliers_pending or 0) + (t.subcontractors_pending or 0) + (t.office_staff_pending or 0) %}
 {% set to_receive = (t.projects_receivable or 0) + (t.tool_rentals_receivable or 0) %}
@@ -26,147 +13,135 @@
 <div class="rm-header">
     <div>
         <h2><i class="fas fa-sack-dollar me-2" aria-hidden="true"></i>Record Money</h2>
-        <div class="rm-subtitle">
-            Money in, money out, or a transfer between your own accounts —
-            one form for all of it.
-        </div>
+        <div class="rm-subtitle">Received, spent, or moved between accounts.</div>
     </div>
     <div class="rm-header-links">
+        <a href="{{ url_for('hdc_cashflow_register') }}" class="btn btn-sm btn-outline-secondary">
+            <i class="fas fa-list-ul me-1" aria-hidden="true"></i>History
+        </a>
         <a href="{{ url_for('hdc_accounts_manage') }}" class="btn btn-sm btn-outline-secondary">
-            <i class="fas fa-list me-1" aria-hidden="true"></i>Balances
+            <i class="fas fa-building-columns me-1" aria-hidden="true"></i>Balances
         </a>
-        <a href="{{ url_for('hdc_accounts_hub') }}" class="btn btn-sm btn-outline-secondary">
-            <i class="fas fa-compass me-1" aria-hidden="true"></i>Accounts
-        </a>
-    </div>
-</div>
-
-{# ── Today's numbers ─────────────────────────────────────────────────────── #}
-<div class="rm-kpis">
-    <div class="rm-kpi">
-        <div class="rm-kpi-label"><i class="fas fa-building-columns me-1" aria-hidden="true"></i>Company total</div>
-        <div class="rm-kpi-value">Rs. {{ "{:,.0f}".format(kpis.company_owned_total or 0) }}</div>
-        <div class="rm-kpi-sub">Cash {{ "{:,.0f}".format(kpis.cash_total or 0) }} · Bank {{ "{:,.0f}".format(kpis.bank_total or 0) }}</div>
-    </div>
-    <div class="rm-kpi in">
-        <div class="rm-kpi-label"><i class="fas fa-arrow-down me-1" aria-hidden="true"></i>Money in — today</div>
-        <div class="rm-kpi-value">Rs. {{ "{:,.0f}".format(today_summary.total_in or 0) }}</div>
-        <div class="rm-kpi-sub">{{ today_summary.count or 0 }} entr{{ 'y' if (today_summary.count or 0) == 1 else 'ies' }} today</div>
-    </div>
-    <div class="rm-kpi out">
-        <div class="rm-kpi-label"><i class="fas fa-arrow-up me-1" aria-hidden="true"></i>Money out — today</div>
-        <div class="rm-kpi-value">Rs. {{ "{:,.0f}".format(today_summary.total_out or 0) }}</div>
-        <div class="rm-kpi-sub">Transfers {{ "{:,.0f}".format(today_summary.total_transfer or 0) }}</div>
-    </div>
-    <div class="rm-kpi {{ 'out' if (today_summary.net or 0) < 0 else 'in' }}">
-        <div class="rm-kpi-label"><i class="fas fa-scale-balanced me-1" aria-hidden="true"></i>Net — today</div>
-        <div class="rm-kpi-value">Rs. {{ "{:,.0f}".format(today_summary.net or 0) }}</div>
-        <div class="rm-kpi-sub">Money in minus money out</div>
     </div>
 </div>
 
 {% if overdrawn_accounts %}
 <div class="rm-alert" role="alert">
     <i class="fas fa-triangle-exclamation" aria-hidden="true"></i>
-    <div>
-        <strong>{{ overdrawn_accounts|length }} account{{ '' if overdrawn_accounts|length == 1 else 's' }} below zero:</strong>
-        {% for acc in overdrawn_accounts %}{{ acc.name }} ({{ "{:,.0f}".format(acc.current_balance or 0) }}){{ ', ' if not loop.last }}{% endfor %}.
-        Money out of {{ 'that account' if overdrawn_accounts|length == 1 else 'those accounts' }} will be refused until it is topped up.
+    <div><strong>Below zero:</strong>
+        {% for acc in overdrawn_accounts %}{{ acc.name }} (Rs. {{ "{:,.2f}".format(acc.current_balance or 0) }}){{ ', ' if not loop.last }}{% endfor %}.
+        Check the balance before spending from this account.
     </div>
 </div>
 {% endif %}
 
 <div class="row g-3">
-    {# ── The one form ─────────────────────────────────────────────────────── #}
-    <div class="col-12 col-xl-7">
+    <div class="col-12 col-xl-8">
         <div class="card hdc-card" id="record-money-form">
-            <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
-                <span><i class="fas fa-plus-circle me-2" aria-hidden="true"></i>New Transaction</span>
-                <a href="{{ url_for('hdc_new_transaction') }}" class="btn btn-sm btn-outline-secondary">
-                    <i class="fas fa-up-right-and-down-left-from-center me-1" aria-hidden="true"></i>Open full page
-                </a>
+            <div class="card-header hdc-card-header">
+                <i class="fas fa-plus-circle me-2" aria-hidden="true"></i>New transaction
             </div>
             <div class="card-body">
+                {% set form_action = url_for('hdc_money_center') %}
                 {% include "accounts/_new_transaction_form.html" %}
             </div>
         </div>
     </div>
 
-    {# ── What is still open ───────────────────────────────────────────────── #}
-    <div class="col-12 col-xl-5">
+    <div class="col-12 col-xl-4">
         <div class="card hdc-card mb-3">
             <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
-                <span><i class="fas fa-hand-holding-dollar me-2" aria-hidden="true"></i>Still to pay</span>
-                <span class="rm-panel-total">Rs. {{ "{:,.0f}".format(to_pay) }}</span>
+                <span><i class="fas fa-building-columns me-2" aria-hidden="true"></i>Current balances</span>
+                <a href="{{ url_for('hdc_accounts_manage') }}" class="btn btn-sm btn-outline-secondary">All Accounts</a>
             </div>
             <div class="card-body pt-2">
-                {% set pay_groups = [
-                    ('Workers', 'fa-helmet-safety', t.workers_pending, t.workers_count, pending.workers),
-                    ('Suppliers', 'fa-truck-field', t.suppliers_pending, t.suppliers_count, pending.suppliers),
-                    ('Subcontractors', 'fa-people-group', t.subcontractors_pending, t.subcontractors_count, pending.subcontractors),
-                    ('Office staff', 'fa-user-tie', t.office_staff_pending, t.office_staff_count, pending.office_staff),
-                ] %}
-                {% set has_payables = [] %}
-                {% for label, icon, total, count, rows in pay_groups %}
-                    {% if rows %}{% set _ = has_payables.append(label) %}{% endif %}
-                {% endfor %}
-
-                {% if has_payables %}
-                    {% for label, icon, total, count, rows in pay_groups %}
-                        {% if rows %}
-                        <div class="rm-group">
-                            <div class="rm-group-head">
-                                <span><i class="fas {{ icon }} me-1" aria-hidden="true"></i>{{ label }}
-                                    <span class="rm-count">{{ count }}</span></span>
-                                <span class="rm-group-total">Rs. {{ "{:,.0f}".format(total or 0) }}</span>
-                            </div>
-                            {% for row in rows[:5] %}
-                            <div class="rm-row">
-                                <div class="rm-row-main">
-                                    <div class="rm-row-name">{{ row.name }}</div>
-                                    <div class="rm-row-meta">
-                                        {{ row.code }}{% if row.project %} · {{ row.project }} {{ row.stage }}{% endif %}
-                                        · Paid {{ "{:,.0f}".format(row.paid or 0) }} of {{ "{:,.0f}".format(row.total or 0) }}
-                                    </div>
-                                </div>
-                                <div class="rm-row-side">
-                                    <div class="rm-row-amount">Rs. {{ "{:,.0f}".format(row.pending or 0) }}</div>
-                                    <a class="rm-row-action" href="{{ row.action_url }}"
-                                       title="Settle this on the {{ row.action_module }} page">{{ row.action_label }}</a>
-                                </div>
-                            </div>
-                            {% endfor %}
-                            {% if rows|length > 5 %}
-                            <div class="rm-more">{{ rows|length - 5 }} more — open the {{ rows[0].action_module }} page for the full list.</div>
-                            {% endif %}
-                        </div>
-                        {% endif %}
-                    {% endfor %}
-                    <div class="rm-note">
-                        Payments to workers, suppliers, subcontractors and staff are recorded on their
-                        own pages — those are the entries that clear the balance. This form records the
-                        money movement itself.
-                    </div>
+                {% for acc in company_accounts[:8] %}
+                <div class="rm-account">
+                    <span class="rm-account-name">
+                        <i class="fas fa-{{ 'building-columns' if (acc.type or '')|lower == 'bank' else 'wallet' }} me-1" aria-hidden="true"></i>{{ acc.name }}
+                    </span>
+                    <span class="rm-account-amount {{ 'neg' if (acc.current_balance or 0) < -0.01 else '' }}">
+                        Rs. {{ "{:,.0f}".format(acc.current_balance or 0) }}
+                    </span>
+                </div>
                 {% else %}
-                    <div class="rm-empty"><i class="fas fa-circle-check me-1" aria-hidden="true"></i>Nothing pending.</div>
+                <div class="rm-empty">No accounts yet. <a href="{{ url_for('hdc_accounts_manage') }}">Add one</a></div>
+                {% endfor %}
+                {% if company_accounts|length > 8 %}
+                <div class="rm-more"><a href="{{ url_for('hdc_accounts_manage') }}">See {{ company_accounts|length - 8 }} more</a></div>
                 {% endif %}
             </div>
         </div>
 
         <div class="card hdc-card mb-3">
             <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
-                <span><i class="fas fa-arrow-down me-2" aria-hidden="true"></i>Still to receive</span>
-                <span class="rm-panel-total">Rs. {{ "{:,.0f}".format(to_receive) }}</span>
+                <span><i class="fas fa-clock-rotate-left me-2" aria-hidden="true"></i>Recent transactions</span>
+                <a href="{{ url_for('hdc_cashflow_register') }}" class="btn btn-sm btn-outline-secondary">See all</a>
             </div>
             <div class="card-body pt-2">
-                {% if pending.projects_receivable %}
+                {% for txn in recent_txns %}
+                <div class="rm-entry">
+                    <span class="rm-entry-dot {{ 'in' if txn.direction == 'in' else ('transfer' if txn.direction == 'internal' else 'out') }}"></span>
+                    <div class="rm-entry-main">
+                        <div class="rm-entry-title">{{ txn.note or txn.category|title or txn.type_label or 'Transaction' }}</div>
+                        <div class="rm-row-meta">
+                            {{ txn.date.isoformat() if txn.date else '' }} ·
+                            {% if txn.direction == 'in' %}{{ txn.party_name or txn.from_account }} → {{ txn.to_account or '—' }}
+                            {% elif txn.direction == 'out' %}{{ txn.from_account }} → {{ txn.party_name or txn.to_party }}
+                            {% else %}{{ txn.from_account }} → {{ txn.to_account or txn.to_party }}{% endif %}
+                        </div>
+                    </div>
+                    <div class="rm-row-amount rm-entry-amount {{ 'in' if txn.direction == 'in' else ('transfer' if txn.direction == 'internal' else 'out') }}">
+                        {% if txn.direction == 'in' %}+{% elif txn.direction == 'out' %}−{% endif %}Rs. {{ "{:,.2f}".format(txn.amount or 0) }}
+                    </div>
+                </div>
+                {% else %}
+                <div class="rm-empty">No transactions yet.</div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <details class="rm-pending card hdc-card">
+            <summary class="card-header hdc-card-header">
+                <span><i class="fas fa-hourglass-half me-2" aria-hidden="true"></i>Still to pay or receive</span>
+                <span class="rm-pending-total">Pay Rs. {{ "{:,.0f}".format(to_pay) }} · Receive Rs. {{ "{:,.0f}".format(to_receive) }}</span>
+            </summary>
+            <div class="card-body pt-2">
+                <div class="rm-pending-help">Choose Pay or Receive to continue.</div>
+                {% set pay_groups = [
+                    ('Workers', t.workers_pending, t.workers_count, pending.workers),
+                    ('Suppliers', t.suppliers_pending, t.suppliers_count, pending.suppliers),
+                    ('Subcontractors', t.subcontractors_pending, t.subcontractors_count, pending.subcontractors),
+                    ('Office staff', t.office_staff_pending, t.office_staff_count, pending.office_staff),
+                ] %}
+                {% for label, total, count, rows in pay_groups if rows %}
                 <div class="rm-group">
                     <div class="rm-group-head">
-                        <span><i class="fas fa-building me-1" aria-hidden="true"></i>Projects
-                            <span class="rm-count">{{ t.projects_count }}</span></span>
-                        <span class="rm-group-total">Rs. {{ "{:,.0f}".format(t.projects_receivable or 0) }}</span>
+                        <span>{{ label }} <span class="rm-count">{{ count }}</span></span>
+                        <span class="rm-group-total">Rs. {{ "{:,.0f}".format(total or 0) }}</span>
                     </div>
-                    {% for p in pending.projects_receivable[:5] %}
+                    {% for row in rows[:3] %}
+                    <div class="rm-row">
+                        <div class="rm-row-main">
+                            <div class="rm-row-name">{{ row.name }}</div>
+                            <div class="rm-row-meta">{{ row.code }}{% if row.project %} · {{ row.project }}{% endif %}</div>
+                        </div>
+                        <div class="rm-row-side">
+                            <div class="rm-row-amount">Rs. {{ "{:,.0f}".format(row.pending or 0) }}</div>
+                            <a class="rm-row-action" href="{{ row.action_url }}">{{ row.action_label }}</a>
+                        </div>
+                    </div>
+                    {% endfor %}
+                    {% if rows|length > 3 %}
+                    <div class="rm-more"><a href="{{ rows[0].action_url }}">See {{ rows|length - 3 }} more</a></div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+
+                {% if pending.projects_receivable %}
+                <div class="rm-group">
+                    <div class="rm-group-head"><span>Projects <span class="rm-count">{{ t.projects_count }}</span></span><span class="rm-group-total">Rs. {{ "{:,.0f}".format(t.projects_receivable or 0) }}</span></div>
+                    {% for p in pending.projects_receivable[:3] %}
                     <div class="rm-row">
                         <div class="rm-row-main">
                             <div class="rm-row-name">{{ p.name }}</div>
@@ -174,29 +149,22 @@
                         </div>
                         <div class="rm-row-side">
                             <div class="rm-row-amount">Rs. {{ "{:,.0f}".format(p.pending or 0) }}</div>
-                            <a class="rm-row-action in" href="{{ p.action_url }}"
-                               title="Opens this form with the project and the receipt category filled in">Receive</a>
+                            <a class="rm-row-action in" href="{{ p.action_url }}">Receive</a>
                         </div>
                     </div>
                     {% endfor %}
-                    {% if pending.projects_receivable|length > 5 %}
-                    <div class="rm-more">{{ pending.projects_receivable|length - 5 }} more projects.</div>
-                    {% endif %}
+                    {% if pending.projects_receivable|length > 3 %}<div class="rm-more">{{ pending.projects_receivable|length - 3 }} more projects.</div>{% endif %}
                 </div>
                 {% endif %}
 
                 {% if pending.tool_rentals_receivable %}
                 <div class="rm-group">
-                    <div class="rm-group-head">
-                        <span><i class="fas fa-screwdriver-wrench me-1" aria-hidden="true"></i>Tool rentals
-                            <span class="rm-count">{{ t.tool_rentals_count }}</span></span>
-                        <span class="rm-group-total">Rs. {{ "{:,.0f}".format(t.tool_rentals_receivable or 0) }}</span>
-                    </div>
-                    {% for tr in pending.tool_rentals_receivable[:5] %}
+                    <div class="rm-group-head"><span>Tool rentals</span><span class="rm-group-total">Rs. {{ "{:,.0f}".format(t.tool_rentals_receivable or 0) }}</span></div>
+                    {% for tr in pending.tool_rentals_receivable[:3] %}
                     <div class="rm-row">
                         <div class="rm-row-main">
                             <div class="rm-row-name">{{ tr.name }}</div>
-                            <div class="rm-row-meta">{{ tr.code }} · Paid {{ "{:,.0f}".format(tr.paid or 0) }}</div>
+                            <div class="rm-row-meta">{{ tr.code }}</div>
                         </div>
                         <div class="rm-row-side">
                             <div class="rm-row-amount">Rs. {{ "{:,.0f}".format(tr.pending or 0) }}</div>
@@ -207,67 +175,15 @@
                 </div>
                 {% endif %}
 
-                {% if not pending.projects_receivable and not pending.tool_rentals_receivable %}
-                <div class="rm-empty"><i class="fas fa-circle-check me-1" aria-hidden="true"></i>Nothing outstanding.</div>
+                {% if not pending.workers and not pending.suppliers and not pending.subcontractors and not pending.office_staff and not pending.projects_receivable and not pending.tool_rentals_receivable %}
+                <div class="rm-empty">Nothing outstanding.</div>
                 {% endif %}
             </div>
-        </div>
-
-        <div class="card hdc-card mb-3">
-            <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
-                <span><i class="fas fa-building-columns me-2" aria-hidden="true"></i>Accounts</span>
-                <a href="{{ url_for('hdc_accounts_manage') }}" class="btn btn-sm btn-outline-secondary">Manage</a>
-            </div>
-            <div class="card-body pt-2">
-                {% for acc in company_accounts[:12] %}
-                <div class="rm-account">
-                    <span class="rm-account-name">
-                        <i class="fas fa-{{ 'building-columns' if (acc.type or '')|lower == 'bank' else 'wallet' }} me-1" aria-hidden="true"></i>{{ acc.name }}
-                    </span>
-                    <span class="rm-account-amount {{ 'neg' if (acc.current_balance or 0) < -0.01 else '' }}">
-                        Rs. {{ "{:,.0f}".format(acc.current_balance or 0) }}
-                    </span>
-                </div>
-                {% else %}
-                <div class="rm-empty">No company accounts yet. <a href="{{ url_for('hdc_accounts_manage') }}">Create one</a></div>
-                {% endfor %}
-                {% if company_accounts|length > 12 %}
-                <div class="rm-more">{{ company_accounts|length - 12 }} more — see Balances.</div>
-                {% endif %}
-            </div>
-        </div>
-
-        <div class="card hdc-card">
-            <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
-                <span><i class="fas fa-clock-rotate-left me-2" aria-hidden="true"></i>Recent entries</span>
-                <a href="{{ url_for('hdc_accounts_entries') }}" class="btn btn-sm btn-outline-secondary">All</a>
-            </div>
-            <div class="card-body pt-2">
-                {% for txn in recent_txns[:8] %}
-                <div class="rm-entry">
-                    <span class="rm-entry-dot {{ 'in' if txn.type in ['project_income', 'party_receipt', 'client_payment'] else ('transfer' if txn.type == 'transfer' else 'out') }}"></span>
-                    <div class="rm-entry-main">
-                        <div class="rm-entry-title">
-                            {{ (txn.description or txn.party_name or txn.type.replace('_', ' ')|title) }}
-                        </div>
-                        <div class="rm-row-meta">
-                            {{ txn.date.isoformat() if txn.date else '' }} ·
-                            {{ txn.from_account.name if txn.from_account else '?' }} → {{ txn.to_account.name if txn.to_account else (txn.party_name or 'Off-ledger') }}
-                        </div>
-                    </div>
-                    <div class="rm-row-amount">Rs. {{ "{:,.0f}".format(txn.amount or 0) }}</div>
-                </div>
-                {% else %}
-                <div class="rm-empty">Nothing recorded yet.</div>
-                {% endfor %}
-            </div>
-        </div>
+        </details>
     </div>
 </div>
 {% endblock %}
 
 {% block extra_js %}
-{# The shared controller: direction gating, category → subcategory, the
-   searchable pickers and the "+ Add New …" modals. #}
 <script src="/hdc_static/js/pages/new_transaction.js"></script>
 {% endblock %}

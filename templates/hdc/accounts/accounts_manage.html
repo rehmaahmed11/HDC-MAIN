@@ -26,29 +26,18 @@
 <div class="acc-page-header">
     <div>
         <h2><i class="fas fa-wallet me-2"></i>Manage Accounts</h2>
-        <div class="acc-subtitle">
-            Every cash, bank, wallet and party account in one place — create, classify,
-            suspend and review balances. Balances are worked out from the entries as you
-            look at them, never stored, so they cannot drift out of step.
-        </div>
+        <div class="acc-subtitle">Manage accounts and check their balances.</div>
     </div>
     <div class="acc-toolbar">
         <a href="{{ url_for('hdc_accounts_hub') }}" class="btn btn-outline-secondary btn-sm">
-            <i class="fas fa-compass me-1"></i>Accounts Hub
+            <i class="fas fa-arrow-left me-1"></i>Back to Accounts
         </a>
-        <a href="{{ url_for('hdc_accounts') }}" class="btn btn-outline-secondary btn-sm">
-            <i class="fas fa-arrow-left me-1"></i>Transactions
-        </a>
-        <a href="{{ url_for('hdc_accounts_reconciliation') }}" class="btn btn-outline-info btn-sm">
-            <i class="fas fa-scale-balanced me-1"></i>Reconciliation
+        <a href="{{ url_for('hdc_money_center') }}" class="btn btn-outline-success btn-sm">
+            <i class="fas fa-sack-dollar me-1"></i>Record Money
         </a>
         <a href="{{ url_for('hdc_accounts_manage_export', show=show_mode, show_auto_person=(1 if show_auto_person else 0)) }}"
-           class="btn btn-outline-dark btn-sm">
+           class="btn btn-outline-dark btn-sm" title="Download CSV">
             <i class="fas fa-file-csv me-1"></i>CSV
-        </a>
-        <a href="{{ url_for('hdc_account_new', return_to=url_for('hdc_accounts_manage', show=show_mode)) }}"
-           class="btn btn-mint btn-sm">
-            <i class="fas fa-plus-lg me-1"></i>Add New Account
         </a>
     </div>
 </div>
@@ -61,17 +50,15 @@
         <a class="acc-stat acc-violet" href="{{ url_for('hdc_accounts_manage', show='all') }}">
             <div class="acc-stat-label"><i class="fas fa-layer-group me-1"></i>Total Accounts</div>
             <div class="acc-stat-value">{{ summary.total_accounts }}</div>
-            <div class="acc-stat-sub">
-                {{ summary.active_count }} active · {{ summary.inactive_count }} suspended · {{ summary.archived_count }} archived
-            </div>
+            <div class="acc-stat-sub">{{ summary.active_count }} active</div>
             <i class="fas fa-layer-group acc-stat-icon"></i>
         </a>
     </div>
     <div class="col-6 col-xl-3">
         <a class="acc-stat acc-emerald" href="{{ url_for('hdc_accounts_kpi_detail', metric='company_total') }}">
-            <div class="acc-stat-label"><i class="fas fa-building-columns me-1"></i>Company-Owned Total</div>
+            <div class="acc-stat-label"><i class="fas fa-building-columns me-1"></i>Company Balance</div>
             <div class="acc-stat-value"><small>Rs.</small> {{ "{:,.0f}".format(summary.company_owned or 0) }}</div>
-            <div class="acc-stat-sub">All accounts combined: {{ "{:,.0f}".format(summary.total_balance or 0) }}</div>
+            <div class="acc-stat-sub">Cash and bank accounts</div>
             <i class="fas fa-sack-dollar acc-stat-icon"></i>
         </a>
     </div>
@@ -112,25 +99,22 @@
     </div>
     <div class="col-6 col-xl-3">
         <a class="acc-stat {{ 'acc-rose' if summary.negative_count else 'acc-slate' }}"
-           href="{{ url_for('hdc_accounts_entries') }}"
-           title="Counts cash, bank and wallet accounts only. A client or supplier account running negative is normal — it is an advance or a credit, not an overdraft.">
-            <div class="acc-stat-label"><i class="fas fa-triangle-exclamation me-1"></i>Overdrawn Money Pots</div>
+           href="{{ url_for('hdc_accounts_entries') }}">
+            <div class="acc-stat-label"><i class="fas fa-triangle-exclamation me-1"></i>Cash / bank below zero</div>
             <div class="acc-stat-value">{{ summary.negative_count }}</div>
             <div class="acc-stat-sub">
                 {% if summary.negative_count %}
-                Needs review: {{ summary.negative_accounts|map(attribute='name')|join(', ')|truncate(46) }}
-                {% else %}No cash or bank account is overdrawn{% endif %}
+                Check: {{ summary.negative_accounts|map(attribute='name')|join(', ')|truncate(46) }}
+                {% else %}No account is below zero{% endif %}
             </div>
             <i class="fas fa-circle-exclamation acc-stat-icon"></i>
         </a>
     </div>
     <div class="col-6 col-xl-3">
         <div class="acc-stat acc-slate">
-            <div class="acc-stat-label"><i class="fas fa-robot me-1"></i>Auto-Generated</div>
+            <div class="acc-stat-label"><i class="fas fa-robot me-1"></i>System-created accounts</div>
             <div class="acc-stat-value">{{ summary.auto_count }}</div>
-            <div class="acc-stat-sub">
-                Party / worker ledgers created by the system
-            </div>
+            <div class="acc-stat-sub">Created automatically</div>
             <i class="fas fa-gears acc-stat-icon"></i>
         </div>
     </div>
@@ -140,16 +124,9 @@
 <div class="acc-section">
     <div class="acc-section-head">
         <h5><i class="fas fa-tags me-2" style="color:#8b5cf6;"></i>Account Groups</h5>
-        <span class="small text-muted">
-            Category &rarr; Subcategory, from the controlled classification hierarchy
-        </span>
+        <span class="small text-muted">Click a group to filter the list.</span>
     </div>
     <div class="acc-section-body">
-        <p class="small text-muted mb-3">
-            Each account belongs to exactly one <strong>Category &rarr; Subcategory &rarr; Account Type</strong>,
-            and the Account Type decides which <strong>channel</strong> it may use (cash, bank, digital wallet or
-            ledger-only). Click a chip to filter the list below to that group.
-        </p>
         <div class="d-flex flex-wrap gap-2">
             {% for g in groups %}
             <button type="button" class="acc-chip acc-group-filter"
@@ -212,7 +189,7 @@
             </select>
         </div>
         <div>
-            <label for="accEntity">Linked Entity</label>
+            <label for="accEntity">Linked party</label>
             <select id="accEntity" class="form-select form-select-sm">
                 <option value="">All entities</option>
                 {% for key, label in entity_labels.items() %}
@@ -235,16 +212,16 @@
                 {% for m in show_modes %}
                 <a class="btn {% if show_mode == m %}btn-success{% else %}btn-outline-success{% endif %}"
                    href="{{ url_for('hdc_accounts_manage', show=m, show_auto_person=(1 if show_auto_person else 0)) }}">
-                    {{ m|title }}
+                    {{ 'Suspended' if m == 'inactive' else m|title }}
                 </a>
                 {% endfor %}
             </div>
         </div>
         <div>
-            <label>Auto Ledgers</label>
+            <label>System-created</label>
             <a class="btn btn-sm {% if show_auto_person %}btn-info{% else %}btn-outline-info{% endif %}"
                href="{{ url_for('hdc_accounts_manage', show=show_mode, show_auto_person=(0 if show_auto_person else 1)) }}">
-                <i class="fas fa-robot me-1"></i>{{ 'Shown' if show_auto_person else 'Hidden' }}
+                <i class="fas fa-robot me-1"></i>{{ 'Hide' if show_auto_person else 'Show' }}
             </a>
         </div>
         <div class="ms-auto acc-filter-count" id="accCount">{{ accounts|length }} accounts</div>

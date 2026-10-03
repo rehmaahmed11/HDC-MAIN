@@ -1,213 +1,138 @@
-{# ==========================================================================
-   New Transaction — the shared entry form.
-
-   One implementation, rendered by both entry surfaces:
-     * accounts/new_transaction.html     (the focused page)
-     * accounts/cashflow_register.html   (the register's entry card)
-
-   It posts to the Cash Flow register engine.  Everything it renders comes from
-   the database — accounts (Account), categories / subcategories
-   (CashFlowCategory / CashFlowSubcategory), parties (CashFlowParty) and
-   projects (Project) — so there is no second, parallel vocabulary here.
-
-   Progressive by design: with JavaScript the user picks the Direction first and
-   only then sees the fields that direction actually needs.  Without JavaScript
-   every field stays visible and the server still enforces the same rules.
-
-   Field names posted (unchanged from the register's original form, so existing
-   bookmarks, scripts and the engine's contract all keep working):
-     direction, date, amount, account_id, destination_account_id, category_id,
-     subcategory_id, party_name, party_type, project_id, reference,
-     description, note
-   ========================================================================== #}
+{# One simple money form, shared by Record Money and Transaction History. #}
 {% set sel = txn_selection or {} %}
 {% set v = txn_values or {} %}
 {% set dir = sel.get('direction') or '' %}
 {% set err = txn_error or '' %}
+{% set selected_rules = (category_rules or {}).get(sel.get('category_id'), {}) %}
+{% set more_has_values = v.get('party_name') or v.get('project_id') or v.get('subcategory_id') or v.get('reference') or v.get('description') or v.get('note') or selected_rules.get('party_mode') == 'required' or selected_rules.get('project_mode') == 'required' %}
 
 <form method="POST" id="hdcTxnForm" class="hdc-txn-form" data-hdc-txn-form
       action="{{ form_action|default(url_for('hdc_new_transaction')) }}">
     <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="action" value="create_entry">
-    {# One key per render: a double-click or a retried post cannot double-post. #}
     <input type="hidden" name="_idempotency_key" value="{{ form_token }}">
+    {# Legacy/internal notes still round-trip if an older link submitted one. #}
+    <input type="hidden" name="note" id="txnNote" value="{{ v.get('note', '') }}">
 
     {% if err %}
-    {# Server-side rejection: the message the engine raised, next to the form it
-       belongs to, with every value below replayed so nothing is lost. #}
     <div class="hdc-txn-alert" role="alert" id="txnServerError">
         <i class="fas fa-circle-exclamation" aria-hidden="true"></i>
         <div>
             <strong>This transaction was not saved.</strong>
             <div class="hdc-txn-alert-msg">{{ err }}</div>
-            <div class="small text-muted mt-1">Your entries below were kept — correct the problem and save again.</div>
+            <div class="small text-muted mt-1">Your entries are kept. Fix the highlighted detail and try again.</div>
         </div>
     </div>
     {% endif %}
 
-    {# ── 1. Direction ─────────────────────────────────────────────────────── #}
-    <fieldset class="hdc-txn-block hdc-txn-block-first">
-        <legend class="hdc-txn-legend">
-            <span class="hdc-txn-step" aria-hidden="true">1</span> What kind of transaction is this?
-        </legend>
-
-        {# Real control, so the form still posts and validates without JS. #}
-        <select name="direction" id="txnDirection" class="form-select hdc-txn-native" required
-                aria-describedby="txnDirectionHelp">
+    <div class="hdc-txn-direction">
+        <label class="form-label" id="txnDirectionLabel" for="txnDirection">What happened?</label>
+        <select name="direction" id="txnDirection" class="form-select hdc-txn-native" required>
             <option value="">Choose…</option>
-            <option value="in" {% if dir == 'in' %}selected{% endif %}>Money In — money received</option>
-            <option value="out" {% if dir == 'out' %}selected{% endif %}>Money Out — money spent</option>
-            <option value="transfer" {% if dir == 'transfer' %}selected{% endif %}>Internal Transfer — between our own accounts</option>
+            <option value="in" {% if dir == 'in' %}selected{% endif %}>Received</option>
+            <option value="out" {% if dir == 'out' %}selected{% endif %}>Spent</option>
+            <option value="transfer" {% if dir == 'transfer' %}selected{% endif %}>Transfer</option>
         </select>
-
-        {# JS replaces the select with these; the select keeps the name. #}
         <div class="hdc-dir-group" id="txnDirectionGroup" role="radiogroup"
              aria-labelledby="txnDirectionLabel" hidden>
             <button type="button" class="hdc-dir-btn" role="radio" aria-checked="false"
                     data-direction="in" tabindex="0">
                 <span class="hdc-dir-icon hdc-dir-in"><i class="fas fa-arrow-down" aria-hidden="true"></i></span>
-                <span class="hdc-dir-text">
-                    <span class="hdc-dir-title">Money In</span>
-                    <span class="hdc-dir-sub">Money received</span>
-                </span>
+                <span class="hdc-dir-text"><span class="hdc-dir-title">Received</span></span>
             </button>
             <button type="button" class="hdc-dir-btn" role="radio" aria-checked="false"
                     data-direction="out" tabindex="-1">
                 <span class="hdc-dir-icon hdc-dir-out"><i class="fas fa-arrow-up" aria-hidden="true"></i></span>
-                <span class="hdc-dir-text">
-                    <span class="hdc-dir-title">Money Out</span>
-                    <span class="hdc-dir-sub">Money spent</span>
-                </span>
+                <span class="hdc-dir-text"><span class="hdc-dir-title">Spent</span></span>
             </button>
             <button type="button" class="hdc-dir-btn" role="radio" aria-checked="false"
                     data-direction="transfer" tabindex="-1">
                 <span class="hdc-dir-icon hdc-dir-transfer"><i class="fas fa-right-left" aria-hidden="true"></i></span>
-                <span class="hdc-dir-text">
-                    <span class="hdc-dir-title">Internal Transfer</span>
-                    <span class="hdc-dir-sub">Between our accounts</span>
-                </span>
+                <span class="hdc-dir-text"><span class="hdc-dir-title">Transfer</span></span>
             </button>
         </div>
-        <span class="visually-hidden" id="txnDirectionLabel">Transaction direction</span>
+        <div class="hdc-field-error" data-error-for="direction" hidden></div>
+    </div>
 
-        <div class="hdc-txn-help" id="txnDirectionHelp">
-            Money In and Money Out need a category; an Internal Transfer only moves
-            money between two of our own accounts.
-        </div>
-    </fieldset>
-
-    {# Everything below is progressive: revealed once a direction is chosen. #}
     <div class="hdc-txn-body" id="txnBody">
-
-        {# ── 2. Amount & account ──────────────────────────────────────────── #}
-        <fieldset class="hdc-txn-block">
-            <legend class="hdc-txn-legend"><span class="hdc-txn-step" aria-hidden="true">2</span>
-                <span id="txnAmountLegend">Amount and account</span>
-            </legend>
-            <div class="hdc-txn-grid">
-                <div class="hdc-field">
-                    <label class="form-label" for="txnDate">Date <span class="hdc-req" aria-hidden="true">*</span></label>
-                    <input type="date" name="date" id="txnDate" class="form-control"
-                           value="{{ txn_date_value }}" required>
-                    <div class="hdc-field-error" data-error-for="date" hidden></div>
-                </div>
-
-                <div class="hdc-field">
-                    <label class="form-label" for="txnAmount">
-                        Amount <span class="hdc-unit">PKR</span> <span class="hdc-req" aria-hidden="true">*</span>
-                    </label>
-                    <div class="hdc-money-input">
-                        <span class="hdc-money-prefix" aria-hidden="true">Rs</span>
-                        <input type="text" inputmode="decimal" autocomplete="off" name="amount"
-                               id="txnAmount" class="form-control" placeholder="50,000"
-                               value="{{ v.get('amount', '') }}" required
-                               aria-describedby="txnAmountHint">
-                    </div>
-                    <div class="hdc-field-hint" id="txnAmountHint">Commas are fine — 1,25,000.50</div>
-                    <div class="hdc-field-error" data-error-for="amount" hidden></div>
-                </div>
-
-                {# One treasury account for Money In / Money Out; the "From"
-                   account for an Internal Transfer.  Same name either way, so
-                   the posted contract never changes. #}
-                <div class="hdc-field">
-                    <label class="form-label" for="txnAccountInput" id="txnAccountLabel">
-                        Account <span class="hdc-req" aria-hidden="true">*</span>
-                    </label>
-                    <input type="text" id="txnAccountInput" class="form-control" data-combo-input
-                           placeholder="Search account… (e.g. MCB, cash)"
-                           autocomplete="off" role="combobox" aria-expanded="false"
-                           aria-autocomplete="list">
-                    <select name="account_id" id="txnAccount" class="form-select" required>
-                        <option value="">Choose account…</option>
-                        {% for a in accounts %}
-                        <option value="{{ a.id }}"
-                                {% if sel.get('account_id') == a.id %}selected{% endif %}>{{ a.name }} ({{ 'Bank' if (a.type or '')|lower == 'bank' else 'Cash' }})</option>
-                        {% endfor %}
-                    </select>
-                    <div class="hdc-field-error" data-error-for="account_id" hidden></div>
-                </div>
-
-                {# Internal Transfer only: where the money lands. #}
-                <div class="hdc-field" id="txnToField" hidden>
-                    <label class="form-label" for="txnToAccountInput">
-                        To account <span class="hdc-req" aria-hidden="true">*</span>
-                    </label>
-                    <input type="text" id="txnToAccountInput" class="form-control" data-combo-input
-                           placeholder="Search account…" autocomplete="off"
-                           role="combobox" aria-expanded="false" aria-autocomplete="list">
-                    <select name="destination_account_id" id="txnToAccount" class="form-select" disabled>
-                        <option value="">Choose account…</option>
-                        {% for a in accounts %}
-                        <option value="{{ a.id }}"
-                                {% if sel.get('destination_account_id') == a.id %}selected{% endif %}>{{ a.name }} ({{ 'Bank' if (a.type or '')|lower == 'bank' else 'Cash' }})</option>
-                        {% endfor %}
-                    </select>
-                    <div class="hdc-field-error" data-error-for="destination_account_id" hidden></div>
-                </div>
+        <div class="hdc-txn-grid hdc-txn-core">
+            <div class="hdc-field">
+                <label class="form-label" for="txnDate">Date <span class="hdc-req" aria-hidden="true">*</span></label>
+                <input type="date" name="date" id="txnDate" class="form-control"
+                       value="{{ txn_date_value }}" required>
+                <div class="hdc-field-error" data-error-for="date" hidden></div>
             </div>
-        </fieldset>
 
-        {# ── 3. Category (Money In / Money Out only) ──────────────────────── #}
-        <fieldset class="hdc-txn-block" id="txnCategoryBlock">
-            <legend class="hdc-txn-legend"><span class="hdc-txn-step" aria-hidden="true">3</span>
-                <span id="txnCategoryLegend">Category</span>
-            </legend>
-            <div class="hdc-txn-grid">
-                <div class="hdc-field">
-                    <label class="form-label" for="txnCategory">
-                        Category <span class="hdc-req" aria-hidden="true">*</span>
-                    </label>
-                    <select name="category_id" id="txnCategory" class="form-select">
-                        <option value="">Choose category…</option>
-                        {# Filtered by direction from the database — never a
-                           hard-coded list of category names.  Each option also
-                           carries the category's own field rules, so picking
-                           one is what decides which fields appear below. #}
-                        {% for c in categories %}
-                        {% set rules = (category_rules or {}).get(c.id, {}) %}
-                        <option value="{{ c.id }}"
-                                data-direction="{{ (c.direction or 'both')|lower }}"
-                                data-party-mode="{{ rules.get('party_mode', 'optional') }}"
-                                data-project-mode="{{ rules.get('project_mode', 'optional') }}"
-                                data-party-types="{{ (rules.get('party_types') or [])|join(',') }}"
-                                data-loan-effect="{{ rules.get('loan_effect', '') }}"
-                                data-project-effect="{{ rules.get('project_effect', '') }}"
-                                {% if sel.get('category_id') == c.id %}selected{% endif %}>{{ c.name }}</option>
-                        {% endfor %}
-                    </select>
-                    <div class="hdc-field-hint" id="txnCategoryHint">
-                        Only the categories that belong to this direction are listed.
-                    </div>
-                    <div class="hdc-field-error" data-error-for="category_id" hidden></div>
+            <div class="hdc-field">
+                <label class="form-label" for="txnAmount">Amount <span class="hdc-req" aria-hidden="true">*</span></label>
+                <div class="hdc-money-input">
+                    <span class="hdc-money-prefix" aria-hidden="true">Rs</span>
+                    <input type="text" inputmode="decimal" autocomplete="off" name="amount"
+                           id="txnAmount" class="form-control" placeholder="50,000"
+                           value="{{ v.get('amount', '') }}" required aria-describedby="txnAmountHint">
                 </div>
+                <div class="hdc-field-hint" id="txnAmountHint">Commas are okay.</div>
+                <div class="hdc-field-error" data-error-for="amount" hidden></div>
+            </div>
 
-                <div class="hdc-field">
-                    <label class="form-label" for="txnSubcategory">Subcategory</label>
+            <div class="hdc-field" id="txnAccountField">
+                <label class="form-label" for="txnAccountInput" id="txnAccountLabel">
+                    Account <span class="hdc-req" aria-hidden="true">*</span>
+                </label>
+                <input type="text" id="txnAccountInput" class="form-control" data-combo-input
+                       placeholder="Search cash or bank account" autocomplete="off"
+                       role="combobox" aria-expanded="false" aria-autocomplete="list">
+                <select name="account_id" id="txnAccount" class="form-select" required>
+                    <option value="">Choose account…</option>
+                    {% for a in accounts %}
+                    <option value="{{ a.id }}" {% if sel.get('account_id') == a.id %}selected{% endif %}>{{ a.name }} ({{ 'Bank' if (a.type or '')|lower == 'bank' else 'Cash' }})</option>
+                    {% endfor %}
+                </select>
+                <div class="hdc-field-error" data-error-for="account_id" hidden></div>
+            </div>
+
+            <div class="hdc-field" id="txnToField" hidden>
+                <label class="form-label" for="txnToAccountInput">To account <span class="hdc-req" aria-hidden="true">*</span></label>
+                <input type="text" id="txnToAccountInput" class="form-control" data-combo-input
+                       placeholder="Search destination account" autocomplete="off"
+                       role="combobox" aria-expanded="false" aria-autocomplete="list">
+                <select name="destination_account_id" id="txnToAccount" class="form-select" disabled>
+                    <option value="">Choose account…</option>
+                    {% for a in accounts %}
+                    <option value="{{ a.id }}" {% if sel.get('destination_account_id') == a.id %}selected{% endif %}>{{ a.name }} ({{ 'Bank' if (a.type or '')|lower == 'bank' else 'Cash' }})</option>
+                    {% endfor %}
+                </select>
+                <div class="hdc-field-error" data-error-for="destination_account_id" hidden></div>
+            </div>
+        </div>
+
+        <div class="hdc-field hdc-txn-category" id="txnCategoryBlock">
+            <label class="form-label" for="txnCategory" id="txnCategoryLabel">Category <span class="hdc-req" aria-hidden="true">*</span></label>
+            <select name="category_id" id="txnCategory" class="form-select">
+                <option value="">Choose category…</option>
+                {% for c in categories %}
+                {% set rules = (category_rules or {}).get(c.id, {}) %}
+                <option value="{{ c.id }}"
+                        data-direction="{{ (c.direction or 'both')|lower }}"
+                        data-party-mode="{{ rules.get('party_mode', 'optional') }}"
+                        data-project-mode="{{ rules.get('project_mode', 'optional') }}"
+                        data-party-types="{{ (rules.get('party_types') or [])|join(',') }}"
+                        data-loan-effect="{{ rules.get('loan_effect', '') }}"
+                        data-project-effect="{{ rules.get('project_effect', '') }}"
+                        {% if sel.get('category_id') == c.id %}selected{% endif %}>{{ c.name }}</option>
+                {% endfor %}
+            </select>
+            <div class="hdc-field-error" data-error-for="category_id" hidden></div>
+        </div>
+
+        <details class="hdc-txn-more" id="txnMoreDetails"
+                 data-has-values="{{ 'true' if more_has_values else 'false' }}" open>
+            <summary><span><i class="fas fa-plus me-1" aria-hidden="true"></i>More details</span></summary>
+            <div class="hdc-txn-grid hdc-txn-extra-grid">
+                <div class="hdc-field" id="txnSubcategoryField" hidden>
+                    <label class="form-label" for="txnSubcategory">Item / type <span class="hdc-optional">optional</span></label>
                     <select name="subcategory_id" id="txnSubcategory" class="form-select">
-                        <option value="">None</option>
-                        {# Rendered from the parent category's own children so the
-                           dependency is the database's, not the template's. #}
+                        <option value="">Choose item…</option>
                         {% for c in categories %}
                             {% for s in c.subcategories if s.is_active %}
                             <option value="{{ s.id }}" data-category="{{ c.id }}"
@@ -215,117 +140,70 @@
                             {% endfor %}
                         {% endfor %}
                     </select>
-                    <div class="hdc-field-hint" id="txnSubcategoryHint">Pick a category first.</div>
                     <div class="hdc-field-error" data-error-for="subcategory_id" hidden></div>
                 </div>
-            </div>
-        </fieldset>
 
-        {# ── 4. Party & project (Money In / Money Out only) ────────────────── #}
-        <fieldset class="hdc-txn-block" id="txnWhoBlock">
-            <legend class="hdc-txn-legend"><span class="hdc-txn-step" aria-hidden="true">4</span>
-                Who and where</legend>
-            <div class="hdc-txn-grid">
-                {# Both fields below are revealed by the category rules the
-                   server sent with the options above: a category that does not
-                   involve a party (or a project) never asks for one. #}
                 <div class="hdc-field" id="txnPartyField" data-field="party">
-                    {# The label is rewritten to "Owner / Client" for a project
-                       receipt: on that category the name is the project's owner
-                       and it is filled in from the project, not typed. #}
                     <label class="form-label" for="txnPartyInput" id="txnPartyLabel">
-                        <span id="txnPartyLabelText">Party / Person</span>
+                        <span id="txnPartyLabelText">Person / business</span>
                         <span class="hdc-req" id="txnPartyReq" hidden aria-hidden="true">*</span>
                     </label>
                     <input type="text" id="txnPartyInput" class="form-control" data-combo-input
-                           placeholder="Search party or person… (e.g. abd)"
-                           autocomplete="off" role="combobox" aria-expanded="false"
-                           aria-autocomplete="list">
+                           placeholder="Search a name" autocomplete="off"
+                           role="combobox" aria-expanded="false" aria-autocomplete="list">
                     <select name="party_name" id="txnParty" class="form-select">
-                        <option value="">None</option>
+                        <option value="">Choose person or business…</option>
                         {% for p in parties %}
-                        <option value="{{ p.name }}"
-                                data-party-type="{{ p.party_type or 'other' }}"
+                        <option value="{{ p.name }}" data-party-type="{{ p.party_type or 'other' }}"
                                 {% if v.get('party_name') == p.name %}selected{% endif %}>{{ p.name }}</option>
                         {% endfor %}
                     </select>
-                    <input type="hidden" name="party_type" id="txnPartyType"
-                           value="{{ v.get('party_type') or 'other' }}">
+                    <input type="hidden" name="party_type" id="txnPartyType" value="{{ v.get('party_type') or 'other' }}">
                     <div class="hdc-field-hint" id="txnPartyHint" hidden></div>
                     <div class="hdc-field-error" data-error-for="party_name" hidden></div>
                 </div>
 
                 <div class="hdc-field" id="txnProjectField" data-field="project">
-                    <label class="form-label" for="txnProjectInput">
-                        Project <span class="hdc-req" id="txnProjectReq" hidden aria-hidden="true">*</span>
-                    </label>
+                    <label class="form-label" for="txnProjectInput">Project <span class="hdc-req" id="txnProjectReq" hidden aria-hidden="true">*</span></label>
                     <input type="text" id="txnProjectInput" class="form-control" data-combo-input
-                           placeholder="Search project… (e.g. JPS)"
-                           autocomplete="off" role="combobox" aria-expanded="false"
-                           aria-autocomplete="list">
+                           placeholder="Search project" autocomplete="off"
+                           role="combobox" aria-expanded="false" aria-autocomplete="list">
                     <select name="project_id" id="txnProject" class="form-select">
-                        <option value="">No project</option>
-                        {# data-client is the owner this project's receipts are
-                           booked against — the script shows it so the name is
-                           confirmed, never retyped.  The server derives the
-                           same value, so the two can never disagree. #}
+                        <option value="">Choose project…</option>
                         {% for p in projects %}
-                        <option value="{{ p.id }}"
-                                data-client="{{ (project_clients or {}).get(p.id, '') }}"
+                        <option value="{{ p.id }}" data-client="{{ (project_clients or {}).get(p.id, '') }}"
                                 {% if sel.get('project_id') == p.id %}selected{% endif %}>{{ p.name }}</option>
                         {% endfor %}
                     </select>
                     <div class="hdc-field-hint" id="txnProjectHint" hidden></div>
                     <div class="hdc-field-error" data-error-for="project_id" hidden></div>
                 </div>
-            </div>
-            <div class="hdc-txn-help" id="txnRulesHelp"></div>
-        </fieldset>
 
-        {# ── 5. Optional detail ───────────────────────────────────────────── #}
-        <fieldset class="hdc-txn-block">
-            <legend class="hdc-txn-legend"><span class="hdc-txn-step" aria-hidden="true">5</span>
-                Reference &amp; description <span class="hdc-optional">optional</span>
-            </legend>
-            <div class="hdc-txn-grid">
                 <div class="hdc-field">
-                    <label class="form-label" for="txnReference">Reference</label>
+                    <label class="form-label" for="txnReference">Reference <span class="hdc-optional">optional</span></label>
                     <input type="text" name="reference" id="txnReference" class="form-control"
-                           maxlength="80" autocomplete="off" placeholder="Cheque / slip / bill no."
+                           maxlength="80" autocomplete="off" placeholder="Cheque or receipt number"
                            value="{{ v.get('reference', '') }}">
                     <div class="hdc-field-error" data-error-for="reference" hidden></div>
                 </div>
                 <div class="hdc-field">
-                    <label class="form-label" for="txnDescription">Description</label>
+                    <label class="form-label" for="txnDescription">Details <span class="hdc-optional">optional</span></label>
                     <input type="text" name="description" id="txnDescription" class="form-control"
-                           maxlength="200" autocomplete="off"
-                           placeholder="Auto-filled from category and party if left blank"
+                           maxlength="200" autocomplete="off" placeholder="What was it for?"
                            value="{{ v.get('description', '') }}">
                     <div class="hdc-field-error" data-error-for="description" hidden></div>
                 </div>
-                <div class="hdc-field hdc-field-wide">
-                    <label class="form-label" for="txnNote">Note <span class="hdc-optional">internal</span></label>
-                    <textarea name="note" id="txnNote" class="form-control" rows="2"
-                              maxlength="500" placeholder="Anything the next person should know">{{ v.get('note', '') }}</textarea>
-                    <div class="hdc-field-error" data-error-for="note" hidden></div>
-                </div>
             </div>
-        </fieldset>
+            <div class="hdc-txn-help" id="txnRulesHelp" hidden></div>
+        </details>
     </div>
 
-    {# ── Save ─────────────────────────────────────────────────────────────── #}
     <div class="hdc-txn-actions">
-        <div class="hdc-txn-actions-note" id="txnActionHint" role="status" aria-live="polite">
-            Choose a direction to start.
-        </div>
+        <div class="hdc-txn-actions-note" id="txnActionHint" role="status" aria-live="polite" hidden></div>
         <div class="hdc-txn-actions-buttons">
-            <button type="button" class="btn btn-outline-secondary" id="txnResetBtn" hidden>
-                <i class="fas fa-eraser me-1" aria-hidden="true"></i>Clear
-            </button>
+            <button type="button" class="btn btn-outline-secondary" id="txnResetBtn" hidden>Clear form</button>
             <button type="submit" class="btn btn-primary hdc-save-btn" id="txnSaveBtn">
-                <span class="hdc-save-idle">
-                    <i class="fas fa-floppy-disk me-1" aria-hidden="true"></i>Save Transaction
-                </span>
+                <span class="hdc-save-idle"><i class="fas fa-floppy-disk me-1" aria-hidden="true"></i>Save transaction</span>
                 <span class="hdc-save-busy" hidden>
                     <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Saving…
                 </span>
@@ -334,5 +212,4 @@
     </div>
 </form>
 
-{# ── "+ Add New …" modals: small, focused, no page reload ────────────────── #}
 {% include "accounts/_new_transaction_modals.html" %}
