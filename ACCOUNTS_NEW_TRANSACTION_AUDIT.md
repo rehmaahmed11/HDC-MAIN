@@ -389,8 +389,17 @@ project behaviour.
 
 ### Still open
 
-Section 5's remaining items are unchanged and **not** addressed here: no
-over-receipt guard (3.1), no duplicate-payment warning (3.2), money-out still
-does not reach project cost (3.9), and the three entry surfaces still exist
-separately — this change makes the register surface correct rather than
-consolidating them.
+The follow-up architecture audit is recorded in
+`TRANSACTION_ARCHITECTURE_AUDIT.md`.
+
+The two register defects listed above are now addressed: the shared engine
+applies the Accounts-style positive-pending-receivable cap for project receipts,
+and an active exact-reference duplicate is refused while voided rows remain
+usable for amend/replace. The linked ledger also retains the register reference.
+
+The remaining intentional boundary is unchanged: a generic project-linked
+money-out entry does not create an `Expense` source row or update project cost
+KPIs, and feature-specific payable workflows remain on their owning pages. The
+shared form is the uniform cash-movement pattern, not a generic substitute for
+worker, supplier, subcontractor, office-staff, rental, purchase, or split-ledger
+settlement.

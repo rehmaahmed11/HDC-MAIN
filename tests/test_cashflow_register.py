@@ -222,6 +222,17 @@ class CashFlowRegisterTestCase(unittest.TestCase):
                                100000 + 125000.50 - 4500.25 - 10000, places=2)
         self.assertAlmostEqual(bal[self.bank.id], 50000 + 10000, places=2)
 
+    def test_register_reference_is_copied_to_the_linked_ledger_row(self):
+        cats = self._categories()
+        entry = self._entry(
+            'out', 1250.50, account=self.cash,
+            category_id=cats['Material & Purchase'].id,
+            reference='VCHR-2026-001',
+        )
+        tx = db.session.get(AccountTransaction, entry.account_tx_id)
+        self.assertEqual(entry.reference, 'VCHR-2026-001')
+        self.assertEqual(tx.reference_id, 'VCHR-2026-001')
+
     def test_ledger_rows_get_minor_units_even_without_the_register(self):
         """The model listener must cover rows posted by other modules too."""
         row = AccountTransaction(
@@ -289,6 +300,34 @@ class CashFlowRegisterTestCase(unittest.TestCase):
         self.assertFalse(created2)
         self.assertEqual(first.id, second.id)
         self.assertEqual(CashFlowEntry.query.filter_by(idempotency_key='RETRY-1').count(), 1)
+
+    def test_exact_reference_duplicate_guard_ignores_voided_rows(self):
+        cats = self._categories()
+        posted = datetime(2026, 9, 21, 10, 30, 0)
+        first = self._entry(
+            'out', 2500, account=self.cash,
+            category_id=cats['Miscellaneous'].id,
+            reference='CHEQUE-77', date_posted=posted,
+        )
+        with self.assertRaises(ValueError) as caught:
+            save_manual_cash_flow_entry(
+                direction='out', amount=2500, account_id=self.cash.id,
+                category_id=cats['Miscellaneous'].id,
+                reference='CHEQUE-77', date_posted=posted, actor=self.actor,
+            )
+        self.assertIn('reference', str(caught.exception).lower())
+        self.assertIn('already exists', str(caught.exception).lower())
+
+        # A correction voids the original before posting the replacement, so
+        # reusing the same real-world document reference is intentional.
+        replacement, old = amend_manual_cash_flow_entry(
+            first, amount=2500, reason='corrected description', actor=self.actor)
+        db.session.commit()
+        self.assertTrue(old.is_void)
+        self.assertFalse(replacement.is_void)
+        self.assertEqual(replacement.reference, 'CHEQUE-77')
+        self.assertEqual(
+            CashFlowEntry.query.filter_by(reference='CHEQUE-77').count(), 2)
 
     # ── immutability ─────────────────────────────────────────────────────
 
@@ -822,6 +861,31 @@ class ProjectReceiptTestCase(unittest.TestCase):
         rules = category_field_rules(self.receipt_cat)
         self.assertEqual(rules['project_effect'], 'receipt')
         self.assertEqual(rules['project_mode'], 'required')
+
+    def test_positive_project_receivable_cannot_be_over_received(self):
+        from hdc.models.accounts import OwnerPayment
+        self._receipt(600000, reference='RCPT-1')
+        before_entries = CashFlowEntry.query.count()
+        before_payments = OwnerPayment.query.filter_by(
+            project_id=self.project.id, is_void=False).count()
+
+        with self.assertRaises(ValueError) as caught:
+            self._receipt(400001, reference='RCPT-2')
+
+        self.assertIn('exceeds project receivable pending', str(caught.exception))
+        self.assertEqual(CashFlowEntry.query.count(), before_entries)
+        self.assertEqual(
+            OwnerPayment.query.filter_by(
+                project_id=self.project.id, is_void=False).count(),
+            before_payments,
+        )
+
+    def test_zero_contract_project_remains_permissive(self):
+        """No established contract value means there is no cap to enforce."""
+        self.project.owner_lump_sum = 0.0
+        db.session.commit()
+        entry = self._receipt(250000, reference='ADVANCE-NO-CONTRACT')
+        self.assertIsNotNone(entry)
 
     def test_owner_is_taken_from_the_project_not_the_typed_name(self):
         """The project already knows its owner: a typed name cannot override it."""
