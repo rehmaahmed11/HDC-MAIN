@@ -45,6 +45,7 @@ HARNESS = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 
 NEW_TXN_URL = '/hdc/accounts/new-transaction'
 REGISTER_URL = '/hdc/accounts/cashflow/register'
+MONEY_CENTER_URL = '/hdc/accounts/money-center'
 FORM_PARTIAL = 'templates/hdc/accounts/_new_transaction_form.html'
 PAGE_SCRIPT = 'static/hdc/js/pages/new_transaction.js'
 
@@ -185,12 +186,23 @@ class NewTransactionTestCase(unittest.TestCase):
         self.assertIn('/hdc_static/css/new_transaction.css', html)
         self.assertIn('/hdc_static/js/pages/new_transaction.js', html)
 
-    def test_register_and_focused_page_render_the_same_form_partial(self):
-        register = self.client.get(REGISTER_URL).get_data(as_text=True)
-        self.assertIn('data-hdc-txn-form', register)
-        self.assertIn('/hdc_static/js/pages/new_transaction.js', register)
-        template = _read('templates/hdc/accounts/cashflow_register.html')
-        self.assertIn('{% include "accounts/_new_transaction_form.html" %}', template)
+    def test_every_entry_surface_renders_the_same_form_partial(self):
+        """Three surfaces, one form — Record Money included.
+
+        The Money Center used to be a second, parallel entry UI (a tile per
+        transaction type with its own mini-form).  It is now the same partial as
+        the register and the focused page, so the three can never drift apart.
+        """
+        for url in (REGISTER_URL, MONEY_CENTER_URL, NEW_TXN_URL):
+            with self.subTest(url=url):
+                page = self.client.get(url).get_data(as_text=True)
+                self.assertIn('data-hdc-txn-form', page)
+                self.assertIn('/hdc_static/js/pages/new_transaction.js', page)
+        for template_path in ('templates/hdc/accounts/cashflow_register.html',
+                              'templates/hdc/accounts/money_center.html',
+                              'templates/hdc/accounts/new_transaction.html'):
+            self.assertIn('{% include "accounts/_new_transaction_form.html" %}',
+                          _read(template_path), template_path)
 
     def test_the_pickers_render_the_database_vocabulary(self):
         html = _html.unescape(self.client.get(NEW_TXN_URL).get_data(as_text=True))

@@ -28,7 +28,8 @@
         <h2><i class="fas fa-wallet me-2"></i>Manage Accounts</h2>
         <div class="acc-subtitle">
             Every cash, bank, wallet and party account in one place — create, classify,
-            suspend and review balances. Balances are derived live from the unified ledger.
+            suspend and review balances. Balances are worked out from the entries as you
+            look at them, never stored, so they cannot drift out of step.
         </div>
     </div>
     <div class="acc-toolbar">
@@ -112,7 +113,7 @@
     <div class="col-6 col-xl-3">
         <a class="acc-stat {{ 'acc-rose' if summary.negative_count else 'acc-slate' }}"
            href="{{ url_for('hdc_accounts_entries') }}"
-           title="Counts only cash / bank / wallet accounts. A client or supplier ledger running negative is normal double-entry (an advance or credit), not an overdraft.">
+           title="Counts cash, bank and wallet accounts only. A client or supplier account running negative is normal — it is an advance or a credit, not an overdraft.">
             <div class="acc-stat-label"><i class="fas fa-triangle-exclamation me-1"></i>Overdrawn Money Pots</div>
             <div class="acc-stat-value">{{ summary.negative_count }}</div>
             <div class="acc-stat-sub">

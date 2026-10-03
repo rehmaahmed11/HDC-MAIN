@@ -3,656 +3,271 @@
 {% block page_heading %}Record Money{% endblock %}
 
 {% block content %}
-{% set is_admin = (current_user.role or '')|trim|lower == 'admin' %}
-{# ── Styles for Money Center ── #}
+{# ==========================================================================
+   Record Money — the Accounts section's entry page.
+
+   It renders the same shared form as /hdc/accounts/new-transaction and the
+   Cash Flow register (accounts/_new_transaction_form.html) and posts it to the
+   same engine, so every kind of transaction — money in, money out, internal
+   transfer — is recorded in exactly one place, in exactly one way.
+
+   Around the form: today's movement, the accounts, and what is still to be
+   paid or received.  A pending row links to the surface that owns that balance
+   (a worker's payment page writes the labour ledger; a project receipt comes
+   back here pre-filled), so recording money can never leave a balance behind.
+   ========================================================================== #}
+{% set t = pending.totals %}
+{% set to_pay = (t.workers_pending or 0) + (t.suppliers_pending or 0) + (t.subcontractors_pending or 0) + (t.office_staff_pending or 0) %}
+{% set to_receive = (t.projects_receivable or 0) + (t.tool_rentals_receivable or 0) %}
+
 <link rel="stylesheet" href="/hdc_static/css/money_center.css">
+<link rel="stylesheet" href="/hdc_static/css/new_transaction.css">
 
-{# ── Header ── #}
-<div class="money-center-header">
-  <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
+<div class="rm-header">
     <div>
-      <h2><i class="fas fa-sack-dollar me-2" style="color:#34d399;"></i>Record Money</h2>
-      <div class="subtitle">
-        Money <strong style="color:#34d399;">In</strong>, money <strong style="color:#fb7185;">Out</strong>, or a <strong style="color:#60a5fa;">Transfer</strong> between cash and bank — pick one below and fill the short form.
-      </div>
+        <h2><i class="fas fa-sack-dollar me-2" aria-hidden="true"></i>Record Money</h2>
+        <div class="rm-subtitle">
+            Money in, money out, or a transfer between your own accounts —
+            one form for all of it.
+        </div>
     </div>
-    <div class="d-flex gap-2 flex-wrap">
-      <a href="{{ url_for('hdc_accounts_hub') }}" class="btn btn-light btn-sm"><i class="fas fa-arrow-left me-1"></i>Back to Accounts</a>
-      <a href="{{ url_for('hdc_accounts_manage') }}" class="btn btn-outline-light btn-sm"><i class="fas fa-list me-1"></i>Balances</a>
+    <div class="rm-header-links">
+        <a href="{{ url_for('hdc_accounts_manage') }}" class="btn btn-sm btn-outline-secondary">
+            <i class="fas fa-list me-1" aria-hidden="true"></i>Balances
+        </a>
+        <a href="{{ url_for('hdc_accounts_hub') }}" class="btn btn-sm btn-outline-secondary">
+            <i class="fas fa-compass me-1" aria-hidden="true"></i>Accounts
+        </a>
     </div>
-  </div>
-
-  <div class="mc-kpi-grid">
-    <div class="mc-kpi pos">
-      <div class="mc-kpi-label"><i class="fas fa-building-columns me-1"></i>Company Total</div>
-      <div class="mc-kpi-value">Rs. {{ "{:,.0f}".format(kpis.company_owned_total or 0) }}</div>
-      <div class="mc-kpi-sub">Cash {{ "{:,.0f}".format(kpis.cash_total or 0) }} · Bank {{ "{:,.0f}".format(kpis.bank_total or 0) }}</div>
-    </div>
-    <div class="mc-kpi info">
-      <div class="mc-kpi-label"><i class="fas fa-arrow-down me-1"></i>Today In</div>
-      <div class="mc-kpi-value">Rs. {{ "{:,.0f}".format(kpis.today_in or 0) }}</div>
-      <div class="mc-kpi-sub">{{ kpis.today_count or 0 }} entries today</div>
-    </div>
-    <div class="mc-kpi neg">
-      <div class="mc-kpi-label"><i class="fas fa-arrow-up me-1"></i>Today Out</div>
-      <div class="mc-kpi-value">Rs. {{ "{:,.0f}".format(kpis.today_out or 0) }}</div>
-      <div class="mc-kpi-sub">Transfers {{ "{:,.0f}".format(kpis.today_transfer or 0) }}</div>
-    </div>
-    <div class="mc-kpi warn">
-      <div class="mc-kpi-label"><i class="fas fa-hand-holding-dollar me-1"></i>Total Payable</div>
-      <div class="mc-kpi-value">Rs. {{ "{:,.0f}".format(kpis.pending.total_payable or 0) }}</div>
-      <div class="mc-kpi-sub">{{ kpis.pending.workers_count + kpis.pending.subcontractors_count + kpis.pending.suppliers_count + kpis.pending.office_staff_count }} parties pending</div>
-    </div>
-    <div class="mc-kpi pos">
-      <div class="mc-kpi-label"><i class="fas fa-arrow-trend-up me-1"></i>Total Receivable</div>
-      <div class="mc-kpi-value">Rs. {{ "{:,.0f}".format(kpis.pending.total_receivable or 0) }}</div>
-      <div class="mc-kpi-sub">{{ kpis.pending.projects_count }} projects · {{ kpis.pending.tool_rentals_count }} rentals</div>
-    </div>
-    {% if is_admin %}
-    <div class="mc-kpi {{ 'neg' if kpis.has_overdraft else 'pos' }}">
-      <div class="mc-kpi-label"><i class="fas fa-shield-halved me-1"></i>Health</div>
-      <div class="mc-kpi-value">
-        {% if kpis.has_overdraft %}<i class="fas fa-triangle-exclamation me-1"></i>Overdraft{% else %}<i class="fas fa-circle-check me-1"></i>Healthy{% endif %}
-      </div>
-      <div class="mc-kpi-sub">
-        {% if kpis.recon_issues > 0 %}{{ kpis.recon_issues }} recon issues{% else %}No recon issues{% endif %}
-        · {{ kpis.company_accounts_count }} treasury accounts
-      </div>
-    </div>
-    {% endif %}
-  </div>
 </div>
 
-{# ── Overdraft / Attention ── #}
-{% if kpis.has_overdraft or kpis.recon_issues > 0 %}
-<div class="row g-2 mb-3">
-  {% if kpis.has_overdraft %}
-  <div class="col-12 col-md-6">
-    <div class="recon-alert danger">
-      <i class="fas fa-triangle-exclamation mt-1"></i>
-      <div>
-        <div class="fw-bold">Overdrawn Treasury Account(s)</div>
-        <div class="small">
-          {% for acc in kpis.company_accounts %}{% if acc.current_balance < -0.01 %}{{ acc.name }} ({{ "{:,.0f}".format(acc.current_balance) }}) {% endif %}{% endfor %}
-          — further outflows will be blocked by overdraft protection.
-        </div>
-      </div>
+{# ── Today's numbers ─────────────────────────────────────────────────────── #}
+<div class="rm-kpis">
+    <div class="rm-kpi">
+        <div class="rm-kpi-label"><i class="fas fa-building-columns me-1" aria-hidden="true"></i>Company total</div>
+        <div class="rm-kpi-value">Rs. {{ "{:,.0f}".format(kpis.company_owned_total or 0) }}</div>
+        <div class="rm-kpi-sub">Cash {{ "{:,.0f}".format(kpis.cash_total or 0) }} · Bank {{ "{:,.0f}".format(kpis.bank_total or 0) }}</div>
     </div>
-  </div>
-  {% endif %}
-  {% if kpis.recon_issues > 0 %}
-  <div class="col-12 col-md-6">
-    <div class="recon-alert warn">
-      <i class="fas fa-stethoscope mt-1"></i>
-      <div>
-        <div class="fw-bold">{{ kpis.recon_issues }} Reconciliation Issue(s)</div>
-        <div class="small">Source rows missing ledger postings or stale active postings. <a href="{{ url_for('hdc_accounts_reconciliation') }}">Open Reconciliation Check</a></div>
-      </div>
+    <div class="rm-kpi in">
+        <div class="rm-kpi-label"><i class="fas fa-arrow-down me-1" aria-hidden="true"></i>Money in — today</div>
+        <div class="rm-kpi-value">Rs. {{ "{:,.0f}".format(today_summary.total_in or 0) }}</div>
+        <div class="rm-kpi-sub">{{ today_summary.count or 0 }} entr{{ 'y' if (today_summary.count or 0) == 1 else 'ies' }} today</div>
     </div>
-  </div>
-  {% endif %}
+    <div class="rm-kpi out">
+        <div class="rm-kpi-label"><i class="fas fa-arrow-up me-1" aria-hidden="true"></i>Money out — today</div>
+        <div class="rm-kpi-value">Rs. {{ "{:,.0f}".format(today_summary.total_out or 0) }}</div>
+        <div class="rm-kpi-sub">Transfers {{ "{:,.0f}".format(today_summary.total_transfer or 0) }}</div>
+    </div>
+    <div class="rm-kpi {{ 'out' if (today_summary.net or 0) < 0 else 'in' }}">
+        <div class="rm-kpi-label"><i class="fas fa-scale-balanced me-1" aria-hidden="true"></i>Net — today</div>
+        <div class="rm-kpi-value">Rs. {{ "{:,.0f}".format(today_summary.net or 0) }}</div>
+        <div class="rm-kpi-sub">Money in minus money out</div>
+    </div>
+</div>
+
+{% if overdrawn_accounts %}
+<div class="rm-alert" role="alert">
+    <i class="fas fa-triangle-exclamation" aria-hidden="true"></i>
+    <div>
+        <strong>{{ overdrawn_accounts|length }} account{{ '' if overdrawn_accounts|length == 1 else 's' }} below zero:</strong>
+        {% for acc in overdrawn_accounts %}{{ acc.name }} ({{ "{:,.0f}".format(acc.current_balance or 0) }}){{ ', ' if not loop.last }}{% endfor %}.
+        Money out of {{ 'that account' if overdrawn_accounts|length == 1 else 'those accounts' }} will be refused until it is topped up.
+    </div>
 </div>
 {% endif %}
 
 <div class="row g-3">
-  {# ── LEFT: Quick Entry (smooth) ── #}
-  <div class="col-12 col-xl-5">
-    <div class="quick-entry-card">
-      <div class="quick-entry-header">
-        <div><i class="fas fa-bolt me-2" style="color:#065f46;"></i><strong>Smooth Money Entry</strong><br><small class="text-muted">Record any money in/out/transfer from Accounts — posts to unified ledger</small></div>
-        <span class="badge bg-success"><i class="fas fa-shield-halved me-1"></i>Protected</span>
-      </div>
-      <div class="p-3">
-        {# Step indicator #}
-        <div class="step-indicator">
-          <div class="d-flex align-items-center gap-1"><div class="step-dot active" id="step1-dot">1</div><span class="step-label active" id="step1-label">Direction</span></div>
-          <div class="step-line" id="step1-2-line"></div>
-          <div class="d-flex align-items-center gap-1"><div class="step-dot" id="step2-dot">2</div><span class="step-label" id="step2-label">Type</span></div>
-          <div class="step-line" id="step2-3-line"></div>
-          <div class="d-flex align-items-center gap-1"><div class="step-dot" id="step3-dot">3</div><span class="step-label" id="step3-label">Details</span></div>
+    {# ── The one form ─────────────────────────────────────────────────────── #}
+    <div class="col-12 col-xl-7">
+        <div class="card hdc-card" id="record-money-form">
+            <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-plus-circle me-2" aria-hidden="true"></i>New Transaction</span>
+                <a href="{{ url_for('hdc_new_transaction') }}" class="btn btn-sm btn-outline-secondary">
+                    <i class="fas fa-up-right-and-down-left-from-center me-1" aria-hidden="true"></i>Open full page
+                </a>
+            </div>
+            <div class="card-body">
+                {% include "accounts/_new_transaction_form.html" %}
+            </div>
         </div>
-
-        <form method="POST" id="moneyCenterForm">
-          <input type="hidden" name="action" value="quick_transaction">
-          <input type="hidden" name="type" id="mc_type">
-          <input type="hidden" name="related_entity_type" id="mc_related_type">
-
-          {# Step 1: Direction #}
-          <div id="mc-step1">
-            <label class="form-label fw-bold">Step 1 — What kind of money movement?</label>
-            <div class="direction-selector">
-              <div class="dir-btn in" data-direction="receive" onclick="mcSelectDirection('receive')">
-                <i class="fas fa-arrow-down" style="color:#10b981;"></i>
-                <div class="lbl">Money IN</div>
-                <div class="desc">Owner receipt, rental income, refund, party receipt</div>
-              </div>
-              <div class="dir-btn out" data-direction="pay" onclick="mcSelectDirection('pay')">
-                <i class="fas fa-arrow-up" style="color:#f43f5e;"></i>
-                <div class="lbl">Money OUT</div>
-                <div class="desc">Worker, supplier, subcontractor, office, expense</div>
-              </div>
-              <div class="dir-btn transfer" data-direction="transfer" onclick="mcSelectDirection('transfer')">
-                <i class="fas fa-right-left" style="color:#3b82f6;"></i>
-                <div class="lbl">Transfer</div>
-                <div class="desc">Cash ↔ Bank, internal treasury movement</div>
-              </div>
-            </div>
-          </div>
-
-          {# Step 2: Type #}
-          <div id="mc-step2" class="d-none">
-            <label class="form-label fw-bold">Step 2 — Select transaction type</label>
-            <div class="type-grid" id="mc-type-grid"></div>
-            <button type="button" class="btn btn-sm btn-outline-secondary mt-2" onclick="mcBackToStep(1)"><i class="fas fa-arrow-left me-1"></i>Back to Direction</button>
-          </div>
-
-          {# Step 3: Details #}
-          <div id="mc-step3" class="d-none">
-            <div class="d-flex justify-content-between align-items-center mb-2">
-              <label class="form-label fw-bold mb-0">Step 3 — Enter details</label>
-              <button type="button" class="btn btn-sm btn-outline-secondary" onclick="mcBackToStep(2)"><i class="fas fa-arrow-left me-1"></i>Back</button>
-            </div>
-
-            <div id="mc-selected-type-info" class="alert alert-light border small py-2 mb-2"></div>
-
-            <div class="row g-2">
-              <div class="col-6">
-                <label class="form-label">Date *</label>
-                <input type="date" name="date" class="form-control" value="{{ today }}" required>
-              </div>
-              <div class="col-6">
-                <label class="form-label">Amount (PKR) *</label>
-                <input type="number" step="0.01" min="0.01" name="amount" id="mc_amount" class="form-control" placeholder="0.00" required onwheel="this.blur()">
-              </div>
-            </div>
-
-            {# Pending snapshot #}
-            <div id="mc_pending_wrap" class="mt-2 d-none">
-              <div class="pending-hint">
-                <div class="ph-label" id="mc_pending_label">Pending Payable</div>
-                <div class="ph-value" id="mc_pending_value">Rs. 0</div>
-                <div class="ph-breakdown" id="mc_pending_breakdown"></div>
-                <div class="mt-2 small" id="mc_excess_info"></div>
-              </div>
-            </div>
-
-            {# Excess split (tip/advance) #}
-            <div id="mc_excess_wrap" class="mt-2 d-none">
-              <label class="form-label small fw-bold">Excess Split (when amount > pending)</label>
-              <div class="row g-2">
-                <div class="col-6">
-                  <label class="form-label small">Tip / Bonus</label>
-                  <input type="number" step="0.01" min="0" name="excess_tip_amount" id="mc_tip" class="form-control form-control-sm" value="0">
-                </div>
-                <div class="col-6">
-                  <label class="form-label small">Advance</label>
-                  <input type="number" step="0.01" min="0" name="excess_advance_amount" id="mc_advance" class="form-control form-control-sm" value="0">
-                </div>
-              </div>
-              <div class="small text-muted mt-1">If Tip=0, all excess auto-posted as Advance. Tip requires Project+Stage.</div>
-            </div>
-
-            <div class="mt-2" id="mc_from_wrap">
-              <label class="form-label" id="mc_from_label">From Account *</label>
-              <input type="text" id="mc_from_account_input" class="form-control" placeholder="Type to search account..." autocomplete="off">
-              <select name="from_account_id" id="mc_from_account" class="form-select" required>
-                <option value="">Select</option>
-                {% for a in all_accounts %}
-                <option value="{{ a.id }}" data-type="{{ a.type }}" data-group="{{ a.class_category or '' }}" data-balance="{{ a.current_balance }}" data-label="{{ a.name }}">{{ a.name }} ({{ a.class_category or a.type }}) | Bal: {{ "{:,.0f}".format(a.current_balance or 0) }}</option>
-                {% endfor %}
-              </select>
-              <div id="mc_from_balance" class="balance-hint d-none"></div>
-            </div>
-
-            <div class="mt-2" id="mc_to_wrap">
-              <label class="form-label" id="mc_to_label">To Account</label>
-              <input type="text" id="mc_to_account_input" class="form-control" placeholder="Type to search account (empty = off-ledger party)..." autocomplete="off">
-              <select name="to_account_id" id="mc_to_account" class="form-select">
-                <option value="">Select (or off-ledger party below)</option>
-                {% for a in all_accounts %}
-                <option value="{{ a.id }}" data-type="{{ a.type }}" data-group="{{ a.class_category or '' }}" data-balance="{{ a.current_balance }}" data-label="{{ a.name }}">{{ a.name }} ({{ a.class_category or a.type }}) | Bal: {{ "{:,.0f}".format(a.current_balance or 0) }}</option>
-                {% endfor %}
-              </select>
-            </div>
-
-            <div class="mt-2" id="mc_project_wrap">
-              <label class="form-label">Project</label>
-              <input type="text" id="mc_project_input" class="form-control" placeholder="Type to search project..." autocomplete="off">
-              <select name="project_id" id="mc_project" class="form-select">
-                <option value="">None</option>
-                {% for p in projects %}
-                <option value="{{ p.id }}">{{ p.name }}</option>
-                {% endfor %}
-              </select>
-            </div>
-
-            <div class="mt-2 d-none" id="mc_stage_wrap">
-              <label class="form-label">Stage</label>
-              <input type="text" id="mc_stage_input" class="form-control" placeholder="Type to search stage..." autocomplete="off">
-              <select name="stage_id" id="mc_stage" class="form-select">
-                <option value="">Select stage</option>
-              </select>
-            </div>
-
-            <div class="mt-2" id="mc_related_wrap">
-              <label class="form-label" id="mc_related_label">Related Entity</label>
-              <input type="text" id="mc_related_id_input" class="form-control" placeholder="Type to search worker / supplier / person..." autocomplete="off">
-              <select name="related_entity_id" id="mc_related_id" class="form-select">
-                <option value="">Select</option>
-              </select>
-              <div class="small text-muted mt-1" id="mc_related_help"></div>
-            </div>
-
-            <div class="mt-2 d-none" id="mc_office_target_wrap">
-              <label class="form-label">Office Target</label>
-              <select name="office_target" id="mc_office_target" class="form-select">
-                <option value="staff">Office Staff</option>
-                <option value="expense">Office Expense</option>
-              </select>
-            </div>
-
-            <div class="mt-2 d-none" id="mc_office_cat_wrap">
-              <label class="form-label">Office Expense Category</label>
-              <input type="text" name="office_expense_category" id="mc_office_cat" class="form-control" placeholder="e.g. Office Rent, Stationery" list="mcOfficeCatList">
-              <datalist id="mcOfficeCatList"></datalist>
-            </div>
-
-            <div class="mt-2 d-none" id="mc_exp_cat_wrap">
-              <label class="form-label">Expense Category *</label>
-              <input type="text" id="mc_exp_cat_input" class="form-control" placeholder="Type to search category..." autocomplete="off">
-              <select name="expense_category_id" id="mc_exp_cat" class="form-select">
-                <option value="">Select category</option>
-              </select>
-            </div>
-
-            <div class="mt-2">
-              <label class="form-label">Party / Purpose (off-ledger)</label>
-              <input type="text" name="party_name" id="mc_party_name" class="form-control" placeholder="Self, Food, Petrol, etc. — used when no To Account">
-            </div>
-
-            <div class="mt-2">
-              <label class="form-label">Reference ID</label>
-              <input type="text" name="reference_id" class="form-control" placeholder="Optional reference">
-            </div>
-
-            <div class="mt-2">
-              <label class="form-label">Note</label>
-              <textarea name="note" class="form-control" rows="2" placeholder="Why, what for, any detail..."></textarea>
-            </div>
-
-            <div class="mt-2 d-none" id="mc_settle_wrap">
-              <div class="form-check">
-                <input class="form-check-input" type="checkbox" name="settle_shortfall" id="mc_settle">
-                <label class="form-check-label small" for="mc_settle">Settle shortfall to zero (posts remaining as settlement)</label>
-              </div>
-            </div>
-
-            <div class="mt-3 d-flex gap-2">
-              <button type="button" class="btn btn-outline-secondary" onclick="mcBackToStep(2)"><i class="fas fa-arrow-left me-1"></i>Back</button>
-              <button type="submit" class="btn btn-success flex-fill"><i class="fas fa-check me-1"></i>Post to Unified Ledger</button>
-            </div>
-
-            <div class="small text-muted mt-2 text-center">
-              <i class="fas fa-shield-halved me-1"></i>Balances are checked automatically — an account can never go below zero
-            </div>
-          </div>
-        </form>
-      </div>
     </div>
 
-    {# Treasury Accounts quick view #}
-    <div class="card hdc-card mt-3">
-      <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
-        <span><i class="fas fa-building-columns me-2"></i>Company Accounts</span>
-        <a href="{{ url_for('hdc_accounts_manage') }}" class="btn btn-sm btn-outline-secondary">Manage</a>
-      </div>
-      <div class="card-body">
-        <div class="d-flex flex-wrap gap-1 mb-2">
-          {% for acc in company_accounts[:20] %}
-          <span class="acc-balance-chip {{ 'neg' if acc.current_balance < -0.01 else ('pos' if acc.current_balance > 0.01 else 'zero') }}">
-            <i class="fas fa-{{ 'building-columns' if acc.type == 'bank' else 'wallet' }}"></i>
-            {{ acc.name }}: {{ "{:,.0f}".format(acc.current_balance or 0) }}
-          </span>
-          {% endfor %}
-        </div>
-        {% if company_accounts|length == 0 %}
-        <div class="text-muted small">No company accounts found. <a href="{{ url_for('hdc_accounts_manage') }}">Create one</a></div>
-        {% endif %}
-      </div>
-    </div>
-
-    {# Recent transactions timeline #}
-    <div class="card hdc-card mt-3">
-      <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
-        <span><i class="fas fa-clock-rotate-left me-2"></i>Recent Entries</span>
-        <a href="{{ url_for('hdc_accounts_entries') }}" class="btn btn-sm btn-outline-secondary">All</a>
-      </div>
-      <div class="card-body p-2">
-        {% for txn in recent_txns[:15] %}
-        <div class="txn-timeline-item">
-          <div class="txn-dot {{ 'in' if txn.type in ['project_income','party_receipt','client_payment'] else ('transfer' if txn.type == 'transfer' else 'out') }}"></div>
-          <div class="flex-fill">
-            <div class="d-flex justify-content-between">
-              <span class="fw-semibold">{{ txn.type.replace('_',' ').title() }}</span>
-              <span class="fw-bold">Rs. {{ "{:,.0f}".format(txn.amount or 0) }}</span>
+    {# ── What is still open ───────────────────────────────────────────────── #}
+    <div class="col-12 col-xl-5">
+        <div class="card hdc-card mb-3">
+            <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-hand-holding-dollar me-2" aria-hidden="true"></i>Still to pay</span>
+                <span class="rm-panel-total">Rs. {{ "{:,.0f}".format(to_pay) }}</span>
             </div>
-            <div class="small text-muted">
-              {{ txn.date.isoformat() if txn.date else '' }} ·
-              {{ txn.from_account.name if txn.from_account else '?' }} → {{ txn.to_account.name if txn.to_account else (txn.party_name or 'Off-ledger') }}
-              {% if txn.project %} · {{ txn.project.name }}{% endif %}
+            <div class="card-body pt-2">
+                {% set pay_groups = [
+                    ('Workers', 'fa-helmet-safety', t.workers_pending, t.workers_count, pending.workers),
+                    ('Suppliers', 'fa-truck-field', t.suppliers_pending, t.suppliers_count, pending.suppliers),
+                    ('Subcontractors', 'fa-people-group', t.subcontractors_pending, t.subcontractors_count, pending.subcontractors),
+                    ('Office staff', 'fa-user-tie', t.office_staff_pending, t.office_staff_count, pending.office_staff),
+                ] %}
+                {% set has_payables = [] %}
+                {% for label, icon, total, count, rows in pay_groups %}
+                    {% if rows %}{% set _ = has_payables.append(label) %}{% endif %}
+                {% endfor %}
+
+                {% if has_payables %}
+                    {% for label, icon, total, count, rows in pay_groups %}
+                        {% if rows %}
+                        <div class="rm-group">
+                            <div class="rm-group-head">
+                                <span><i class="fas {{ icon }} me-1" aria-hidden="true"></i>{{ label }}
+                                    <span class="rm-count">{{ count }}</span></span>
+                                <span class="rm-group-total">Rs. {{ "{:,.0f}".format(total or 0) }}</span>
+                            </div>
+                            {% for row in rows[:5] %}
+                            <div class="rm-row">
+                                <div class="rm-row-main">
+                                    <div class="rm-row-name">{{ row.name }}</div>
+                                    <div class="rm-row-meta">
+                                        {{ row.code }}{% if row.project %} · {{ row.project }} {{ row.stage }}{% endif %}
+                                        · Paid {{ "{:,.0f}".format(row.paid or 0) }} of {{ "{:,.0f}".format(row.total or 0) }}
+                                    </div>
+                                </div>
+                                <div class="rm-row-side">
+                                    <div class="rm-row-amount">Rs. {{ "{:,.0f}".format(row.pending or 0) }}</div>
+                                    <a class="rm-row-action" href="{{ row.action_url }}"
+                                       title="Settle this on the {{ row.action_module }} page">{{ row.action_label }}</a>
+                                </div>
+                            </div>
+                            {% endfor %}
+                            {% if rows|length > 5 %}
+                            <div class="rm-more">{{ rows|length - 5 }} more — open the {{ rows[0].action_module }} page for the full list.</div>
+                            {% endif %}
+                        </div>
+                        {% endif %}
+                    {% endfor %}
+                    <div class="rm-note">
+                        Payments to workers, suppliers, subcontractors and staff are recorded on their
+                        own pages — those are the entries that clear the balance. This form records the
+                        money movement itself.
+                    </div>
+                {% else %}
+                    <div class="rm-empty"><i class="fas fa-circle-check me-1" aria-hidden="true"></i>Nothing pending.</div>
+                {% endif %}
             </div>
-          </div>
         </div>
-        {% else %}
-        <div class="text-muted small text-center py-3">No transactions yet.</div>
-        {% endfor %}
-      </div>
-    </div>
-  </div>
 
-  {# ── RIGHT: Money Flows + Pending ── #}
-  <div class="col-12 col-xl-7">
-    {# Tabs for flows #}
-    <ul class="nav nav-pills mb-3" role="tablist">
-      <li class="nav-item"><button class="nav-link active" data-bs-toggle="pill" data-bs-target="#flows-in" type="button"><i class="fas fa-arrow-down me-1" style="color:#10b981;"></i>Money IN ({{ in_count }})</button></li>
-      <li class="nav-item"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#flows-out" type="button"><i class="fas fa-arrow-up me-1" style="color:#f43f5e;"></i>Money OUT ({{ out_count }})</button></li>
-      <li class="nav-item"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#flows-transfer" type="button"><i class="fas fa-right-left me-1" style="color:#3b82f6;"></i>Transfers ({{ transfer_count }})</button></li>
-      <li class="nav-item"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#pending-tab" type="button"><i class="fas fa-hand-holding-dollar me-1"></i>Pending ({{ pending.totals.workers_count + pending.totals.subcontractors_count + pending.totals.suppliers_count + pending.totals.office_staff_count + pending.totals.projects_count }})</button></li>
-      {% if is_admin %}
-      <li class="nav-item"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#diagram-tab" type="button"><i class="fas fa-diagram-project me-1"></i>How It Works</button></li>
-      {% endif %}
-    </ul>
-
-    <div class="tab-content">
-      {# Money IN flows #}
-      <div class="tab-pane fade show active" id="flows-in">
-        <div class="row g-3">
-          {% for flow in grouped_flows.in %}
-          <div class="col-12 col-md-6">
-            <div class="flow-card" style="--flow-color:{% if flow.color=='emerald' %}#10b981{% elif flow.color=='cyan' %}#06b6d4{% else %}#3b82f6{% endif %};">
-              <div class="flow-card-header">
-                <div class="flow-icon {{ flow.color }}"><i class="fas {{ flow.icon }}"></i></div>
-                <div class="flex-fill">
-                  <div class="flow-title">{{ flow.label }}</div>
-                  <span class="flow-module">{{ flow.module }}</span>
+        <div class="card hdc-card mb-3">
+            <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-arrow-down me-2" aria-hidden="true"></i>Still to receive</span>
+                <span class="rm-panel-total">Rs. {{ "{:,.0f}".format(to_receive) }}</span>
+            </div>
+            <div class="card-body pt-2">
+                {% if pending.projects_receivable %}
+                <div class="rm-group">
+                    <div class="rm-group-head">
+                        <span><i class="fas fa-building me-1" aria-hidden="true"></i>Projects
+                            <span class="rm-count">{{ t.projects_count }}</span></span>
+                        <span class="rm-group-total">Rs. {{ "{:,.0f}".format(t.projects_receivable or 0) }}</span>
+                    </div>
+                    {% for p in pending.projects_receivable[:5] %}
+                    <div class="rm-row">
+                        <div class="rm-row-main">
+                            <div class="rm-row-name">{{ p.name }}</div>
+                            <div class="rm-row-meta">{{ p.client }} · Received {{ "{:,.0f}".format(p.paid or 0) }} of {{ "{:,.0f}".format(p.total or 0) }}</div>
+                        </div>
+                        <div class="rm-row-side">
+                            <div class="rm-row-amount">Rs. {{ "{:,.0f}".format(p.pending or 0) }}</div>
+                            <a class="rm-row-action in" href="{{ p.action_url }}"
+                               title="Opens this form with the project and the receipt category filled in">Receive</a>
+                        </div>
+                    </div>
+                    {% endfor %}
+                    {% if pending.projects_receivable|length > 5 %}
+                    <div class="rm-more">{{ pending.projects_receivable|length - 5 }} more projects.</div>
+                    {% endif %}
                 </div>
-                <span class="flow-badge in"><i class="fas fa-arrow-down me-1"></i>IN</span>
-              </div>
-              <div class="flow-desc">{{ flow.accounts_type }}</div>
-              <div class="flow-posting"><strong>Posting:</strong> {{ flow.posting }}</div>
-              <div class="flow-meta">
-                <span class="flow-badge">Tx: {{ flow.tx_type }}</span>
-                <span class="flow-badge">{{ flow.category }}</span>
-                {% if flow.needs_receiving_account %}<span class="flow-badge"><i class="fas fa-building-columns me-1"></i>Needs receiving account</span>{% endif %}
-              </div>
-              <div class="flow-meta">
-                <span class="flow-badge" title="Duplicate guard"><i class="fas fa-clone me-1"></i>{{ flow.duplicate_guard[:60] }}...</span>
-              </div>
-              <div class="flow-meta">
-                <span class="flow-badge" title="Void sync"><i class="fas fa-link me-1"></i>{{ flow.void_sync[:70] }}...</span>
-              </div>
-              <div class="flow-actions mt-2">
-                <button class="btn btn-outline-success btn-sm" onclick="mcQuickSelectType('{{ flow.accounts_entry_intent }}')"><i class="fas fa-plus me-1"></i>{{ flow.quick_action }}</button>
-                {% if flow.route %}<a href="{{ safe_url_for(flow.route) if flow.route.startswith('hdc_') else '#' }}" class="btn btn-outline-secondary btn-sm">Open Module</a>{% endif %}
-              </div>
-            </div>
-          </div>
-          {% endfor %}
-        </div>
-      </div>
+                {% endif %}
 
-      {# Money OUT flows #}
-      <div class="tab-pane fade" id="flows-out">
-        <div class="row g-3">
-          {% for flow in grouped_flows.out %}
-          <div class="col-12 col-md-6">
-            <div class="flow-card" style="--flow-color:#f43f5e;">
-              <div class="flow-card-header">
-                <div class="flow-icon {{ flow.color }}"><i class="fas {{ flow.icon }}"></i></div>
-                <div class="flex-fill">
-                  <div class="flow-title">{{ flow.label }}</div>
-                  <span class="flow-module">{{ flow.module }}</span>
+                {% if pending.tool_rentals_receivable %}
+                <div class="rm-group">
+                    <div class="rm-group-head">
+                        <span><i class="fas fa-screwdriver-wrench me-1" aria-hidden="true"></i>Tool rentals
+                            <span class="rm-count">{{ t.tool_rentals_count }}</span></span>
+                        <span class="rm-group-total">Rs. {{ "{:,.0f}".format(t.tool_rentals_receivable or 0) }}</span>
+                    </div>
+                    {% for tr in pending.tool_rentals_receivable[:5] %}
+                    <div class="rm-row">
+                        <div class="rm-row-main">
+                            <div class="rm-row-name">{{ tr.name }}</div>
+                            <div class="rm-row-meta">{{ tr.code }} · Paid {{ "{:,.0f}".format(tr.paid or 0) }}</div>
+                        </div>
+                        <div class="rm-row-side">
+                            <div class="rm-row-amount">Rs. {{ "{:,.0f}".format(tr.pending or 0) }}</div>
+                            <a class="rm-row-action in" href="{{ tr.action_url }}">{{ tr.action_label }}</a>
+                        </div>
+                    </div>
+                    {% endfor %}
                 </div>
-                <span class="flow-badge out"><i class="fas fa-arrow-up me-1"></i>OUT</span>
-              </div>
-              <div class="flow-desc">{{ flow.accounts_type }}</div>
-              <div class="flow-posting"><strong>Posting:</strong> {{ flow.posting }}</div>
-              <div class="flow-meta">
-                <span class="flow-badge">Tx: {{ flow.tx_type }}</span>
-                <span class="flow-badge">{{ flow.category }}</span>
-                {% if flow.needs_receiving_account %}<span class="flow-badge">Needs account</span>{% endif %}
-              </div>
-              {% if flow.excess_handling %}
-              <div class="flow-posting" style="background:#fffbeb; border-color:#fde68a;"><strong>Excess:</strong> {{ flow.excess_handling }}</div>
-              {% endif %}
-              <div class="flow-meta">
-                <span class="flow-badge" title="{{ flow.pending_calc }}"><i class="fas fa-calculator me-1"></i>Pending: {{ flow.pending_calc[:80] }}</span>
-              </div>
-              <div class="flow-actions mt-2">
-                <button class="btn btn-outline-danger btn-sm" onclick="mcQuickSelectType('{{ flow.accounts_entry_intent }}')"><i class="fas fa-plus me-1"></i>{{ flow.quick_action }}</button>
-                {% if flow.route %}<a href="{{ safe_url_for(flow.route) if flow.route.startswith('hdc_') else '#' }}" class="btn btn-outline-secondary btn-sm">Open Module</a>{% endif %}
-              </div>
-            </div>
-          </div>
-          {% endfor %}
-        </div>
-      </div>
+                {% endif %}
 
-      {# Transfers #}
-      <div class="tab-pane fade" id="flows-transfer">
-        <div class="row g-3">
-          {% for flow in grouped_flows.transfer %}
-          <div class="col-12 col-md-6">
-            <div class="flow-card" style="--flow-color:#3b82f6;">
-              <div class="flow-card-header">
-                <div class="flow-icon {{ flow.color }}"><i class="fas {{ flow.icon }}"></i></div>
-                <div class="flex-fill">
-                  <div class="flow-title">{{ flow.label }}</div>
-                  <span class="flow-module">{{ flow.module }}</span>
+                {% if not pending.projects_receivable and not pending.tool_rentals_receivable %}
+                <div class="rm-empty"><i class="fas fa-circle-check me-1" aria-hidden="true"></i>Nothing outstanding.</div>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="card hdc-card mb-3">
+            <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-building-columns me-2" aria-hidden="true"></i>Accounts</span>
+                <a href="{{ url_for('hdc_accounts_manage') }}" class="btn btn-sm btn-outline-secondary">Manage</a>
+            </div>
+            <div class="card-body pt-2">
+                {% for acc in company_accounts[:12] %}
+                <div class="rm-account">
+                    <span class="rm-account-name">
+                        <i class="fas fa-{{ 'building-columns' if (acc.type or '')|lower == 'bank' else 'wallet' }} me-1" aria-hidden="true"></i>{{ acc.name }}
+                    </span>
+                    <span class="rm-account-amount {{ 'neg' if (acc.current_balance or 0) < -0.01 else '' }}">
+                        Rs. {{ "{:,.0f}".format(acc.current_balance or 0) }}
+                    </span>
                 </div>
-                <span class="flow-badge transfer"><i class="fas fa-right-left me-1"></i>TRANSFER</span>
-              </div>
-              <div class="flow-desc">{{ flow.accounts_type }}</div>
-              <div class="flow-posting"><strong>Posting:</strong> {{ flow.posting }}</div>
-              <div class="flow-meta">
-                <span class="flow-badge">Tx: {{ flow.tx_type }}</span>
-                <span class="flow-badge">Overdraft: {{ 'Blocked' if 'Blocked' in flow.overdraft else flow.overdraft }}</span>
-              </div>
-              <div class="flow-meta">
-                <span class="flow-badge" title="Void sync"><i class="fas fa-link me-1"></i>{{ flow.void_sync[:80] }}</span>
-              </div>
-              <div class="flow-actions mt-2">
-                <button class="btn btn-outline-primary btn-sm" onclick="mcQuickSelectType('{{ flow.accounts_entry_intent }}')"><i class="fas fa-plus me-1"></i>{{ flow.quick_action }}</button>
-                <a href="{{ url_for('hdc_accounts') }}" class="btn btn-outline-secondary btn-sm">Transactions</a>
-                <a href="{{ url_for('hdc_cashflow_register') }}" class="btn btn-outline-secondary btn-sm">CF Register</a>
-              </div>
+                {% else %}
+                <div class="rm-empty">No company accounts yet. <a href="{{ url_for('hdc_accounts_manage') }}">Create one</a></div>
+                {% endfor %}
+                {% if company_accounts|length > 12 %}
+                <div class="rm-more">{{ company_accounts|length - 12 }} more — see Balances.</div>
+                {% endif %}
             </div>
-          </div>
-          {% endfor %}
         </div>
 
-        {% if is_admin %}
-        <div class="card hdc-card mt-3">
-          <div class="card-header hdc-card-header"><i class="fas fa-code-branch me-2"></i>Split Transfer Logic (Smooth Handling)</div>
-          <div class="card-body small">
-            <p class="text-muted">When <code>from_account != executed_by_account</code>, the system auto-creates 2 rows with same <code>group_id</code>:</p>
-            <ul class="mb-2">
-              <li><strong>Step 1:</strong> <code>transfer</code> from Source → Executor (internal)</li>
-              <li><strong>Step 2:</strong> actual type (e.g. <code>payroll</code>) from Executor → Final Destination</li>
-            </ul>
-            <p class="text-muted">Overdraft checked on both steps sequentially. Void by group_id voids both. Duplicate guard treats group as one.</p>
-            <div class="alert alert-light border small mb-0">
-              <strong>Example:</strong> Pay worker from Bank via Cash — Bank → Cash (step1 transfer), Cash → Worker (step2 payroll), same group_id.
-            </div>
-          </div>
-        </div>
-        {% endif %}
-      </div>
-
-      {# Pending tab #}
-      <div class="tab-pane fade" id="pending-tab">
-        <div class="row g-2 mb-3">
-          <div class="col-6 col-md-3"><div class="mc-kpi warn p-2"><div class="mc-kpi-label">Workers</div><div class="mc-kpi-value" style="font-size:1.1rem;">Rs. {{ "{:,.0f}".format(pending.totals.workers_pending or 0) }}</div><div class="mc-kpi-sub">{{ pending.totals.workers_count }} workers</div></div></div>
-          <div class="col-6 col-md-3"><div class="mc-kpi warn p-2"><div class="mc-kpi-label">Subcontractors</div><div class="mc-kpi-value" style="font-size:1.1rem;">Rs. {{ "{:,.0f}".format(pending.totals.subcontractors_pending or 0) }}</div><div class="mc-kpi-sub">{{ pending.totals.subcontractors_count }} subs</div></div></div>
-          <div class="col-6 col-md-3"><div class="mc-kpi warn p-2"><div class="mc-kpi-label">Suppliers</div><div class="mc-kpi-value" style="font-size:1.1rem;">Rs. {{ "{:,.0f}".format(pending.totals.suppliers_pending or 0) }}</div><div class="mc-kpi-sub">{{ pending.totals.suppliers_count }} suppliers</div></div></div>
-          <div class="col-6 col-md-3"><div class="mc-kpi warn p-2"><div class="mc-kpi-label">Office Staff</div><div class="mc-kpi-value" style="font-size:1.1rem;">Rs. {{ "{:,.0f}".format(pending.totals.office_staff_pending or 0) }}</div><div class="mc-kpi-sub">{{ pending.totals.office_staff_count }} staff</div></div></div>
-        </div>
-        <div class="row g-2 mb-3">
-          <div class="col-6"><div class="mc-kpi pos p-2"><div class="mc-kpi-label">Projects Receivable</div><div class="mc-kpi-value" style="font-size:1.1rem;">Rs. {{ "{:,.0f}".format(pending.totals.projects_receivable or 0) }}</div><div class="mc-kpi-sub">{{ pending.totals.projects_count }} projects</div></div></div>
-          <div class="col-6"><div class="mc-kpi pos p-2"><div class="mc-kpi-label">Tool Rentals Receivable</div><div class="mc-kpi-value" style="font-size:1.1rem;">Rs. {{ "{:,.0f}".format(pending.totals.tool_rentals_receivable or 0) }}</div><div class="mc-kpi-sub">{{ pending.totals.tool_rentals_count }} rentals</div></div></div>
-        </div>
-
-        <div class="row g-3">
-          <div class="col-12 col-md-6">
-            <div class="pending-card">
-              <div class="pending-header"><span class="pending-title"><i class="fas fa-helmet-safety me-1" style="color:#f43f5e;"></i>Workers Pending</span><span class="pending-total">Rs. {{ "{:,.0f}".format(pending.totals.workers_pending or 0) }}</span></div>
-              {% for w in pending.workers[:15] %}
-              <div class="pending-item">
-                <div><div class="name">{{ w.name }}</div><div class="code">{{ w.code }} · Paid {{ "{:,.0f}".format(w.paid) }} / {{ "{:,.0f}".format(w.total) }}</div></div>
-                <div class="text-end"><div class="amt pos">Rs. {{ "{:,.0f}".format(w.pending) }}</div><button class="btn btn-sm btn-outline-danger py-0 px-2 mt-1" style="font-size:0.65rem;" onclick="mcPayEntity('worker', {{ w.id }}, '{{ w.name }}', {{ w.pending }})">Pay</button></div>
-              </div>
-              {% else %}<div class="small text-muted text-center py-2">No worker payables pending 🎉</div>{% endfor %}
-            </div>
-
-            <div class="pending-card">
-              <div class="pending-header"><span class="pending-title"><i class="fas fa-truck-field me-1" style="color:#f43f5e;"></i>Suppliers Pending</span><span class="pending-total">Rs. {{ "{:,.0f}".format(pending.totals.suppliers_pending or 0) }}</span></div>
-              {% for s in pending.suppliers[:15] %}
-              <div class="pending-item">
-                <div><div class="name">{{ s.name }}</div><div class="code">{{ s.code }} · Paid {{ "{:,.0f}".format(s.paid) }} / {{ "{:,.0f}".format(s.total) }}</div></div>
-                <div class="text-end"><div class="amt pos">Rs. {{ "{:,.0f}".format(s.pending) }}</div><button class="btn btn-sm btn-outline-danger py-0 px-2 mt-1" style="font-size:0.65rem;" onclick="mcPayEntity('supplier', {{ s.id }}, '{{ s.name }}', {{ s.pending }})">Pay</button></div>
-              </div>
-              {% else %}<div class="small text-muted text-center py-2">No supplier payables pending 🎉</div>{% endfor %}
-            </div>
-          </div>
-
-          <div class="col-12 col-md-6">
-            <div class="pending-card">
-              <div class="pending-header"><span class="pending-title"><i class="fas fa-people-group me-1" style="color:#f43f5e;"></i>Subcontractors Pending</span><span class="pending-total">Rs. {{ "{:,.0f}".format(pending.totals.subcontractors_pending or 0) }}</span></div>
-              {% for s in pending.subcontractors[:15] %}
-              <div class="pending-item">
-                <div><div class="name">{{ s.name }}</div><div class="code">{{ s.code }}{% if s.project %} · {{ s.project }}{% endif %}{% if s.stage %} / {{ s.stage }}{% endif %}</div></div>
-                <div class="text-end"><div class="amt pos">Rs. {{ "{:,.0f}".format(s.pending) }}</div><button class="btn btn-sm btn-outline-danger py-0 px-2 mt-1" style="font-size:0.65rem;" onclick="mcPayEntity('subcontractor', {{ s.id }}, '{{ s.name }}', {{ s.pending }})">Pay</button></div>
-              </div>
-              {% else %}<div class="small text-muted text-center py-2">No subcontractor payables pending 🎉</div>{% endfor %}
-            </div>
-
-            <div class="pending-card">
-              <div class="pending-header"><span class="pending-title"><i class="fas fa-user-tie me-1" style="color:#f43f5e;"></i>Office Staff Pending</span><span class="pending-total">Rs. {{ "{:,.0f}".format(pending.totals.office_staff_pending or 0) }}</span></div>
-              {% for st in pending.office_staff[:15] %}
-              <div class="pending-item">
-                <div><div class="name">{{ st.name }}</div><div class="code">{{ st.code }} · Paid {{ "{:,.0f}".format(st.paid) }}</div></div>
-                <div class="text-end"><div class="amt pos">Rs. {{ "{:,.0f}".format(st.pending) }}</div><button class="btn btn-sm btn-outline-danger py-0 px-2 mt-1" style="font-size:0.65rem;" onclick="mcPayEntity('office_staff', {{ st.id }}, '{{ st.name }}', {{ st.pending }})">Pay</button></div>
-              </div>
-              {% else %}<div class="small text-muted text-center py-2">No office staff payables pending 🎉</div>{% endfor %}
-            </div>
-
-            <div class="pending-card">
-              <div class="pending-header"><span class="pending-title"><i class="fas fa-building me-1" style="color:#10b981;"></i>Projects Receivable</span><span class="pending-total" style="color:#065f46;">Rs. {{ "{:,.0f}".format(pending.totals.projects_receivable or 0) }}</span></div>
-              {% for p in pending.projects_receivable[:15] %}
-              <div class="pending-item">
-                <div><div class="name">{{ p.name }}</div><div class="code">{{ p.client }} · Received {{ "{:,.0f}".format(p.paid) }} / {{ "{:,.0f}".format(p.total) }}</div></div>
-                <div class="text-end"><div class="amt pos">Rs. {{ "{:,.0f}".format(p.pending) }}</div><button class="btn btn-sm btn-outline-success py-0 px-2 mt-1" style="font-size:0.65rem;" onclick="mcReceiveProject({{ p.id }}, '{{ p.name }}', {{ p.pending }})">Receive</button></div>
-              </div>
-              {% else %}<div class="small text-muted text-center py-2">No project receivables pending 🎉</div>{% endfor %}
-            </div>
-
-            {% if pending.tool_rentals_receivable %}
-            <div class="pending-card">
-              <div class="pending-header"><span class="pending-title"><i class="fas fa-screwdriver-wrench me-1" style="color:#10b981;"></i>Tool Rentals Receivable</span><span class="pending-total" style="color:#065f46;">Rs. {{ "{:,.0f}".format(pending.totals.tool_rentals_receivable or 0) }}</span></div>
-              {% for tr in pending.tool_rentals_receivable[:10] %}
-              <div class="pending-item">
-                <div><div class="name">{{ tr.name }}</div><div class="code">{{ tr.code }} · Paid {{ "{:,.0f}".format(tr.paid) }}</div></div>
-                <div class="text-end"><div class="amt pos">Rs. {{ "{:,.0f}".format(tr.pending) }}</div></div>
-              </div>
-              {% endfor %}
-            </div>
-            {% endif %}
-          </div>
-        </div>
-      </div>
-
-      {# How it works / diagram — internal documentation, admin only #}
-      {% if is_admin %}
-      <div class="tab-pane fade" id="diagram-tab">
         <div class="card hdc-card">
-          <div class="card-header hdc-card-header"><i class="fas fa-diagram-project me-2"></i>How Money Flows — One Ledger, No Duplicates</div>
-          <div class="card-body">
-            <div class="row g-3">
-              <div class="col-12 col-md-6">
-                <h6><i class="fas fa-shield-halved me-1" style="color:#10b981;"></i>Smooth Handling Guarantees</h6>
-                <ul class="small" style="line-height:1.8;">
-                  <li><strong>Single Source of Truth:</strong> Every module posts to <code>hdc_account_txn</code> unified ledger. Balances derived as opening + in − out, never stored.</li>
-                  <li><strong>Overdraft Protection:</strong> Company/cash/bank accounts cannot go negative. Checked in minor units (paisa) exact. Transfer checks both legs.</li>
-                  <li><strong>Duplicate Guard:</strong> <code>source_type:source_id</code> unique + <code>_has_recent_duplicate</code> time-window check prevents double entry.</li>
-                  <li><strong>Void Sync:</strong> Voiding source row (LabourLedger, Expense, etc.) auto-voids linked AccountTransaction and vice versa via <code>_accounts_set_void_by_source</code>.</li>
-                  <li><strong>Receipt Consistency:</strong> Every transaction generates receipt via <code>_receipt_company_profile</code>, linked by group_id for split transactions.</li>
-                  <li><strong>Reconciliation:</strong> Forensic scan finds orphan_txns, void_mismatch, duplicate_active, group_inconsistent, orphan_sources.</li>
-                  <li><strong>Day Lock:</strong> CF Register entries immutable, void-only, day lock via <code>CashDayLock</code> prevents back-dated edits, carries counted closing forward.</li>
-                  <li><strong>Excess Split:</strong> Overpayment auto-split: <code>payment_part=min(amount,pending)</code>, excess=amount−payment_part, tip+advance must equal excess.</li>
-                </ul>
-              </div>
-              <div class="col-12 col-md-6">
-                <h6><i class="fas fa-list-check me-1" style="color:#3b82f6;"></i>All Money Types Inventory ({{ flows_count }} flows)</h6>
-                <div class="small">
-                  <div class="mb-2"><strong style="color:#10b981;">IN ({{ in_count }}):</strong> Owner receipt, Client payment, Party receipt, Tool rental income, CF Register In, Supplier refund/settlement</div>
-                  <div class="mb-2"><strong style="color:#f43f5e;">OUT ({{ out_count }}):</strong> Worker payment/advance/tip, Supplier payment, Subcontractor payment, Sub-labour payment, Office staff payment/advance, Office expense, Material expense, Personal expense, Purchase paid, Tool purchase</div>
-                  <div class="mb-2"><strong style="color:#3b82f6;">TRANSFER ({{ transfer_count }}):</strong> Internal transfer (company accounts), Split transfer (source→executor→destination), Advance to person</div>
+            <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-clock-rotate-left me-2" aria-hidden="true"></i>Recent entries</span>
+                <a href="{{ url_for('hdc_accounts_entries') }}" class="btn btn-sm btn-outline-secondary">All</a>
+            </div>
+            <div class="card-body pt-2">
+                {% for txn in recent_txns[:8] %}
+                <div class="rm-entry">
+                    <span class="rm-entry-dot {{ 'in' if txn.type in ['project_income', 'party_receipt', 'client_payment'] else ('transfer' if txn.type == 'transfer' else 'out') }}"></span>
+                    <div class="rm-entry-main">
+                        <div class="rm-entry-title">
+                            {{ (txn.description or txn.party_name or txn.type.replace('_', ' ')|title) }}
+                        </div>
+                        <div class="rm-row-meta">
+                            {{ txn.date.isoformat() if txn.date else '' }} ·
+                            {{ txn.from_account.name if txn.from_account else '?' }} → {{ txn.to_account.name if txn.to_account else (txn.party_name or 'Off-ledger') }}
+                        </div>
+                    </div>
+                    <div class="rm-row-amount">Rs. {{ "{:,.0f}".format(txn.amount or 0) }}</div>
                 </div>
-
-                <h6 class="mt-3"><i class="fas fa-right-left me-1"></i>Account Section Smooth UX</h6>
-                <ul class="small" style="line-height:1.8;">
-                  <li><strong>Money Center</strong> (this page) — unified entry for all money types with direction → type → details stepper, real-time pending & balance hints</li>
-                  <li><strong>Transactions</strong> — KPI drilldown, full form with intent_matrix, excess split UI, settle_shortfall, office_target, receiving account validation</li>
-                  <li><strong>CF Register</strong> — primary entry for simple cash flow, immutable docs, day lock, project/party scoped</li>
-                  <li><strong>Manage Accounts</strong> — every account with live balance, classification, archive, bank detail</li>
-                  <li><strong>All Entries</strong> — audit view with filters, receipts, void/restore, reverse, group_id split view</li>
-                  <li><strong>Day Close</strong> — counted vs expected, difference, lock, carry forward</li>
-                  <li><strong>Reconciliation</strong> — forensic health check</li>
-                </ul>
-              </div>
+                {% else %}
+                <div class="rm-empty">Nothing recorded yet.</div>
+                {% endfor %}
             </div>
-
-            <div class="alert alert-light border mt-3 small">
-              <i class="fas fa-circle-info me-1"></i>
-              <strong>Money flow example — Worker Wage:</strong> TimeEntry calculates wage → LabourLedger entry_type=work (earned, non-cash) → Payroll run creates payment capped at balance → LabourLedger payment + Expense wage → AccountTransaction payroll via <code>_accounts_post_labour_ledger_row</code> from company to worker person account → Overdraft check in minor units → Duplicate guard via source_type:source_id → Receipt via company profile. Void sync ensures all three void together.
-            </div>
-
-            <div class="mt-3">
-              <h6><i class="fas fa-code me-1"></i>Posting Paths (Code)</h6>
-              <div class="table-responsive">
-                <table class="table table-sm small">
-                  <thead><tr><th>Module</th><th>Model</th><th>Service Function</th><th>Tx Type</th><th>Direction</th></tr></thead>
-                  <tbody>
-                    <tr><td>Workers</td><td>LabourLedger</td><td>_accounts_post_labour_ledger_row</td><td>payroll / advance_to_person</td><td>OUT</td></tr>
-                    <tr><td>Office</td><td>OfficeStaffLedger</td><td>_accounts_upsert_office_staff_ledger_txn</td><td>office_management_payment</td><td>OUT</td></tr>
-                    <tr><td>Office</td><td>OfficeExpense</td><td>_accounts_upsert_office_expense_txn</td><td>office_management_payment</td><td>OUT</td></tr>
-                    <tr><td>Expenses</td><td>Expense</td><td>_accounts_post_expense_row</td><td>expense_material / expense_general</td><td>OUT</td></tr>
-                    <tr><td>Projects</td><td>OwnerPayment</td><td>_accounts_post_owner_receipt</td><td>project_income</td><td>IN</td></tr>
-                    <tr><td>Purchase</td><td>PurchaseV2 (paid)</td><td>_accounts_upsert_purchase_paid_txn</td><td>purchase</td><td>OUT</td></tr>
-                    <tr><td>Purchase</td><td>SupplierLedger (credit)</td><td>_accounts_post_supplier_credit_row</td><td>purchase</td><td>OUT</td></tr>
-                    <tr><td>Subcontract</td><td>SubcontractPayment</td><td>_accounts_post_subcontract_payment_row</td><td>expense_subcontractor</td><td>OUT</td></tr>
-                    <tr><td>Subcontract Labour</td><td>SubcontractLabourPayment</td><td>_accounts_post_subcontract_labour_payment_row</td><td>payroll</td><td>OUT</td></tr>
-                    <tr><td>Tool Rental</td><td>ToolRentalPayment</td><td>post_tool_rental_payment_to_accounts</td><td>party_receipt</td><td>IN</td></tr>
-                    <tr><td>Accounts Direct</td><td>AccountTransaction</td><td>_create_accounts_transaction_with_sync</td><td>any</td><td>IN/OUT/TRANSFER</td></tr>
-                    <tr><td>CF Register</td><td>CashFlowEntry</td><td>register engine → AccountTransaction</td><td>party_receipt / party_payment / transfer</td><td>IN/OUT/TRANSFER</td></tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
         </div>
-      </div>
-      {% endif %}
     </div>
-  </div>
 </div>
 {% endblock %}
 
 {% block extra_js %}
-{# Data the Money Center JS needs, passed from the server as JSON so the
-   logic itself can live in a cacheable static file (audit 7.3). #}
-<script id="moneyCenterConfig" type="application/json">
-{"entryConfig": {{ entry_config_json|safe }}, "intentMatrix": {{ intent_matrix_json|safe }}}
-</script>
-<script src="/hdc_static/js/pages/money_center.js"></script>
+{# The shared controller: direction gating, category → subcategory, the
+   searchable pickers and the "+ Add New …" modals. #}
+<script src="/hdc_static/js/pages/new_transaction.js"></script>
 {% endblock %}

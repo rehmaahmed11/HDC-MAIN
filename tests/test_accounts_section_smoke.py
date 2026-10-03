@@ -162,12 +162,21 @@ class AccountsSectionSmokeTestCase(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
 
     def test_money_center_and_new_transaction_carry_field_hooks(self):
+        """One form, rendered by both entry surfaces.
+
+        Record Money used to ship its own per-type picker (``money_center.js``);
+        it now renders the shared partial, so the same field hooks must appear
+        on either page.
+        """
+        for url in ('/hdc/accounts/money-center', '/hdc/accounts/new-transaction'):
+            page = self.client.get(url).get_data(as_text=True)
+            with self.subTest(url=url):
+                for needle in ('data-hdc-txn-form', 'txnAmount', 'txnCategory',
+                               'value=\"in\"', 'value=\"out\"', 'value=\"transfer\"'):
+                    self.assertIn(needle, page, needle)
         mc = self.client.get('/hdc/accounts/money-center').get_data(as_text=True)
-        self.assertIn('money_center.js', mc)
-        nt = self.client.get('/hdc/accounts/new-transaction').get_data(as_text=True)
-        for needle in ('data-hdc-txn-form', 'txnAmount', 'txnCategory',
-                       'value=\"in\"', 'value=\"out\"', 'value=\"transfer\"'):
-            self.assertIn(needle, nt, needle)
+        self.assertIn('/hdc_static/js/pages/new_transaction.js', mc)
+        self.assertNotIn('money_center.js', mc)
 
     def test_all_entries_renders_every_form_option(self):
         """The workspace (and All Entries script payload) lists every operator type."""
