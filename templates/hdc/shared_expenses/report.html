@@ -302,9 +302,9 @@
 </div>
 
 <p class="small text-muted">
-    Printed by HDC ERP on {{ today }}. Figures are derived from the shared-expense records and their
-    settlements at the moment this page was rendered; the money side of every linked expense lives in the
-    accounts ledger (<code>hdc_account_txn</code>) and is never duplicated here.
+    Printed by HDC ERP on {{ today }}. Figures come from the shared-expense records and their
+    settlements at the moment this page was rendered; the money side of every linked expense stays in
+    Accounts and is never duplicated here.
     {% if summary.unlinked_count %}
     <strong>{{ summary.unlinked_count }} expense(s) totalling Rs. {{ '{:,.2f}'.format(summary.unlinked_amount) }}
     have no Accounts entry yet.</strong>

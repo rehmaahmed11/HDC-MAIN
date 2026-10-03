@@ -1,34 +1,46 @@
-"""HDC routes: Money Center — unified smooth handling of all money from Accounts.
+"""HDC routes: Record Money — the Accounts section's one entry page.
 
-This is the new primary entry point for handling all money types (in/out/transfer)
-from the Accounts section. It consolidates every money flow documented in
-hdc/services/money_hub.py into one smooth UX.
+``/hdc/accounts/money-center`` is where the Accounts section records money, and
+it renders the *same* New Transaction form as ``/hdc/accounts/new-transaction``
+and the entry card on the Cash Flow register
+(``templates/hdc/accounts/_new_transaction_form.html``).  Posting goes through
+the same engine as everywhere else —
+``hdc.services.transaction_entry.create_entry_from_form`` →
+``hdc.services.cashflow_register.save_manual_cash_flow_entry`` — so there is one
+form and one posting path for every kind of transaction (money in, money out,
+internal transfer), with the register's validation, balance guard, day lock,
+exactly-once posting and audit trail unchanged.
+
+Around the form the page shows the numbers an operator needs: today's movement,
+company balances, and what is still to be paid or received.  Every pending row
+links to the surface that *owns* that balance — a worker payable is settled on
+the worker's payment page (which writes the labour ledger), a supplier's on the
+supplier's page, and a project receipt comes back here with the form already
+pointed at that project.  That is deliberate: a cash entry that does not settle
+the payable behind it would leave the same person payable twice.
 
 Routes:
-  /hdc/accounts/money-center     Money Center page — all flows, pendings, quick entry
-  /hdc/accounts/money-center/api  JSON API for money center data
-
-The existing routes (/hdc/accounts, /hdc/accounts/manage, /hdc/cashflow/register, etc.)
-remain untouched — Money Center is an additional smooth hub that links to them.
+  GET/POST /hdc/accounts/money-center          the page + the shared form's post
+  GET      /hdc/accounts/money-center/api/...  JSON feeds (flows, pending, KPIs)
+  GET      /hdc/api/...                        the picker feeds the APIS expose
 """
-
-import json
-from datetime import timedelta
 
 from flask import flash, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 
 from hdc.extensions import _admin_only, db
-from hdc.models.accounts import Account, AccountTransaction
-from hdc.models.cashflow import CashDayLock
-from hdc.models.projects import Project, Stage
+from hdc.models.accounts import AccountTransaction
 from hdc.services.accounts import (
-    _account_dashboard_kpis,
     _account_intent_field_matrix,
     _create_accounts_transaction_with_sync,
 )
-from hdc.services.accounts_manage import list_manage_accounts, manage_summary
-from hdc.services.cashflow_register import day_lock_state, day_positions, day_totals, register_rows, register_summary
+from hdc.services.cashflow_register import (
+    CF_DIRECTION_LABELS,
+    category_options,
+    party_options,
+    register_rows,
+    register_summary,
+)
 from hdc.services.money_hub import (
     get_all_money_flows,
     get_money_accounts,
@@ -38,95 +50,204 @@ from hdc.services.money_hub import (
     get_pending_payables_detailed,
     get_smooth_entry_config,
 )
+from hdc.services.transaction_entry import (
+    clear_entry_form,
+    create_entry_from_form,
+    entry_form_context,
+    pop_entry_form,
+    stash_entry_form,
+)
 from hdc.utils.dates import _pkt_today
-from hdc.utils.money import from_minor
+from hdc.utils.format import _parse_date, _payload_int
+
+#: Directions the shared entry form understands (the form's own vocabulary).
+ENTRY_DIRECTIONS = ('in', 'out', 'transfer')
+
+#: Prefill numbers are shown in the form as typed, so they are only accepted
+#: when they look like an amount at all (the engine does the real parsing).
+_MAX_PREFILL_AMOUNT = 1_000_000_000_000
+
+
+def _account_balance(account):
+    """The live balance of an account row, whichever shape it arrives in.
+
+    ``get_money_accounts()`` returns plain dicts while other callers pass model
+    rows; the page treats both the same.
+    """
+    if isinstance(account, dict):
+        return float(account.get('current_balance') or 0)
+    return float(getattr(account, 'current_balance', 0) or 0)
 
 
 def _money_center_context():
+    """The numbers around the entry form — nothing the form itself supplies."""
     today = _pkt_today()
-    grouped = get_money_flows_grouped()
-    pending = get_pending_payables_detailed()
     accounts_info = get_money_accounts()
-    kpis = get_money_kpis()
-    entry_config = get_smooth_entry_config()
-    intent_matrix = _account_intent_field_matrix()
-    diagram = get_money_flow_diagram()
+    pending = get_pending_payables_detailed()
 
-    # Active accounts for dropdowns
+    today_summary = {'total_in': 0.0, 'total_out': 0.0,
+                     'total_transfer': 0.0, 'net': 0.0, 'count': 0}
     try:
-        active_accounts = list_manage_accounts(show='active', include_auto_person=True)
-    except Exception:
-        active_accounts = []
-
-    # Company accounts for quick transfer
-    company_accounts = accounts_info.get("company_accounts", [])
-
-    # Projects and stages for selectors
-    try:
-        projects = Project.query.filter(Project.is_void == False).order_by(Project.name.asc()).all()
-    except Exception:
-        projects = []
-    try:
-        stages = Stage.query.filter(Stage.is_void == False).order_by(Stage.name.asc()).all()
-    except Exception:
-        stages = []
-
-    # Today's register summary
-    today_summary = {'total_in': 0.0, 'total_out': 0.0, 'total_transfer': 0.0, 'net': 0.0, 'count': 0}
-    try:
-        rows = register_rows(date_from=today, date_to=today, limit=None)
-        today_summary = register_summary(rows)
+        today_summary = register_summary(
+            register_rows(date_from=today, date_to=today, limit=None))
     except Exception:
         pass
 
-    # Day lock state
-    lock_today = None
-    try:
-        lock_today = day_lock_state(today)
-    except Exception:
-        pass
-
-    # Recent transactions (last 20)
     recent_txns = []
     try:
         recent_txns = (AccountTransaction.query
-                       .filter(AccountTransaction.is_void == False)
+                       .filter(AccountTransaction.is_void == False)  # noqa: E712
                        .order_by(AccountTransaction.id.desc())
-                       .limit(20).all())
+                       .limit(10).all())
     except Exception:
         pass
 
-    # Summary for hub
-    try:
-        summary = manage_summary(active_accounts)
-    except Exception:
-        summary = {'total_accounts': 0, 'active_count': 0, 'negative_count': 0, 'negative_accounts': []}
+    company_accounts = accounts_info.get('company_accounts', [])
+    overdrawn_accounts = [a for a in company_accounts if _account_balance(a) < -0.01]
 
     return {
         'today': today.isoformat(),
-        'grouped_flows': grouped,
-        'all_flows': get_all_money_flows(),
-        'pending': pending,
-        'accounts_info': accounts_info,
+        'kpis': get_money_kpis(),
         'company_accounts': company_accounts,
-        'all_accounts': active_accounts,
-        'kpis': kpis,
-        'entry_config': entry_config,
-        'entry_config_json': json.dumps(entry_config),
-        'intent_matrix': intent_matrix,
-        'intent_matrix_json': json.dumps(intent_matrix),
-        'diagram': diagram,
-        'projects': projects,
-        'stages': stages,
-        'today_summary': today_summary,
-        'lock_today': lock_today,
+        'overdrawn_accounts': overdrawn_accounts,
+        'pending': pending,
         'recent_txns': recent_txns,
-        'summary': summary,
-        'flows_count': len(get_all_money_flows()),
-        'in_count': len(grouped.get('in', [])),
-        'out_count': len(grouped.get('out', [])),
-        'transfer_count': len(grouped.get('transfer', [])),
+        'today_summary': today_summary,
     }
+
+
+# ---------------------------------------------------------------------------
+# deep links: a pending row -> the form (or the page that settles it)
+# ---------------------------------------------------------------------------
+
+def _project_receipt_category():
+    """The category that books money received for a project, if configured.
+
+    The name is read from the database rather than hard-coded, so a renamed or
+    operator-added receipt category is what the pending rows point at.
+    """
+    for category in category_options('in'):
+        if getattr(category, 'is_project_receipt', False):
+            return category
+    return None
+
+
+def _prefill_category_id(raw_id, raw_name, direction):
+    """Resolve a deep-link's category, by id or by (case-insensitive) name."""
+    wanted_id = _payload_int({'category_id': raw_id}, 'category_id')
+    wanted_name = (raw_name or '').strip().casefold()
+    if not wanted_id and not wanted_name:
+        return 0
+    for category in category_options(direction or None):
+        if wanted_id and int(category.id) == wanted_id:
+            return int(category.id)
+        if wanted_name and (category.name or '').strip().casefold() == wanted_name:
+            return int(category.id)
+    return 0
+
+
+def _prefill_party(raw_name):
+    """The party a deep-link named, matched case-insensitively.
+
+    Only a name the picker actually offers is returned: pre-filling a name the
+    form cannot select would render a select with nothing chosen, which reads
+    as "the party was forgotten" rather than "the party is not in the list yet".
+    """
+    wanted = (raw_name or '').strip().casefold()
+    if not wanted:
+        return None
+    for party in party_options():
+        if (party.name or '').strip().casefold() == wanted:
+            return party
+    return None
+
+
+def _entry_prefill(args):
+    """Turn a pending row's deep-link into values the entry form replays.
+
+    Only fields the shared form understands are produced, and every id is
+    resolved against the database first: a stale bookmark opens a clean form
+    instead of one pointing at a row that no longer exists.
+    """
+    values = {}
+    direction = (args.get('direction') or '').strip().lower()
+    if direction in ENTRY_DIRECTIONS:
+        values['direction'] = direction
+
+    category_id = _prefill_category_id(args.get('category_id'),
+                                       args.get('category'), direction)
+    if category_id:
+        values['category_id'] = str(category_id)
+
+    project_id = _payload_int(args, 'project_id')
+    if project_id:
+        values['project_id'] = str(project_id)
+
+    party = _prefill_party(args.get('party'))
+    if party is not None:
+        values['party_name'] = party.name
+        values['party_type'] = (party.party_type or 'other')
+
+    amount = (args.get('amount') or '').strip().replace(',', '')
+    if amount:
+        try:
+            parsed = float(amount)
+        except ValueError:
+            parsed = 0.0
+        if parsed > 0 and parsed < _MAX_PREFILL_AMOUNT:
+            values['amount'] = '%.2f' % parsed
+
+    date = (args.get('date') or '').strip()
+    if date and _parse_date(date, fallback=None) is not None:
+        values['date'] = date
+
+    return values
+
+
+def _pending_links(pending):
+    """Attach to every pending row the link that settles it.
+
+    Services return plain facts; building URLs is the view's job, so nothing
+    else has to know that (for example) a worker payable is settled on
+    ``/hdc/workers/<id>/payment``.
+    """
+    receipt_category = _project_receipt_category()
+
+    for row in pending.get('workers', []):
+        row['action_url'] = url_for('hdc_worker_payment', wid=row['id'])
+        row['action_label'] = 'Pay'
+        row['action_module'] = 'Payroll'
+    for row in pending.get('suppliers', []):
+        row['action_url'] = url_for('hdc_purchase_v2_supplier_detail',
+                                    supplier_id=row['id'])
+        row['action_label'] = 'Pay'
+        row['action_module'] = 'Suppliers'
+    for row in pending.get('subcontractors', []):
+        row['action_url'] = url_for('hdc_subcontractor_payment_page', sid=row['id'])
+        row['action_label'] = 'Pay'
+        row['action_module'] = 'Subcontractor'
+    for row in pending.get('office_staff', []):
+        row['action_url'] = url_for('hdc_office_staff_payment', sid=row['id'])
+        row['action_label'] = 'Pay'
+        row['action_module'] = 'Office'
+    for row in pending.get('tool_rentals_receivable', []):
+        row['action_url'] = url_for('hdc_tool_rental_dashboard')
+        row['action_label'] = 'Open rentals'
+        row['action_module'] = 'HDC Tools'
+    for row in pending.get('projects_receivable', []):
+        # A project receipt belongs on this page: the entry form books it and
+        # the engine mirrors it into the project's own receipts, so the
+        # receivable really does come down.  Open it with the project, the
+        # receipt category and the outstanding amount already filled in.
+        params = {'direction': 'in', 'project_id': row['id']}
+        if receipt_category is not None:
+            params['category_id'] = receipt_category.id
+        if float(row.get('pending') or 0) > 0:
+            params['amount'] = '%.2f' % float(row['pending'])
+        row['action_url'] = url_for('hdc_money_center', **params) + '#record-money-form'
+        row['action_label'] = 'Receive'
+        row['action_module'] = 'This form'
+    return pending
 
 
 def register(app):
@@ -138,79 +259,44 @@ def register(app):
 
         if request.method == 'POST':
             action = (request.form.get('action') or '').strip().lower()
-            if action == 'quick_transaction':
-                tool_rental_id = request.form.get('tool_rental_id', type=int)
-                if tool_rental_id:
-                    try:
-                        from hdc.models.tool_rental import ToolRental
-                        from hdc.services.tool_rental import post_tool_rental_payment_to_accounts
-                        rental = ToolRental.query.get(tool_rental_id)
-                        if not rental:
-                            flash('Tool rental not found.', 'danger')
-                            return redirect(url_for('hdc_money_center'))
-                        amount = float(request.form.get('amount') or 0.0)
-                        receiving_account_id = request.form.get('to_account_id', type=int) or request.form.get('from_account_id', type=int)
-                        if not receiving_account_id:
-                            flash('Receiving company account required for tool rental income.', 'danger')
-                            return redirect(url_for('hdc_money_center'))
-                        from hdc.models.tool_rental import ToolRentalPayment
-                        from hdc.utils.dates import _pkt_now_naive
-                        from hdc.utils.format import _parse_date
-                        rental_id = rental.id
-                        note_text = request.form.get('note') or 'Tool rental payment via Money Center for rental #{}'.format(rental_id)
-                        pay_row = ToolRentalPayment(
-                            rental_id=rental.id,
-                            amount=amount,
-                            date=_parse_date(request.form.get('date')) or _pkt_today(),
-                            receiving_account_id=receiving_account_id,
-                            notes=note_text,
-                            is_void=False,
-                            created_at=_pkt_now_naive()
-                        )
-                        db.session.add(pay_row)
-                        db.session.flush()
-                        ok, msg = post_tool_rental_payment_to_accounts(pay_row, commit=True)
-                        if ok:
-                            flash('Tool rental payment recorded: Rs. {:.2f} for rental #{} posted to unified ledger.'.format(amount, rental_id), 'success')
-                        else:
-                            flash('Failed: {}'.format(msg), 'danger')
-                        return redirect(url_for('hdc_money_center'))
-                    except Exception as ex:
-                        db.session.rollback()
-                        flash('Tool rental payment failed: {}'.format(ex), 'danger')
-                        return redirect(url_for('hdc_money_center'))
-
-                payload = {
-                    'date': (request.form.get('date') or _pkt_today().isoformat()),
-                    'type': (request.form.get('type') or request.form.get('transaction_type') or '').strip(),
-                    'amount': (request.form.get('amount') or '0'),
-                    'from_account_id': (request.form.get('from_account_id') or ''),
-                    'to_account_id': (request.form.get('to_account_id') or ''),
-                    'executed_by_account_id': (request.form.get('executed_by_account_id') or request.form.get('from_account_id') or ''),
-                    'project_id': (request.form.get('project_id') or ''),
-                    'stage_id': (request.form.get('stage_id') or ''),
-                    'related_entity_type': (request.form.get('related_entity_type') or ''),
-                    'related_entity_id': (request.form.get('related_entity_id') or ''),
-                    'party_name': (request.form.get('party_name') or ''),
-                    'note': (request.form.get('note') or ''),
-                    'reference_id': (request.form.get('reference_id') or ''),
-                    'expense_category_id': (request.form.get('expense_category_id') or ''),
-                    'office_target': (request.form.get('office_target') or ''),
-                    'office_expense_category': (request.form.get('office_expense_category') or ''),
-                    'excess_tip_amount': (request.form.get('excess_tip_amount') or '0'),
-                    'excess_advance_amount': (request.form.get('excess_advance_amount') or '0'),
-                    'settle_shortfall': (request.form.get('settle_shortfall') or ''),
-                }
-                ok, msg, rows = _create_accounts_transaction_with_sync(payload)
-                if ok:
-                    tx_type = payload.get("type", "")
-                    amt = payload.get("amount", "")
-                    flash('Transaction recorded: {} row(s) posted to unified ledger. Direction: {} | Amount: Rs. {} | Single source of truth maintained.'.format(len(rows), tx_type, amt), 'success')
-                else:
-                    flash('Failed: {}'.format(msg), 'danger')
+            if action != 'create_entry':
+                flash('Unknown action — nothing was saved.', 'danger')
+                return redirect(url_for('hdc_money_center'))
+            try:
+                entry, created = create_entry_from_form(request.form, actor=current_user)
+                db.session.commit()
+            except ValueError as exc:
+                # Keep the submission so the re-rendered form is not empty.
+                db.session.rollback()
+                stash_entry_form(request.form, str(exc))
+                flash(str(exc), 'danger')
+                return redirect(url_for('hdc_money_center'))
+            except Exception as exc:  # pragma: no cover - defensive
+                db.session.rollback()
+                stash_entry_form(request.form, 'Unexpected error — your entry was not saved.')
+                flash(f'Unable to save the transaction: {exc}', 'danger')
                 return redirect(url_for('hdc_money_center'))
 
-        return render_template('accounts/money_center.html', **_money_center_context())
+            clear_entry_form()
+            if not created:
+                flash('That transaction was already recorded (duplicate submission ignored).',
+                      'info')
+            else:
+                flash(
+                    f"{CF_DIRECTION_LABELS.get(entry.direction, entry.direction)} recorded: "
+                    f"{entry.amount:,.2f} PKR (entry #{entry.id}).",
+                    'success',
+                )
+            return redirect(url_for('hdc_money_center'))
+
+        values, error = pop_entry_form()
+        # A pending row's deep-link is a suggestion; a rejected submission is
+        # what the user actually typed, so the draft wins.
+        values = {**_entry_prefill(request.args), **(values or {})}
+        context = _money_center_context()
+        context['pending'] = _pending_links(context['pending'])
+        context.update(entry_form_context(values or None, error or None))
+        return render_template('accounts/money_center.html', **context)
 
     @app.route('/hdc/accounts/money-center/api/flows', methods=['GET'])
     @login_required
@@ -282,7 +368,7 @@ def register(app):
             return jsonify(ok=False, message='Admin access required.'), 403
         return jsonify(ok=True, diagram=get_money_flow_diagram())
 
-    # Entity options APIs for smooth Money Center selectors
+    # Entity options APIs for pickers and module screens.
     @app.route('/hdc/api/workers', methods=['GET'])
     @login_required
     def hdc_api_workers_options():

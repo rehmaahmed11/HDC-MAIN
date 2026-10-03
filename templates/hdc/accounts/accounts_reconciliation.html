@@ -5,7 +5,7 @@
 {% block content %}
 <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
     <div>
-        <h5 class="mb-1"><i class="fas fa-shield-halved me-2 text-primary"></i>Forensic Reconciliation</h5>
+        <h5 class="mb-1"><i class="fas fa-shield-halved me-2 text-primary"></i>Books Check</h5>
         <div class="small text-muted">
             Scanned at {{ fmt_pkt(scanned_at) }} ·
             <strong class="{% if total_issues == 0 %}text-success{% else %}text-danger{% endif %}">
@@ -25,31 +25,31 @@
     <div class="col-6 col-md">
         <div class="rc-kpi {% if findings.totals.orphan_txns %}rc-kpi-bad{% else %}rc-kpi-ok{% endif %}">
             <div class="rc-kpi-num">{{ findings.totals.orphan_txns }}</div>
-            <div class="rc-kpi-lbl">Orphan transactions</div>
+            <div class="rc-kpi-lbl">Entries with no source</div>
         </div>
     </div>
     <div class="col-6 col-md">
         <div class="rc-kpi {% if findings.totals.void_mismatch %}rc-kpi-bad{% else %}rc-kpi-ok{% endif %}">
             <div class="rc-kpi-num">{{ findings.totals.void_mismatch }}</div>
-            <div class="rc-kpi-lbl">Void state mismatch</div>
+            <div class="rc-kpi-lbl">Voided on one side only</div>
         </div>
     </div>
     <div class="col-6 col-md">
         <div class="rc-kpi {% if findings.totals.duplicate_active %}rc-kpi-bad{% else %}rc-kpi-ok{% endif %}">
             <div class="rc-kpi-num">{{ findings.totals.duplicate_active }}</div>
-            <div class="rc-kpi-lbl">Active duplicates</div>
+            <div class="rc-kpi-lbl">Possible duplicates</div>
         </div>
     </div>
     <div class="col-6 col-md">
         <div class="rc-kpi {% if findings.totals.group_inconsistent %}rc-kpi-bad{% else %}rc-kpi-ok{% endif %}">
             <div class="rc-kpi-num">{{ findings.totals.group_inconsistent }}</div>
-            <div class="rc-kpi-lbl">Split inconsistencies</div>
+            <div class="rc-kpi-lbl">Splits that do not add up</div>
         </div>
     </div>
     <div class="col-6 col-md">
         <div class="rc-kpi {% if findings.totals.orphan_sources %}rc-kpi-bad{% else %}rc-kpi-ok{% endif %}">
             <div class="rc-kpi-num">{{ findings.totals.orphan_sources }}</div>
-            <div class="rc-kpi-lbl">Sources without cash entry</div>
+            <div class="rc-kpi-lbl">Records with no cash entry</div>
         </div>
     </div>
 </div>
@@ -57,7 +57,7 @@
 {% if total_issues == 0 %}
 <div class="alert alert-success">
     <i class="fas fa-circle-check me-1"></i>
-    All clear. Every account transaction is correctly linked to its source row, no duplicates, no split inconsistencies.
+    All clear. Every entry is linked to its source record — no duplicates and no splits that fail to add up.
 </div>
 {% endif %}
 
@@ -73,9 +73,9 @@
 
 {# ---------- Orphan transactions ---------- #}
 {{ section_open(
-    'Orphan transactions (linked source row missing)',
+    'Entries whose source record is missing',
     findings.totals.orphan_txns,
-    'Account txn says it came from a worker/supplier/expense row that no longer exists.'
+    'The entry says it came from a worker, supplier or expense record that no longer exists.'
 ) }}
 {% if findings.orphan_txns %}
 <div class="table-responsive">
@@ -118,9 +118,9 @@
 
 {# ---------- Void mismatch ---------- #}
 {{ section_open(
-    'Void state mismatch',
+    'Voided on one side only',
     findings.totals.void_mismatch,
-    'Source row and account txn disagree on whether the entry is voided.'
+    'The record and its cash entry disagree about whether this was voided.'
 ) }}
 {% if findings.void_mismatch %}
 <div class="table-responsive">
@@ -153,9 +153,9 @@
 
 {# ---------- Duplicate active txns ---------- #}
 {{ section_open(
-    'Active duplicate transactions',
+    'Possible duplicate entries',
     findings.totals.duplicate_active,
-    'Two or more active rows share identical date / type / amount / accounts / party / reference (and are not part of the same intentional split).'
+    'Two or more live entries share the same date, type, amount, accounts, party and reference, and are not part of one deliberate split.'
 ) }}
 {% if findings.duplicate_active %}
 <div class="table-responsive">
@@ -190,9 +190,9 @@
 
 {# ---------- Group split inconsistencies ---------- #}
 {{ section_open(
-    'Split / group inconsistencies',
+    'Splits that do not add up',
     findings.totals.group_inconsistent,
-    'Same group_id has a mix of active+voided rows or step amounts that do not agree.'
+    'One split mixes live and voided rows, or its steps do not agree.'
 ) }}
 {% if findings.group_inconsistent %}
 <div class="table-responsive">
@@ -221,9 +221,9 @@
 
 {# ---------- Source rows without an account txn ---------- #}
 {{ section_open(
-    'Source rows without a paired account transaction',
+    'Records with no cash entry',
     findings.totals.orphan_sources,
-    'Worker/staff/owner/expense source rows that should have moved cash but no account entry exists.'
+    'A worker, staff, owner or expense record that should have moved cash, with no entry recorded.'
 ) }}
 {% if findings.orphan_sources %}
 <div class="table-responsive">

@@ -666,10 +666,19 @@ def get_pending_payables_detailed():
         pass
     office_pending = sorted(office_pending, key=lambda x: x["pending"], reverse=True)
 
-    # Projects Receivable
+    # Projects Receivable.
+    #
+    # ``Project`` has no ``is_void`` column: asking for one raised inside this
+    # try/except, so every project's outstanding money was silently dropped and
+    # the list always came back empty.  A project that still owes money is one
+    # that has not been closed — the same statuses the entry form refuses to
+    # book against.
     projects_receivable = []
     try:
-        projects = Project.query.filter(Project.is_void == False).order_by(Project.name.asc()).all()
+        closed_statuses = ('completed', 'closed', 'cancelled', 'canceled', 'inactive')
+        projects = (Project.query
+                    .filter(~func.lower(func.coalesce(Project.status, '')).in_(closed_statuses))
+                    .order_by(Project.name.asc()).all())
         for p in projects:
             pending = max(0.0, float(p.remaining_receivable or 0.0))
             if pending > 0.01:

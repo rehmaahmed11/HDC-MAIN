@@ -40,9 +40,11 @@ COMBO_PAGES = {
         'templates/hdc/accounts/accounts.html',
         'static/hdc/js/pages/accounts_workspace.js',
     ),
+    # Record Money renders the shared New Transaction partial (the per-type
+    # tile picker and its own script are gone), so it promises the same pairs.
     '/hdc/accounts/money-center': (
-        'templates/hdc/accounts/money_center.html',
-        'static/hdc/js/pages/money_center.js',
+        'templates/hdc/accounts/_new_transaction_form.html',
+        'static/hdc/js/pages/new_transaction.js',
     ),
     # The New Transaction form is one shared partial rendered by two surfaces;
     # both promise the same combo contract and are driven by the same script.
@@ -77,18 +79,11 @@ EXPECTED_COMBO_PAIRS = {
         ('txnPartyInput', 'txnParty'),
         ('txnProjectInput', 'txnProject'),
     ],
-    '/hdc/accounts/money-center': [
-        ('mc_from_account_input', 'mc_from_account'),
-        ('mc_to_account_input', 'mc_to_account'),
-        ('mc_project_input', 'mc_project'),
-        ('mc_stage_input', 'mc_stage'),
-        ('mc_related_id_input', 'mc_related_id'),
-        ('mc_exp_cat_input', 'mc_exp_cat'),
-    ],
 }
-# The register and the focused page share the same partial, so the same pairs.
-EXPECTED_COMBO_PAIRS['/hdc/accounts/cashflow/register'] = EXPECTED_COMBO_PAIRS[
-    '/hdc/accounts/new-transaction']
+# The register, the focused page and Record Money all render that same
+# partial, so they promise exactly the same pairs.
+for _url in ('/hdc/accounts/cashflow/register', '/hdc/accounts/money-center'):
+    EXPECTED_COMBO_PAIRS[_url] = EXPECTED_COMBO_PAIRS['/hdc/accounts/new-transaction']
 
 
 class ComboWidgetHarnessTestCase(unittest.TestCase):
@@ -166,24 +161,6 @@ class TransactionComboPagesTestCase(unittest.TestCase):
                         'post nothing and the select would stay hidden'
                         % (script, input_id, select_id),
                     )
-
-    def test_money_center_loader_functions_are_untouched_by_combo_wiring(self):
-        """The combo wiring must not creep into the loader functions the
-        Money Center node test executes in a bare sandbox."""
-        path = os.path.join(REPO_ROOT, 'static/hdc/js/pages/money_center.js')
-        with open(path, encoding='utf-8') as fh:
-            source = fh.read()
-        for name in ('loadWorkerOptions', 'loadSupplierOptions',
-                     'loadSubcontractorOptions', 'loadOfficeStaffOptions',
-                     'loadAllOptions', 'loadRelatedOptions'):
-            match = re.search(
-                r'(?:async )?function %s\([^)]*\) \{.*?^\}' % re.escape(name),
-                source, re.S | re.M,
-            )
-            self.assertIsNotNone(match, name)
-            self.assertNotIn('hdc:sync-combos', match.group(),
-                             '%s must stay free of combo wiring' % name)
-
 
 if __name__ == '__main__':
     unittest.main()

@@ -191,7 +191,9 @@ def pop_entry_form():
     """Return ``(values, error)`` stashed by :func:`stash_entry_form`, once.
 
     Both keys are removed as they are read, so the values are replayed into a
-    single render and a later refresh shows a clean form again.
+    single render and a later refresh shows a clean form again.  ``{}`` means
+    "nothing was stashed", so callers can safely write
+    ``{**something_else, **pop_entry_form()[0]}`` and let a real draft win.
     """
     if not has_request_context():
         return {}, ''
@@ -200,7 +202,10 @@ def pop_entry_form():
         error = session.pop(DRAFT_ERROR_KEY, '') or ''
     except Exception:  # pragma: no cover - defensive, mirrors stash
         return {}, ''
-    if not isinstance(values, dict):
+    if not isinstance(values, dict) or not values:
+        # Nothing was stashed: return *no* values rather than a blank-shaped
+        # draft, so a caller can merge something else underneath (a deep-link
+        # pre-fill) without the blanks silently overwriting it.
         return {}, ''
     clean = {name: values.get(name, '') for name in ENTRY_FORM_FIELDS}
     clean = {k: (v if isinstance(v, str) else str(v or '')) for k, v in clean.items()}

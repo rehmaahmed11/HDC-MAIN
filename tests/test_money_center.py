@@ -1,10 +1,15 @@
-"""Money Center dropdown regression coverage (audit Step 6)."""
+"""Record Money (Money Center) coverage: the feeds, the page and posting.
 
-import json
+The page used to carry its own Step-2 grid of one tile per transaction type,
+with a script that loaded four dropdown feeds.  It now renders the shared New
+Transaction form (the same partial as /hdc/accounts/new-transaction and the CF
+register) and posts it through the same engine, so these tests pin *that*
+contract: one form, one posting path, and the module links that settle the
+balances the entry form does not own.
+"""
+
 import os
 import re
-import shutil
-import subprocess
 import tempfile
 import unittest
 
@@ -15,8 +20,10 @@ os.environ.setdefault('HDC_BOOTSTRAP_ADMIN_PASSWORD', 'Admin@1234')
 from hdc.app import create_app
 from hdc.extensions import db
 from hdc.models.accounts import Account, AccountTransaction
-from hdc.models.materials import Supplier
+from hdc.models.cashflow import CashFlowCategory, CashFlowEntry, CashFlowParty
+from hdc.models.materials import Supplier, SupplierLedger
 from hdc.models.office import OfficeStaff
+from hdc.models.projects import Project
 from hdc.models.subcontract import Subcontractor
 from hdc.models.workforce import Worker
 
@@ -70,24 +77,6 @@ class MoneyCenterOptionsTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         return response.get_data(as_text=True)
 
-    def _page_code(self):
-        """The page's Money Center logic, wherever it now lives.
-
-        Audit 7.3 / Step 12 moved it out of the template into a cacheable
-        static file, so the behaviour tests read the script the page loads
-        instead of assuming it is inline.
-        """
-        page = self._page()
-        code = page
-        for src in re.findall(r'<script[^>]+src="([^"]+)"', page):
-            if 'money_center' not in src:
-                continue
-            path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                                'static', 'hdc', src.split('/hdc_static/', 1)[-1])
-            with open(path, encoding='utf-8') as fh:
-                code += '\n' + fh.read()
-        return code
-
     def test_all_four_feeds_return_seeded_options(self):
         for family, row in self.rows.items():
             with self.subTest(family=family):
@@ -104,76 +93,121 @@ class MoneyCenterOptionsTestCase(unittest.TestCase):
             with self.subTest(family=family):
                 self.assertEqual(self._feed(family)['items'], [])
 
-    def test_money_center_uses_correct_dropdown_urls(self):
-        page = self._page()
-        code = self._page_code()
-        for family in self.rows:
-            with self.subTest(family=family):
-                self.assertNotIn('/hdc/api/' + family + '/options', page)
-                self.assertNotIn('/hdc/api/' + family + '/options', code)
-                self.assertIn("fetch('/hdc/api/" + family + "')", code)
+    # ── the page: one form, one posting path ────────────────────────────────
 
-    @unittest.skipUnless(shutil.which('node'), 'Node.js required for dropdown JS execution')
-    def test_initialization_loads_all_four_selectors_and_refreshes_early_selection(self):
-        page = self._page_code()
-        # Execute the actual rendered loader/selector functions with real API
-        # responses and a minimal DOM; no browser/network dependencies required.
-        names = ('loadWorkerOptions', 'loadSupplierOptions', 'loadSubcontractorOptions',
-                 'loadOfficeStaffOptions', 'loadAllOptions', 'loadRelatedOptions')
-        functions = []
-        for name in names:
-            match = re.search(r'(?:async )?function ' + name + r'\([^)]*\) \{.*?^\}',
-                              page, re.S | re.M)
-            self.assertIsNotNone(match, name)
-            functions.append(match.group())
-        self.assertRegex(page, r"document.addEventListener\('DOMContentLoaded',.*?\n\s*loadAllOptions\(\)")
-        feeds = {'/hdc/api/' + family: self._feed(family) for family in self.rows}
-        script = r'''
-const assert = require('node:assert/strict');
-let workerOptions = [], supplierOptions = [], subcontractorOptions = [], officeStaffOptions = [];
-const calls = [];
-const select = {
-  options: [], value: '',
-  set innerHTML(value) { this.options = []; this.value = ''; },
-  appendChild(option) { this.options.push(option); }
-};
-const relatedType = {value: 'office_staff'};
-const document = {
-  getElementById(id) {
-    if (id === 'mc_related_id') return select;
-    if (id === 'mc_related_type') return relatedType;
-    throw new Error('Unexpected DOM lookup: ' + id);
-  },
-  createElement(tag) { assert.equal(tag, 'option'); return {}; }
-};
-async function fetch(url) {
-  calls.push(url);
-  assert.ok(feeds[url], 'Unexpected URL: ' + url);
-  return {ok: true, json: async () => feeds[url]};
-}
-'''
-        script += '\nconst feeds = ' + json.dumps(feeds) + ';\n' + '\n'.join(functions)
-        script += r'''
-(async () => {
-  loadRelatedOptions('office_staff'); // User selects a type before fetch finishes.
-  assert.equal(select.options.length, 0);
-  await loadAllOptions();
-  assert.deepEqual(calls.sort(), Object.keys(feeds).sort());
-  assert.equal(select.options.length, feeds['/hdc/api/office_staff'].items.length);
-  for (const [type, family] of Object.entries({worker: 'workers', supplier: 'suppliers',
-       subcontractor: 'subcontractors', office_staff: 'office_staff'})) {
-    loadRelatedOptions(type);
-    assert.deepEqual(select.options.map(o => ({id: o.value, label: o.textContent})),
-      feeds['/hdc/api/' + family].items.map(o => ({id: o.id, label: o.label})));
-  }
-})().catch(error => { console.error(error); process.exitCode = 1; });
-'''
-        result = subprocess.run(['node', '-e', script], text=True, capture_output=True, timeout=20)
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+    def _form_tokens(self):
+        html = self._page()
+        csrf = re.search(r'name="_csrf_token" value="([^"]+)"', html)
+        key = re.search(r'name="_idempotency_key" value="([^"]+)"', html)
+        self.assertIsNotNone(csrf, 'the shared form must carry a CSRF token')
+        self.assertIsNotNone(key, 'the shared form must carry an idempotency key')
+        return {'_csrf_token': csrf.group(1), '_idempotency_key': key.group(1)}
 
+    def test_page_renders_the_shared_entry_form(self):
+        """Record Money is the form, not a menu of little forms."""
+        html = self._page()
+        for needle in ('data-hdc-txn-form', 'id="hdcTxnForm"', 'id="txnDirection"',
+                       'id="txnDate"', 'id="txnAmount"', 'id="txnAccount"',
+                       'id="txnCategory"', 'id="txnSubcategory"', 'id="txnParty"',
+                       'id="txnProject"', 'txnNewAccountModal', 'txnNewPartyModal',
+                       'txnNewProjectModal', 'name="action" value="create_entry"'):
+            self.assertIn(needle, html, needle)
+        self.assertIn('/hdc_static/js/pages/new_transaction.js', html)
+        self.assertIn('/hdc_static/css/new_transaction.css', html)
 
-if __name__ == '__main__':
-    unittest.main()
+    def test_the_per_type_tile_picker_is_gone(self):
+        """One tile + one mini-form per transaction type was the clutter."""
+        html = self._page()
+        for gone in ('type-btn', 'mcSelectDirection', 'mcQuickSelectType',
+                     'typeConfigByIntent', 'money_center.js', 'mc_from_account',
+                     'mc_type_grid', 'step-dot'):
+            self.assertNotIn(gone, html, gone)
+
+    def test_the_page_does_not_talk_to_developers(self):
+        html = self._page()
+        for gone in ('unified ledger', 'How It Works', 'intent_matrix',
+                     'hdc_account_txn', 'Posting:', 'overdraft block',
+                     'void sync', 'source_type'):
+            self.assertNotIn(gone, html, gone)
+
+    def test_every_entry_surface_renders_the_same_partial(self):
+        for url in ('/hdc/accounts/money-center', '/hdc/accounts/new-transaction',
+                    '/hdc/accounts/cashflow/register'):
+            with self.subTest(url=url):
+                page = self.client.get(url)
+                self.assertEqual(page.status_code, 200, url)
+                self.assertIn('data-hdc-txn-form', page.get_data(as_text=True), url)
+
+    def test_a_deep_link_prefills_the_one_form(self):
+        category = CashFlowCategory.query.filter_by(name='Labour & Wages').first()
+        self.assertIsNotNone(category, 'the register seeds its default categories')
+        db.session.add(CashFlowParty(name='Prefill Worker', party_type='worker'))
+        db.session.commit()
+
+        html = self.client.get(
+            '/hdc/accounts/money-center'
+            '?direction=out&category=Labour+%26+Wages&amount=1250.50&party=Prefill+Worker'
+        ).get_data(as_text=True)
+
+        self.assertRegex(html, r'<option value="out" selected')
+        self.assertRegex(html, r'<option[^>]*value="%d"[^>]*\bselected\b' % category.id)
+        self.assertIn('value="1250.50"', html)
+        self.assertRegex(html, r'<option[^>]*value="Prefill Worker"[^>]*\bselected\b')
+
+    def test_a_deep_link_that_no_longer_resolves_opens_a_clean_form(self):
+        html = self.client.get(
+            '/hdc/accounts/money-center'
+            '?direction=bogus&category=Nope&project_id=999999&amount=abc&date=31-13-2026'
+        ).get_data(as_text=True)
+        self.assertIn('data-hdc-txn-form', html)
+        direction_select = html.split('id="txnDirection"', 1)[1].split('</select>', 1)[0]
+        self.assertNotIn('selected', direction_select)
+
+    def test_posting_the_form_records_exactly_one_entry(self):
+        account = Account.query.filter_by(name='Company Cash').first()
+        account.opening_balance = 100000.0
+        account.opening_balance_minor = 10000000
+        category = CashFlowCategory.query.filter_by(name='Miscellaneous').first()
+        db.session.commit()
+
+        before = CashFlowEntry.query.count()
+        payload = {
+            'action': 'create_entry', 'direction': 'out', 'date': '2026-02-01',
+            'amount': '250', 'account_id': account.id, 'category_id': category.id,
+            'description': 'posted through Record Money',
+        }
+        payload.update(self._form_tokens())
+        response = self.client.post('/hdc/accounts/money-center', data=payload)
+        self.assertEqual(response.status_code, 302)
+
+        entry = CashFlowEntry.query.filter_by(
+            description='posted through Record Money').one()
+        self.assertEqual(entry.direction, 'out')
+        self.assertAlmostEqual(float(entry.amount), 250.0, places=2)
+        self.assertIsNotNone(entry.account_tx_id)
+
+        # The same idempotency key means a double-click cannot post twice.
+        self.client.post('/hdc/accounts/money-center', data=payload)
+        self.assertEqual(CashFlowEntry.query.count(), before + 1)
+
+    def test_open_balances_link_to_the_page_that_settles_them(self):
+        """A pending row must point at the entry that clears it — a supplier
+        payable at the supplier's own page, a project receipt back here."""
+        supplier = self.rows['suppliers']
+        db.session.add(SupplierLedger(supplier_id=supplier.id, entry_type='debit',
+                                      amount=4500.0, reference_type='purchase',
+                                      note='probe payable'))
+        project = Project(project_code='MC-P1', name='Receivable Site',
+                          client='Receivable Client', status='Active',
+                          contract_type='lump_sum', owner_lump_sum=900000.0)
+        db.session.add(project)
+        db.session.commit()
+
+        html = self._page()
+        self.assertIn('/hdc/purchase-v2/suppliers/%d' % supplier.id, html)
+        self.assertIn('project_id=%d' % project.id, html)
+        self.assertIn('#record-money-form', html)
+        self.assertNotIn('mcPayEntity', html)
 
 
 class MoneyCenterRegressionTestCase(unittest.TestCase):
@@ -364,7 +398,7 @@ class MoneyCenterRegressionTestCase(unittest.TestCase):
         """The page's dropdown feeds and its extracted JS/CSS must all answer 200."""
         for url in ('/hdc/api/workers', '/hdc/api/suppliers',
                     '/hdc/api/subcontractors', '/hdc/api/office_staff',
-                    '/hdc_static/js/pages/money_center.js',
+                    '/hdc_static/js/pages/new_transaction.js',
                     '/hdc_static/css/money_center.css'):
             with self.subTest(url=url):
                 self.assertEqual(self.client.get(url).status_code, 200)

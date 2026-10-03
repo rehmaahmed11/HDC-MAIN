@@ -46,7 +46,7 @@ APIS_EXPECTED_200 = (
     '/hdc/api/workers', '/hdc/api/suppliers', '/hdc/api/subcontractors',
     '/hdc/api/office_staff', '/hdc/accounts/money-center/api/diagram',
     '/hdc/accounts/money-center/api/pending',
-    '/hdc_static/js/pages/money_center.js',
+    '/hdc_static/js/pages/new_transaction.js',
     '/hdc_static/css/money_center.css',
 )
 

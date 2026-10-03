@@ -63,15 +63,10 @@ PAGES = (
         'style': 'static/hdc/css/accounts_entries.css',
         'variables': ('__hdcEntriesConfig',),
     },
-    {
-        'name': 'money center',
-        'template': 'templates/hdc/accounts/money_center.html',
-        'url': '/hdc/accounts/money-center',
-        'config_id': 'moneyCenterConfig',
-        'script': 'static/hdc/js/pages/money_center.js',
-        'style': 'static/hdc/css/money_center.css',
-        'variables': ('__cfg',),
-    },
+    # Record Money is not listed here on purpose: it carries no page script of
+    # its own any more.  It renders the shared New Transaction partial and is
+    # driven by static/hdc/js/pages/new_transaction.js, which reads the form's
+    # own data attributes instead of a JSON config block.
 )
 
 # The edit-only payloads, read through their own variable inside the script.

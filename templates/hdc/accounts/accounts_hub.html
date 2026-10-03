@@ -175,7 +175,7 @@ details.hub-advanced > .hub-advanced-body {
 <details class="hub-advanced mb-3">
     <summary>
         <i class="fas fa-user-gear"></i> Advanced (admin only)
-        <span class="small text-muted ms-1">— day close, audit and checking tools</span>
+        <span class="small text-muted ms-1">— day close, history and checking tools</span>
         <i class="fas fa-chevron-down ms-auto"></i>
     </summary>
     <div class="hub-advanced-body">
@@ -198,7 +198,7 @@ details.hub-advanced > .hub-advanced-body {
                     <div class="hub-action-icon slate"><i class="fas fa-receipt"></i></div>
                     <div>
                         <div class="fw-bold">All Entries</div>
-                        <div class="small text-muted">Every single posting with receipts, void and restore. Use it to investigate a number.</div>
+                        <div class="small text-muted">Every entry with its receipt. Void or restore one when it was a mistake.</div>
                         <div class="small text-muted mt-1"><strong>{{ "{:,.0f}".format(txn_total or 0) }}</strong> entries</div>
                     </div>
                 </div>
@@ -208,7 +208,7 @@ details.hub-advanced > .hub-advanced-body {
                     <div class="hub-action-icon cyan"><i class="fas fa-book"></i></div>
                     <div>
                         <div class="fw-bold">Cash Flow Register</div>
-                        <div class="small text-muted">The raw register of cash movement documents, with void and audit trail.</div>
+                        <div class="small text-muted">Where money is recorded: one document per movement, with its full history.</div>
                         <div class="small text-muted mt-1"><strong>{{ "{:,.0f}".format(entry_total or 0) }}</strong> documents</div>
                     </div>
                 </div>
@@ -218,7 +218,7 @@ details.hub-advanced > .hub-advanced-body {
                     <div class="hub-action-icon slate"><i class="fas fa-wallet"></i></div>
                     <div>
                         <div class="fw-bold">Transactions Workspace</div>
-                        <div class="small text-muted">The detailed double-entry form for special cases, with full drilldowns.</div>
+                        <div class="small text-muted">The detailed accounts screen: every balance, the edit form and the breakdown behind each number.</div>
                     </div>
                 </div>
             </a>
@@ -227,7 +227,7 @@ details.hub-advanced > .hub-advanced-body {
                     <div class="hub-action-icon rose"><i class="fas fa-stethoscope"></i></div>
                     <div>
                         <div class="fw-bold">Data Health Check</div>
-                        <div class="small text-muted">Scans the books for broken or duplicate records. Use it when a total looks wrong.</div>
+                        <div class="small text-muted">Checks the entries for duplicates and records with no source. Use it when a total looks wrong.</div>
                     </div>
                 </div>
             </a>
