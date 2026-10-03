@@ -77,6 +77,17 @@ filters on the project status the rest of the app uses, and a test pins it.
 stashed, so merging a pre-fill underneath it silently overwrote every field. It
 now returns `{}` when there is no draft.
 
+## Architecture follow-up
+
+The uniform form is the one cash-movement pattern, not a replacement for every
+module's source-ledger settlement form. The full post-PR #70 matrix is in
+`TRANSACTION_ARCHITECTURE_AUDIT.md`. The shared engine now also carries the
+operator reference into the linked Accounts row, blocks active exact-reference
+duplicates while allowing amend/replace, and applies the Accounts-style cap for
+a project receipt when a positive receivable is established. Generic
+project-linked outflows remain cash tags only until an explicit project-cost
+effect is designed.
+
 ## Tests
 
 * `tests/test_money_center.py` — rewritten around the new contract: the page

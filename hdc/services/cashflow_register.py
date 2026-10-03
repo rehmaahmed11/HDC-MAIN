@@ -227,6 +227,48 @@ def _cf_type_label(direction):
     return CF_DIRECTION_LABELS.get(direction, direction or '')
 
 
+def _cf_find_exact_reference_duplicate(*, direction, amount, account_id, posted,
+                                        reference):
+    """Return an active register row matching a document reference exactly.
+
+    A form idempotency key only protects one rendered form.  A reference is the
+    operator's document identity (cheque, receipt, voucher, etc.), so the same
+    active movement must not be posted twice merely because it was entered from
+    two pages.  Voided rows are deliberately ignored: an amendment voids the
+    original before posting its replacement and must be able to reuse the same
+    document reference.
+
+    The date comparison is calendar-day based because ``CashFlowEntry`` stores a
+    timestamp while the ledger and the operator-facing document use a date.
+    Amounts are compared in minor units so float representation cannot defeat the
+    guard.
+    """
+    ref = (reference or '').strip()
+    if not ref or not account_id:
+        return None
+
+    day = posted.date() if isinstance(posted, datetime) else posted
+    query = (CashFlowEntry.query
+             .filter(CashFlowEntry.is_void == False,  # noqa: E712
+                    CashFlowEntry.direction == direction,
+                    CashFlowEntry.account_id == int(account_id),
+                    CashFlowEntry.reference == ref))
+    if day is not None:
+        query = query.filter(
+            CashFlowEntry.date_posted >= datetime.combine(day, datetime.min.time()),
+            CashFlowEntry.date_posted < datetime.combine(day, datetime.min.time()) + timedelta(days=1),
+        )
+
+    amount_minor = to_minor(amount)
+    for row in query.order_by(CashFlowEntry.id.asc()).all():
+        row_minor = (int(row.amount_minor)
+                      if row.amount_minor is not None
+                      else to_minor(row.amount or 0.0))
+        if row_minor == amount_minor:
+            return row
+    return None
+
+
 def _cf_snapshot(entry):
     """JSON-serialisable snapshot of an entry for the audit trail."""
     return {
@@ -510,7 +552,7 @@ def _cf_resolve_counterparty_account(party_name, *, project=None, as_client=Fals
 
 def _cf_build_tx_payload(direction, amount, account, destination, description, note,
                          posted, project_id=None, stage_id=None, counterparty_account=None,
-                         party_name=None):
+                         party_name=None, reference=None):
     """Build the :class:`AccountTransaction` payload for a register entry.
 
     ``executed_by_account_id`` is pinned to the register account so the engine
@@ -553,7 +595,10 @@ def _cf_build_tx_payload(direction, amount, account, destination, description, n
             'transfer': 'transfer',
         }[_CF_TX_TYPE[direction]],
         'note': (note or description or '')[:400] or None,
-        'reference_id': None,
+        # The register document and the linked Accounts row must carry the same
+        # operator-supplied document number.  Leaving this blank made a cash-flow
+        # row impossible to find from the authoritative ledger receipt.
+        'reference_id': (reference or '').strip()[:120] or None,
         'party_name': (party_name or '').strip() or None,
         'project_id': (int(project_id) if project_id else None),
         'stage_id': (int(stage_id) if stage_id else None),
@@ -601,7 +646,23 @@ def save_manual_cash_flow_entry(*, direction, amount, account_id, destination_ac
         create_missing=create_missing,
     )
     posted = date_posted or _pkt_now_naive()
+    # Keep the register document and its linked ledger reference within the
+    # schema's 120-character contract before duplicate detection and posting.
+    reference = (reference or '').strip()[:120] or None
     assert_period_open(int(account.id), posted, operation='posted')
+    duplicate = _cf_find_exact_reference_duplicate(
+        direction=direction,
+        amount=amount,
+        account_id=account.id,
+        posted=posted,
+        reference=reference,
+    )
+    if duplicate is not None:
+        raise ValueError(
+            f'An active {_cf_type_label(direction).lower()} entry with reference '
+            f'"{reference}" already exists for {duplicate.amount:,.2f} PKR on '
+            f'{duplicate.date_posted.date().isoformat() if duplicate.date_posted else "that date"}.'
+        )
     project_row = None
     if validate_scope:
         project_row, stage = _cf_resolve_project(project_id, stage_id)
@@ -642,6 +703,8 @@ def save_manual_cash_flow_entry(*, direction, amount, account_id, destination_ac
             # Project master has no client recorded — keep what was typed, but
             # file it as the client it functionally is.
             party_type = 'client'
+        _cf_assert_project_receipt_within_pending(
+            project_id, amount, stage_id=stage_id)
 
     ptype = (party_type or 'other').strip().lower() or 'other'
     party = _cf_find_party(party_id=party_id, name=party_name, party_type=ptype)
@@ -684,7 +747,7 @@ def save_manual_cash_flow_entry(*, direction, amount, account_id, destination_ac
         party_type=ptype,
         description=desc[:200],
         note=(note or '').strip() or None,
-        reference=(reference or '').strip() or None,
+        reference=reference,
         date_posted=posted,
         project_id=(int(project_id) if project_id else None),
         stage_id=(int(stage_id) if stage_id else None),
@@ -712,7 +775,8 @@ def save_manual_cash_flow_entry(*, direction, amount, account_id, destination_ac
     payload = _cf_build_tx_payload(direction, amount, account, destination, desc, note,
                                    posted, project_id=project_id, stage_id=stage_id,
                                    counterparty_account=counterparty,
-                                   party_name=(party_name or '').strip())
+                                   party_name=(party_name or '').strip(),
+                                   reference=reference)
     ok, msg, rows = _create_account_transaction(payload, commit=False)
     if not ok:
         raise ValueError(msg or 'Unable to post the ledger transaction.')
@@ -773,6 +837,29 @@ def _cf_owner_payment_for_entry(entry):
     return (OwnerPayment.query
             .filter(OwnerPayment.source_entry_id == int(entry.id))
             .first())
+
+
+def _cf_assert_project_receipt_within_pending(project_id, amount, stage_id=None):
+    """Apply the same over-receipt rule as the Accounts project flow.
+
+    A positive, established receivable is capped: once a project has a
+    contract value and the submitted receipt is larger than the remaining
+    amount, reject it before either the register document or its ledger posting
+    is created.  A project whose contract value is still zero has no established
+    receivable yet, so it remains permissive just like the existing Accounts
+    path (and like historical form behaviour).
+    """
+    if not project_id:
+        return
+    from hdc.services.accounts import _account_pending_snapshot
+    pending = _account_pending_snapshot(
+        'project_income', 'project', int(project_id),
+        project_id=int(project_id), stage_id=stage_id,
+    )
+    remaining = float((pending or {}).get('pending') or 0.0)
+    if remaining > 0.0 and float(amount or 0.0) > remaining + 1e-6:
+        raise ValueError(
+            f'Amount exceeds project receivable pending ({remaining:,.2f} PKR).')
 
 
 def _cf_apply_project_effect(entry, category, project=None):
