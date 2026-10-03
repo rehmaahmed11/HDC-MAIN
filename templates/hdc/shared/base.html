@@ -139,14 +139,14 @@ body[data-hdc-custom-access="true"][data-hdc-page-write="false"] form[method="PO
             ]},
             {'id': 'accounts', 'label': 'Accounts & Cash', 'icon': 'fa-wallet',
              'roles': ['admin', 'accountant'], 'links': [
-                {'label': 'Accounts Hub', 'icon': 'fa-compass', 'href': url_for('hdc_accounts_hub'),
-                 'badge': 'Money', 'match': ['/hdc/accounts']},
-                {'label': 'Manage Accounts', 'icon': 'fa-list', 'href': url_for('hdc_accounts_manage'),
-                 'match': ['/hdc/accounts/manage']},
+                {'label': 'Accounts', 'icon': 'fa-wallet', 'href': url_for('hdc_accounts_hub'),
+                 'match': ['/hdc/accounts']},
+                {'label': 'Record Money', 'icon': 'fa-sack-dollar', 'href': url_for('hdc_money_center'),
+                 'match': ['/hdc/accounts/money-center']},
                 {'label': 'All Entries', 'icon': 'fa-receipt', 'href': url_for('hdc_accounts_entries'),
-                 'note': 'audit', 'match': ['/hdc/accounts/entries']},
+                 'note': 'audit', 'admin_only': True, 'match': ['/hdc/accounts/entries']},
                 {'label': 'Shared Expenses', 'icon': 'fa-users-rectangle', 'href': url_for('hdc_shared_expenses'), 'permission': 'shared_expenses',
-                 'match': ['/hdc/accounts/shared']},
+                 'admin_only': True, 'match': ['/hdc/accounts/shared']},
             ]},
             {'id': 'administration', 'label': 'Administration', 'icon': 'fa-user-gear',
              'roles': ['admin'], 'links': [
@@ -166,7 +166,12 @@ body[data-hdc-custom-access="true"][data-hdc-page-write="false"] form[method="PO
             {% set role_can_see_section = (not section.roles or sidebar_role in section.roles or (current_user.permissions_json and section.id != 'administration')) %}
             {% set visible_links = [] %}
             {% for link in section.links %}
-                {% if role_can_see_section and hdc_page_allowed(link.permission|default(hdc_page_id_for_path(link.href)), 'read') %}
+                {# `admin_only` hides advanced/audit rows from non-admin users to
+                   keep the drawer simple; the pages themselves stay guarded
+                   server-side. #}
+                {% if role_can_see_section
+                      and (not link.admin_only|default(false) or sidebar_role == 'admin')
+                      and hdc_page_allowed(link.permission|default(hdc_page_id_for_path(link.href)), 'read') %}
                     {% set _ = visible_links.append(link) %}
                 {% endif %}
             {% endfor %}

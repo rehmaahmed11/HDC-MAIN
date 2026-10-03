@@ -510,13 +510,17 @@ class AccountsManageRouteTestCase(unittest.TestCase):
     def test_edit_unknown_account_404s(self):
         self.assertEqual(self.client.get('/hdc/accounts/999999/edit').status_code, 404)
 
-    def test_hub_explains_what_each_page_is_for(self):
+    def test_hub_shows_the_simple_actions_and_admin_advanced_block(self):
+        # The hub was simplified: three plain-language actions for everyone,
+        # with the audit/close tools tucked into an admin-only Advanced block.
         html = self.client.get('/hdc/accounts/hub').get_data(as_text=True)
-        self.assertIn('What Each Page Is For', html)
-        for label in ('Manage Accounts', 'CF Register', 'Cash Flow', 'Day Close', 'All Entries'):
+        self.assertIn('What do you want to do?', html)
+        for label in ('Record Money', 'Accounts &amp; Balances', 'Daily Report'):
             self.assertIn(label, html)
-        # the Cash Flow vs CF Register distinction the section was missing
-        self.assertIn('Cash Flow vs CF Register', html)
+        # admin (the signed-in role here) still reaches the advanced tools
+        self.assertIn('Advanced (admin only)', html)
+        for label in ('Day Close', 'All Entries', 'Cash Flow Register'):
+            self.assertIn(label, html)
 
     def test_csv_export_returns_the_list(self):
         res = self.client.get('/hdc/accounts/manage/export?show=all')
