@@ -1,0 +1,206 @@
+{% extends "shared/base.html" %}
+{% block title %}New Rental{% endblock %}
+{% block page_heading %}New Rental{% endblock %}
+
+{# The rental creation form lives on its own page so the Rentals hub stays a
+   simple summary + list.  The hub's "New Rental" action opens this page. #}
+{% block content %}
+{% set tools_active = 'rentals' %}
+{% from "shared/_combo_field.html" import combo_field %}
+{% include "tool_rental/_tools_nav.html" %}
+
+<style>
+.tool-rental-form-header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:4px 0 16px; flex-wrap:wrap; }
+.tool-rental-form-header h2 { margin:0; font-size:1.35rem; }
+.tool-rental-form-subtitle { color:var(--text-muted, #64748b); margin-top:3px; }
+</style>
+
+<div class="tool-rental-form-header">
+    <div>
+        <h2><i class="fas fa-plus me-2" aria-hidden="true"></i>New Rental</h2>
+        <div class="tool-rental-form-subtitle">Choose a site or customer, then add the tools and quantities.</div>
+    </div>
+    <a href="{{ url_for('hdc_tool_rental') }}" class="btn btn-outline-secondary">
+        <i class="fas fa-arrow-left me-1" aria-hidden="true"></i>Back to rentals
+    </a>
+</div>
+
+<div class="card hdc-card mb-3">
+    <div class="card-header hdc-card-header"><h5 class="mb-0"><i class="fas fa-file-contract me-2" aria-hidden="true"></i>Rental details</h5></div>
+    <div class="card-body">
+        <form method="POST" action="{{ url_for('hdc_tool_rental_create') }}" id="createRentalForm">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label">Who is renting?</label>
+                    <select name="renter_type" id="renterType" class="form-select" required onchange="toggleRenter()">
+                        <option value="internal">Our site</option>
+                        <option value="external">Outside customer</option>
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">How should rent be charged?</label>
+                    <select name="billing_type" class="form-select" required>
+                        <option value="fixed_fee">One rental fee</option>
+                        <option value="per_day">Per day</option>
+                        <option value="no_charge">No charge (included in contract)</option>
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Rental date</label>
+                    <input type="date" name="rental_date" value="{{ today }}" class="form-control" required>
+                </div>
+
+                <div class="col-12" id="internalFields">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Site / project</label>
+                            <select name="project_id" id="rentalProjectSelect" class="form-select">
+                                <option value="">Select a site</option>
+                                {% for p in projects %}
+                                <option value="{{ p.id }}">{{ p.name }} ({{ p.project_code }})</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Stage (optional)</label>
+                            <select name="stage_id" id="rentalStageSelect" class="form-select">
+                                <option value="">No stage</option>
+                                {% for s in stages %}
+                                <option value="{{ s.id }}" data-project-id="{{ s.project_id }}">{{ s.name }} — {{ s.project.name if s.project else '' }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-12 d-none" id="externalFields">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            {{ combo_field('customer_name', 'rentalCustomerName',
+                               known_customers, label='Customer name',
+                               placeholder='Search or type a customer…',
+                               hint='Choose an existing customer or type a new name.',
+                               max_items=60) }}
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Phone</label>
+                            <input type="text" name="customer_phone" class="form-control" placeholder="03xx-xxxxxxx">
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Address (optional)</label>
+                            <input type="text" name="customer_address" class="form-control" placeholder="Customer address">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-md-6">
+                    <label class="form-label">Expected return date (optional)</label>
+                    <input type="date" name="expected_return_date" class="form-control">
+                </div>
+                <div class="col-12">
+                    <label class="form-label fw-semibold">Tools to rent</label>
+                    {% if tools %}
+                    <div id="toolItemsContainer">
+                        <div class="row g-2 mb-2 tool-item-row align-items-end">
+                            <div class="col-md-6">
+                                <label class="form-label small">Tool</label>
+                                <select name="tool_id[]" class="form-select" required>
+                                    <option value="">Select a tool</option>
+                                    {% for t in tools %}
+                                    <option value="{{ t.id }}" data-rate="{{ t.rental_rate_per_day }}" data-avail="{{ t.available_qty }}">{{ t.name }} ({{ t.tool_code }}) — {{ "%.0f"|format(t.available_qty) }} available</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-4 col-md-2">
+                                <label class="form-label small">Quantity</label>
+                                <input type="number" name="qty[]" class="form-control" placeholder="Qty" min="0.1" step="0.1" required>
+                            </div>
+                            <div class="col-6 col-md-3">
+                                <label class="form-label small">Rate per tool</label>
+                                <input type="number" name="rate[]" class="form-control" placeholder="Use saved rate" min="0" step="0.01">
+                            </div>
+                            <div class="col-2 col-md-1">
+                                <button type="button" class="btn btn-outline-danger w-100" aria-label="Remove tool line" title="Remove tool line" onclick="this.closest('.tool-item-row').remove()"><i class="fas fa-times" aria-hidden="true"></i></button>
+                            </div>
+                        </div>
+                    </div>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="addToolRow()"><i class="fas fa-plus me-1" aria-hidden="true"></i>Add another tool</button>
+                    {% else %}
+                    <div class="alert alert-info mb-2">There are no tools in stock yet. Add tools in Inventory before creating a rental.</div>
+                    <a href="{{ url_for('hdc_tool_rental_inventory') }}" class="btn btn-outline-primary"><i class="fas fa-warehouse me-1" aria-hidden="true"></i>Open Inventory</a>
+                    {% endif %}
+                </div>
+
+                <div class="col-12">
+                    <label class="form-label">Notes or agreement details (optional)</label>
+                    <textarea name="notes" class="form-control" rows="2" placeholder="Add any rental terms or agreement reference"></textarea>
+                </div>
+                {% if tools %}
+                <div class="col-12">
+                    <button type="submit" class="btn btn-success"><i class="fas fa-check me-1" aria-hidden="true"></i>Create Rental</button>
+                    <a href="{{ url_for('hdc_tool_rental') }}" class="btn btn-outline-secondary ms-1">Cancel</a>
+                </div>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function filterStages(projectId, stageId){
+    const stage = document.getElementById(stageId);
+    if(!stage) return;
+    Array.from(stage.options).forEach(function(option){
+        const visible = !option.value || !projectId || option.dataset.projectId === projectId;
+        option.hidden = !visible;
+        if(!visible && option.selected) stage.value = '';
+    });
+}
+function syncRentalStages(){
+    const project = document.getElementById('rentalProjectSelect');
+    filterStages(project && project.value, 'rentalStageSelect');
+}
+function toggleRenter(){
+    const type = document.getElementById('renterType');
+    const intF = document.getElementById('internalFields');
+    const extF = document.getElementById('externalFields');
+    if(!type || !intF || !extF) return;
+    if(type.value==='internal'){ intF.classList.remove('d-none'); extF.classList.add('d-none'); }
+    else { intF.classList.add('d-none'); extF.classList.remove('d-none'); }
+}
+document.getElementById('rentalProjectSelect')?.addEventListener('change', syncRentalStages);
+syncRentalStages();
+function addToolRow(){
+    const container = document.getElementById('toolItemsContainer');
+    if(!container) return;
+    const row = document.createElement('div');
+    row.className = 'row g-2 mb-2 tool-item-row align-items-end';
+    row.innerHTML = `
+        <div class="col-md-6">
+            <label class="form-label small">Tool</label>
+            <select name="tool_id[]" class="form-select" required>
+                <option value="">Select a tool</option>
+                {% for t in tools %}
+                <option value="{{ t.id }}" data-rate="{{ t.rental_rate_per_day }}" data-avail="{{ t.available_qty }}">{{ t.name }} ({{ t.tool_code }}) — {{ "%.0f"|format(t.available_qty) }} available</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-4 col-md-2">
+            <label class="form-label small">Quantity</label>
+            <input type="number" name="qty[]" class="form-control" placeholder="Qty" min="0.1" step="0.1" required>
+        </div>
+        <div class="col-6 col-md-3">
+            <label class="form-label small">Rate per tool</label>
+            <input type="number" name="rate[]" class="form-control" placeholder="Use saved rate" min="0" step="0.01">
+        </div>
+        <div class="col-2 col-md-1">
+            <button type="button" class="btn btn-outline-danger w-100" aria-label="Remove tool line" title="Remove tool line" onclick="this.closest('.tool-item-row').remove()"><i class="fas fa-times" aria-hidden="true"></i></button>
+        </div>
+    `;
+    container.appendChild(row);
+}
+</script>
+{% endblock %}

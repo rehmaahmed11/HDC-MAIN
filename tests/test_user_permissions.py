@@ -139,8 +139,14 @@ class UserPermissionsTestCase(unittest.TestCase):
         self.assertNotIn('Payroll', body)
         self.assertNotIn('Accounts &amp; Cash', body)
 
-    def test_tool_rental_hub_is_simple_for_everyday_users(self):
-        """Keep routine rental actions visible and admin detail tucked away."""
+    def test_tool_rental_hub_stays_simple_and_creation_has_its_own_page(self):
+        """The hub is a summary + list; the create form lives on its own page.
+
+        The admin reconciliation panel, the advanced filters and the movement
+        chain column are gone from the hub for every role (they belong to the
+        Tracking / Reports pages), and creating a rental is now a page the
+        hub's "New Rental" action opens.
+        """
         with self.app.app_context():
             user = HDCUser(username='rental-operator', password_hash='unused', role='manager')
             db.session.add(user)
@@ -160,28 +166,43 @@ class UserPermissionsTestCase(unittest.TestCase):
         self.assertIn('Find a rental', body)
         self.assertIn('name="q"', body)
         self.assertIn('name="status"', body)
-        self.assertNotIn('id="createRentalForm"', body)
-        self.assertNotIn('class="tool-admin-panel mb-3"', body)
-        self.assertNotIn('name="date_from"', body)
-        self.assertNotIn('name="payment_status"', body)
+        for removed in ('id="createRentalForm"', 'class="tool-admin-panel mb-3"',
+                        'Tool quantities', 'do not reconcile', 'More filters',
+                        'Movement chain', 'name="date_from"', 'name="payment_status"',
+                        'name="billing_type"'):
+            self.assertNotIn(removed, body)
+        # a user with no tools write grant cannot open the create page
+        denied = self.client.get('/hdc/tool-rental/new')
+        self.assertEqual(denied.status_code, 302)
 
         self._sign_in_as_admin()
         admin_body = self.client.get('/hdc/tool-rental').get_data(as_text=True)
-        self.assertIn('id="createRentalForm"', admin_body)
-        self.assertIn('class="tool-admin-panel mb-3"', admin_body)
-        self.assertIn('name="date_from"', admin_body)
-        self.assertIn('name="payment_status"', admin_body)
+        # the action card keeps working and opens the form page
+        self.assertIn('Choose an action', admin_body)
+        self.assertIn('/hdc/tool-rental/new', admin_body)
+        # …but the hub itself stays as simple for the admin as for everyone
+        for removed in ('id="createRentalForm"', 'class="tool-admin-panel mb-3"',
+                        'Tool quantities', 'do not reconcile', 'More filters',
+                        'Movement chain', 'name="date_from"', 'name="payment_status"'):
+            self.assertNotIn(removed, admin_body)
 
-        opened = self.client.get('/hdc/tool-rental?create=1').get_data(as_text=True)
-        self.assertRegex(opened, r'<details id="createRentalCard"[^>]*\bopen\b')
+        form_page = self.client.get('/hdc/tool-rental/new')
+        self.assertEqual(form_page.status_code, 200)
+        form_body = form_page.get_data(as_text=True)
+        self.assertIn('id="createRentalForm"', form_body)
+        self.assertIn('Who is renting?', form_body)
+
+        # the old hub link still works — it redirects to the form page
+        opened = self.client.get('/hdc/tool-rental?create=1')
+        self.assertEqual(opened.status_code, 302)
+        self.assertTrue(opened.headers['Location'].endswith('/hdc/tool-rental/new'))
         failed_create = self.client.post('/hdc/tool-rental/create', data={
             '_csrf_token': self.csrf, 'renter_type': 'internal',
             'billing_type': 'fixed_fee',
         }, follow_redirects=True)
         self.assertIn('Select a project/site for internal rental.',
                       failed_create.get_data(as_text=True))
-        self.assertRegex(failed_create.get_data(as_text=True),
-                         r'<details id="createRentalCard"[^>]*\bopen\b')
+        self.assertIn('id="createRentalForm"', failed_create.get_data(as_text=True))
 
     def test_admin_saves_page_grants_and_stage_scope(self):
         with self.client.session_transaction() as session:
