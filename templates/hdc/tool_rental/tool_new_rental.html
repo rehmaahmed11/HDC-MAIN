@@ -3,20 +3,15 @@
 {% block page_heading %}New Rental{% endblock %}
 
 {# The rental creation form lives on its own page so the Rentals hub stays a
-   simple summary + list.  The hub's "New Rental" action opens this page.
+   simple summary + list. The operator chooses the transaction first. A new
+   rental shows the stock tool picker; a transfer follows From → rent type → To
+   → the pending tools at From (with per-tool rates) → other settings. The
+   destination site/customer fields still adapt to the selected renter type,
+   and a no-additional-rent choice hides the rate inputs without hiding tools.
 
-   The whole form is *driven by the operator's previous choice*:
-
-     * who is renting  → shows the site/project+stage fields OR the outside
-       customer fields (never both);
-     * which site      → narrows the stage list to that site's stages;
-     * how rent is charged → the per-tool Rent rate fields only exist for a
-       charge; pick "No charge" and they hide (nothing to bill);
-     * which tool      → its saved rate fills the Rent rate box automatically.
-
-   Every rental made here *shows below* the form, newest first, with the one
-   just created highlighted — so the operator sees it land without navigating
-   away.  Opening a row leads to its detail page (returns / payments / moves). #}
+   Every rental made here shows below the form, newest first, with the one just
+   created highlighted. Opening a row leads to its detail page (returns /
+   payments / moves). #}
 {% block content %}
 {% set tools_active = 'rentals' %}
 {% from "shared/_combo_field.html" import combo_field, combo_select %}
@@ -32,6 +27,12 @@
 .tool-rental-row.is-new:hover { background:var(--bs-success-bg-subtle, #e7f7ee); }
 #billingHint { display:block; margin-top:2px; }
 .tool-item-row .form-label.small { margin-bottom:2px; }
+.transfer-tools-list { background:var(--card-bg, #fff); }
+.transfer-tool-row:last-child { border-bottom:0 !important; }
+.transfer-tool-row .form-check-input { flex:0 0 auto; }
+@media (max-width:767.98px) {
+  .transfer-tool-row .transfer-rate-cell { padding-left:2.1rem; }
+}
 @media (max-width:575.98px) {
   .tool-rental-form-header { align-items:flex-start; }
 }
@@ -39,8 +40,8 @@
 
 <div class="tool-rental-form-header">
     <div>
-        <h2><i class="fas fa-plus me-2" aria-hidden="true"></i>New Rental</h2>
-        <div class="tool-rental-form-subtitle">Pick who is renting and how rent is charged — the form adapts as you choose. New rentals appear below.</div>
+        <h2><i class="fas fa-plus me-2" aria-hidden="true"></i><span id="pageFormHeading">New Rental</span></h2>
+        <div class="tool-rental-form-subtitle">Choose the transaction first. Transfers follow From → rent type → To → tools → other settings; new rentals appear below.</div>
     </div>
     <a href="{{ url_for('hdc_tool_rental') }}" class="btn btn-outline-secondary">
         <i class="fas fa-arrow-left me-1" aria-hidden="true"></i>Back to rentals
@@ -48,92 +49,52 @@
 </div>
 
 <div class="card hdc-card mb-3">
-    <div class="card-header hdc-card-header"><h5 class="mb-0"><i class="fas fa-file-contract me-2" aria-hidden="true"></i>Rental details</h5></div>
+    <div class="card-header hdc-card-header"><h5 class="mb-0"><i class="fas fa-file-contract me-2" aria-hidden="true"></i><span id="rentalFormTitle">Rental details</span></h5></div>
     <div class="card-body">
         <form method="POST" action="{{ url_for('hdc_tool_rental_create') }}" id="createRentalForm">
             <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
             <div class="row g-3">
-                <div class="col-md-3">
+                <div class="col-md-4">
                     <label class="form-label">Transaction type</label>
                     <select name="txn_type" id="txnType" class="form-select" required onchange="toggleTxnType()">
                         <option value="new_rental">New Rental</option>
                         <option value="transfer">Transfer Rental</option>
                     </select>
-                    <small class="text-muted d-block">New rental, or hand a rental's tools to a new holder.</small>
+                    <small class="text-muted d-block">Choose the transaction first; the next fields follow the selected flow.</small>
                 </div>
-                <div class="col-md-3">
+
+                {# Transfer flow order: from → rent type → to → choose tools → other settings. #}
+                <div class="col-12 d-none" id="transferSourceField">
+                    {{ combo_select('source_rental_id', 'sourceRental', transfer_source_options,
+                       label='From — current holder / rental',
+                       placeholder='Search a rental code or holder…',
+                       required=true,
+                       hint='Choose the current holder and location. Only tool quantities physically at this From location will be listed below.',
+                       max_items=80) }}
+                </div>
+
+                <div class="col-md-6" id="billingField">
+                    <label class="form-label" id="billingLabel">How should rent be charged?</label>
+                    <select name="billing_type" id="billingType" class="form-select" required onchange="syncBilling()">
+                        <option value="fixed_fee">One rental fee</option>
+                        <option value="per_day">Per day</option>
+                        <option value="no_charge">No charge (included in contract)</option>
+                    </select>
+                    <small id="billingSelectionHint" class="text-muted d-block"></small>
+                </div>
+
+                <div class="col-md-6" id="renterTypeField">
                     <label class="form-label" id="whoLabel">Who is renting?</label>
                     <select name="renter_type" id="renterType" class="form-select" required onchange="toggleRenter()">
                         <option value="internal">Our site</option>
                         <option value="external">Outside customer</option>
                     </select>
                 </div>
-                <div class="col-md-3">
-                    <label class="form-label">How should rent be charged?</label>
-                    <select name="billing_type" id="billingType" class="form-select" required onchange="syncBilling()">
-                        <option value="fixed_fee">One rental fee</option>
-                        <option value="per_day">Per day</option>
-                        <option value="no_charge">No charge (included in contract)</option>
-                    </select>
-                </div>
-                <div class="col-md-3">
-                    <label class="form-label" id="dateLabel">Rental date</label>
-                    <input type="date" name="rental_date" value="{{ today }}" class="form-control" required>
-                </div>
-
-                {# ── Transfer only: the rental the tools come FROM ───────────────
-                   Shown when Transaction type = Transfer Rental.  Picking a rental
-                   previews exactly which still-out tools (and how many) will move
-                   to the new holder, and where the previous holder's finalised
-                   rent is collected. #}
-                <div class="col-12 d-none" id="transferFields">
-                    <div class="row g-3">
-                        <div class="col-md-6">
-                            {{ combo_select('source_rental_id', 'sourceRental', transfer_source_options,
-                               label='Transfer from (existing rental)',
-                               placeholder='Search a rental code or holder…',
-                               hint='The rental whose still-out tools move to the new holder. Its rent is settled to the previous holder.',
-                               max_items=80) }}
-                        </div>
-                        <div class="col-md-6">
-                            <label class="form-label">Settle the previous holder's rent</label>
-                            <select name="settle_choice" id="settleChoice" class="form-select" required onchange="toggleSettle()">
-                                <option value="pay_now">Pay now — collect &amp; mark completed</option>
-                                <option value="add_credit">Add to credit — collect later</option>
-                            </select>
-                            <small class="text-muted d-block">Pay now collects the full outstanding rent; add to credit keeps it owed.</small>
-                        </div>
-                        <div class="col-md-6" id="payNowFields">
-                            {{ combo_select('received_to_account_id', 'recvAccount', receiving_account_options,
-                               label='Receive rent into',
-                               placeholder='Company cash (default)',
-                               hint='Cash/Bank account that receives the previous holder’s rent.',
-                               max_items=40) }}
-                        </div>
-                        <div class="col-md-3" id="payNowMode">
-                            <label class="form-label">Payment mode</label>
-                            <select name="payment_mode" class="form-select">
-                                <option value="cash">Cash</option>
-                                <option value="bank">Bank</option>
-                                <option value="online">Online</option>
-                            </select>
-                        </div>
-                        <div class="col-md-3" id="payNowRef">
-                            <label class="form-label">Reference (optional)</label>
-                            <input type="text" name="payment_reference" class="form-control" placeholder="Slip / cheque no.">
-                        </div>
-                        <div class="col-12">
-                            <div id="sourceToolsPreview" class="border rounded p-2 bg-light small text-muted">
-                                Pick a rental above to see exactly which tools will move.
-                            </div>
-                        </div>
-                    </div>
-                </div>
 
                 <div class="col-12" id="internalFields">
                     <div class="row g-3">
                         <div class="col-md-6">
-                            <label class="form-label">Site / project</label>
+                            <label class="form-label" id="projectLabel">Site / project</label>
                             <select name="project_id" id="rentalProjectSelect" class="form-select">
                                 <option value="">Select a site</option>
                                 {% for p in projects %}
@@ -142,7 +103,7 @@
                             </select>
                         </div>
                         <div class="col-md-6">
-                            <label class="form-label">Stage (optional)</label>
+                            <label class="form-label" id="stageLabel">Stage (optional)</label>
                             <select name="stage_id" id="rentalStageSelect" class="form-select">
                                 <option value="">No stage</option>
                                 {% for s in stages %}
@@ -172,10 +133,6 @@
                     </div>
                 </div>
 
-                <div class="col-md-6">
-                    <label class="form-label">Expected return date (optional)</label>
-                    <input type="date" name="expected_return_date" class="form-control">
-                </div>
                 <div class="col-12" id="newRentalTools">
                     <label class="form-label fw-semibold">Tools to rent</label>
                     {% if tools %}
@@ -213,16 +170,86 @@
                     {% endif %}
                 </div>
 
-                <div class="col-12">
-                    <label class="form-label">Notes or agreement details (optional)</label>
-                    <textarea name="notes" class="form-control" rows="2" placeholder="Add any rental terms or agreement reference"></textarea>
+                <div class="col-12 d-none" id="transferToolsPanel">
+                    <input type="hidden" name="transfer_selection_enabled" value="1">
+                    <div class="d-flex flex-wrap align-items-start justify-content-between gap-2 mb-2">
+                        <div>
+                            <label class="form-label fw-semibold mb-0">Tools available at the selected "From" holder</label>
+                            <small id="transferToolsSummary" class="text-muted d-block">Select a From holder/location above to see its available tools.</small>
+                        </div>
+                        <label class="form-check d-flex align-items-center gap-2 mb-0">
+                            <input type="checkbox" class="form-check-input mt-0" id="selectAllTransferTools" onchange="toggleAllTransferTools(this.checked)">
+                            <span class="form-check-label">Select all</span>
+                        </label>
+                    </div>
+                    <div id="transferToolsList" class="transfer-tools-list border rounded p-2">
+                        <div class="small text-muted">Select a From holder/location above to see available tools.</div>
+                    </div>
+                    <small id="transferBillingHint" class="text-muted d-block mt-2"></small>
+                    <div id="transferToolsError" class="small text-danger d-none mt-2" role="alert">Select at least one tool to transfer.</div>
                 </div>
-                {% if tools %}
-                <div class="col-12">
-                    <button type="submit" class="btn btn-success"><i class="fas fa-check me-1" aria-hidden="true"></i>Create Rental</button>
-                    <a href="{{ url_for('hdc_tool_rental') }}" class="btn btn-outline-secondary ms-1">Cancel</a>
+
+                <div class="col-12" id="otherSettings">
+                    <div class="border rounded p-3">
+                        <h6 class="mb-3"><i class="fas fa-sliders me-1" aria-hidden="true"></i>Other settings</h6>
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label" id="dateLabel">Rental date</label>
+                                <input type="date" name="rental_date" value="{{ today }}" class="form-control" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Expected return date (optional)</label>
+                                <input type="date" name="expected_return_date" class="form-control">
+                            </div>
+
+                            <div class="col-12 d-none" id="transferSettlementFields">
+                                <div class="border rounded p-3">
+                                    <h6 class="mb-3">Settle the previous holder's rent</h6>
+                                    <div class="row g-3">
+                                        <div class="col-md-6">
+                                            <label class="form-label">Settlement choice</label>
+                                            <select name="settle_choice" id="settleChoice" class="form-select" required onchange="toggleSettle()">
+                                                <option value="pay_now">Pay now — collect &amp; mark completed</option>
+                                                <option value="add_credit">Add to credit — collect later</option>
+                                            </select>
+                                            <small class="text-muted d-block">This settles the previous holder's rent due up to the transfer date.</small>
+                                        </div>
+                                        <div class="col-md-6" id="payNowFields">
+                                            {{ combo_select('received_to_account_id', 'recvAccount', receiving_account_options,
+                                               label='Receive rent into',
+                                               placeholder='Company cash (default)',
+                                               hint='Cash/Bank account that receives the previous holder’s rent.',
+                                               max_items=40) }}
+                                        </div>
+                                        <div class="col-md-6" id="payNowMode">
+                                            <label class="form-label">Payment mode</label>
+                                            <select name="payment_mode" class="form-select">
+                                                <option value="cash">Cash</option>
+                                                <option value="bank">Bank</option>
+                                                <option value="online">Online</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-6" id="payNowRef">
+                                            <label class="form-label">Reference (optional)</label>
+                                            <input type="text" name="payment_reference" class="form-control" placeholder="Slip / cheque no.">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="col-12">
+                                <label class="form-label">Notes or agreement details (optional)</label>
+                                <textarea name="notes" class="form-control" rows="2" placeholder="Add any rental terms or agreement reference"></textarea>
+                            </div>
+                            {% if tools %}
+                            <div class="col-12">
+                                <button type="submit" id="rentalSubmitButton" class="btn btn-success"><i class="fas fa-check me-1" aria-hidden="true"></i><span>Create Rental</span></button>
+                                <a href="{{ url_for('hdc_tool_rental') }}" class="btn btn-outline-secondary ms-1">Cancel</a>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
                 </div>
-                {% endif %}
             </div>
         </form>
     </div>
@@ -337,102 +364,287 @@ function syncRentalStages(){
     filterStages(project && project.value, 'rentalStageSelect');
 }
 
-// ── Who is renting: site fields XOR customer fields ───────────────────────
+function setPanelControlsEnabled(panel, enabled){
+    if(!panel) return;
+    panel.querySelectorAll('input, select, textarea').forEach(function(control){
+        control.disabled = !enabled;
+    });
+}
+
+// ── Destination: site fields XOR customer fields ──────────────────────────
 function toggleRenter(){
     const type = document.getElementById('renterType');
     const intF = document.getElementById('internalFields');
     const extF = document.getElementById('externalFields');
     if(!type || !intF || !extF) return;
     const internal = type.value === 'internal';
+    const transfer = document.getElementById('txnType')?.value === 'transfer';
     intF.classList.toggle('d-none', !internal);
     extF.classList.toggle('d-none', internal);
-    // A hidden control must never be *required*, or the browser blocks a valid
-    // submit; the server enforces the real rule (site needs a project, customer
-    // needs a name).  Mirror it onto the controls the operator can actually see.
+
+    // Hidden controls must not block submit. The server still enforces the
+    // appropriate destination fields for the selected renter type.
     const project = document.getElementById('rentalProjectSelect');
     if(project) project.required = internal;
     const customer = document.getElementById('rentalCustomerName');
     if(customer) customer.required = !internal;
+
+    const whoLabel = document.getElementById('whoLabel');
+    if(whoLabel) whoLabel.textContent = transfer ? 'To — who will receive the tools?' : 'Who is renting?';
+    const projectLabel = document.getElementById('projectLabel');
+    if(projectLabel) projectLabel.textContent = transfer ? 'To site / project' : 'Site / project';
+    const stageLabel = document.getElementById('stageLabel');
+    if(stageLabel) stageLabel.textContent = transfer ? 'To stage (optional)' : 'Stage (optional)';
+    const customerLabel = document.querySelector('label[for="rentalCustomerNameInput"]');
+    if(customerLabel) customerLabel.textContent = transfer ? 'To customer name' : 'Customer name';
 }
 
-// ── Transaction type: New Rental vs Transfer Rental ───────────────────────
-// One form, two jobs.  A transfer settles the *from* holder and starts a fresh
-// cycle for the *to* holder, so it hides the generic tool picker (the tools come
-// from the chosen rental) and shows the "from" picker + preview instead.
 const TRANSFER_SOURCES = {{ transfer_sources | tojson }};
-function toggleTxnType(){
-    const t = document.getElementById('txnType');
-    if(!t) return;
-    const transfer = t.value === 'transfer';
-    document.getElementById('transferFields')?.classList.toggle('d-none', !transfer);
-    document.getElementById('newRentalTools')?.classList.toggle('d-none', transfer);
-    const dateLabel = document.getElementById('dateLabel');
-    if(dateLabel) dateLabel.textContent = transfer ? 'Transfer date' : 'Rental date';
-    const whoLabel = document.getElementById('whoLabel');
-    if(whoLabel) whoLabel.textContent = transfer ? 'Transfer to — who is receiving?' : 'Who is renting?';
-    syncBilling();
+
+function transferMode(){
+    return document.getElementById('txnType')?.value === 'transfer';
 }
+
+function updateSelectAllTransferTools(){
+    const selectAll = document.getElementById('selectAllTransferTools');
+    if(!selectAll) return;
+    const checkboxes = Array.from(document.querySelectorAll('.transfer-item-checkbox'));
+    const selected = checkboxes.filter(function(box){ return box.checked; }).length;
+    selectAll.disabled = !transferMode() || checkboxes.length === 0;
+    selectAll.checked = checkboxes.length > 0 && selected === checkboxes.length;
+    selectAll.indeterminate = selected > 0 && selected < checkboxes.length;
+}
+
+function toggleAllTransferTools(checked){
+    document.querySelectorAll('.transfer-item-checkbox').forEach(function(box){
+        box.checked = !!checked;
+    });
+    document.getElementById('transferToolsError')?.classList.add('d-none');
+    updateSelectAllTransferTools();
+}
+
+function transferDefaultRate(sourceRate, dailyRate, billingType){
+    const source = parseFloat(sourceRate || '0') || 0;
+    const daily = parseFloat(dailyRate || '0') || 0;
+    if(billingType === 'per_day' || billingType === 'per_hour') return daily || source;
+    return source || daily;
+}
+
+function createTransferToolRow(line){
+    const row = document.createElement('div');
+    row.className = 'row g-2 align-items-center py-2 transfer-tool-row border-bottom';
+
+    const toolCell = document.createElement('div');
+    toolCell.className = 'col-md-8';
+    const label = document.createElement('label');
+    label.className = 'form-check d-flex align-items-start gap-2 mb-0';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.name = 'transfer_item_id[]';
+    checkbox.value = String(line.item_id);
+    checkbox.id = 'transferItem' + String(line.item_id);
+    checkbox.className = 'form-check-input mt-1 transfer-item-checkbox';
+    checkbox.disabled = !transferMode();
+    checkbox.addEventListener('change', function(){
+        document.getElementById('transferToolsError')?.classList.add('d-none');
+        updateSelectAllTransferTools();
+    });
+    const detail = document.createElement('span');
+    const title = document.createElement('span');
+    title.className = 'fw-semibold';
+    title.textContent = line.name || ('Tool #' + line.tool_id);
+    if(line.code){
+        const code = document.createElement('span');
+        code.className = 'badge bg-secondary ms-1';
+        code.textContent = line.code;
+        title.appendChild(code);
+    }
+    const qty = document.createElement('small');
+    qty.className = 'text-muted d-block';
+    qty.textContent = 'Available to transfer: ' + line.qty + ' ' + (line.unit || '');
+    detail.appendChild(title);
+    detail.appendChild(qty);
+    label.appendChild(checkbox);
+    label.appendChild(detail);
+    toolCell.appendChild(label);
+
+    const rateCell = document.createElement('div');
+    rateCell.className = 'col-md-4 transfer-rate-cell';
+    const rateLabel = document.createElement('label');
+    rateLabel.className = 'form-label small transfer-rate-label mb-1';
+    rateLabel.htmlFor = 'transferRate' + String(line.item_id);
+    rateLabel.textContent = 'Rent rate';
+    const rate = document.createElement('input');
+    rate.type = 'number';
+    rate.name = 'transfer_rate_' + String(line.item_id);
+    rate.id = 'transferRate' + String(line.item_id);
+    rate.className = 'form-control form-control-sm transfer-rate-input';
+    rate.min = '0';
+    rate.step = '0.01';
+    rate.dataset.sourceRate = line.rate == null ? '0' : String(line.rate);
+    rate.dataset.dailyRate = line.daily_rate == null ? rate.dataset.sourceRate : String(line.daily_rate);
+    rate.dataset.userEdited = 'false';
+    rate.value = transferDefaultRate(rate.dataset.sourceRate, rate.dataset.dailyRate,
+                                     document.getElementById('billingType')?.value);
+    rate.addEventListener('input', function(){ rate.dataset.userEdited = 'true'; });
+    rate.disabled = !transferMode() || document.getElementById('billingType')?.value === 'no_charge';
+    rateCell.appendChild(rateLabel);
+    rateCell.appendChild(rate);
+
+    row.appendChild(toolCell);
+    row.appendChild(rateCell);
+    return row;
+}
+
 function renderSourceTools(){
-    const sel = document.getElementById('sourceRental');   // the hidden <select> the combo drives
-    const box = document.getElementById('sourceToolsPreview');
-    if(!sel || !box) return;
-    const id = parseInt(sel.value || '0', 10);
-    const src = TRANSFER_SOURCES.find(function(s){ return s.id === id; });
-    if(!src){
-        box.className = 'border rounded p-2 bg-light small text-muted';
-        box.textContent = 'Pick a rental above to see exactly which tools will move.';
+    const sourceSelect = document.getElementById('sourceRental');
+    const list = document.getElementById('transferToolsList');
+    const summary = document.getElementById('transferToolsSummary');
+    if(!sourceSelect || !list || !summary) return;
+
+    const sourceKey = sourceSelect.value || '';
+    const source = TRANSFER_SOURCES.find(function(item){ return item.key === sourceKey; });
+    list.replaceChildren();
+    document.getElementById('transferToolsError')?.classList.add('d-none');
+
+    if(!source){
+        summary.textContent = 'Select a From holder/location above to see available tools.';
+        const empty = document.createElement('div');
+        empty.className = 'small text-muted';
+        empty.textContent = 'Available tools will appear here after you choose the From holder/location.';
+        list.appendChild(empty);
+        updateSelectAllTransferTools();
         return;
     }
-    const rows = (src.lines || []).map(function(l){
-        return '<div class="d-flex justify-content-between border-bottom py-1">' +
-               '<span>' + l.name + '</span>' +
-               '<span class="text-nowrap ms-3">' + l.qty + ' ' + (l.unit || '') + ' @ ' + l.rate + '</span>' +
-               '</div>';
-    }).join('');
-    box.className = 'border rounded p-2 bg-light small';
-    box.innerHTML = '<div class="fw-semibold mb-1">' + src.code + ' — ' + src.holder +
-                    ' · ' + src.pending + ' out · ' + src.billing + '</div>' +
-                    (rows || '<div class="text-muted">No tools pending.</div>');
-}
-document.getElementById('sourceRental')?.addEventListener('change', renderSourceTools);
 
-// ── Settle previous rent: pay now (enter details) vs add to credit ─────────
-function toggleSettle(){
-    const sc = document.getElementById('settleChoice');
-    if(!sc) return;
-    const payNow = sc.value === 'pay_now';
-    document.getElementById('payNowFields')?.classList.toggle('d-none', !payNow);
-    document.getElementById('payNowMode')?.classList.toggle('d-none', !payNow);
-    document.getElementById('payNowRef')?.classList.toggle('d-none', !payNow);
-}
-
-// ── How rent is charged: the per-tool Rent rate only exists when charging ──
-function syncBilling(){
-    const bt = document.getElementById('billingType');
-    if(!bt) return;
-    const noCharge = bt.value === 'no_charge';
-    let label = 'Rent rate';
-    let hint = '';
-    if(bt.value === 'fixed_fee'){
-        label = 'Rent rate (one-time fee)';
-        hint = 'One rental fee — the rate you enter per tool line is the full charge.';
-    } else if(bt.value === 'per_day'){
-        label = 'Rate per tool / day';
-        hint = 'Per day — enter the daily rent for each tool line.';
-    } else if(bt.value === 'per_hour'){
-        label = 'Rate per tool / hour';
-        hint = 'Per hour — enter the hourly rent for each tool line.';
-    } else if(noCharge){
-        hint = 'No charge — included in the contract, so there is no rent rate to enter and the rate fields are hidden.';
+    summary.textContent = source.code + ' — ' + source.holder + ' · ' + source.pending + ' available at this location';
+    if(!source.lines || !source.lines.length){
+        const empty = document.createElement('div');
+        empty.className = 'small text-muted';
+        empty.textContent = 'There are no tools still out on this rental.';
+        list.appendChild(empty);
+    } else {
+        source.lines.forEach(function(line){
+            list.appendChild(createTransferToolRow(line));
+        });
     }
-    // Hide/show the rate column without disabling it: a display:none input still
-    // posts, so the rate[] array stays aligned with tool_id[] / qty[] row for row.
+    syncBilling();
+    updateSelectAllTransferTools();
+}
+
+function toggleSettle(){
+    const choice = document.getElementById('settleChoice');
+    if(!choice) return;
+    const transfer = transferMode();
+    const payNow = transfer && choice.value === 'pay_now';
+    ['payNowFields', 'payNowMode', 'payNowRef'].forEach(function(id){
+        const panel = document.getElementById(id);
+        if(!panel) return;
+        panel.classList.toggle('d-none', !payNow);
+        setPanelControlsEnabled(panel, payNow);
+    });
+}
+
+// ── Rent type controls only the rate inputs, never the tool selection ──────
+function syncBilling(){
+    const billing = document.getElementById('billingType');
+    if(!billing) return;
+    const transfer = transferMode();
+    const noCharge = billing.value === 'no_charge';
+    const billingLabel = document.getElementById('billingLabel');
+    if(billingLabel) billingLabel.textContent = transfer ? 'Rent type' : 'How should rent be charged?';
+
+    const labels = {
+        fixed_fee: transfer ? 'Fixed rent (one-time)' : 'One rental fee',
+        per_day: transfer ? 'Per-day rent' : 'Per day',
+        no_charge: transfer
+            ? 'Rent already fixed in contact / contract (no extra rent)'
+            : 'No charge (included in contract)'
+    };
+    Array.from(billing.options).forEach(function(option){
+        if(labels[option.value]) option.textContent = labels[option.value];
+    });
+
+    let rateLabel = 'Rent rate';
+    let newRentalHint = '';
+    let transferHint = '';
+    if(billing.value === 'fixed_fee'){
+        rateLabel = transfer ? 'Fixed rent per tool' : 'Rent rate (one-time fee)';
+        newRentalHint = 'One rental fee — the rate entered for each tool line is the full charge.';
+        transferHint = 'Enter a fixed rent amount for each checked tool. The full quantity shown for each checked line moves from this location.';
+    } else if(billing.value === 'per_day'){
+        rateLabel = transfer ? 'Rent per tool / day' : 'Rate per tool / day';
+        newRentalHint = 'Per day — enter the daily rent for each tool line.';
+        transferHint = 'Enter the daily rate for each checked tool. The full quantity shown for each checked line moves from this location.';
+    } else if(billing.value === 'per_hour'){
+        rateLabel = 'Rate per tool / hour';
+        newRentalHint = 'Per hour — enter the hourly rent for each tool line.';
+        transferHint = 'Enter the hourly rate for each checked tool.';
+    } else if(noCharge){
+        newRentalHint = 'Rent is already included in the contact/contract; no additional rent rate is needed.';
+        transferHint = 'Rent is already fixed in the contact/contract. Rate fields are hidden; you can still select which tools to transfer.';
+    }
+
+    // Keep new-rental rate[] controls enabled while visually hidden so their
+    // values stay aligned with tool_id[] and qty[] in the posted form.
     document.querySelectorAll('.rental-rate-cell').forEach(function(cell){
         cell.classList.toggle('d-none', noCharge);
     });
-    document.querySelectorAll('.rental-rate-label').forEach(function(el){ el.textContent = label; });
-    const hintEl = document.getElementById('billingHint');
-    if(hintEl) hintEl.textContent = hint;
+    document.querySelectorAll('.rental-rate-label').forEach(function(el){
+        el.textContent = rateLabel;
+    });
+    const newHint = document.getElementById('billingHint');
+    if(newHint) newHint.textContent = newRentalHint;
+    const transferBillingHint = document.getElementById('transferBillingHint');
+    if(transferBillingHint) transferBillingHint.textContent = transferHint;
+    document.querySelectorAll('.transfer-rate-cell').forEach(function(cell){
+        cell.classList.toggle('d-none', noCharge);
+        const rate = cell.querySelector('.transfer-rate-input');
+        if(rate){
+            if(rate.dataset.userEdited !== 'true'){
+                rate.value = transferDefaultRate(rate.dataset.sourceRate, rate.dataset.dailyRate, billing.value);
+            }
+            rate.disabled = !transfer || noCharge;
+        }
+    });
+}
+
+function toggleTxnType(){
+    const txn = document.getElementById('txnType');
+    if(!txn) return;
+    const transfer = txn.value === 'transfer';
+    const sourcePanel = document.getElementById('transferSourceField');
+    const newTools = document.getElementById('newRentalTools');
+    const transferTools = document.getElementById('transferToolsPanel');
+    const settlement = document.getElementById('transferSettlementFields');
+
+    sourcePanel?.classList.toggle('d-none', !transfer);
+    setPanelControlsEnabled(sourcePanel, transfer);
+    newTools?.classList.toggle('d-none', transfer);
+    setPanelControlsEnabled(newTools, !transfer);
+    transferTools?.classList.toggle('d-none', !transfer);
+    setPanelControlsEnabled(transferTools, transfer);
+    settlement?.classList.toggle('d-none', !transfer);
+    setPanelControlsEnabled(settlement, transfer);
+
+    const pageHeading = document.getElementById('pageFormHeading');
+    if(pageHeading) pageHeading.textContent = transfer ? 'Transfer Rental' : 'New Rental';
+    const formTitle = document.getElementById('rentalFormTitle');
+    if(formTitle) formTitle.textContent = transfer ? 'Transfer details' : 'Rental details';
+    const dateLabel = document.getElementById('dateLabel');
+    if(dateLabel) dateLabel.textContent = transfer ? 'Transfer date' : 'Rental date';
+    const submitButton = document.getElementById('rentalSubmitButton');
+    if(submitButton){
+        submitButton.classList.toggle('btn-warning', transfer);
+        submitButton.classList.toggle('btn-success', !transfer);
+        const caption = submitButton.querySelector('span');
+        if(caption) caption.textContent = transfer ? 'Complete Transfer' : 'Create Rental';
+    }
+
+    toggleRenter();
+    syncBilling();
+    renderSourceTools();
+    toggleSettle();
 }
 
 // ── Picking a tool fills its saved rate (until the operator overrides it) ──
@@ -450,14 +662,25 @@ function wireToolRow(row){
 }
 
 document.getElementById('rentalProjectSelect')?.addEventListener('change', syncRentalStages);
+document.getElementById('sourceRental')?.addEventListener('change', renderSourceTools);
 document.querySelectorAll('.tool-item-row').forEach(wireToolRow);
+document.getElementById('createRentalForm')?.addEventListener('submit', function(event){
+    if(!transferMode()) return;
+    const selected = document.querySelectorAll('.transfer-item-checkbox:checked');
+    if(selected.length) return;
+    event.preventDefault();
+    document.getElementById('transferToolsError')?.classList.remove('d-none');
+    const first = document.querySelector('.transfer-item-checkbox');
+    if(first){
+        first.focus();
+    } else {
+        document.getElementById('sourceRentalInput')?.focus();
+    }
+});
 
-// Reflect the server defaults the moment the page is ready.
-toggleRenter();
+// Reflect the defaults as soon as the page loads.
 toggleTxnType();
-toggleSettle();
 syncRentalStages();
-syncBilling();
 
 function addToolRow(){
     const container = document.getElementById('toolItemsContainer');

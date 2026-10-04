@@ -9,9 +9,10 @@ own.
 Rules (deliberately boring, so the numbers always reconcile):
 
 1. A tool is ``out`` while its rental line still has ``qty_pending > 0``.
-2. The current site of a pending line is the destination of its latest
-   transfer; if it was never transferred it is the rental's original
-   site/customer.  Transfers recorded before per-tool split existed have no
+2. A pending line is replayed into location buckets from its per-tool
+   transfer/return events. New transfers lift qty from the recorded From
+   location; legacy rows without a usable From location fall back to the latest
+   touched bucket. Transfers recorded before per-tool splits existed have no
    ``ToolRentalTransferItem`` rows — they are treated as "the whole pending
    line moved", which is what the old movement log already assumed.
 3. Everything owned but not out is ``in_store`` (Warehouse / Store).
@@ -167,14 +168,50 @@ def _load_position_events(rental_ids, item_ids, names=None):
     return events_by_item
 
 
+def _transfer_source_matches_bucket(bucket, transfer):
+    """Whether a transfer's recorded From location matches a position bucket.
+
+    Newer forms store the precise source location, so a later transfer can
+    take tools from the selected site even when this rental has holdings at
+    multiple sites. Incomplete legacy rows fall back to the old latest-bucket
+    behaviour in :func:`_resolve_position_buckets`.
+    """
+    from_type = (transfer.from_type or '').strip().lower()
+    if from_type in ('site', 'project'):
+        if bucket.get('loc_type') != LOC_OWN_PROJECT:
+            return False
+        if transfer.from_project_id:
+            if int(bucket.get('project_id') or 0) != int(transfer.from_project_id):
+                return False
+            if int(bucket.get('stage_id') or 0) != int(transfer.from_stage_id or 0):
+                return False
+        elif transfer.from_location_label:
+            if (bucket.get('label') or '').strip().lower() != transfer.from_location_label.strip().lower():
+                return False
+        return True
+    if from_type == 'customer':
+        if bucket.get('loc_type') != LOC_CUSTOMER:
+            return False
+        source_name = (transfer.from_customer_name or '').strip().lower()
+        if source_name:
+            return (bucket.get('customer_name') or '').strip().lower() == source_name
+        if transfer.from_location_label:
+            return (bucket.get('label') or '').strip().lower() == transfer.from_location_label.strip().lower()
+        return True
+    if from_type in ('warehouse', 'store'):
+        return bucket.get('loc_type') == LOC_STORE
+    return False
+
+
 def _resolve_position_buckets(rental, item, events, names=None):
     """Replay a rental line's events into ``(location, qty)`` buckets.
 
-    A transfer lifts pieces out of the most recently touched bucket and opens a
-    new one at the destination; a return takes pieces off the most recent
-    bucket first.  Because a partial transfer only moves the qty it names, a
-    line can legitimately sit in two places at once (80 props on Site A, 40 on
-    Site B) — which is the whole point of the position dashboard.
+    A transfer lifts pieces from its recorded From-location bucket (falling
+    back to the most recently touched bucket for older/incomplete rows) and
+    opens a new one at the destination; a return takes pieces off the most
+    recent bucket first. Because a partial transfer only moves the qty it
+    names, a line can legitimately sit in two places at once (80 props on Site
+    A, 40 on Site B) — which is the whole point of the position dashboard.
     """
     origin = _rental_origin(rental, names)
     buckets = []
@@ -196,7 +233,16 @@ def _resolve_position_buckets(rental, item, events, names=None):
             want = None if event['qty'] is None else _round_qty(event['qty'])
             remaining = want
             source_chain = None
-            for bucket in reversed(buckets):
+            transfer = event.get('transfer')
+            source_buckets = [bucket for bucket in reversed(buckets)
+                              if bucket['qty'] > EPS
+                              and transfer
+                              and _transfer_source_matches_bucket(bucket, transfer)]
+            # Older transfers (or manually entered rows without a usable From
+            # location) retain the historical latest-bucket-first behaviour.
+            if not source_buckets:
+                source_buckets = [bucket for bucket in reversed(buckets) if bucket['qty'] > EPS]
+            for bucket in source_buckets:
                 if bucket['qty'] <= EPS:
                     continue
                 if remaining is None:
