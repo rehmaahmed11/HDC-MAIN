@@ -367,6 +367,67 @@ def get_tool_tracking_chain(tool_id):
             .all())
     return logs
 
+def _rental_holder_label(rental):
+    """Short 'who holds this rental' label used in the a > b > c chain."""
+    if rental.renter_type == 'internal' and rental.project:
+        lbl = rental.project.name
+        if rental.stage:
+            lbl += f" > {rental.stage.name}"
+        return lbl
+    return rental.customer_name or 'External'
+
+
+def rental_transfer_chain(rental_id):
+    """The full hand-over chain ``a > b > c`` across transfer-linked rentals.
+
+    A "Transfer Rental" closes one rental and opens another for the new holder,
+    linking them through ``ToolRentalTransfer.to_rental_id``.  Starting from any
+    rental in that lineage, walk backwards to the first holder and forwards to
+    the last, and return the ordered holder labels so the UI can render e.g.
+    ``Ali Traders > Site B > Site C``.  A rental with no transfer links returns
+    a single-element list (just itself).
+    """
+    rental = db.session.get(ToolRental, rental_id)
+    if not rental:
+        return []
+    seen = {int(rental.id)}
+    ids = [int(rental.id)]
+
+    # backwards: who handed this rental over to us?
+    cur = int(rental.id)
+    while True:
+        prev = (ToolRentalTransfer.query
+                .filter(ToolRentalTransfer.to_rental_id == cur)
+                .order_by(ToolRentalTransfer.transfer_date.desc(), ToolRentalTransfer.id.desc())
+                .first())
+        if not prev or int(prev.rental_id) in seen:
+            break
+        ids.insert(0, int(prev.rental_id))
+        seen.add(int(prev.rental_id))
+        cur = int(prev.rental_id)
+
+    # forwards: who did we hand it over to?
+    cur = int(rental.id)
+    while True:
+        nxt = (ToolRentalTransfer.query
+               .filter(ToolRentalTransfer.rental_id == cur,
+                       ToolRentalTransfer.to_rental_id.isnot(None))
+               .order_by(ToolRentalTransfer.transfer_date.desc(), ToolRentalTransfer.id.desc())
+               .first())
+        if not nxt or int(nxt.to_rental_id) in seen:
+            break
+        ids.append(int(nxt.to_rental_id))
+        seen.add(int(nxt.to_rental_id))
+        cur = int(nxt.to_rental_id)
+
+    labels = []
+    for rid in ids:
+        r = db.session.get(ToolRental, rid)
+        if r:
+            labels.append(_rental_holder_label(r))
+    return labels
+
+
 def get_rental_tracking_chain(rental_id):
     rental = db.session.get(ToolRental, rental_id)
     if not rental:

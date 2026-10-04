@@ -22,7 +22,7 @@ from hdc.services.tool_rental import (
     get_receiving_accounts, global_tool_locations,
     known_tool_customers, known_tool_suppliers,
     post_tool_rental_payment_to_accounts, recalc_rental_totals,
-    record_tool_purchase, record_tool_scrap, search_rentals,
+    record_tool_purchase, record_tool_scrap, rental_transfer_chain, search_rentals,
     tool_available_for_integrity, tool_kpis, tool_purchases, tool_scraps, tool_stock_aggregates,
     void_tool_rental_payment_in_accounts
 )
@@ -610,11 +610,22 @@ def register(app):
             to_label = to_customer_name or 'External Customer'
         from_label = source.current_location_label or 'Unknown'
 
-        # ---- 1) FINALISE the previous holder: post outstanding rent to the party ledger ----
+        # ---- 1) settle the previous holder: pay now, or put the whole rent on credit ----
+        settle_choice = (request.form.get('settle_choice') or 'pay_now').strip().lower()
+        if settle_choice not in ('pay_now', 'add_credit'):
+            settle_choice = 'pay_now'
         recalc_rental_totals(source.id)
         outstanding = 0.0 if (source.billing_type or '').lower() == 'no_charge' else float(source.total_pending_amount or 0)
         finalized_amount = 0.0
-        if outstanding > 0.001:
+        credit_amount = 0.0
+        if outstanding > 0.001 and settle_choice == 'add_credit':
+            # Nothing collected now: the full outstanding rent stays owed by the
+            # previous holder and is flagged as credit (an amount due on their
+            # party ledger, not a receipt).  recalc keeps payment_status='credit'
+            # below because the balance is still open.
+            credit_amount = outstanding
+            source.payment_status = 'credit'
+        elif outstanding > 0.001:
             from hdc.services.accounts import _accounts_default_company_cash
             recv_acc = None
             acc_id = request.form.get('received_to_account_id', type=int)
@@ -715,23 +726,33 @@ def register(app):
                 notes=f'New rental {new_code} from transfer of {source.rental_code}',
             )
 
+        transfer.to_rental_id = new_rental.id
         transfer.notes = f'Transferred to new rental {new_code}'
 
         # the external destination customer lands in Parties, like any fresh rental
         if to_type == 'external' and to_customer_name:
             ensure_party(to_customer_name, party_type='rental', phone=to_customer_phone)
 
-        # ---- 5) finalise the source totals (paid -> closed) and note the hand-off ----
+        # ---- 5) finalise the source totals (paid -> closed, or credit) and note the hand-off ----
         recalc_rental_totals(source.id)
+        if credit_amount > 0 and float(source.total_pending_amount or 0) > 0.001:
+            source.payment_status = 'credit'
         add = f'Transferred {moved_qty:g} tools to {to_label} (new rental {new_code}).'
         src_note = (source.notes or '').strip()
         source.notes = (src_note + ' ' + add).strip() if src_note else add
 
         db.session.commit()
 
-        fin_txt = f' Finalised {finalized_amount:,.0f} PKR rent to the previous holder.' if finalized_amount > 0 else ''
+        # Full hand-over lineage, so the operator sees a > b > c across rentals.
+        chain_str = ' > '.join(rental_transfer_chain(new_rental.id))
+        if credit_amount > 0:
+            settle_txt = f' {credit_amount:,.0f} PKR moved to credit for the previous holder.'
+        elif finalized_amount > 0:
+            settle_txt = f' Finalised {finalized_amount:,.0f} PKR rent from the previous holder.'
+        else:
+            settle_txt = ''
         flash(f'Transfer complete: {source.rental_code} → {new_code} for {to_label} '
-              f'({moved_qty:g} tools).{fin_txt} New rental shown below.', 'success')
+              f'({moved_qty:g} tools).{settle_txt} Chain: {chain_str}. New rental shown below.', 'success')
         return redirect(url_for('hdc_tool_rental_new', created=new_rental.id))
 
     # ------------------ CREATE RENTAL ------------------
@@ -954,6 +975,7 @@ def register(app):
             payments=payments,
             transfers=transfers,
             tracking_chain=tracking_chain,
+            transfer_chain=rental_transfer_chain(rental.id),
             movement_logs=movement_logs,
             projects=projects,
             stages=stages,

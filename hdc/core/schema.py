@@ -1738,6 +1738,7 @@ def _ensure_tool_rental_schema():
             to_stage_id INTEGER REFERENCES hdc_stage(id),
             to_customer_name VARCHAR(150),
             to_location_label VARCHAR(300),
+            to_rental_id INTEGER REFERENCES hdc_tool_rental(id),
             qty_transferred FLOAT DEFAULT 0,
             transfer_date DATE,
             notes VARCHAR(500),
@@ -1861,6 +1862,11 @@ def _ensure_tool_rental_schema():
         'is_void': "is_void BOOLEAN DEFAULT 0",
         'void_reason': "void_reason VARCHAR(250)",
         'voided_at': "voided_at DATETIME",
+    })
+    # Link a transfer to the new rental it spawned, so a hand-over chain reads
+    # a > b > c across rentals (see hdc.services.tool_rental.rental_transfer_chain).
+    _ensure_table_columns_sqlite('hdc_tool_rental_transfer', {
+        'to_rental_id': "to_rental_id INTEGER REFERENCES hdc_tool_rental(id)",
     })
     # Backfill is_void for legacy rows and ensure link table indexes - auto on reload
     with db.engine.connect() as conn:

@@ -92,15 +92,35 @@
                             {{ combo_select('source_rental_id', 'sourceRental', transfer_source_options,
                                label='Transfer from (existing rental)',
                                placeholder='Search a rental code or holder…',
-                               hint='The rental whose still-out tools move to the new holder. Its rent is finalised to the previous holder.',
+                               hint='The rental whose still-out tools move to the new holder. Its rent is settled to the previous holder.',
                                max_items=80) }}
                         </div>
                         <div class="col-md-6">
+                            <label class="form-label">Settle the previous holder's rent</label>
+                            <select name="settle_choice" id="settleChoice" class="form-select" required onchange="toggleSettle()">
+                                <option value="pay_now">Pay now — collect &amp; mark completed</option>
+                                <option value="add_credit">Add to credit — collect later</option>
+                            </select>
+                            <small class="text-muted d-block">Pay now collects the full outstanding rent; add to credit keeps it owed.</small>
+                        </div>
+                        <div class="col-md-6" id="payNowFields">
                             {{ combo_select('received_to_account_id', 'recvAccount', receiving_account_options,
-                               label='Collect previous rent to',
+                               label='Receive rent into',
                                placeholder='Company cash (default)',
-                               hint='Where the previous holder’s finalised rent is received (defaults to company cash).',
+                               hint='Cash/Bank account that receives the previous holder’s rent.',
                                max_items=40) }}
+                        </div>
+                        <div class="col-md-3" id="payNowMode">
+                            <label class="form-label">Payment mode</label>
+                            <select name="payment_mode" class="form-select">
+                                <option value="cash">Cash</option>
+                                <option value="bank">Bank</option>
+                                <option value="online">Online</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3" id="payNowRef">
+                            <label class="form-label">Reference (optional)</label>
+                            <input type="text" name="payment_reference" class="form-control" placeholder="Slip / cheque no.">
                         </div>
                         <div class="col-12">
                             <div id="sourceToolsPreview" class="border rounded p-2 bg-light small text-muted">
@@ -376,6 +396,16 @@ function renderSourceTools(){
 }
 document.getElementById('sourceRental')?.addEventListener('change', renderSourceTools);
 
+// ── Settle previous rent: pay now (enter details) vs add to credit ─────────
+function toggleSettle(){
+    const sc = document.getElementById('settleChoice');
+    if(!sc) return;
+    const payNow = sc.value === 'pay_now';
+    document.getElementById('payNowFields')?.classList.toggle('d-none', !payNow);
+    document.getElementById('payNowMode')?.classList.toggle('d-none', !payNow);
+    document.getElementById('payNowRef')?.classList.toggle('d-none', !payNow);
+}
+
 // ── How rent is charged: the per-tool Rent rate only exists when charging ──
 function syncBilling(){
     const bt = document.getElementById('billingType');
@@ -425,6 +455,7 @@ document.querySelectorAll('.tool-item-row').forEach(wireToolRow);
 // Reflect the server defaults the moment the page is ready.
 toggleRenter();
 toggleTxnType();
+toggleSettle();
 syncRentalStages();
 syncBilling();
 
