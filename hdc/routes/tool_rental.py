@@ -39,6 +39,13 @@ from hdc.services.timekeeping import _has_recent_duplicate
 from hdc.services.permissions import may_access_path
 
 
+#: How many rentals the create page lists *below* the form.  The newest are
+#: always on top, so a rental the operator just made is the first row and the
+#: page never grows into a second hub — the full searchable list stays on the
+#: Rentals page.
+RECENT_RENTALS_ON_NEW = 10
+
+
 def register(app):
 
     # ------------------ TOOLS DASHBOARD (simple stock & rent summary) ------------------
@@ -467,11 +474,21 @@ def register(app):
             flash('You do not have permission to create rentals.', 'danger')
             return redirect(url_for('hdc_tool_rental'))
 
+        # Landing back here after a create (or a rejected create) keeps the
+        # operator in one place: the form up top, the rentals they just made
+        # *below* it.  ``created`` highlights the fresh rental so "where did my
+        # rental go?" is answered on the same screen instead of a jump away.
+        created_rental_id = request.args.get('created', type=int)
+        created_rental = db.session.get(ToolRental, created_rental_id) if created_rental_id else None
+        recent_rentals = search_rentals({})[:RECENT_RENTALS_ON_NEW]
+
         return render_template('tool_rental/tool_new_rental.html',
             projects=Project.query.order_by(Project.name.asc()).all(),
             stages=Stage.query.order_by(Stage.name.asc()).all(),
             tools=Tool.query.filter(Tool.is_void==False).order_by(Tool.name.asc()).all(),
             known_customers=known_tool_customers(),
+            recent_rentals=recent_rentals,
+            created_rental=created_rental,
             today=_pkt_today().isoformat(),
         )
 
@@ -621,8 +638,14 @@ def register(app):
             # every HDC Tools transaction shows up there.
             ensure_party(customer_name, party_type='rental', phone=customer_phone)
         db.session.commit()
-        flash(f'Rental {rental_code} created: {total_rented_qty} tools.', 'success')
-        return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+        # Stay on the create page: the fresh rental *shows below* the form,
+        # highlighted, so the operator sees it land without navigating away.
+        # Its row (and the Rentals hub) still lead to the detail view where
+        # returns, payments and transfers are recorded.
+        qty_word = 'tool' if abs(total_rented_qty - 1.0) < 0.001 else 'tools'
+        flash(f'Rental {rental_code} created — {total_rented_qty:g} {qty_word} '
+              f'shown in the list below.', 'success')
+        return redirect(url_for('hdc_tool_rental_new', created=rental.id))
 
     # ------------------ RENTAL DETAIL ------------------
     @app.route('/hdc/tool-rental/<int:rental_id>')
