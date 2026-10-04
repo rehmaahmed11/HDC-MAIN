@@ -54,16 +54,11 @@ def register(app):
         repeated here — they live on the Tracking / Rentals pages (see
         `hdc.services.tool_tracking.tool_item_summary`).
         """
-        q = (request.args.get('q') or '').strip()
-        category_id = request.args.get('category_id', type=int)
-        summary = tool_item_summary(term=q, category_id=category_id)
+        summary = tool_item_summary()
 
         return render_template('tool_rental/tool_dashboard.html',
             summary=summary,
-            rows=summary['rows'],
             totals=summary['totals'],
-            categories=ToolCategory.query.order_by(ToolCategory.name.asc()).all(),
-            filters={'q': q, 'category_id': category_id},
             today=_pkt_today().isoformat(),
         )
 

@@ -2,11 +2,11 @@
 {% block title %}HDC Tools{% endblock %}
 {% block page_heading %}HDC Tools — Stock &amp; Rent Summary{% endblock %}
 
-{# The Tools dashboard is deliberately one simple page: per tool item, how
-   much we own, how much is in the store, how much is rented out, and how
-   much rent customers have still not paid.  Movement chains and the full
-   per-site audit live on the Tracking page, and rentals/payments on the
-   Rentals page — nothing is repeated here. #}
+{# The Tools dashboard shows headline KPI numbers only: how many tools we own,
+   how many are in the store, how many are rented out, and how much rent
+   customers have still not paid.  The item-wise breakdown, movement chains
+   and the full per-site audit live on the Inventory / Tracking / Rentals
+   pages — nothing is repeated here. #}
 {% block content %}
 {% set tools_active = 'dashboard' %}
 {% include "tool_rental/_tools_nav.html" %}
@@ -15,7 +15,7 @@
 
 <!-- ============ HEADLINE NUMBERS ============ -->
 <div class="row g-3 mt-1">
-    <div class="col-6 col-xl-3">
+    <div class="col-6 col-xl">
         <div class="kpi-card kpi-blue h-100">
             <div class="kpi-icon"><i class="fas fa-tools"></i></div>
             <div class="kpi-value">{{ "%g"|format(t.owned_qty) }}</div>
@@ -23,7 +23,7 @@
             <div class="kpi-sub">{{ t.items_total }} item(s) in the list</div>
         </div>
     </div>
-    <div class="col-6 col-xl-3">
+    <div class="col-6 col-xl">
         <div class="kpi-card kpi-green h-100">
             <div class="kpi-icon"><i class="fas fa-warehouse"></i></div>
             <div class="kpi-value">{{ "%g"|format(t.in_store_qty) }}</div>
@@ -31,7 +31,7 @@
             <div class="kpi-sub">{{ "%.1f"|format(t.store_pct) }}% of owned — ready to rent</div>
         </div>
     </div>
-    <div class="col-6 col-xl-3">
+    <div class="col-6 col-xl">
         <div class="kpi-card kpi-orange h-100">
             <div class="kpi-icon"><i class="fas fa-hand-holding-hand"></i></div>
             <div class="kpi-value">{{ "%g"|format(t.out_qty) }}</div>
@@ -46,11 +46,19 @@
             </div>
         </div>
     </div>
-    <div class="col-6 col-xl-3">
+    <div class="col-6 col-xl">
+        <div class="kpi-card kpi-purple h-100">
+            <div class="kpi-icon"><i class="fas fa-boxes-stacked"></i></div>
+            <div class="kpi-value">{{ t.items_total }}</div>
+            <div class="kpi-label">Tool Items</div>
+            <div class="kpi-sub">Distinct items tracked</div>
+        </div>
+    </div>
+    <div class="col-6 col-xl">
         <div class="kpi-card {% if t.pending_amount > 0 %}kpi-purple{% else %}kpi-teal{% endif %} h-100">
             <div class="kpi-icon"><i class="fas fa-hand-holding-dollar"></i></div>
             <div class="kpi-value small">{{ "{:,.0f}".format(t.pending_amount) }}</div>
-            <div class="kpi-label">Rent Not Paid by Customers (PKR)</div>
+            <div class="kpi-label">Rent Not Paid (PKR)</div>
             <div class="kpi-sub">
                 {% if t.pending_amount > 0 %}
                 {{ summary.customer_count }} customer(s) · {{ summary.unpaid_rental_count }} rental(s) unpaid
@@ -65,109 +73,5 @@
     </div>
 </div>
 
-<!-- ============ ITEM-WISE TABLE ============ -->
-<div class="card hdc-card mt-3">
-    <div class="card-header hdc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-        <span><i class="fas fa-list-check me-2"></i>Tools by item — {{ t.items_shown }} of {{ t.items_total }} item(s)</span>
-        <small class="text-muted">Owned = In Store + Rented Out</small>
-    </div>
-    <div class="card-body pb-2">
-        <form method="GET" class="row g-2 align-items-end">
-            <div class="col-md-5">
-                <label class="form-label">Search item</label>
-                <input type="text" name="q" value="{{ filters.q or '' }}" class="form-control"
-                       placeholder="e.g. Vibrator or TOOL-0004">
-            </div>
-            <div class="col-md-4">
-                <label class="form-label">Category</label>
-                <select name="category_id" class="form-select">
-                    <option value="">All categories</option>
-                    {% for c in categories %}
-                    <option value="{{ c.id }}" {% if filters.category_id == c.id %}selected{% endif %}>{{ c.name }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="col-md-3 d-flex gap-2">
-                <button type="submit" class="btn btn-mint"><i class="fas fa-search me-1"></i>Search</button>
-                <a href="{{ url_for('hdc_tool_rental_dashboard') }}" class="btn btn-outline-secondary">Reset</a>
-            </div>
-        </form>
-    </div>
-    <div class="table-responsive">
-        <table class="table hdc-table table-sm mb-0 align-middle">
-            <thead>
-                <tr>
-                    <th>Tool Item</th>
-                    <th class="text-center">Total Owned</th>
-                    <th class="text-center">In Store</th>
-                    <th class="text-center">Rented Out</th>
-                    <th class="text-end">Not Paid by Customers (PKR)</th>
-                </tr>
-            </thead>
-            <tbody>
-            {% for r in rows %}
-                <tr>
-                    <td>
-                        <a href="{{ url_for('hdc_tool_rental_tool_position', tool_id=r.tool_id) }}"
-                           class="text-decoration-none text-reset"
-                           title="Open this item's stock history">{{ r.name }}</a>
-                        <div>
-                            <span class="badge bg-secondary">{{ r.code }}</span>
-                            <small class="text-muted">{{ r.category }} · {{ r.unit }}</small>
-                        </div>
-                    </td>
-                    <td class="text-center fw-bold">{{ "%g"|format(r.owned_qty) }}</td>
-                    <td class="text-center">
-                        {% if r.in_store_qty > 0 %}
-                        <span class="badge bg-success-subtle text-success border border-success-subtle">{{ "%g"|format(r.in_store_qty) }}</span>
-                        {% else %}<span class="text-muted">–</span>{% endif %}
-                    </td>
-                    <td class="text-center">
-                        {% if r.out_qty > 0 %}
-                        <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle">{{ "%g"|format(r.out_qty) }}</span>
-                        <div><small class="text-muted">own {{ "%g"|format(r.own_project_qty) }} · cust {{ "%g"|format(r.customer_qty) }}</small></div>
-                        {% else %}<span class="text-muted">–</span>{% endif %}
-                    </td>
-                    <td class="text-end">
-                        {% if r.pending_amount > 0 %}
-                        <span class="text-danger fw-bold">{{ "{:,.0f}".format(r.pending_amount) }}</span>
-                        {% else %}<span class="text-muted">–</span>{% endif %}
-                    </td>
-                </tr>
-            {% else %}
-                <tr><td colspan="5" class="text-center text-muted py-4">
-                    {% if t.items_total == 0 %}
-                    No tools yet.
-                    <a href="{{ url_for('hdc_tool_rental_inventory') }}">Add your first tool in Inventory</a>.
-                    {% else %}
-                    No item matches this search.
-                    <a href="{{ url_for('hdc_tool_rental_dashboard') }}">Reset the filters</a>.
-                    {% endif %}
-                </td></tr>
-            {% endfor %}
-            </tbody>
-            {% if rows %}
-            <tfoot>
-                <tr class="hdc-empty-row">
-                    <td class="fw-bold">Totals ({{ t.items_shown }} shown)</td>
-                    <td class="text-center fw-bold">{{ "%g"|format(t.owned_qty) }}</td>
-                    <td class="text-center fw-bold">{{ "%g"|format(t.in_store_qty) }}</td>
-                    <td class="text-center fw-bold">{{ "%g"|format(t.out_qty) }}</td>
-                    <td class="text-end fw-bold {% if t.pending_amount > 0 %}text-danger{% endif %}">
-                        {{ "{:,.0f}".format(t.pending_amount) }}
-                    </td>
-                </tr>
-            </tfoot>
-            {% endif %}
-        </table>
-    </div>
-</div>
 
-<div class="d-flex flex-wrap gap-3 mt-3 small text-muted">
-    <span><i class="fas fa-warehouse me-1"></i><a href="{{ url_for('hdc_tool_rental_inventory') }}">Inventory</a> — add tools, buy or scrap stock</span>
-    <span><i class="fas fa-file-contract me-1"></i><a href="{{ url_for('hdc_tool_rental') }}">Rentals</a> — rent out, return and record payments</span>
-    {% if (current_user.role or '')|trim|lower == 'admin' %}
-    <span><i class="fas fa-map-location-dot me-1"></i><a href="{{ url_for('hdc_tool_rental_tracking') }}">Tracking</a> — where every piece is right now</span>
-    {% endif %}
-</div>
 {% endblock %}
