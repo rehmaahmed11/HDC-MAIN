@@ -10,6 +10,9 @@ Pins the behaviour described in TOOLS_TRACKING_SYSTEM.md:
   - a return puts the qty back in store so the balance still holds
   - the universal search finds a tool by code, a rental by code and a
     customer by name, and reports where the pieces are
+  - the dashboard stays a simple item-wise stock + unpaid-rent summary
+    (no repeated tracking/audit blocks) and its filters narrow the list
+  - a customer's unpaid rent is split per item, but own-site money is not
   - the dashboard / position pages / JSON feed all render
 
 Run with:
@@ -43,7 +46,8 @@ from hdc.models.tool_rental import (                              # noqa: E402
 from hdc.services.tool_tracking import (                          # noqa: E402
     LOC_CUSTOMER, LOC_OWN_PROJECT, LOC_STORE, WAREHOUSE_LABEL,
     allocate_transfer_qty, dashboard_summary, location_summary,
-    tool_ledger, tools_reconciliation, tools_universal_search,
+    tool_item_summary, tool_ledger, tools_reconciliation,
+    tools_universal_search,
 )
 from hdc.utils.dates import _pkt_today                            # noqa: E402
 
@@ -392,51 +396,101 @@ class ToolTrackingTestCase(unittest.TestCase):
         self.assertEqual(tools_universal_search('')['total'], 0)
         self.assertEqual(tools_universal_search('zzz-nothing')['tools'], [])
 
-    def test_dashboard_page_renders_split_and_balance(self):
-        vib = self._make_tool('TOOL-0001', 'Vibrator', 50)
-        jack = self._make_tool('TOOL-0002', 'Jack Hammer', 20, condition='damaged')
+    def test_dashboard_is_a_simple_item_wise_summary(self):
+        """The dashboard answers only the stock question — and repeats nothing.
+
+        Item by item: how many we own, how many are in the store, how many are
+        rented out and how much rent customers have not paid.  Movement chains,
+        per-site positions and audit panels belong to the Tracking / Rentals
+        pages, so the dashboard must not carry them again.
+        """
+        vib = self._make_tool('TOOL-0001', 'Vibrator', 50, rate=500)
+        self._make_tool('TOOL-0002', 'Jack Hammer', 20, condition='damaged')
         self._rent([(vib, 30)], renter_type='internal', project=self.site_a)
         self._rent([(vib, 12)], renter_type='external', customer_name='Ali Traders')
 
         r = self.client.get('/hdc/tool-rental/dashboard')
         self.assertEqual(r.status_code, 200)
         html = r.get_data(as_text=True)
-        self.assertIn('Total Owned (Inventory)', html)
-        self.assertIn('Sent to Own Projects', html)
-        self.assertIn('Sent to Other Customers', html)
-        self.assertIn('Rent Pending', html)
-        self.assertIn('Balanced', html)
-        self.assertIn('Site A', html)
-        self.assertIn('Ali Traders', html)
-        self.assertIn('Vibrator', html)
-        # split bar segments present
-        self.assertIn('tools-split-seg', html)
+        # the four simple headline numbers
+        self.assertIn('Total Tools Owned', html)
+        self.assertIn('In Store (Available)', html)
+        self.assertIn('Rented Out', html)
+        self.assertIn('Rent Not Paid by Customers (PKR)', html)
+        # one item-wise table: owned / store / rented / unpaid per item
+        self.assertIn('Tools by item', html)
+        self.assertIn('>Vibrator</a>', html)
+        self.assertIn('TOOL-0001', html)
+        self.assertIn('Totals (2 shown)', html)
+        # 12 pcs out to the customer at 500/day = 6,000 not paid
+        self.assertIn('6,000', html)
+        # no repeated tracking / audit blocks on this page
+        self.assertNotIn('tools-split-seg', html)
+        self.assertNotIn('Does every tool add up', html)
+        self.assertNotIn('Needs Attention', html)
+        self.assertNotIn('By location', html)
+        self.assertNotIn('Movement history', html)
 
-    def test_dashboard_filters_narrow_the_tool_list(self):
+    def test_dashboard_filters_narrow_the_item_list(self):
         vib = self._make_tool('TOOL-0001', 'Vibrator', 50)
-        jack = self._make_tool('TOOL-0002', 'Jack Hammer', 20)
+        other_cat = ToolCategory(name='Manual Tools', active_status=True)
+        db.session.add(other_cat)
+        db.session.commit()
+        self._make_tool('TOOL-0002', 'Jack Hammer', 20, category=other_cat)
         self._rent([(vib, 30)], renter_type='internal', project=self.site_a)
 
-        r = self.client.get('/hdc/tool-rental/dashboard?view=out')
-        html = r.get_data(as_text=True)
-        # only the rented tool is listed (the filter dropdown still names both)
-        self.assertIn('Totals (1 shown)', html)
-        self.assertIn('<strong>Vibrator</strong>', html)
-        self.assertNotIn('<strong>Jack Hammer</strong>', html)
-
-        r = self.client.get(f'/hdc/tool-rental/dashboard?location_type={LOC_CUSTOMER}')
-        self.assertEqual(r.status_code, 200)
-        # nothing is with a customer, so the tool list is empty
-        self.assertIn('No tools match this filter', r.get_data(as_text=True))
-
         r = self.client.get('/hdc/tool-rental/dashboard?q=vibrator')
-        self.assertIn('Vibrator', r.get_data(as_text=True))
+        html = r.get_data(as_text=True)
+        self.assertIn('Totals (1 shown)', html)
+        self.assertIn('>Vibrator</a>', html)
+        self.assertNotIn('>Jack Hammer</a>', html)
 
-        r = self.client.get(f'/hdc/tool-rental/dashboard?project_id={self.site_a.id}')
-        self.assertIn('Site A', r.get_data(as_text=True))
+        r = self.client.get(f'/hdc/tool-rental/dashboard?category_id={self.cat.id}')
+        html = r.get_data(as_text=True)
+        self.assertIn('Totals (1 shown)', html)
+        self.assertIn('>Vibrator</a>', html)
+        self.assertNotIn('>Jack Hammer</a>', html)
 
-        r = self.client.get('/hdc/tool-rental/dashboard?issues=1')
-        self.assertEqual(r.status_code, 200)
+        r = self.client.get('/hdc/tool-rental/dashboard?q=nothing-like-this')
+        self.assertIn('No item matches this search', r.get_data(as_text=True))
+
+    def test_item_summary_counts_only_unpaid_customer_rent(self):
+        """Money: unpaid rent per item, customers only, apportioned per line."""
+        vib = self._make_tool('TOOL-0001', 'Vibrator', 50, rate=500)
+        jack = self._make_tool('TOOL-0002', 'Jack Hammer', 20, rate=1000)
+        self._rent([(vib, 30)], renter_type='internal', project=self.site_a)
+        external = self._rent([(vib, 12), (jack, 8)], renter_type='external',
+                              customer_name='Ali Traders')
+        # own-site money is internal, and a no-charge rental owes nothing
+        self._rent([(vib, 5)], renter_type='internal', project=self.site_b)
+        self._rent([(jack, 3)], renter_type='external', customer_name='Free Co',
+                   billing='no_charge')
+
+        summary = tool_item_summary()
+        by_name = {r['name']: r for r in summary['rows']}
+        self.assertEqual(by_name['Vibrator']['pending_amount'], 6000.0)
+        self.assertEqual(by_name['Jack Hammer']['pending_amount'], 8000.0)
+        self.assertEqual(summary['totals']['pending_amount'], 14000.0)
+        self.assertEqual(summary['customer_count'], 1)
+        self.assertEqual(summary['unpaid_rental_count'], 1)
+        # own-site (internal) charges are reported separately, never as dues
+        self.assertEqual(summary['internal_pending'], 30 * 500 + 5 * 500)
+        # stock side of the same rows still reconciles: a no-charge customer
+        # still holds the pieces, it just does not owe money for them
+        self.assertEqual(by_name['Jack Hammer']['owned_qty'], 20.0)
+        self.assertEqual(by_name['Jack Hammer']['customer_qty'], 11.0)
+        self.assertEqual(by_name['Jack Hammer']['in_store_qty'], 9.0)
+
+        # a part payment lowers the due and is shared pro-rata across the lines
+        external.total_paid = 4000.0
+        db.session.commit()
+        summary = tool_item_summary()
+        by_name = {r['name']: r for r in summary['rows']}
+        self.assertEqual(summary['totals']['pending_amount'], 10000.0)
+        self.assertAlmostEqual(by_name['Vibrator']['pending_amount'],
+                               6000.0 / 14000.0 * 10000.0, places=2)
+        self.assertAlmostEqual(by_name['Jack Hammer']['pending_amount'],
+                               8000.0 / 14000.0 * 10000.0, places=2)
 
     def test_tool_position_page_renders_chain(self):
         vib = self._make_tool('TOOL-0001', 'Vibrator', 10)

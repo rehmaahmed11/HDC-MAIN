@@ -29,8 +29,8 @@ from hdc.services.tool_rental import (
 from hdc.services.tool_tracking import (
     LOC_CUSTOMER, LOC_OWN_PROJECT, LOC_STORE, WAREHOUSE_LABEL,
     allocate_transfer_qty, dashboard_summary, inventory_rows, location_summary,
-    record_transfer_items, tool_ledger, tool_position, tools_reconciliation,
-    tools_universal_search
+    record_transfer_items, tool_item_summary, tool_ledger, tool_position,
+    tools_reconciliation
 )
 from hdc.utils.dates import _pkt_now_naive, _pkt_today
 from hdc.utils.format import _flt, _amount_to_words
@@ -42,91 +42,28 @@ from hdc.services.permissions import may_access_path
 
 def register(app):
 
-    # ------------------ TOOLS DASHBOARD (total sent / own sites / customers vs inventory) ------------------
+    # ------------------ TOOLS DASHBOARD (simple stock & rent summary) ------------------
     @app.route('/hdc/tool-rental/dashboard')
     @login_required
     def hdc_tool_rental_dashboard():
-        """One screen: how many tools we own, how many went out, to whom, and
-        whether every single piece can be located right now."""
-        ledger = tool_ledger()
-        summary = dashboard_summary(ledger)
-        recon = tools_reconciliation(ledger)
+        """The simple Tools answers: how many tools we own **item by item**,
+        how many are in the store, how many are rented out, and how much rent
+        customers have still not paid.
 
-        # ---- view filters (all optional, all keep the same reconciliation) ----
-        view = (request.args.get('view') or 'all').strip().lower()
-        if view not in ('all', 'out', 'store', 'own', 'customer', 'attention'):
-            view = 'all'
-        location_type = (request.args.get('location_type') or '').strip().lower()
-        if location_type not in ('', LOC_STORE, LOC_OWN_PROJECT, LOC_CUSTOMER):
-            location_type = ''
-        tool_id = request.args.get('tool_id', type=int)
-        category_id = request.args.get('category_id', type=int)
-        project_id = request.args.get('project_id', type=int)
-        only_issues = (request.args.get('issues') or '').strip().lower() in ('1', 'yes', 'true')
+        Movement chains, per-location positions and audit warnings are not
+        repeated here — they live on the Tracking / Rentals pages (see
+        `hdc.services.tool_tracking.tool_item_summary`).
+        """
         q = (request.args.get('q') or '').strip()
-
-        rows = ledger['tools']
-        if tool_id:
-            rows = [r for r in rows if int(r['tool_id']) == int(tool_id)]
-        if category_id:
-            rows = [r for r in rows if int(r['tool'].category_id or 0) == int(category_id)]
-        if view == 'out':
-            rows = [r for r in rows if r['out_qty'] > 0]
-        elif view == 'store':
-            rows = [r for r in rows if r['in_store_qty'] > 0]
-        elif view == 'own':
-            rows = [r for r in rows if r['own_project_qty'] > 0]
-        elif view == 'customer':
-            rows = [r for r in rows if r['customer_qty'] > 0]
-        elif view == 'attention':
-            rows = [r for r in rows if r['unaccounted'] or r['overdue_qty'] > 0 or r['long_out']]
-        if only_issues:
-            rows = [r for r in rows if r['unaccounted'] or r['overdue_qty'] > 0 or r['long_out'] or r['idle']]
-        if location_type:
-            rows = [r for r in rows
-                    if any(h['loc_type'] == location_type for h in r['holdings']) or
-                    (location_type == LOC_STORE and r['in_store_qty'] > 0)]
-        if project_id:
-            rows = [r for r in rows
-                    if any(h['loc_type'] == LOC_OWN_PROJECT and int(h['project_id'] or 0) == int(project_id)
-                           for h in r['holdings'])]
-        if q:
-            ql = q.lower()
-            rows = [r for r in rows if ql in ' '.join([
-                str(r['name'] or '').lower(), str(r['code'] or '').lower(),
-                str(r['category'] or '').lower(),
-                ' '.join(str(h['label'] or '').lower() for h in r['holdings']),
-            ])]
-
-        locations = location_summary(ledger)
-        if location_type:
-            locations = [loc for loc in locations if loc['loc_type'] == location_type]
-        if project_id:
-            locations = [loc for loc in locations
-                         if loc['loc_type'] != LOC_OWN_PROJECT or int(loc['project_id'] or 0) == int(project_id)]
-        if q:
-            locations = [loc for loc in locations if q.lower() in (loc['label'] or '').lower()]
-
-        # ---- one search box that finds a tool / rental / customer / site ----
-        found = tools_universal_search(q) if q else None
+        category_id = request.args.get('category_id', type=int)
+        summary = tool_item_summary(term=q, category_id=category_id)
 
         return render_template('tool_rental/tool_dashboard.html',
             summary=summary,
-            recon=recon,
-            ledger=ledger,
-            rows=rows,
-            locations=locations,
-            found=found,
-            tools=ledger['tools'],
+            rows=summary['rows'],
+            totals=summary['totals'],
             categories=ToolCategory.query.order_by(ToolCategory.name.asc()).all(),
-            projects=Project.query.order_by(Project.name.asc()).all(),
-            filters={
-                'view': view, 'location_type': location_type, 'tool_id': tool_id,
-                'category_id': category_id, 'project_id': project_id,
-                'issues': '1' if only_issues else '', 'q': q,
-            },
-            loc_store=LOC_STORE, loc_own=LOC_OWN_PROJECT, loc_customer=LOC_CUSTOMER,
-            warehouse_label=WAREHOUSE_LABEL,
+            filters={'q': q, 'category_id': category_id},
             today=_pkt_today().isoformat(),
         )
 
