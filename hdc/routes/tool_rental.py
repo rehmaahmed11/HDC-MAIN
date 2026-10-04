@@ -45,6 +45,10 @@ from hdc.services.permissions import may_access_path
 #: Rentals page.
 RECENT_RENTALS_ON_NEW = 10
 
+#: How many still-open rentals the "Transfer Rental" picker offers as a source.
+#: A picker, not a list — the full searchable Rentals page is elsewhere.
+TRANSFER_SOURCE_LIMIT = 60
+
 
 def register(app):
 
@@ -482,6 +486,43 @@ def register(app):
         created_rental = db.session.get(ToolRental, created_rental_id) if created_rental_id else None
         recent_rentals = search_rentals({})[:RECENT_RENTALS_ON_NEW]
 
+        # For "Transfer Rental": the rentals that still have tools out (the
+        # "from" holders), plus their still-out tool lines so the form can show
+        # exactly what will move the moment a rental is picked.  Kept small — it
+        # is a picker, not the full Rentals list.
+        transfer_sources = []
+        active_rentals = (ToolRental.query
+                          .filter(ToolRental.is_void == False,
+                                  ToolRental.status.in_(['active', 'partially_returned', 'overdue']))
+                          .order_by(ToolRental.rental_date.desc(), ToolRental.id.desc())
+                          .limit(TRANSFER_SOURCE_LIMIT).all())
+        for r in active_rentals:
+            pend = float(r.total_pending_tools or 0)
+            if pend <= 0.001:
+                continue
+            holder = r.current_location_label or (r.customer_name or 'Rental')
+            lines = []
+            for it in ToolRentalItem.query.filter_by(rental_id=r.id).all():
+                p = float(it.qty_pending or 0)
+                if p > 0.001:
+                    lines.append({
+                        'name': it.tool.name if it.tool else f'Tool#{it.tool_id}',
+                        'qty': p,
+                        'rate': float(it.rate or 0),
+                        'unit': (it.tool.unit if it.tool else '') or '',
+                    })
+            transfer_sources.append({
+                'id': r.id, 'code': r.rental_code, 'holder': holder,
+                'pending': pend, 'billing': r.billing_type, 'lines': lines,
+            })
+        transfer_source_options = [
+            (s['id'], f"{s['code']} — {s['holder']} ({s['pending']:g} out)") for s in transfer_sources
+        ]
+        receiving_accounts = get_receiving_accounts()
+        receiving_account_options = [
+            (a.id, f"{a.name} ({a.type})") for a in receiving_accounts
+        ]
+
         return render_template('tool_rental/tool_new_rental.html',
             projects=Project.query.order_by(Project.name.asc()).all(),
             stages=Stage.query.order_by(Stage.name.asc()).all(),
@@ -489,14 +530,221 @@ def register(app):
             known_customers=known_tool_customers(),
             recent_rentals=recent_rentals,
             created_rental=created_rental,
+            transfer_sources=transfer_sources,
+            transfer_source_options=transfer_source_options,
+            receiving_account_options=receiving_account_options,
             today=_pkt_today().isoformat(),
         )
+
+    # ------------------ TRANSFER RENTAL (settle old holder, start new cycle) ------------------
+    def _create_transfer_rental():
+        """Transaction type = "Transfer Rental".
+
+        Takes an existing rental (the *from* holder — an outside customer or one
+        of our own sites), finalises that holder's outstanding rent by posting a
+        payment to their party ledger, moves the still-out tools onto a brand-new
+        rental for the *to* holder, and records the transfer for traceability.
+        The previous cycle is settled and closed; the destination starts fresh.
+        """
+        source_id = request.form.get('source_rental_id', type=int)
+        source = db.session.get(ToolRental, source_id) if source_id else None
+        if not source or source.is_void:
+            flash('Select the rental you are transferring from.', 'danger')
+            return redirect(url_for('hdc_tool_rental_new'))
+        if source.status in ('returned', 'closed'):
+            flash(f'{source.rental_code} is already closed — nothing left to transfer.', 'warning')
+            return redirect(url_for('hdc_tool_rental_new'))
+
+        # capture the still-out tools *before* we move them off the source
+        pending_items = [it for it in ToolRentalItem.query.filter_by(rental_id=source.id).all()
+                         if float(it.qty_pending or 0) > 0.001]
+        if not pending_items:
+            flash(f'{source.rental_code} has no tools still out to transfer.', 'warning')
+            return redirect(url_for('hdc_tool_rental_new'))
+
+        # ---- destination (the "to" holder) ----
+        to_type = (request.form.get('renter_type') or 'internal').strip().lower()
+        if to_type not in ('internal', 'external'):
+            to_type = 'internal'
+        to_project_id = request.form.get('project_id', type=int) if to_type == 'internal' else None
+        to_stage_id = request.form.get('stage_id', type=int) if to_type == 'internal' else None
+        to_customer_name = (request.form.get('customer_name') or '').strip() if to_type == 'external' else None
+        to_customer_phone = (request.form.get('customer_phone') or '').strip() if to_type == 'external' else None
+        to_customer_address = (request.form.get('customer_address') or '').strip() if to_type == 'external' else None
+
+        if to_type == 'internal' and not to_project_id:
+            flash('Select the destination site/project for the transfer.', 'danger')
+            return redirect(url_for('hdc_tool_rental_new'))
+        if to_type == 'external' and not to_customer_name:
+            flash('Enter the destination customer name for the transfer.', 'danger')
+            return redirect(url_for('hdc_tool_rental_new'))
+        if to_type == 'internal' and to_stage_id:
+            st = db.session.get(Stage, to_stage_id)
+            if not st or st.project_id != to_project_id:
+                flash('Selected stage does not belong to the destination site.', 'danger')
+                return redirect(url_for('hdc_tool_rental_new'))
+
+        # ---- new rental terms + transfer date ----
+        billing_type = (request.form.get('billing_type') or 'fixed_fee').strip().lower()
+        if billing_type not in ('no_charge', 'fixed_fee', 'per_day', 'per_hour'):
+            billing_type = 'fixed_fee'
+        date_raw = (request.form.get('rental_date') or '').strip()
+        try:
+            txn_date = datetime.strptime(date_raw, '%Y-%m-%d').date() if date_raw else _pkt_today()
+        except Exception:
+            txn_date = _pkt_today()
+        exp_raw = (request.form.get('expected_return_date') or '').strip()
+        try:
+            exp_date = datetime.strptime(exp_raw, '%Y-%m-%d').date() if exp_raw else None
+        except Exception:
+            exp_date = None
+
+        if to_type == 'internal':
+            proj = db.session.get(Project, to_project_id)
+            to_label = proj.name if proj else f'Project #{to_project_id}'
+            if to_stage_id:
+                st = db.session.get(Stage, to_stage_id)
+                if st:
+                    to_label += f" > {st.name}"
+        else:
+            to_label = to_customer_name or 'External Customer'
+        from_label = source.current_location_label or 'Unknown'
+
+        # ---- 1) FINALISE the previous holder: post outstanding rent to the party ledger ----
+        recalc_rental_totals(source.id)
+        outstanding = 0.0 if (source.billing_type or '').lower() == 'no_charge' else float(source.total_pending_amount or 0)
+        finalized_amount = 0.0
+        if outstanding > 0.001:
+            from hdc.services.accounts import _accounts_default_company_cash
+            recv_acc = None
+            acc_id = request.form.get('received_to_account_id', type=int)
+            if acc_id:
+                recv_acc = Account.query.get(int(acc_id))
+            if (not recv_acc) or recv_acc.is_void or str(recv_acc.status or 'active').lower() != 'active' \
+                    or str(recv_acc.type or '').lower() not in ('company', 'cash', 'bank'):
+                recv_acc = _accounts_default_company_cash()
+            if not recv_acc:
+                db.session.rollback()
+                flash('Choose a Cash/Bank account to receive the finalised rent before transferring.', 'danger')
+                return redirect(url_for('hdc_tool_rental_new'))
+            pay = ToolRentalPayment(
+                rental_id=source.id, return_id=None, payment_date=txn_date,
+                amount=outstanding,
+                payment_mode=(request.form.get('payment_mode') or 'cash').strip().lower(),
+                received_to_account_id=int(recv_acc.id),
+                reference=(request.form.get('payment_reference') or '').strip(),
+                notes=f'Rent finalised on transfer to {to_label}',
+                created_by=current_user.id if hasattr(current_user, 'id') else None,
+            )
+            db.session.add(pay)
+            db.session.flush()
+            ok_acc, msg_acc, _ = post_tool_rental_payment_to_accounts(pay, rental=source, commit=False)
+            if not ok_acc:
+                db.session.rollback()
+                flash(msg_acc or 'Unable to post the finalised rent to the party ledger.', 'danger')
+                return redirect(url_for('hdc_tool_rental_new'))
+            finalized_amount = outstanding
+
+        # ---- 2) move the still-out tools off the source (they left via transfer, not a return) ----
+        moved = []          # (tool_id, tool_name, qty, source_rate)
+        moved_qty = 0.0
+        for it in pending_items:
+            take = float(it.qty_pending or 0)
+            if take <= 0:
+                continue
+            moved.append((it.tool_id, it.tool.name if it.tool else f'Tool#{it.tool_id}', take, float(it.rate or 0)))
+            it.qty_returned = float(it.qty_returned or 0) + take
+            it.qty_pending = 0.0
+            moved_qty += take
+            create_movement_log(
+                tool_id=it.tool_id, rental_id=source.id,
+                movement_type='external_transfer' if to_type == 'external' else 'site_transfer',
+                from_label=from_label, to_label=to_label, qty=take,
+                notes=f'Transferred out of {source.rental_code} to {to_label}',
+            )
+
+        # ---- 3) record the transfer for traceability (source -> destination) ----
+        transfer = ToolRentalTransfer(
+            rental_id=source.id,
+            from_type='site' if source.renter_type == 'internal' else 'customer',
+            from_project_id=source.project_id, from_stage_id=source.stage_id,
+            from_customer_name=source.customer_name if source.renter_type == 'external' else None,
+            from_location_label=from_label,
+            to_type='site' if to_type == 'internal' else 'customer',
+            to_project_id=to_project_id, to_stage_id=to_stage_id,
+            to_customer_name=to_customer_name,
+            to_location_label=to_label,
+            qty_transferred=moved_qty, transfer_date=txn_date,
+            notes='Transferred to a new rental cycle',
+            created_by=current_user.id if hasattr(current_user, 'id') else None,
+        )
+        db.session.add(transfer)
+        db.session.flush()
+
+        # ---- 4) start the NEW rental cycle for the destination (fresh, source rates carried over) ----
+        new_code = _next_rental_code()
+        new_amount = 0.0 if billing_type == 'no_charge' else sum(q * rate for (_tid, _nm, q, rate) in moved)
+        new_rental = ToolRental(
+            rental_code=new_code, renter_type=to_type,
+            project_id=to_project_id, stage_id=to_stage_id,
+            customer_name=to_customer_name, customer_phone=to_customer_phone, customer_address=to_customer_address,
+            rental_date=txn_date, expected_return_date=exp_date,
+            billing_type=billing_type,
+            billing_notes=(request.form.get('billing_notes') or '').strip(),
+            total_rented_qty=moved_qty,
+            total_amount=new_amount,
+            total_paid=0.0, total_returned_qty=0.0,
+            status='active',
+            payment_status='no_charge' if billing_type == 'no_charge' else 'unpaid',
+            notes=f'Transferred from {source.rental_code}',
+            created_by=current_user.id if hasattr(current_user, 'id') else None,
+        )
+        db.session.add(new_rental)
+        db.session.flush()
+        for (tid, _tname, q, rate) in moved:
+            item_rate = 0.0 if billing_type == 'no_charge' else rate
+            db.session.add(ToolRentalItem(
+                rental_id=new_rental.id, tool_id=tid,
+                qty_rented=q, qty_returned=0.0, qty_pending=q,
+                rate=item_rate, amount=q * item_rate,
+                notes=f'From transfer of {source.rental_code}',
+            ))
+            create_movement_log(
+                tool_id=tid, rental_id=new_rental.id, movement_type='rental_out',
+                from_label=from_label, to_label=to_label, qty=q,
+                notes=f'New rental {new_code} from transfer of {source.rental_code}',
+            )
+
+        transfer.notes = f'Transferred to new rental {new_code}'
+
+        # the external destination customer lands in Parties, like any fresh rental
+        if to_type == 'external' and to_customer_name:
+            ensure_party(to_customer_name, party_type='rental', phone=to_customer_phone)
+
+        # ---- 5) finalise the source totals (paid -> closed) and note the hand-off ----
+        recalc_rental_totals(source.id)
+        add = f'Transferred {moved_qty:g} tools to {to_label} (new rental {new_code}).'
+        src_note = (source.notes or '').strip()
+        source.notes = (src_note + ' ' + add).strip() if src_note else add
+
+        db.session.commit()
+
+        fin_txt = f' Finalised {finalized_amount:,.0f} PKR rent to the previous holder.' if finalized_amount > 0 else ''
+        flash(f'Transfer complete: {source.rental_code} → {new_code} for {to_label} '
+              f'({moved_qty:g} tools).{fin_txt} New rental shown below.', 'success')
+        return redirect(url_for('hdc_tool_rental_new', created=new_rental.id))
 
     # ------------------ CREATE RENTAL ------------------
     @app.route('/hdc/tool-rental/create', methods=['POST'])
     @login_required
     @_money_write_required()
     def hdc_tool_rental_create():
+        # One form, two jobs: a brand-new rental, or a transfer that settles the
+        # previous holder and starts a fresh cycle for the destination.
+        txn_type = (request.form.get('txn_type') or 'new_rental').strip().lower()
+        if txn_type == 'transfer':
+            return _create_transfer_rental()
+
         renter_type = (request.form.get('renter_type') or 'internal').strip().lower()
         if renter_type not in ('internal','external'):
             renter_type = 'internal'
