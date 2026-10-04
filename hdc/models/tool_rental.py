@@ -223,7 +223,9 @@ class ToolRental(db.Model):
     items = db.relationship('ToolRentalItem', backref='rental', lazy=True, cascade='all, delete-orphan')
     returns = db.relationship('ToolRentalReturn', backref='rental', lazy=True, cascade='all, delete-orphan')
     payments = db.relationship('ToolRentalPayment', backref='rental', lazy=True, cascade='all, delete-orphan')
-    transfers = db.relationship('ToolRentalTransfer', backref='rental', lazy=True, cascade='all, delete-orphan')
+    transfers = db.relationship('ToolRentalTransfer', backref='rental', lazy=True,
+                                 cascade='all, delete-orphan',
+                                 foreign_keys='ToolRentalTransfer.rental_id')
 
     @property
     def total_pending_tools(self):
@@ -371,6 +373,10 @@ class ToolRentalTransfer(db.Model):
     to_stage_id = db.Column(db.Integer, db.ForeignKey('hdc_stage.id'), nullable=True)
     to_customer_name = db.Column(db.String(150), nullable=True)
     to_location_label = db.Column(db.String(300))
+    # The brand-new rental a "Transfer Rental" spawned for the destination, so
+    # a hand-over chain can be walked a > b > c across rentals (NULL for a
+    # plain site-to-site move that stays inside one rental).
+    to_rental_id = db.Column(db.Integer, db.ForeignKey('hdc_tool_rental.id'), nullable=True, index=True)
 
     qty_transferred = db.Column(db.Float, default=0.0)
     transfer_date = db.Column(db.Date, default=_pkt_today)

@@ -3,22 +3,44 @@
 {% block page_heading %}New Rental{% endblock %}
 
 {# The rental creation form lives on its own page so the Rentals hub stays a
-   simple summary + list.  The hub's "New Rental" action opens this page. #}
+   simple summary + list.  The hub's "New Rental" action opens this page.
+
+   The whole form is *driven by the operator's previous choice*:
+
+     * who is renting  → shows the site/project+stage fields OR the outside
+       customer fields (never both);
+     * which site      → narrows the stage list to that site's stages;
+     * how rent is charged → the per-tool Rent rate fields only exist for a
+       charge; pick "No charge" and they hide (nothing to bill);
+     * which tool      → its saved rate fills the Rent rate box automatically.
+
+   Every rental made here *shows below* the form, newest first, with the one
+   just created highlighted — so the operator sees it land without navigating
+   away.  Opening a row leads to its detail page (returns / payments / moves). #}
 {% block content %}
 {% set tools_active = 'rentals' %}
-{% from "shared/_combo_field.html" import combo_field %}
+{% from "shared/_combo_field.html" import combo_field, combo_select %}
 {% include "tool_rental/_tools_nav.html" %}
 
 <style>
 .tool-rental-form-header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:4px 0 16px; flex-wrap:wrap; }
 .tool-rental-form-header h2 { margin:0; font-size:1.35rem; }
 .tool-rental-form-subtitle { color:var(--text-muted, #64748b); margin-top:3px; }
+/* A freshly created rental is tinted so the eye lands on it in the list below. */
+.tool-rental-row.is-new { background:var(--bs-success-bg-subtle, #e7f7ee); box-shadow:inset 3px 0 0 var(--bs-success, #10b981); }
+.tool-rental-row:hover { background:var(--card-header-bg); }
+.tool-rental-row.is-new:hover { background:var(--bs-success-bg-subtle, #e7f7ee); }
+#billingHint { display:block; margin-top:2px; }
+.tool-item-row .form-label.small { margin-bottom:2px; }
+@media (max-width:575.98px) {
+  .tool-rental-form-header { align-items:flex-start; }
+}
 </style>
 
 <div class="tool-rental-form-header">
     <div>
         <h2><i class="fas fa-plus me-2" aria-hidden="true"></i>New Rental</h2>
-        <div class="tool-rental-form-subtitle">Choose a site or customer, then add the tools and quantities.</div>
+        <div class="tool-rental-form-subtitle">Pick who is renting and how rent is charged — the form adapts as you choose. New rentals appear below.</div>
     </div>
     <a href="{{ url_for('hdc_tool_rental') }}" class="btn btn-outline-secondary">
         <i class="fas fa-arrow-left me-1" aria-hidden="true"></i>Back to rentals
@@ -31,24 +53,81 @@
         <form method="POST" action="{{ url_for('hdc_tool_rental_create') }}" id="createRentalForm">
             <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
             <div class="row g-3">
-                <div class="col-md-4">
-                    <label class="form-label">Who is renting?</label>
+                <div class="col-md-3">
+                    <label class="form-label">Transaction type</label>
+                    <select name="txn_type" id="txnType" class="form-select" required onchange="toggleTxnType()">
+                        <option value="new_rental">New Rental</option>
+                        <option value="transfer">Transfer Rental</option>
+                    </select>
+                    <small class="text-muted d-block">New rental, or hand a rental's tools to a new holder.</small>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label" id="whoLabel">Who is renting?</label>
                     <select name="renter_type" id="renterType" class="form-select" required onchange="toggleRenter()">
                         <option value="internal">Our site</option>
                         <option value="external">Outside customer</option>
                     </select>
                 </div>
-                <div class="col-md-4">
+                <div class="col-md-3">
                     <label class="form-label">How should rent be charged?</label>
-                    <select name="billing_type" class="form-select" required>
+                    <select name="billing_type" id="billingType" class="form-select" required onchange="syncBilling()">
                         <option value="fixed_fee">One rental fee</option>
                         <option value="per_day">Per day</option>
                         <option value="no_charge">No charge (included in contract)</option>
                     </select>
                 </div>
-                <div class="col-md-4">
-                    <label class="form-label">Rental date</label>
+                <div class="col-md-3">
+                    <label class="form-label" id="dateLabel">Rental date</label>
                     <input type="date" name="rental_date" value="{{ today }}" class="form-control" required>
+                </div>
+
+                {# ── Transfer only: the rental the tools come FROM ───────────────
+                   Shown when Transaction type = Transfer Rental.  Picking a rental
+                   previews exactly which still-out tools (and how many) will move
+                   to the new holder, and where the previous holder's finalised
+                   rent is collected. #}
+                <div class="col-12 d-none" id="transferFields">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            {{ combo_select('source_rental_id', 'sourceRental', transfer_source_options,
+                               label='Transfer from (existing rental)',
+                               placeholder='Search a rental code or holder…',
+                               hint='The rental whose still-out tools move to the new holder. Its rent is settled to the previous holder.',
+                               max_items=80) }}
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Settle the previous holder's rent</label>
+                            <select name="settle_choice" id="settleChoice" class="form-select" required onchange="toggleSettle()">
+                                <option value="pay_now">Pay now — collect &amp; mark completed</option>
+                                <option value="add_credit">Add to credit — collect later</option>
+                            </select>
+                            <small class="text-muted d-block">Pay now collects the full outstanding rent; add to credit keeps it owed.</small>
+                        </div>
+                        <div class="col-md-6" id="payNowFields">
+                            {{ combo_select('received_to_account_id', 'recvAccount', receiving_account_options,
+                               label='Receive rent into',
+                               placeholder='Company cash (default)',
+                               hint='Cash/Bank account that receives the previous holder’s rent.',
+                               max_items=40) }}
+                        </div>
+                        <div class="col-md-3" id="payNowMode">
+                            <label class="form-label">Payment mode</label>
+                            <select name="payment_mode" class="form-select">
+                                <option value="cash">Cash</option>
+                                <option value="bank">Bank</option>
+                                <option value="online">Online</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3" id="payNowRef">
+                            <label class="form-label">Reference (optional)</label>
+                            <input type="text" name="payment_reference" class="form-control" placeholder="Slip / cheque no.">
+                        </div>
+                        <div class="col-12">
+                            <div id="sourceToolsPreview" class="border rounded p-2 bg-light small text-muted">
+                                Pick a rental above to see exactly which tools will move.
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="col-12" id="internalFields">
@@ -97,14 +176,14 @@
                     <label class="form-label">Expected return date (optional)</label>
                     <input type="date" name="expected_return_date" class="form-control">
                 </div>
-                <div class="col-12">
+                <div class="col-12" id="newRentalTools">
                     <label class="form-label fw-semibold">Tools to rent</label>
                     {% if tools %}
                     <div id="toolItemsContainer">
                         <div class="row g-2 mb-2 tool-item-row align-items-end">
                             <div class="col-md-6">
                                 <label class="form-label small">Tool</label>
-                                <select name="tool_id[]" class="form-select" required>
+                                <select name="tool_id[]" class="form-select tool-select" required>
                                     <option value="">Select a tool</option>
                                     {% for t in tools %}
                                     <option value="{{ t.id }}" data-rate="{{ t.rental_rate_per_day }}" data-avail="{{ t.available_qty }}">{{ t.name }} ({{ t.tool_code }}) — {{ "%.0f"|format(t.available_qty) }} available</option>
@@ -115,16 +194,19 @@
                                 <label class="form-label small">Quantity</label>
                                 <input type="number" name="qty[]" class="form-control" placeholder="Qty" min="0.1" step="0.1" required>
                             </div>
-                            <div class="col-6 col-md-3">
-                                <label class="form-label small">Rate per tool</label>
-                                <input type="number" name="rate[]" class="form-control" placeholder="Use saved rate" min="0" step="0.01">
+                            <div class="col-6 col-md-3 rental-rate-cell">
+                                <label class="form-label small rental-rate-label">Rent rate</label>
+                                <input type="number" name="rate[]" class="form-control rental-rate-input" placeholder="Use saved rate" min="0" step="0.01">
                             </div>
                             <div class="col-2 col-md-1">
                                 <button type="button" class="btn btn-outline-danger w-100" aria-label="Remove tool line" title="Remove tool line" onclick="this.closest('.tool-item-row').remove()"><i class="fas fa-times" aria-hidden="true"></i></button>
                             </div>
                         </div>
                     </div>
-                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="addToolRow()"><i class="fas fa-plus me-1" aria-hidden="true"></i>Add another tool</button>
+                    <div class="d-flex flex-wrap align-items-center gap-2 mt-1">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="addToolRow()"><i class="fas fa-plus me-1" aria-hidden="true"></i>Add another tool</button>
+                        <small id="billingHint" class="text-muted"></small>
+                    </div>
                     {% else %}
                     <div class="alert alert-info mb-2">There are no tools in stock yet. Add tools in Inventory before creating a rental.</div>
                     <a href="{{ url_for('hdc_tool_rental_inventory') }}" class="btn btn-outline-primary"><i class="fas fa-warehouse me-1" aria-hidden="true"></i>Open Inventory</a>
@@ -146,10 +228,101 @@
     </div>
 </div>
 
+{# ── Rentals made here, *below* the form ───────────────────────────────────
+   Newest first, so the rental the operator just created is the top row and
+   tinted with a "New" tag.  The full searchable list stays on the Rentals hub. #}
+<div class="card hdc-card" id="recentRentals">
+    <div class="card-header hdc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span><i class="fas fa-list-check me-2" aria-hidden="true"></i>Rentals</span>
+        <span class="small text-muted">Newest first — open one to record a return, payment, or move.</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table hdc-table table-sm mb-0 align-middle">
+            <thead>
+                <tr>
+                    <th>Rental</th>
+                    <th>Site or customer</th>
+                    <th>Charge</th>
+                    <th>Rent still due</th>
+                    <th>Tools to return</th>
+                    <th>Status</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for r in recent_rentals %}
+                {% set is_new = created_rental and r.id == created_rental.id %}
+                <tr class="tool-rental-row{% if is_new %} is-new{% endif %}">
+                    <td>
+                        <a href="{{ url_for('hdc_tool_rental_detail', rental_id=r.id) }}" class="fw-semibold">{{ r.rental_code }}</a>
+                        {% if is_new %}<span class="badge bg-success ms-1">New</span>{% endif %}
+                        <div class="small text-muted">{{ r.rental_date }}{% if r.expected_return_date %} · Return by {{ r.expected_return_date }}{% endif %}</div>
+                    </td>
+                    <td>
+                        {% if r.renter_type=='internal' %}
+                            <strong>{{ r.project.name if r.project else 'Our site' }}</strong>
+                            {% if r.stage %}<div class="small text-muted">{{ r.stage.name }}</div>{% endif %}
+                        {% else %}
+                            <strong>{{ r.customer_name or 'Outside customer' }}</strong>
+                            {% if r.customer_phone %}<div class="small text-muted">{{ r.customer_phone }}</div>{% endif %}
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if r.billing_type=='no_charge' %}<span class="badge bg-secondary">No charge</span>
+                        {% elif r.billing_type=='per_day' %}<span class="badge bg-info text-dark">Per day</span>
+                        {% elif r.billing_type=='per_hour' %}<span class="badge bg-info text-dark">Per hour</span>
+                        {% else %}<span class="badge bg-light text-dark border">One-time fee</span>{% endif %}
+                    </td>
+                    <td>
+                        {% if r.billing_type=='no_charge' %}
+                            <span class="text-muted">—</span>
+                        {% elif r.total_pending_amount > 0 %}
+                            <strong class="text-danger">{{ "{:,.0f}".format(r.total_pending_amount) }} PKR</strong>
+                        {% else %}
+                            <span class="badge bg-success">Paid</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if r.total_pending_tools > 0 %}
+                            <span class="badge bg-warning text-dark">{{ "%.0f"|format(r.total_pending_tools) }} still out</span>
+                        {% else %}
+                            <span class="badge bg-success">All returned</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if r.status=='overdue' %}<span class="badge bg-danger">Overdue</span>
+                        {% elif r.status=='partially_returned' %}<span class="badge bg-warning text-dark">Partly returned</span>
+                        {% elif r.status=='closed' %}<span class="badge bg-success">Closed</span>
+                        {% elif r.status=='returned' %}<span class="badge bg-secondary">Returned</span>
+                        {% else %}<span class="badge bg-primary">In use</span>{% endif %}
+                        {% if r.payment_status=='partial' %}<div class="mt-1"><span class="badge bg-warning text-dark">Partly paid</span></div>
+                        {% elif r.payment_status=='credit' %}<div class="mt-1"><span class="badge bg-danger">On credit</span></div>
+                        {% elif r.payment_status=='paid' %}<div class="mt-1"><span class="badge bg-success">Paid</span></div>
+                        {% elif r.payment_status=='no_charge' %}<div class="mt-1"><span class="badge bg-secondary">No charge</span></div>{% endif %}
+                    </td>
+                    <td><a href="{{ url_for('hdc_tool_rental_detail', rental_id=r.id) }}" class="btn btn-sm btn-outline-primary" aria-label="Open rental {{ r.rental_code }}">Open</a></td>
+                </tr>
+            {% else %}
+                <tr><td colspan="7" class="text-center text-muted py-4">
+                    No rentals yet — create your first one with the form above.
+                </td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% if recent_rentals %}
+    <div class="card-footer small text-muted d-flex justify-content-between flex-wrap gap-2">
+        <span>Showing the {{ recent_rentals|length }} most recent rental{{ '' if recent_rentals|length == 1 else 's' }}.</span>
+        <a href="{{ url_for('hdc_tool_rental') }}">Open the full Rentals list <i class="fas fa-arrow-right fa-xs" aria-hidden="true"></i></a>
+    </div>
+    {% endif %}
+</div>
+
 {% endblock %}
 
 {% block extra_js %}
 <script>
+// ── Stage list follows the chosen site ────────────────────────────────────
 function filterStages(projectId, stageId){
     const stage = document.getElementById(stageId);
     if(!stage) return;
@@ -163,16 +336,129 @@ function syncRentalStages(){
     const project = document.getElementById('rentalProjectSelect');
     filterStages(project && project.value, 'rentalStageSelect');
 }
+
+// ── Who is renting: site fields XOR customer fields ───────────────────────
 function toggleRenter(){
     const type = document.getElementById('renterType');
     const intF = document.getElementById('internalFields');
     const extF = document.getElementById('externalFields');
     if(!type || !intF || !extF) return;
-    if(type.value==='internal'){ intF.classList.remove('d-none'); extF.classList.add('d-none'); }
-    else { intF.classList.add('d-none'); extF.classList.remove('d-none'); }
+    const internal = type.value === 'internal';
+    intF.classList.toggle('d-none', !internal);
+    extF.classList.toggle('d-none', internal);
+    // A hidden control must never be *required*, or the browser blocks a valid
+    // submit; the server enforces the real rule (site needs a project, customer
+    // needs a name).  Mirror it onto the controls the operator can actually see.
+    const project = document.getElementById('rentalProjectSelect');
+    if(project) project.required = internal;
+    const customer = document.getElementById('rentalCustomerName');
+    if(customer) customer.required = !internal;
 }
+
+// ── Transaction type: New Rental vs Transfer Rental ───────────────────────
+// One form, two jobs.  A transfer settles the *from* holder and starts a fresh
+// cycle for the *to* holder, so it hides the generic tool picker (the tools come
+// from the chosen rental) and shows the "from" picker + preview instead.
+const TRANSFER_SOURCES = {{ transfer_sources | tojson }};
+function toggleTxnType(){
+    const t = document.getElementById('txnType');
+    if(!t) return;
+    const transfer = t.value === 'transfer';
+    document.getElementById('transferFields')?.classList.toggle('d-none', !transfer);
+    document.getElementById('newRentalTools')?.classList.toggle('d-none', transfer);
+    const dateLabel = document.getElementById('dateLabel');
+    if(dateLabel) dateLabel.textContent = transfer ? 'Transfer date' : 'Rental date';
+    const whoLabel = document.getElementById('whoLabel');
+    if(whoLabel) whoLabel.textContent = transfer ? 'Transfer to — who is receiving?' : 'Who is renting?';
+    syncBilling();
+}
+function renderSourceTools(){
+    const sel = document.getElementById('sourceRental');   // the hidden <select> the combo drives
+    const box = document.getElementById('sourceToolsPreview');
+    if(!sel || !box) return;
+    const id = parseInt(sel.value || '0', 10);
+    const src = TRANSFER_SOURCES.find(function(s){ return s.id === id; });
+    if(!src){
+        box.className = 'border rounded p-2 bg-light small text-muted';
+        box.textContent = 'Pick a rental above to see exactly which tools will move.';
+        return;
+    }
+    const rows = (src.lines || []).map(function(l){
+        return '<div class="d-flex justify-content-between border-bottom py-1">' +
+               '<span>' + l.name + '</span>' +
+               '<span class="text-nowrap ms-3">' + l.qty + ' ' + (l.unit || '') + ' @ ' + l.rate + '</span>' +
+               '</div>';
+    }).join('');
+    box.className = 'border rounded p-2 bg-light small';
+    box.innerHTML = '<div class="fw-semibold mb-1">' + src.code + ' — ' + src.holder +
+                    ' · ' + src.pending + ' out · ' + src.billing + '</div>' +
+                    (rows || '<div class="text-muted">No tools pending.</div>');
+}
+document.getElementById('sourceRental')?.addEventListener('change', renderSourceTools);
+
+// ── Settle previous rent: pay now (enter details) vs add to credit ─────────
+function toggleSettle(){
+    const sc = document.getElementById('settleChoice');
+    if(!sc) return;
+    const payNow = sc.value === 'pay_now';
+    document.getElementById('payNowFields')?.classList.toggle('d-none', !payNow);
+    document.getElementById('payNowMode')?.classList.toggle('d-none', !payNow);
+    document.getElementById('payNowRef')?.classList.toggle('d-none', !payNow);
+}
+
+// ── How rent is charged: the per-tool Rent rate only exists when charging ──
+function syncBilling(){
+    const bt = document.getElementById('billingType');
+    if(!bt) return;
+    const noCharge = bt.value === 'no_charge';
+    let label = 'Rent rate';
+    let hint = '';
+    if(bt.value === 'fixed_fee'){
+        label = 'Rent rate (one-time fee)';
+        hint = 'One rental fee — the rate you enter per tool line is the full charge.';
+    } else if(bt.value === 'per_day'){
+        label = 'Rate per tool / day';
+        hint = 'Per day — enter the daily rent for each tool line.';
+    } else if(bt.value === 'per_hour'){
+        label = 'Rate per tool / hour';
+        hint = 'Per hour — enter the hourly rent for each tool line.';
+    } else if(noCharge){
+        hint = 'No charge — included in the contract, so there is no rent rate to enter and the rate fields are hidden.';
+    }
+    // Hide/show the rate column without disabling it: a display:none input still
+    // posts, so the rate[] array stays aligned with tool_id[] / qty[] row for row.
+    document.querySelectorAll('.rental-rate-cell').forEach(function(cell){
+        cell.classList.toggle('d-none', noCharge);
+    });
+    document.querySelectorAll('.rental-rate-label').forEach(function(el){ el.textContent = label; });
+    const hintEl = document.getElementById('billingHint');
+    if(hintEl) hintEl.textContent = hint;
+}
+
+// ── Picking a tool fills its saved rate (until the operator overrides it) ──
+function wireToolRow(row){
+    const sel = row.querySelector('select.tool-select');
+    const rate = row.querySelector('input.rental-rate-input');
+    if(!sel || !rate) return;
+    sel.addEventListener('change', function(){
+        const opt = sel.options[sel.selectedIndex];
+        const saved = opt && opt.getAttribute('data-rate');
+        if(rate.value === '' && saved !== null && saved !== ''){
+            rate.value = saved;
+        }
+    });
+}
+
 document.getElementById('rentalProjectSelect')?.addEventListener('change', syncRentalStages);
+document.querySelectorAll('.tool-item-row').forEach(wireToolRow);
+
+// Reflect the server defaults the moment the page is ready.
+toggleRenter();
+toggleTxnType();
+toggleSettle();
 syncRentalStages();
+syncBilling();
+
 function addToolRow(){
     const container = document.getElementById('toolItemsContainer');
     if(!container) return;
@@ -181,7 +467,7 @@ function addToolRow(){
     row.innerHTML = `
         <div class="col-md-6">
             <label class="form-label small">Tool</label>
-            <select name="tool_id[]" class="form-select" required>
+            <select name="tool_id[]" class="form-select tool-select" required>
                 <option value="">Select a tool</option>
                 {% for t in tools %}
                 <option value="{{ t.id }}" data-rate="{{ t.rental_rate_per_day }}" data-avail="{{ t.available_qty }}">{{ t.name }} ({{ t.tool_code }}) — {{ "%.0f"|format(t.available_qty) }} available</option>
@@ -192,15 +478,17 @@ function addToolRow(){
             <label class="form-label small">Quantity</label>
             <input type="number" name="qty[]" class="form-control" placeholder="Qty" min="0.1" step="0.1" required>
         </div>
-        <div class="col-6 col-md-3">
-            <label class="form-label small">Rate per tool</label>
-            <input type="number" name="rate[]" class="form-control" placeholder="Use saved rate" min="0" step="0.01">
+        <div class="col-6 col-md-3 rental-rate-cell">
+            <label class="form-label small rental-rate-label">Rent rate</label>
+            <input type="number" name="rate[]" class="form-control rental-rate-input" placeholder="Use saved rate" min="0" step="0.01">
         </div>
         <div class="col-2 col-md-1">
             <button type="button" class="btn btn-outline-danger w-100" aria-label="Remove tool line" title="Remove tool line" onclick="this.closest('.tool-item-row').remove()"><i class="fas fa-times" aria-hidden="true"></i></button>
         </div>
     `;
     container.appendChild(row);
+    wireToolRow(row);
+    syncBilling();
 }
 </script>
 {% endblock %}
