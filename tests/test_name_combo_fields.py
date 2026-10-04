@@ -55,7 +55,7 @@ REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
 #: page -> {field the form posts: combo input id that must sit next to it}
 NAME_FIELDS = {
-    '/hdc/tool-rental': {'customer_name': 'rentalCustomerName'},
+    '/hdc/tool-rental/new': {'customer_name': 'rentalCustomerName'},
     '/hdc/tool-rental/<id>': {'to_customer_name': 'transferCustomerName'},
     '/hdc/tool-rental/inventory': {'supplier': 'toolSupplier'},
     '/hdc/tool-rental/tool/<id>': {'supplier': 'purchaseModalSupplier'},
@@ -139,7 +139,7 @@ class NameComboFieldTestCase(unittest.TestCase):
     def test_every_tools_page_renders_a_combo_for_every_name_field(self):
         rental = self._rental()
         urls = {
-            '/hdc/tool-rental': '/hdc/tool-rental',
+            '/hdc/tool-rental/new': '/hdc/tool-rental/new',
             '/hdc/tool-rental/<id>': '/hdc/tool-rental/%d' % rental.id,
             '/hdc/tool-rental/inventory': '/hdc/tool-rental/inventory',
             '/hdc/tool-rental/tool/<id>': '/hdc/tool-rental/tool/%d' % self.tool.id,
@@ -178,7 +178,7 @@ class NameComboFieldTestCase(unittest.TestCase):
 
     def test_no_bare_text_box_is_left_for_a_name_field(self):
         """A name field must not regress to a plain <input type="text">."""
-        for url in ('/hdc/tool-rental',
+        for url in ('/hdc/tool-rental/new',
                     '/hdc/tool-rental/%d' % self._rental().id):
             html = self.client.get(url).get_data(as_text=True)
             for field_name in ('customer_name', 'to_customer_name'):

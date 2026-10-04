@@ -12,14 +12,15 @@ chains, per-location positions, overdue warnings — live on their own pages, so
 no page repeats the same numbers twice.
 
 - Dashboard (simple stock + unpaid rent, item by item): `/hdc/tool-rental/dashboard` (sidebar → **HDC Tools**)
-- Rentals (create, return, pay — and the admin reconciliation strip): `/hdc/tool-rental`
+- Rentals (summary + search + list; return and pay from a rental's page): `/hdc/tool-rental`
+- New Rental (the create form, opened by the hub's **New Rental** action): `/hdc/tool-rental/new`
 - One tool (position + movement history): `/hdc/tool-rental/tool/<tool_id>`
 - Tracking (chains, where each piece is right now, admin): `/hdc/tool-rental/tracking`
 - JSON feed: `/hdc/api/tool-rental/dashboard`
 - Inventory (add tools, buy stock, scrap, categories): `/hdc/tool-rental/inventory`
 - Logic: `hdc/services/tool_tracking.py`, `hdc/services/tool_rental.py`
 - Pages: `templates/hdc/tool_rental/tool_dashboard.html`, `tool_position.html`,
-  `tool_inventory.html`, `_stock_forms.html`
+  `tool_inventory.html`, `tool_rental.html`, `tool_new_rental.html`, `_stock_forms.html`
 - Tests: `tests/test_tool_tracking.py` (20 cases),
   `tests/test_tool_stock_lifecycle.py` (22 cases)
 
@@ -50,8 +51,9 @@ Deliberately **not** on the dashboard, because they already have their own home:
 | Detail | Where it lives |
 | --- | --- |
 | Movement chains, site-to-site transfers, where each piece is now | Tracking (`/hdc/tool-rental/tracking`) and one tool's position page |
-| Reconciliation strip (`store + sites + customers = owned`), Balanced/off badge | Rentals page (admin panel) and the tool position page |
+| Reconciliation strip (`store + sites + customers = owned`), Balanced/off badge | Tool position page and Tracking (`/hdc/tool-rental/tracking`) |
 | Overdue / long-out / non-reconciling warnings | Rentals page (overdue rentals) + Tracking |
+| Creating a rental | New Rental page (`/hdc/tool-rental/new`), opened from the hub |
 | Purchase / scrap life-cycle, conditions, rates | Inventory (`/hdc/tool-rental/inventory`) |
 | Rental-level money (per rental, per customer, payments) | Rentals, rental detail and Reports |
 
@@ -71,8 +73,8 @@ Deliberately **not** on the dashboard, because they already have their own home:
 
 Consequence: `owned == in_store + out` for every tool, always. When bad legacy
 data breaks it, the row is flagged `unaccounted` with the signed variance —
-surfaced in `tools_attention()` on the Rentals admin panel and the tracking /
-position views, not silently averaged away on the simple dashboard.
+surfaced in `tools_attention()` on the tracking and position views (and in
+the JSON feed), not silently averaged away on the simple dashboard.
 
 ---
 
@@ -237,7 +239,10 @@ itself never repeats that detail; it is the one-page stock summary.
 `templates/hdc/tool_rental/_tools_nav.html` gives the section one sub-nav
 (Dashboard · Rentals · Inventory · Tracking · Reports) included by every tool
 page. The sidebar entry **HDC Tools** now opens the dashboard; the rentals hub
-stays at `/hdc/tool-rental` and carries the same reconciliation numbers.
+stays at `/hdc/tool-rental` and keeps the simple numbers — the reconciliation
+identity itself is on Tracking and the one-tool position page. Creating a
+rental has its own page (`/hdc/tool-rental/new`), opened by the hub's
+**New Rental** action.
 
 ---
 

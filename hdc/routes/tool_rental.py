@@ -29,8 +29,7 @@ from hdc.services.tool_rental import (
 from hdc.services.tool_tracking import (
     LOC_CUSTOMER, LOC_OWN_PROJECT, LOC_STORE, WAREHOUSE_LABEL,
     allocate_transfer_qty, dashboard_summary, inventory_rows, location_summary,
-    record_transfer_items, tool_item_summary, tool_ledger, tool_position,
-    tools_reconciliation
+    record_transfer_items, tool_item_summary, tool_ledger, tool_position
 )
 from hdc.utils.dates import _pkt_now_naive, _pkt_today
 from hdc.utils.format import _flt, _amount_to_words
@@ -95,50 +94,31 @@ def register(app):
     @app.route('/hdc/tool-rental')
     @login_required
     def hdc_tool_rental():
+        # Old bookmarks/links that opened the create form on this page are
+        # sent to the form's own page now.
+        if (request.args.get('create') or '').strip() == '1':
+            return redirect(url_for('hdc_tool_rental_new'))
+
         kpis = tool_kpis()
+        # The hub is a simple list: search by code/customer and filter by
+        # status.  Everything else (site, tool, payment, billing, dates) and
+        # the admin reconciliation panel are deliberately not here.
         filters = {
-            'project_id': request.args.get('project_id', type=int),
-            'tool_id': request.args.get('tool_id', type=int),
-            'renter_type': (request.args.get('renter_type') or '').strip() or None,
             'status': (request.args.get('status') or '').strip() or None,
-            'payment_status': (request.args.get('payment_status') or '').strip() or None,
-            'billing_type': (request.args.get('billing_type') or '').strip() or None,
-            'date_from': (request.args.get('date_from') or '').strip() or None,
-            'date_to': (request.args.get('date_to') or '').strip() or None,
             'search_text': (request.args.get('q') or '').strip() or None,
         }
         rentals = search_rentals(filters)
-        # Same reconciliation the Tools dashboard shows, so the two pages
-        # cannot disagree about where the tools are. Keep the everyday view
-        # simple and only offer writes to users who can actually create rentals.
-        recon = tools_reconciliation()
+        # Only users who may create rentals see the "New Rental" action.
         role = (current_user.role or '').strip().lower()
-        is_admin = role == 'admin'
-        write_access = may_access_path(current_user, '/hdc/tool-rental/create', 'write')
+        write_access = may_access_path(current_user, '/hdc/tool-rental/new', 'write')
         can_manage_tools = (write_access if write_access is not None else
                             role in ('admin', 'accountant'))
 
-        # The normal read-only rental view only needs search results and KPIs.
-        # Load the larger picklists only for the controls that will render.
-        projects = (Project.query.order_by(Project.name.asc()).all()
-                    if is_admin or can_manage_tools else [])
-        tools = (Tool.query.filter(Tool.is_void==False).order_by(Tool.name.asc()).all()
-                 if is_admin or can_manage_tools else [])
-        stages = Stage.query.order_by(Stage.name.asc()).all() if can_manage_tools else []
-        known_customers = known_tool_customers() if can_manage_tools else []
-
         return render_template('tool_rental/tool_rental.html',
             kpis=kpis,
-            recon=recon,
             can_manage_tools=can_manage_tools,
-            create_open=(request.args.get('create') or '').strip() == '1',
             rentals=rentals,
-            projects=projects,
-            stages=stages,
-            tools=tools,
-            known_customers=known_customers,
             filters=filters,
-            today=_pkt_today().isoformat()
         )
 
     # ------------------ INVENTORY ------------------
@@ -469,6 +449,32 @@ def register(app):
         flash(f'Category "{name}" deleted.', 'success')
         return redirect(url_for('hdc_tool_rental_inventory'))
 
+    # ------------------ NEW RENTAL (its own page) ------------------
+    @app.route('/hdc/tool-rental/new')
+    @login_required
+    def hdc_tool_rental_new():
+        """The rental creation form lives on its own page.
+
+        The Rentals hub keeps the summary, the search and the list; its
+        "New Rental" action opens this form.  Only users who may write the
+        tools page can open it — the same users who could ever see the form.
+        """
+        role = (current_user.role or '').strip().lower()
+        write_access = may_access_path(current_user, '/hdc/tool-rental/new', 'write')
+        can_manage_tools = (write_access if write_access is not None else
+                            role in ('admin', 'accountant'))
+        if not can_manage_tools:
+            flash('You do not have permission to create rentals.', 'danger')
+            return redirect(url_for('hdc_tool_rental'))
+
+        return render_template('tool_rental/tool_new_rental.html',
+            projects=Project.query.order_by(Project.name.asc()).all(),
+            stages=Stage.query.order_by(Stage.name.asc()).all(),
+            tools=Tool.query.filter(Tool.is_void==False).order_by(Tool.name.asc()).all(),
+            known_customers=known_tool_customers(),
+            today=_pkt_today().isoformat(),
+        )
+
     # ------------------ CREATE RENTAL ------------------
     @app.route('/hdc/tool-rental/create', methods=['POST'])
     @login_required
@@ -485,15 +491,15 @@ def register(app):
 
         if renter_type=='internal' and not project_id:
             flash('Select a project/site for internal rental.', 'danger')
-            return redirect(url_for('hdc_tool_rental', create=1))
+            return redirect(url_for('hdc_tool_rental_new'))
         if renter_type=='external' and not customer_name:
             flash('Customer name required for external rental.', 'danger')
-            return redirect(url_for('hdc_tool_rental', create=1))
+            return redirect(url_for('hdc_tool_rental_new'))
         if renter_type == 'internal' and stage_id:
             stage = db.session.get(Stage, stage_id)
             if not stage or stage.project_id != project_id:
                 flash('Selected stage does not belong to the selected project/site.', 'danger')
-                return redirect(url_for('hdc_tool_rental', create=1))
+                return redirect(url_for('hdc_tool_rental_new'))
 
         billing_type = (request.form.get('billing_type') or 'fixed_fee').strip().lower()
         if billing_type not in ('no_charge','fixed_fee','per_day','per_hour'):
@@ -517,7 +523,7 @@ def register(app):
 
         if not tool_ids or len(tool_ids)!=len(qtys):
             flash('Add at least one tool item.', 'danger')
-            return redirect(url_for('hdc_tool_rental', create=1))
+            return redirect(url_for('hdc_tool_rental_new'))
 
         parsed_items = []
         requested_by_tool = {}
@@ -528,20 +534,20 @@ def register(app):
                 tid = int(tid_raw)
             except:
                 flash(f'Invalid tool at row {idx+1}.', 'danger')
-                return redirect(url_for('hdc_tool_rental', create=1))
+                return redirect(url_for('hdc_tool_rental_new'))
             tool = Tool.query.get(tid)
             if not tool or tool.is_void:
                 flash(f'Tool not found at row {idx+1}.', 'danger')
-                return redirect(url_for('hdc_tool_rental', create=1))
+                return redirect(url_for('hdc_tool_rental_new'))
             qty = max(0.0, _flt(qty_raw))
             if qty <= 0:
                 flash(f'Quantity must be >0 at row {idx+1}.', 'danger')
-                return redirect(url_for('hdc_tool_rental', create=1))
+                return redirect(url_for('hdc_tool_rental_new'))
             available = tool_available_for_integrity(tool)
             requested_by_tool[tid] = requested_by_tool.get(tid, 0) + qty
             if requested_by_tool[tid] > available + 0.001:
                 flash(integrity_message('Not enough available tool stock.', f'Not enough stock for {tool.name}: available {available}, requested {qty}.'), 'danger')
-                return redirect(url_for('hdc_tool_rental', create=1))
+                return redirect(url_for('hdc_tool_rental_new'))
             rate_raw = rates[idx] if idx < len(rates) else tool.rental_rate_per_day
             rate = max(0.0, _flt(rate_raw, tool.rental_rate_per_day))
             if billing_type == 'no_charge':
