@@ -998,16 +998,12 @@ HDC Tool Rental  →  /hdc/tool-rental
 └── Card: Rentals — 7 records | Tracking chain shows Site1 > Site2 > Site3 etc Click row t
     └── Table columns: Code | Date | Renter | Site / Customer | Tools (Qty) | Tracking Chain | Amount / Paid / Pending | Tools Pending | Status
 
-HDC Tools — Total Sent, Own Sites vs Customers vs Inventory  →  /hdc/tool-rental/dashboard
-├── KPI tiles: Total Owned (Inventory) · In Store (Available) · Sent to Own Projects · Sent to Other Customers · Total Sent Out · Rent Pending
-├── Card: Find any tool — name, code, customer, site or rental code
-│   ├── Fields: Search everything (text) · Where (dropdown) · Show (dropdown) · Tool (dropdown) · Category (dropdown) · Own site (dropdown) · Issues only (tick)
-│   └── Buttons: [Apply] · [Reset] · [JSON]
-├── Card: Tool-by-tool position — 11 of 11 tools
-│   ├── Table columns: Tool | Owned | In Store | Own Sites | Customers | Split | Where it is now | Status
-│   └── Buttons: [Full position + movement history]
-└── Card: By location — who is holding what right now
-    └── Table columns: Location | Type | Qty Held | Tool Types | Rentals | Overdue | Oldest (days) | Rent Pending
+HDC Tools — Stock & Rent Summary  →  /hdc/tool-rental/dashboard
+├── KPI tiles: Total Tools Owned · In Store (Available) · Rented Out · Rent Not Paid by Customers (PKR)
+├── Card: Tools by item — owned / in store / rented out / not paid by customers
+│   ├── Fields: Search item (text) · Category (dropdown)
+│   └── Table columns: Tool Item | Total Owned | In Store | Rented Out | Not Paid by Customers (PKR)
+└── Links: Inventory · Rentals · Tracking (movement chains live there, not on this page)
 
 Rental Detail - RENT-DEMO-001  →  /hdc/tool-rental/<int:rental_id>
 ├── Card: RENT-DEMO-001 — Internal | no_charge

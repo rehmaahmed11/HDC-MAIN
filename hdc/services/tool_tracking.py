@@ -32,6 +32,7 @@ per-tool split.
 from datetime import date
 
 from sqlalchemy import func, or_
+from sqlalchemy.orm import joinedload
 
 from hdc.extensions import db
 from hdc.models.projects import Project, Stage
@@ -722,6 +723,133 @@ def dashboard_summary(ledger=None):
         'idle_tools': [t for t in ledger['tools'] if t['idle']][:10],
         'long_out': sorted([t for t in ledger['tools'] if t['long_out']],
                            key=lambda t: -t['oldest_days_out'])[:10],
+    }
+
+
+def customer_dues_by_tool():
+    """Rent still unpaid by *outside customers*, split per tool item.
+
+    The unpaid amount belongs to the rental, not to a line, so each rental's
+    pending is shared across its lines in proportion to the line amount
+    (falling back to the rented qty when no line amount was recorded).
+
+    Internal rentals are HDC renting from itself, so they are reported
+    separately as ``internal_pending`` and never counted as a customer due.
+
+    Returns ``{'by_tool': {tool_id: amount}, 'customer_count': n,
+    'rental_count': n, 'internal_pending': amount}``.
+    """
+    by_tool = {}
+    customers = set()
+    rental_count = 0
+
+    # Only rentals that really owe money are loaded, with their lines eager
+    # loaded — the dashboard runs this on every page view.
+    rentals = (ToolRental.query
+               .options(joinedload(ToolRental.items))
+               .filter(ToolRental.is_void == False,  # noqa: E712
+                       ToolRental.renter_type == 'external',
+                       func.coalesce(ToolRental.billing_type, '') != 'no_charge',
+                       ToolRental.total_amount > ToolRental.total_paid)
+               .all())
+    for rental in rentals:
+        pending = _round_qty(rental.total_pending_amount)
+        if pending <= EPS:
+            continue
+        items = list(rental.items or ())
+        weights = {}
+        total_weight = 0.0
+        for item in items:
+            weight = _flt(item.amount)
+            if weight <= 0:
+                weight = _flt(item.qty_rented)
+            weights[int(item.id)] = weight
+            total_weight += weight
+        if total_weight <= 0:
+            continue
+        rental_count += 1
+        customers.add((rental.customer_name or '').strip().lower() or f'#{rental.id}')
+        for item in items:
+            share = pending * (weights[int(item.id)] / total_weight)
+            tool_id = int(item.tool_id)
+            by_tool[tool_id] = by_tool.get(tool_id, 0.0) + share
+
+    # Internal charges are not customer dues, but the dashboard still tells
+    # the reader how much own-site money is floating around (one query).
+    internal_rows = (ToolRental.query
+                     .with_entities(ToolRental.total_amount, ToolRental.total_paid)
+                     .filter(ToolRental.is_void == False,  # noqa: E712
+                             ToolRental.renter_type == 'internal',
+                             func.coalesce(ToolRental.billing_type, '') != 'no_charge',
+                             ToolRental.total_amount > ToolRental.total_paid)
+                     .all())
+    internal_pending = sum(max(0.0, _flt(total) - _flt(paid))
+                           for total, paid in internal_rows)
+
+    return {
+        'by_tool': {tid: _round_qty(amount) for tid, amount in by_tool.items()},
+        'customer_count': len(customers),
+        'rental_count': rental_count,
+        'internal_pending': _round_qty(internal_pending),
+    }
+
+
+def tool_item_summary(term=None, category_id=None):
+    """The simple Tools dashboard: one row per tool **item**.
+
+    Answers only the stock question — how many of each item we own, how many
+    are in the store, how many are rented out, and how much rent customers
+    have still not paid.  Movement chains and per-location detail belong to
+    the Tracking page, so they are deliberately not part of this payload.
+    """
+    ledger = tool_ledger()
+    dues = customer_dues_by_tool()
+    term = (term or '').strip().lower()
+
+    rows = []
+    for row in ledger['tools']:
+        if category_id and int(row['tool'].category_id or 0) != int(category_id):
+            continue
+        if term and term not in ' '.join([
+            str(row['name'] or '').lower(), str(row['code'] or '').lower(),
+            str(row['category'] or '').lower(),
+        ]):
+            continue
+        rows.append({
+            'tool_id': row['tool_id'],
+            'name': row['name'],
+            'code': row['code'],
+            'category': row['category'],
+            'unit': row['unit'],
+            'owned_qty': row['owned_qty'],
+            'in_store_qty': row['in_store_qty'],
+            'own_project_qty': row['own_project_qty'],
+            'customer_qty': row['customer_qty'],
+            'out_qty': row['out_qty'],
+            'pending_amount': dues['by_tool'].get(int(row['tool_id']), 0.0),
+        })
+
+    totals = {
+        'owned_qty': _round_qty(sum(r['owned_qty'] for r in rows)),
+        'in_store_qty': _round_qty(sum(r['in_store_qty'] for r in rows)),
+        'own_project_qty': _round_qty(sum(r['own_project_qty'] for r in rows)),
+        'customer_qty': _round_qty(sum(r['customer_qty'] for r in rows)),
+        'out_qty': _round_qty(sum(r['out_qty'] for r in rows)),
+        'pending_amount': _round_qty(sum(r['pending_amount'] for r in rows)),
+        'items_shown': len(rows),
+        'items_total': len(ledger['tools']),
+    }
+    totals['store_pct'] = (round(totals['in_store_qty'] / totals['owned_qty'] * 100.0, 1)
+                           if totals['owned_qty'] > 0 else 0.0)
+    totals['out_pct'] = (round(totals['out_qty'] / totals['owned_qty'] * 100.0, 1)
+                         if totals['owned_qty'] > 0 else 0.0)
+    return {
+        'rows': rows,
+        'totals': totals,
+        'customer_count': dues['customer_count'],
+        'unpaid_rental_count': dues['rental_count'],
+        'internal_pending': dues['internal_pending'],
+        'today': ledger['today'],
     }
 
 

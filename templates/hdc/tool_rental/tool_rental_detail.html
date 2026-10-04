@@ -397,8 +397,8 @@
                         <div class="col-12">
                             <label class="form-label fw-bold">Which tools move? — qty per tool</label>
                             <small class="text-muted d-block mb-1">
-                                Leave blank to move everything pending. Enter a qty to split the load, so the
-                                <a href="{{ url_for('hdc_tool_rental_dashboard') }}">Tools dashboard</a> knows exactly which tool is on which site.
+                                Leave blank to move everything pending. Enter a qty to split the load, so
+                                <a href="{{ url_for('hdc_tool_rental_tracking') }}">Tool Tracking</a> knows exactly which tool is on which site.
                             </small>
                             <div id="transferItems">
                                 {% for it in items %}

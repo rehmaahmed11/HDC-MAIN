@@ -1,45 +1,59 @@
-# HDC Tools — Position Dashboard & Complete Tool Tracking
+# HDC Tools — Stock Summary & Complete Tool Tracking
 
-Answers one question for every tool HDC owns: **where is it right now, and do the
-numbers add up?**
+Every tool HDC owns must always satisfy one identity:
 
 ```
 Total Owned (Inventory)  =  In Store  +  Sent to Own Projects  +  Sent to Other Customers
 ```
 
-Everything in the Tools section is built around that single identity. If it ever
-fails to hold, the dashboard says so loudly instead of quietly showing a
-plausible-looking wrong number.
+The Tools section is built around that identity. The **dashboard** shows it the
+simple way (item by item), while the **audit** views that prove it — movement
+chains, per-location positions, overdue warnings — live on their own pages, so
+no page repeats the same numbers twice.
 
-- Dashboard: `/hdc/tool-rental/dashboard` (sidebar → **HDC Tools**)
-- One tool: `/hdc/tool-rental/tool/<tool_id>`
+- Dashboard (simple stock + unpaid rent, item by item): `/hdc/tool-rental/dashboard` (sidebar → **HDC Tools**)
+- Rentals (create, return, pay — and the admin reconciliation strip): `/hdc/tool-rental`
+- One tool (position + movement history): `/hdc/tool-rental/tool/<tool_id>`
+- Tracking (chains, where each piece is right now, admin): `/hdc/tool-rental/tracking`
 - JSON feed: `/hdc/api/tool-rental/dashboard`
 - Inventory (add tools, buy stock, scrap, categories): `/hdc/tool-rental/inventory`
 - Logic: `hdc/services/tool_tracking.py`, `hdc/services/tool_rental.py`
 - Pages: `templates/hdc/tool_rental/tool_dashboard.html`, `tool_position.html`,
   `tool_inventory.html`, `_stock_forms.html`
-- Tests: `tests/test_tool_tracking.py` (19 cases),
+- Tests: `tests/test_tool_tracking.py` (20 cases),
   `tests/test_tool_stock_lifecycle.py` (22 cases)
 
 ---
 
-## 1. What the dashboard shows
+## 1. What the dashboard shows (and what it deliberately does not)
+
+The dashboard is one simple page: **how many tools we own item by item, how
+many are in the store, how many are rented out, and how much rent customers
+have still not paid.**
 
 | Block | What it answers |
 | --- | --- |
-| KPI strip | Total owned · in store · **sent to own projects** · **sent to other customers** · total sent · rent pending |
-| Reconciliation strip | `store + own sites + customers = accounted`, compared with `owned`, with a **Balanced / N tool(s) off** badge |
-| Split bar | One glance at the proportion in store vs own sites vs customers |
-| Needs Attention | Overdue rentals, tools out > 30 days, damaged/lost stock, tools that do not reconcile, idle tools with a rental rate, rent pending |
-| Universal search | One box across tools, rental codes, customers, sites and movement notes — every hit says where the pieces are |
-| Tool-by-tool table | Per tool: owned / store / own sites / customers, a mini split bar, the actual locations holding it, and a status badge |
-| By location | Who is holding what: qty, tool types, rentals, overdue qty, oldest days, rent pending |
+| KPI strip | Total owned · in store · rented out (own sites + customers split) · **rent not paid by customers (PKR)** |
+| Tools-by-item table | Per item: total owned, in store, rented out (qty + own-site/customer split), **unpaid customer rent** |
+| Totals row | The same five numbers added up for the filtered list |
+| Search / category filter | `q` (name, code, category) and `category_id` only |
 
-Filters: `view` (all / out / store / own / customer / attention),
-`location_type`, `tool_id`, `category_id`, `project_id`, `issues=1`, `q`.
-Every filter narrows the *tool list*; the reconciliation strip always reports the
-true company-wide position so a filtered view can never be mistaken for the
-whole picture.
+**Rent not paid by customers** is the unpaid balance
+(`total_amount − total_paid`) of outside-customer rentals, split across the
+rental's lines in proportion to the line amount (falling back to the rented
+qty). Own-site (internal) rentals are HDC renting from itself, so they are
+reported separately as a note under the KPI and never counted as a customer
+due. A `no_charge` rental owes nothing by definition.
+
+Deliberately **not** on the dashboard, because they already have their own home:
+
+| Detail | Where it lives |
+| --- | --- |
+| Movement chains, site-to-site transfers, where each piece is now | Tracking (`/hdc/tool-rental/tracking`) and one tool's position page |
+| Reconciliation strip (`store + sites + customers = owned`), Balanced/off badge | Rentals page (admin panel) and the tool position page |
+| Overdue / long-out / non-reconciling warnings | Rentals page (overdue rentals) + Tracking |
+| Purchase / scrap life-cycle, conditions, rates | Inventory (`/hdc/tool-rental/inventory`) |
+| Rental-level money (per rental, per customer, payments) | Rentals, rental detail and Reports |
 
 ---
 
@@ -56,8 +70,9 @@ whole picture.
    balance would break.
 
 Consequence: `owned == in_store + out` for every tool, always. When bad legacy
-data breaks it, the row is flagged `unaccounted` with the signed variance and
-pushed into *Needs Attention*.
+data breaks it, the row is flagged `unaccounted` with the signed variance —
+surfaced in `tools_attention()` on the Rentals admin panel and the tracking /
+position views, not silently averaged away on the simple dashboard.
 
 ---
 
@@ -143,7 +158,8 @@ tool still uses the category.
 
 Inventory search matches tool name, code, category, description **and the site or
 customer a tool is currently sitting on**, because the list is built from the
-same `tool_ledger()` the dashboard uses — the two pages can never disagree.
+same `tool_ledger()` the dashboard and tracking pages use — the pages can never
+disagree about stock.
 
 ## 4. Schema change
 
@@ -185,7 +201,9 @@ No existing column changed type or meaning. Nothing is deleted.
 | --- | --- |
 | `tool_ledger()` | `{'tools': [...], 'locations': [...], 'totals': {...}, 'today': date}` — the single source of truth |
 | `tools_reconciliation(ledger)` | the balance identity + `balanced` / `variance` / `unaccounted_rows` |
-| `dashboard_summary(ledger)` | KPI totals, split bar segments, top locations, attention list |
+| `dashboard_summary(ledger)` | KPI totals, split bar segments, top locations, attention list (used by the JSON feed / audit views) |
+| `tool_item_summary(term, category_id)` | the simple dashboard: item-wise owned / store / rented + unpaid customer rent |
+| `customer_dues_by_tool()` | unpaid outside-customer rent per tool, split per line; internal pending reported separately |
 | `tools_attention(ledger)` | ranked issues (danger → warning → info), each with a deep link |
 | `tool_position(tool_id)` | one tool's row + its movement log |
 | `location_summary(ledger)` | per site / customer / store holdings |
@@ -207,9 +225,10 @@ Location types: `store` / `own_project` / `customer` (`LOC_STORE`,
 `LOC_OWN_PROJECT`, `LOC_CUSTOMER`). All read-only except the two transfer
 helpers.
 
-The JSON feed at `/hdc/api/tool-rental/dashboard` returns the same numbers the
-HTML shows — reconciliation, split, **all** locations (not a truncated top-N)
-and a per-tool array — so external analysis cannot drift from the UI.
+The JSON feed at `/hdc/api/tool-rental/dashboard` returns the audit numbers —
+reconciliation, split, **all** locations (not a truncated top-N) and a per-tool
+array — so external analysis cannot drift from the UI.  The simple dashboard
+itself never repeats that detail; it is the one-page stock summary.
 
 ---
 
@@ -231,8 +250,8 @@ python3 scripts/seed_tools_demo.py     # idempotent
 Seeds 11 tools (542 pieces) across 3 categories, 3 sites, 7 rentals: internal
 no-charge site rentals, a site-to-site chain, external fee rentals, partial
 returns, one overdue rental, one long-out rental, one damaged tool, one top-up
-purchase and one scrap — enough for every dashboard panel to show something
-real:
+purchase and one scrap — enough for every page (dashboard, rentals, tracking,
+reports) to show something real:
 
 ```
 owned 542 = in store 160 + own projects 270 + customers 112   (balanced: True)
@@ -252,8 +271,11 @@ the current location and keeps the `Site A > Site B` chain · partial transfer
 splits a line across two sites · `allocate_transfer_qty` never exceeds the
 request · returns put stock back · stock edited below out-qty is flagged not
 hidden · overdue and >30-day flags · location roll-up · universal search by
-code / name / rental / customer · dashboard + position pages render · filters
-narrow the list · JSON matches the service · void rentals hold nothing ·
+code / name / rental / customer · dashboard + position pages render · the
+dashboard stays a simple item-wise summary (no repeated tracking/audit blocks) ·
+its search/category filters narrow the item list · unpaid customer rent is split
+per item while own-site money is excluded · JSON matches the service · void
+rentals hold nothing ·
 no-charge internal rentals still count as sent · rent pending is not double
 counted across two customers · the pre-existing tool pages still render.
 
