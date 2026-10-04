@@ -84,8 +84,8 @@ A rental line is not "at one place". It is replayed into **buckets**:
 
 ```
 start     → bucket[origin] += qty_rented
-transfer T → lift T pieces from the most recently touched bucket
-             open bucket[destination] += T   (chain inherits + destination)
+transfer T → lift T pieces from the recorded From location (latest bucket for
+             older transfers), then open bucket[destination] += T
 return  R → take R pieces off the most recent bucket first
 ```
 
@@ -121,6 +121,15 @@ the pending lines).
 `ToolRentalTransfer.qty_transferred` is rewritten to the qty that actually
 moved, and the flash message names the tools:
 `Tools transferred: Site A to Site B (2 qty — Angle Grinder x2). Chain: Site A > Site B`.
+
+The **Transfer Rental** flow on `/hdc/tool-rental/new` follows the operator's
+sequence: transaction type → From holder/location → rent type → To holder →
+available tools → other settings. From choices are grouped by each live rental's
+actual location, so a rental split across sites only offers the quantities at
+the chosen site. Checked tool lines move their displayed quantity and use their
+own destination rate; unchecked lines and quantities at other locations stay
+with the previous rental. Choosing rent already fixed in the contact/contract
+hides the rate inputs but still allows the tools to be selected and moved.
 
 ### Rent pending is apportioned, never duplicated
 
