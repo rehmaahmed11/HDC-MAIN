@@ -62,8 +62,8 @@
                         <div class="col-12">
                             <label class="form-label" for="toolCategoryInput">Category</label>
                             <input type="text" id="toolCategoryInput" class="form-control" placeholder="Search categories or choose No Category"
-                                   autocomplete="off">
-                            <select name="category_id" id="toolCategorySelect" class="form-select">
+                                   autocomplete="off" data-hdc-combo="toolCategorySelect" data-hdc-combo-strict="true" data-hdc-combo-manual="true">
+                            <select name="category_id" id="toolCategorySelect" class="form-select d-none" data-hdc-combo-source>
                                 <option value="">No Category</option>
                                 {% for c in categories %}
                                 <option value="{{ c.id }}" {% if new_category==c.id %}selected{% endif %}>{{ c.name }}</option>
@@ -189,8 +189,8 @@
                     <div class="col-md-3">
                         <label class="form-label small mb-1" for="inventoryCategoryInput">Category</label>
                         <input type="text" id="inventoryCategoryInput" class="form-control" placeholder="Search categories"
-                               autocomplete="off">
-                        <select name="category_id" id="inventoryCategorySelect" class="form-select">
+                               autocomplete="off" data-hdc-combo="inventoryCategorySelect" data-hdc-combo-strict="true" data-hdc-combo-manual="true">
+                        <select name="category_id" id="inventoryCategorySelect" class="form-select d-none" data-hdc-combo-source>
                             <option value="">All Categories</option>
                             {% for c in categories %}
                             <option value="{{ c.id }}" {% if selected_category==c.id %}selected{% endif %}>{{ c.name }}</option>
@@ -343,8 +343,9 @@
                                     <div class="col-6">
                                         <label class="form-label" for="editToolCategoryInput{{ r.tool_id }}">Category</label>
                                         <input type="text" id="editToolCategoryInput{{ r.tool_id }}" class="form-control js-edit-tool-category-input"
-                                               placeholder="Search categories" autocomplete="off">
-                                        <select name="category_id" id="editToolCategorySelect{{ r.tool_id }}" class="form-select">
+                                               placeholder="Search categories" autocomplete="off"
+                                               data-hdc-combo="editToolCategorySelect{{ r.tool_id }}" data-hdc-combo-strict="true" data-hdc-combo-manual="true">
+                                        <select name="category_id" id="editToolCategorySelect{{ r.tool_id }}" class="form-select d-none" data-hdc-combo-source>
                                             <option value="">No Category</option>
                                             {% for c in categories %}<option value="{{ c.id }}" {% if r.tool.category_id==c.id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}
                                         </select>
@@ -435,7 +436,10 @@ document.addEventListener('DOMContentLoaded', function () {
         var modal = document.getElementById(modalId);
         if (!modal) return;
         var select = modal.querySelector('select[name="tool_id"]');
-        if (select && button.dataset.toolId) { select.value = button.dataset.toolId; }
+        if (select && button.dataset.toolId) {
+            select.value = button.dataset.toolId;
+            select.dispatchEvent(new Event('change', {bubbles:true}));
+        }
         var qty = modal.querySelector('input[name="qty"]');
         if (qty) { qty.value = ''; }
     }

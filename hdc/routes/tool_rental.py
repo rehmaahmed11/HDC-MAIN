@@ -7,6 +7,7 @@ from urllib.parse import quote, unquote
 from flask import flash, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 from sqlalchemy import func
+from sqlalchemy.orm import joinedload
 
 from hdc.extensions import _money_write_required, db
 from hdc.models.accounts import Account
@@ -60,6 +61,41 @@ def _transfer_source_key(rental_id, loc_type, project_id=None, stage_id=None, cu
         str(int(stage_id or 0)),
         quote((customer_name or '').strip(), safe=''),
     ))
+
+
+def _tool_project_option_label(project):
+    """Show enough context to find a site by either its name or its client."""
+    if not project:
+        return ''
+    label = (project.name or '').strip()
+    code = (project.project_code or '').strip()
+    client = (project.client or '').strip()
+    if code:
+        label += f' ({code})'
+    if client:
+        label += f' — Client: {client}'
+    return label
+
+
+def _tool_project_combo_options(projects):
+    return [(project.id, _tool_project_option_label(project))
+            for project in projects]
+
+
+def _tool_stage_combo_options(stages):
+    return [
+        (stage.id,
+         f"{stage.name} — {_tool_project_option_label(stage.project)}",
+         {'project-id': stage.project_id})
+        for stage in stages
+    ]
+
+
+def _tool_picker_options(tools):
+    return [
+        (tool.id, f'{tool.name} ({tool.tool_code})' if tool.tool_code else tool.name)
+        for tool in tools
+    ]
 
 
 def _parse_transfer_source_key(value):
@@ -184,6 +220,7 @@ def register(app):
             can_manage_tools=can_manage_tools,
             rentals=rentals,
             filters=filters,
+            known_customers=known_tool_customers(),
         )
 
     # ------------------ INVENTORY ------------------
@@ -617,11 +654,16 @@ def register(app):
         receiving_account_options = [
             (a.id, f"{a.name} ({a.type})") for a in receiving_accounts
         ]
+        projects = Project.query.order_by(Project.name.asc()).all()
+        stages = Stage.query.options(joinedload(Stage.project)).order_by(Stage.name.asc()).all()
+        tools = Tool.query.filter(Tool.is_void==False).order_by(Tool.name.asc()).all()
 
         return render_template('tool_rental/tool_new_rental.html',
-            projects=Project.query.order_by(Project.name.asc()).all(),
-            stages=Stage.query.order_by(Stage.name.asc()).all(),
-            tools=Tool.query.filter(Tool.is_void==False).order_by(Tool.name.asc()).all(),
+            projects=projects,
+            project_options=_tool_project_combo_options(projects),
+            stages=stages,
+            stage_options=_tool_stage_combo_options(stages),
+            tools=tools,
             known_customers=known_tool_customers(),
             recent_rentals=recent_rentals,
             created_rental=created_rental,
@@ -1178,7 +1220,7 @@ def register(app):
                          .order_by(ToolMovementLog.timestamp.asc(), ToolMovementLog.id.asc())
                          .all())
         projects = Project.query.order_by(Project.name.asc()).all()
-        stages = Stage.query.order_by(Stage.name.asc()).all()
+        stages = Stage.query.options(joinedload(Stage.project)).order_by(Stage.name.asc()).all()
         tools = Tool.query.filter(Tool.is_void==False).order_by(Tool.name.asc()).all()
         receiving_accounts = get_receiving_accounts()
         # (id, label) pairs for the searchable account combos on this page.
@@ -1213,7 +1255,9 @@ def register(app):
             transfer_chain=rental_transfer_chain(rental.id),
             movement_logs=movement_logs,
             projects=projects,
+            project_options=_tool_project_combo_options(projects),
             stages=stages,
+            stage_options=_tool_stage_combo_options(stages),
             tools=tools,
             receiving_accounts=receiving_accounts,
             receiving_account_options=receiving_account_options,
@@ -1635,7 +1679,9 @@ def register(app):
         return render_template('tool_rental/tool_tracking.html',
             locations=locations,
             projects=projects,
+            project_options=_tool_project_combo_options(projects),
             tools=tools,
+            tool_options=_tool_picker_options(tools),
             selected_tool=tool_id,
             selected_project=project_id,
             q=q,
@@ -1739,7 +1785,10 @@ def register(app):
             purchase_totals=purchase_totals,
             scrap_totals=scrap_totals,
             projects=projects,
+            project_options=_tool_project_combo_options(projects),
             tools=tools,
+            tool_options=_tool_picker_options(tools),
+            known_customers=known_tool_customers(),
             receiving_accounts=receiving_accounts,
             kpis=kpis
         )

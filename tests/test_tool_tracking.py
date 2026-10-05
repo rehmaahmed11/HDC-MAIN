@@ -820,6 +820,25 @@ class ToolTrackingTestCase(unittest.TestCase):
             self.assertEqual(r.status_code, 200, url)
             self.assertIn('tools-subnav', r.get_data(as_text=True), url)
 
+    def test_tracking_layout_wraps_location_chains_and_keeps_modals_out_of_table(self):
+        tool = self._make_tool('TOOL-0001', 'Concrete Vibrator', 3)
+        self._rent([(tool, 1)], renter_type='external',
+                   customer_name='Chand Contractor')
+
+        response = self.client.get('/hdc/tool-rental/tracking')
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        table_start = html.index(
+            '<table class="table hdc-table table-sm mb-0 tool-tracking-table">')
+        table_end = html.index('</table>', table_start)
+        modal_start = html.index('<div class="modal fade tool-tracking-modal"')
+
+        self.assertLess(table_end, modal_start)
+        self.assertIn('tool-tracking-current', html)
+        self.assertIn('tool-tracking-chain', html)
+        self.assertIn('Chand Contractor', html)
+        self.assertNotIn('Example: Site1 &gt; Site2', html)
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

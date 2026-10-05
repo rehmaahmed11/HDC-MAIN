@@ -376,22 +376,15 @@
                         <div class="col-12" id="toSiteFields">
                             <div class="row g-2">
                                 <div class="col-6">
-                                    <label class="form-label">To Project / Site</label>
-                                    <select name="to_project_id" class="form-select">
-                                        <option value="">Select Site</option>
-                                        {% for p in projects %}
-                                        <option value="{{ p.id }}">{{ p.name }}</option>
-                                        {% endfor %}
-                                    </select>
+                                    {{ combo_select('to_project_id', 'transferProjectSelect', project_options,
+                                       label='To Project / Site',
+                                       placeholder='Search site, project, or client…',
+                                       max_items=80) }}
                                 </div>
                                 <div class="col-6">
-                                    <label class="form-label">To Stage (Optional)</label>
-                                    <select name="to_stage_id" id="transferStageSelect" class="form-select">
-                                        <option value="">No Stage</option>
-                                        {% for s in stages %}
-                                        <option value="{{ s.id }}" data-project-id="{{ s.project_id }}">{{ s.name }} - {{ s.project.name if s.project else '' }}</option>
-                                        {% endfor %}
-                                    </select>
+                                    {{ combo_select('to_stage_id', 'transferStageSelect', stage_options,
+                                       label='To Stage (Optional)',
+                                       placeholder='Search a stage…', max_items=80) }}
                                 </div>
                             </div>
                         </div>
@@ -518,11 +511,16 @@ function syncTransferStages(){
     const project = document.getElementById('transferProjectSelect');
     const stage = document.getElementById('transferStageSelect');
     if(!project || !stage) return;
+    let selectionCleared = false;
     Array.from(stage.options).forEach(function(option){
         const visible = !option.value || !project.value || option.dataset.projectId === project.value;
         option.hidden = !visible;
-        if(!visible && option.selected) stage.value = '';
+        if(!visible && option.selected){
+            stage.value = '';
+            selectionCleared = true;
+        }
     });
+    if(selectionCleared) stage.dispatchEvent(new Event('change', {bubbles:true}));
 }
 function toggleToType(){
     const t = document.getElementById('toType').value;
