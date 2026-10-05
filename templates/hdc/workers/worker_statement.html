@@ -1,0 +1,224 @@
+{% extends "shared/base.html" %}
+{% block title %}{{ w.name }} — Statement{% endblock %}
+{% block page_heading %}
+    {{ w.name }}
+    <span class="badge bg-secondary ms-2 fs-6">{{ w.worker_code }}</span>
+    <span class="badge bg-primary ms-1 fs-6">Statement</span>
+{% endblock %}
+
+{% block content %}
+<style>
+.ws-legend { display:flex; flex-wrap:wrap; gap:10px; }
+.ws-legend .ws-chip { border:1px solid var(--card-border); border-radius:8px; padding:6px 10px; font-size:0.78rem; background:var(--card-bg); }
+.ws-legend .ws-chip .dot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; }
+.statement-actions { display:none; }
+/* Row tints: one colour per kind of money movement, so the statement can be
+   read at a glance instead of by decoding the Type column. */
+.table-success-light > td { background: rgba(22,163,74,.10) !important; }
+.table-warning-light > td { background: rgba(245,158,11,.10) !important; }
+.table-danger-light  > td { background: rgba(220,38,38,.09) !important; }
+tr.no-notes-row > td { background: transparent !important; }
+@media print {
+    .topbar, .sidebar, .ledger-actions, .no-print, .ws-filters { display:none !important; }
+    .statement-actions { display:block; text-align:center; margin-bottom:10px; }
+}
+</style>
+
+<div class="statement-actions">
+    <strong>HDC — Worker Statement</strong> · {{ w.name }} ({{ w.worker_code }})
+</div>
+
+{# ── where did the money go ─────────────────────────────────────────────── #}
+<div class="row g-3 mt-1">
+    <div class="col-6 col-md-2">
+        <div class="kpi-card kpi-green">
+            <div class="kpi-label">Earned</div>
+            <div class="kpi-value small">{{ "{:,.0f}".format(snap.earned or 0) }}</div>
+            <div class="kpi-sub">wages earned</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-2">
+        <div class="kpi-card kpi-orange">
+            <div class="kpi-label">Advances</div>
+            <div class="kpi-value small">{{ "{:,.0f}".format(snap.advanced or 0) }}</div>
+            <div class="kpi-sub">{{ type_summary.get('advance', {}).get('count', 0) }} entr{{ 'y' if type_summary.get('advance', {}).get('count', 0) == 1 else 'ies' }}</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-2">
+        <div class="kpi-card kpi-red">
+            <div class="kpi-label">Paid</div>
+            <div class="kpi-value small">{{ "{:,.0f}".format(snap.salary_paid or 0) }}</div>
+            <div class="kpi-sub">against wages</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-2">
+        <div class="kpi-card kpi-teal">
+            <div class="kpi-label">Tips</div>
+            <div class="kpi-value small">{{ "{:,.0f}".format(snap.tip_paid or 0) }}</div>
+            <div class="kpi-sub">gratis — not deducted</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-2">
+        <div class="kpi-card kpi-purple">
+            <div class="kpi-label">Settled</div>
+            <div class="kpi-value small">{{ "{:,.0f}".format(snap.settled or 0) }}</div>
+            <div class="kpi-sub">shortfall written off</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-2">
+        <div class="kpi-card {% if (snap.balance or 0) > 0 %}kpi-profit{% else %}kpi-green{% endif %}">
+            <div class="kpi-label">Balance Due</div>
+            <div class="kpi-value small">{{ "{:,.0f}".format(snap.balance or 0) }}</div>
+            <div class="kpi-sub">owed to worker</div>
+        </div>
+    </div>
+</div>
+
+{# ── plain-language legend: what each kind of row means ──────────────────── #}
+<div class="card hdc-card mt-3">
+    <div class="card-header hdc-card-header"><i class="fas fa-circle-info me-2"></i>How to read this statement</div>
+    <div class="card-body">
+        <div class="ws-legend">
+            {% for value, label, hint in entry_types %}
+            <div class="ws-chip">
+                <span class="dot {% if value == 'work' %}bg-success{% elif value == 'advance' %}bg-warning{% elif value == 'payment' %}bg-danger{% elif value == 'tip' %}bg-info{% else %}bg-primary{% endif %}"></span>
+                <strong>{{ label }}</strong>
+                <div class="text-muted" style="font-size:0.74rem">{{ hint }}</div>
+            </div>
+            {% endfor %}
+        </div>
+        <div class="alert alert-secondary mt-3 mb-0 py-2 small">
+            <i class="fas fa-triangle-exclamation me-1"></i>
+            <strong>Tips do not reduce what is owed.</strong> A tip is cash given on top of the
+            wage, so it is shown on its own and leaves the balance untouched. Advances,
+            payments and settlements all reduce it.
+        </div>
+    </div>
+</div>
+
+<div class="ledger-actions d-flex gap-2 mt-3 flex-wrap">
+    <a href="{{ url_for('hdc_worker_statement', wid=w.id) }}" class="btn btn-outline-primary btn-sm">
+        <i class="fas fa-rotate me-1"></i>Full statement
+    </a>
+    <a href="{{ url_for('hdc_worker_advance', wid=w.id) }}" class="btn btn-warning btn-sm">
+        <i class="fas fa-hand-holding-usd me-1"></i>Give Advance
+    </a>
+    <a href="{{ url_for('hdc_worker_payment', wid=w.id) }}" class="btn btn-success btn-sm">
+        <i class="fas fa-money-bill-wave me-1"></i>Record Payment
+    </a>
+    <a href="{{ url_for('hdc_worker_ledger', wid=w.id) }}" class="btn btn-outline-secondary btn-sm">
+        <i class="fas fa-book me-1"></i>Classic ledger
+    </a>
+    <button type="button" class="btn btn-outline-dark btn-sm no-print" onclick="window.print()">
+        <i class="fas fa-print me-1"></i>Print / Save PDF
+    </button>
+    <a href="{{ url_for('hdc_workers') }}" class="btn btn-outline-secondary btn-sm ms-auto">
+        <i class="fas fa-arrow-left me-1"></i>Back to Workers
+    </a>
+</div>
+
+<div class="card hdc-card mt-3">
+    <div class="card-header hdc-card-header ws-filters">
+        <form method="GET" action="{{ url_for('hdc_worker_statement', wid=w.id) }}" class="row g-2 align-items-end">
+            <div class="col-6 col-md-2">
+                <label class="form-label small mb-0">From</label>
+                <input type="date" name="date_from" value="{{ date_from }}" class="form-control form-control-sm">
+            </div>
+            <div class="col-6 col-md-2">
+                <label class="form-label small mb-0">To</label>
+                <input type="date" name="date_to" value="{{ date_to }}" class="form-control form-control-sm">
+            </div>
+            <div class="col-12 col-md-5">
+                <label class="form-label small mb-0">Types</label>
+                <div class="d-flex flex-wrap gap-2">
+                    {% for value, label, hint in entry_types %}
+                    <div class="form-check form-check-inline mb-0">
+                        <input class="form-check-input" type="checkbox" name="type" value="{{ value }}"
+                               id="type_{{ value }}" {% if value in selected_types %}checked{% endif %}>
+                        <label class="form-check-label small" for="type_{{ value }}">{{ label }}</label>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="col-6 col-md-2">
+                <div class="form-check mb-1">
+                    <input class="form-check-input" type="checkbox" name="show_voided" value="1"
+                           id="showVoided" {% if show_voided %}checked{% endif %}>
+                    <label class="form-check-label small" for="showVoided">Show voided</label>
+                </div>
+            </div>
+            <div class="col-6 col-md-1 d-grid">
+                <button type="submit" class="btn btn-sm btn-mint">Apply</button>
+            </div>
+        </form>
+    </div>
+    <div class="table-responsive">
+        <table class="table hdc-table table-sm mb-0">
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Type</th>
+                    <th>Project / Stage</th>
+                    <th class="text-success text-end">Earned</th>
+                    <th class="text-warning text-end">Advance</th>
+                    <th class="text-danger text-end">Paid</th>
+                    <th class="text-info text-end">Tip</th>
+                    <th class="text-primary text-end">Settled</th>
+                    <th class="text-end">Balance</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for r in rows %}
+                <tr class="{% if r.is_void %}table-secondary{% elif r.entry_type == 'work' %}table-success-light{% elif r.entry_type == 'advance' %}table-warning-light{% elif r.entry_type == 'payment' %}table-danger-light{% elif r.entry_type == 'tip' %}table-info{% elif r.entry_type == 'settlement' %}table-primary{% endif %}"
+                    style="{% if r.is_void %}text-decoration:line-through;opacity:.6{% endif %}">
+                    <td>{{ r.date or '-' }}</td>
+                    <td>
+                        <span class="badge {% if r.is_void %}bg-secondary{% elif r.entry_type == 'work' %}bg-success{% elif r.entry_type == 'advance' %}bg-warning text-dark{% elif r.entry_type == 'payment' %}bg-danger{% elif r.entry_type == 'tip' %}bg-info text-dark{% elif r.entry_type == 'settlement' %}bg-primary{% else %}bg-secondary{% endif %}">
+                            {% if r.is_void %}Voided{% else %}{{ r.type_label }}{% endif %}
+                        </span>
+                    </td>
+                    <td class="text-muted small">
+                        {{ r.row.project.name if r.row.project else '-' }}
+                        {% if r.row.stage %}<br><small>{{ r.row.stage.name }}</small>{% endif %}
+                    </td>
+                    <td class="text-success text-end">{% if r.earned %}{{ "{:,.0f}".format(r.earned) }}{% endif %}</td>
+                    <td class="text-warning text-end">{% if r.advanced %}{{ "{:,.0f}".format(r.advanced) }}{% endif %}</td>
+                    <td class="text-danger text-end">{% if r.paid %}{{ "{:,.0f}".format(r.paid) }}{% endif %}</td>
+                    <td class="text-info text-end">{% if r.tip %}{{ "{:,.0f}".format(r.tip) }}{% endif %}</td>
+                    <td class="text-primary text-end">{% if r.settled %}{{ "{:,.0f}".format(r.settled) }}{% endif %}</td>
+                    <td class="fw-bold text-end {% if r.running_balance > 0 %}text-info{% elif r.running_balance < 0 %}text-danger{% else %}text-muted{% endif %}">
+                        {{ "{:,.0f}".format(r.running_balance) }}
+                    </td>
+                </tr>
+                {% if r.is_void %}
+                <tr class="no-notes-row"><td colspan="9" class="text-muted small py-0 border-0" style="padding-top:0">
+                    <em class="text-danger">Voided — {{ r.row.void_reason or 'no reason given' }}</em>
+                </td></tr>
+                {% elif r.row.notes %}
+                <tr class="no-notes-row"><td colspan="9" class="text-muted small py-0 border-0" style="padding-top:0">
+                    <em>{{ r.row.notes }}</em>
+                </td></tr>
+                {% endif %}
+            {% else %}
+                <tr><td colspan="9" class="text-center text-muted py-4 hdc-empty-row">No entries match these filters.</td></tr>
+            {% endfor %}
+            </tbody>
+            <tfoot class="table-secondary fw-bold">
+                <tr>
+                    <td colspan="3">Totals for the rows shown above</td>
+                    <td class="text-success text-end">{{ "{:,.0f}".format(totals.earned or 0) }}</td>
+                    <td class="text-warning text-end">{{ "{:,.0f}".format(totals.advanced or 0) }}</td>
+                    <td class="text-danger text-end">{{ "{:,.0f}".format(totals.paid or 0) }}</td>
+                    <td class="text-info text-end">{{ "{:,.0f}".format(totals.tip or 0) }}</td>
+                    <td class="text-primary text-end">{{ "{:,.0f}".format(totals.settled or 0) }}</td>
+                    <td class="text-info text-end">{{ "{:,.0f}".format(totals.closing_balance or 0) }}</td>
+                </tr>
+                <tr>
+                    <td colspan="8" class="text-end">Balance due to worker (whole ledger, filters ignored)</td>
+                    <td class="text-end">{{ "{:,.0f}".format(totals.balance or 0) }}</td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+</div>
+{% endblock %}

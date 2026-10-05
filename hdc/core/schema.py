@@ -1650,6 +1650,7 @@ def _ensure_tool_rental_schema():
             total_rented_qty FLOAT DEFAULT 0,
             total_amount FLOAT DEFAULT 0,
             total_paid FLOAT DEFAULT 0,
+            total_discount FLOAT DEFAULT 0,
             total_returned_qty FLOAT DEFAULT 0,
             status VARCHAR(30) DEFAULT 'active',
             payment_status VARCHAR(30) DEFAULT 'unpaid',
@@ -1705,10 +1706,29 @@ def _ensure_tool_rental_schema():
             return_id INTEGER REFERENCES hdc_tool_rental_return(id),
             payment_date DATE,
             amount FLOAT DEFAULT 0,
+            discount FLOAT DEFAULT 0,
             payment_mode VARCHAR(30) DEFAULT 'cash',
             received_to_account_id INTEGER REFERENCES hdc_account(id),
             reference VARCHAR(120),
             notes VARCHAR(300),
+            is_void BOOLEAN DEFAULT 0,
+            void_reason VARCHAR(250),
+            voided_at DATETIME,
+            created_at DATETIME,
+            created_by INTEGER REFERENCES hdc_user(id)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS hdc_tool_rental_discount (
+            id INTEGER PRIMARY KEY,
+            discount_code VARCHAR(30) NOT NULL UNIQUE,
+            rental_id INTEGER NOT NULL REFERENCES hdc_tool_rental(id),
+            payment_id INTEGER REFERENCES hdc_tool_rental_payment(id),
+            return_id INTEGER REFERENCES hdc_tool_rental_return(id),
+            discount_date DATE,
+            amount FLOAT DEFAULT 0,
+            reason VARCHAR(40) DEFAULT 'goodwill',
+            notes VARCHAR(500),
             is_void BOOLEAN DEFAULT 0,
             void_reason VARCHAR(250),
             voided_at DATETIME,
@@ -1857,12 +1877,33 @@ def _ensure_tool_rental_schema():
         'payment_status': "payment_status VARCHAR(30) DEFAULT 'unpaid'",
         'is_void': "is_void BOOLEAN DEFAULT 0",
     })
+    # Discounts: a rental can be settled partly by cash and partly by a
+    # concession, so both the rental and each payment carry one.
+    _ensure_table_columns_sqlite('hdc_tool_rental', {
+        'total_discount': "total_discount FLOAT DEFAULT 0",
+    })
     _ensure_table_columns_sqlite('hdc_tool_rental_payment', {
         'received_to_account_id': "received_to_account_id INTEGER REFERENCES hdc_account(id)",
         'is_void': "is_void BOOLEAN DEFAULT 0",
         'void_reason': "void_reason VARCHAR(250)",
         'voided_at': "voided_at DATETIME",
+        'discount': "discount FLOAT DEFAULT 0",
     })
+    with db.engine.connect() as conn:
+        for sql in (
+            "UPDATE hdc_tool_rental SET total_discount = COALESCE(total_discount, 0)",
+            "UPDATE hdc_tool_rental_payment SET discount = COALESCE(discount, 0)",
+            "CREATE INDEX IF NOT EXISTS idx_tool_rental_discount_rental ON hdc_tool_rental_discount(rental_id, discount_date)",
+            "CREATE INDEX IF NOT EXISTS idx_tool_rental_discount_payment ON hdc_tool_rental_discount(payment_id)",
+        ):
+            try:
+                conn.execute(text(sql))
+                conn.commit()
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
     # Link a transfer to the new rental it spawned, so a hand-over chain reads
     # a > b > c across rentals (see hdc.services.tool_rental.rental_transfer_chain).
     _ensure_table_columns_sqlite('hdc_tool_rental_transfer', {

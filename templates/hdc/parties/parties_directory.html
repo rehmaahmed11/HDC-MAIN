@@ -37,6 +37,14 @@
     <div class="col-6 col-md-3">
         <div class="card hdc-card h-100">
             <div class="card-body py-2">
+                <div class="small text-muted"><i class="fas fa-hard-hat me-1"></i>Workers</div>
+                <div class="h5 mb-0">{{ counts.worker }} <span class="small text-muted">/ {{ counts.worker_total }} on the books</span></div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card hdc-card h-100">
+            <div class="card-body py-2">
                 <div class="small text-muted"><i class="fas fa-users me-1"></i>Other Parties</div>
                 <div class="h5 mb-0">{{ counts.other }}</div>
             </div>
@@ -47,6 +55,20 @@
             <div class="card-body py-2">
                 <div class="small text-muted">Active Total</div>
                 <div class="h5 mb-0 text-success">{{ counts.active_total }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card hdc-card h-100">
+            <div class="card-body py-2">
+                <div class="small text-muted"><i class="fas fa-rotate me-1"></i>Worker sync</div>
+                <form method="post" action="{{ url_for('hdc_parties') }}" class="mt-1">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+                    <input type="hidden" name="action" value="sync_workers">
+                    <button type="submit" class="btn btn-sm btn-outline-primary w-100">
+                        <i class="fas fa-hard-hat me-1" aria-hidden="true"></i>Sync Workers
+                    </button>
+                </form>
             </div>
         </div>
     </div>
@@ -121,6 +143,15 @@
                     automatically, and those names appear in the customer
                     search on the rental forms.
                 </p>
+                <p class="mb-2">
+                    <strong>Workers</strong> — every worker on the books is
+                    filed here automatically as a <em>Worker / Labour</em>
+                    party (under <strong>Other Parties</strong>), with a link
+                    straight to their statement. Advances, payments, tips and
+                    settlements are money moving to a person, so workers belong
+                    in the same directory as lenders and customers. The
+                    <strong>Workers</strong> module itself is unchanged.
+                </p>
                 <p class="mb-0">
                     <strong>Deactivate</strong> hides a party from new
                     transactions without touching entries that already use it.
@@ -169,6 +200,10 @@
                             <th class="text-center">Loans</th>
                             <th class="text-center">Tool Rentals</th>
                             <th class="text-end">Tool Income (PKR)</th>
+                            <th class="text-end">Advances</th>
+                            <th class="text-end">Paid</th>
+                            <th class="text-end">Tips</th>
+                            <th class="text-end">Owed</th>
                             <th class="text-center">Status</th>
                             <th class="text-end">Action</th>
                         </tr>
@@ -176,7 +211,7 @@
                     <tbody>
                         {% if not group.rows %}
                         <tr>
-                            <td colspan="8" class="text-muted text-center py-3">
+                            <td colspan="12" class="text-muted text-center py-3">
                                 {% if search %}
                                 No {{ group.label|lower }} match “{{ search }}”.
                                 {% elif group.key == 'loan' %}
@@ -196,12 +231,38 @@
                                 <span class="fw-semibold">{{ row.party.name }}</span>
                                 {% if row.party.phone %}<div class="small text-muted">{{ row.party.phone }}</div>{% endif %}
                                 {% if row.party.note %}<div class="small text-muted">{{ row.party.note }}</div>{% endif %}
+                                {% if row.worker %}
+                                <div class="mt-1">
+                                    <span class="badge bg-warning text-dark" title="Synced from the Workers module">
+                                        <i class="fas fa-hard-hat me-1" aria-hidden="true"></i>{{ row.worker.worker.worker_code }}
+                                    </span>
+                                    <a class="small ms-1" href="{{ url_for('hdc_worker_statement', wid=row.worker.worker.id) }}">
+                                        <i class="fas fa-file-invoice-dollar me-1"></i>Statement
+                                    </a>
+                                    <a class="small ms-1" href="{{ url_for('hdc_worker_ledger', wid=row.worker.worker.id) }}">
+                                        <i class="fas fa-book me-1"></i>Ledger
+                                    </a>
+                                </div>
+                                {% endif %}
                             </td>
                             <td><span class="badge bg-light text-dark border">{{ row.type_label }}</span></td>
                             <td class="text-center">{{ row.entries }}</td>
                             <td class="text-center">{{ row.loans or '–' }}</td>
                             <td class="text-center">{{ row.rentals or '–' }}</td>
                             <td class="text-end">{{ '{:,.2f}'.format(row.rental_paid) if row.rentals else '–' }}</td>
+                            {% if row.worker %}
+                            <td class="text-end text-warning">{{ '{:,.0f}'.format(row.worker.advance) if row.worker.advance else '–' }}</td>
+                            <td class="text-end text-danger">{{ '{:,.0f}'.format(row.worker.payment) if row.worker.payment else '–' }}</td>
+                            <td class="text-end text-info">{{ '{:,.0f}'.format(row.worker.tip) if row.worker.tip else '–' }}</td>
+                            <td class="text-end fw-bold {% if row.worker.balance > 0 %}text-info{% else %}text-muted{% endif %}">
+                                {{ '{:,.0f}'.format(row.worker.balance) }}
+                            </td>
+                            {% else %}
+                            <td class="text-end text-muted">–</td>
+                            <td class="text-end text-muted">–</td>
+                            <td class="text-end text-muted">–</td>
+                            <td class="text-end text-muted">–</td>
+                            {% endif %}
                             <td class="text-center">
                                 {% if row.party.is_active %}
                                 <span class="badge bg-success">Active</span>

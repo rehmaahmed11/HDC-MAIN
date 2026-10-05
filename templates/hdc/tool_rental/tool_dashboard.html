@@ -66,6 +66,11 @@
                 Nothing pending — every customer has paid
                 {% endif %}
             </div>
+            {% if (t.discount_value or 0) > 0 %}
+            <div class="kpi-sub" title="Concessions granted — money the customer never pays">
+                <i class="fas fa-percent me-1"></i>{{ "{:,.0f}".format(t.discount_value or 0) }} PKR discounted
+            </div>
+            {% endif %}
             {% if internal_pending > 0 %}
             <div class="kpi-sub">{{ "{:,.0f}".format(internal_pending) }} PKR on own-site (internal) rentals not counted</div>
             {% endif %}

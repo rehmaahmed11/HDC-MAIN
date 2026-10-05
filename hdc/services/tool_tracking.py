@@ -411,7 +411,7 @@ def tool_ledger():
         'own_project_qty': 0.0, 'customer_qty': 0.0, 'out_qty': 0.0,
         'damaged_lost_qty': 0.0, 'maintenance_qty': 0.0, 'unaccounted_qty': 0.0,
         'purchase_value': 0.0, 'out_value': 0.0, 'rental_value': 0.0,
-        'paid_value': 0.0, 'pending_amount': 0.0,
+        'paid_value': 0.0, 'discount_value': 0.0, 'pending_amount': 0.0,
         'purchased_qty': 0.0, 'purchased_value': 0.0,
         'scrapped_qty': 0.0, 'scrapped_value': 0.0,
         'open_rentals': 0, 'overdue_rentals': 0, 'overdue_qty': 0.0,
@@ -459,6 +459,7 @@ def tool_ledger():
                 totals['rental_value'] += (_flt(rental.total_amount)
                                            if (rental.billing_type or '') != 'no_charge' else 0.0)
                 totals['paid_value'] += _flt(rental.total_paid)
+                totals['discount_value'] += _flt(rental.total_discount)
                 if overdue:
                     totals['overdue_rentals'] += 1
 
@@ -666,10 +667,16 @@ def tool_ledger():
     totals['owned_qty'] = _round_qty(totals['owned_qty'])
     totals['own_project_count'] = len([r for r in location_rows if r['loc_type'] == LOC_OWN_PROJECT and r['qty'] > EPS])
     totals['customer_count'] = len([r for r in location_rows if r['loc_type'] == LOC_CUSTOMER and r['qty'] > EPS])
-    totals['pending_amount'] = _round_qty(totals['rental_value'] - totals['paid_value'])
+    # Outstanding = what was billed, less cash received, less what we agreed
+    # to forgo.  Leaving the discount out here made the dashboard chase money
+    # the rental had already written off.
+    totals['pending_amount'] = _round_qty(totals['rental_value']
+                                          - totals['paid_value']
+                                          - totals['discount_value'])
     totals['utilization_pct'] = round((totals['out_qty'] / totals['owned_qty'] * 100.0), 1) if totals['owned_qty'] > 0 else 0.0
     for key in ('purchase_value', 'out_value', 'rental_value', 'paid_value',
-                'purchased_qty', 'purchased_value', 'scrapped_qty', 'scrapped_value'):
+                'discount_value', 'purchased_qty', 'purchased_value',
+                'scrapped_qty', 'scrapped_value'):
         totals[key] = _round_qty(totals[key])
 
     return {'tools': tool_rows, 'locations': location_rows, 'totals': totals, 'today': today}
@@ -782,8 +789,12 @@ def customer_dues_by_tool():
     Internal rentals are HDC renting from itself, so they are reported
     separately as ``internal_pending`` and never counted as a customer due.
 
+    A discount granted on a rental reduces what is owed just like cash does,
+    so it is taken off before the split — a rental whose balance was cleared
+    by a concession is not a customer due.
+
     Returns ``{'by_tool': {tool_id: amount}, 'customer_count': n,
-    'rental_count': n, 'internal_pending': amount}``.
+    'rental_count': n, 'internal_pending': amount, 'discount_value': amount}``.
     """
     by_tool = {}
     customers = set()
@@ -796,7 +807,13 @@ def customer_dues_by_tool():
                .filter(ToolRental.is_void == False,  # noqa: E712
                        ToolRental.renter_type == 'external',
                        func.coalesce(ToolRental.billing_type, '') != 'no_charge',
-                       ToolRental.total_amount > ToolRental.total_paid)
+                       # Outstanding = amount - paid - discount.  Comparing
+                       # only amount > paid would list rentals whose balance
+                       # was cleared by a discount, and the dashboard would
+                       # chase money nobody owes.
+                       (func.coalesce(ToolRental.total_amount, 0.0)
+                        - func.coalesce(ToolRental.total_paid, 0.0)
+                        - func.coalesce(ToolRental.total_discount, 0.0)) > 0)
                .all())
     for rental in rentals:
         pending = _round_qty(rental.total_pending_amount)
@@ -823,20 +840,31 @@ def customer_dues_by_tool():
     # Internal charges are not customer dues, but the dashboard still tells
     # the reader how much own-site money is floating around (one query).
     internal_rows = (ToolRental.query
-                     .with_entities(ToolRental.total_amount, ToolRental.total_paid)
+                     .with_entities(ToolRental.total_amount, ToolRental.total_paid,
+                                    ToolRental.total_discount)
                      .filter(ToolRental.is_void == False,  # noqa: E712
                              ToolRental.renter_type == 'internal',
                              func.coalesce(ToolRental.billing_type, '') != 'no_charge',
-                             ToolRental.total_amount > ToolRental.total_paid)
+                             (func.coalesce(ToolRental.total_amount, 0.0)
+                              - func.coalesce(ToolRental.total_paid, 0.0)
+                              - func.coalesce(ToolRental.total_discount, 0.0)) > 0)
                      .all())
-    internal_pending = sum(max(0.0, _flt(total) - _flt(paid))
-                           for total, paid in internal_rows)
+    internal_pending = sum(max(0.0, _flt(total) - _flt(paid) - _flt(disc))
+                           for total, paid, disc in internal_rows)
+
+    # Total concessions granted on open rentals — shown on the dashboard so
+    # "rent not paid" is never mistaken for "rent we gave up".
+    discount_value = float(db.session.query(
+        func.coalesce(func.sum(ToolRental.total_discount), 0.0)
+    ).filter(ToolRental.is_void == False,  # noqa: E712
+             func.coalesce(ToolRental.billing_type, '') != 'no_charge').scalar() or 0.0)
 
     return {
         'by_tool': {tid: _round_qty(amount) for tid, amount in by_tool.items()},
         'customer_count': len(customers),
         'rental_count': rental_count,
         'internal_pending': _round_qty(internal_pending),
+        'discount_value': _round_qty(discount_value),
     }
 
 
@@ -884,6 +912,7 @@ def tool_item_summary(term=None, category_id=None):
         'pending_amount': _round_qty(sum(r['pending_amount'] for r in rows)),
         'items_shown': len(rows),
         'items_total': len(ledger['tools']),
+        'discount_value': _round_qty(dues.get('discount_value', 0.0)),
     }
     totals['store_pct'] = (round(totals['in_store_qty'] / totals['owned_qty'] * 100.0, 1)
                            if totals['owned_qty'] > 0 else 0.0)

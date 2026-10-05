@@ -80,7 +80,7 @@
                         <div class="pending-highlight text-center">
                             <div class="small text-muted">Pending Amount</div>
                             <div class="fw-bold fs-5 text-danger">{{ "{:,.0f}".format(pending_amount) }}</div>
-                            <small>Total: {{ "{:,.0f}".format(rental.total_amount or 0) }} | Paid: {{ "{:,.0f}".format(rental.total_paid or 0) }}</small>
+                            <small>Total: {{ "{:,.0f}".format(rental.total_amount or 0) }} | Paid: {{ "{:,.0f}".format(rental.total_paid or 0) }}{% if discount_total %} | Discount: {{ "{:,.0f}".format(discount_total) }}{% endif %}</small>
                         </div>
                     </div>
                 </div>
@@ -162,12 +162,17 @@
                     <div class="card-header hdc-card-header d-flex justify-content-between"><span><i class="fas fa-money-bill-wave me-2"></i>Payment History — Cash/Bank Receiving</span><small class="text-muted">Linked to Accounts</small></div>
                     <div class="table-responsive">
                         <table class="table hdc-table table-sm mb-0">
-                            <thead><tr><th>Date</th><th>Amount</th><th>Receiving Account (Cash/Bank)</th><th>Mode</th><th>Ref / Action</th></tr></thead>
+                            <thead><tr><th>Date</th><th>Amount</th><th>Discount</th><th>Receiving Account (Cash/Bank)</th><th>Mode</th><th>Ref / Action</th></tr></thead>
                             <tbody>
                             {% for p in payments %}
                                 <tr {% if p.is_void %}style="text-decoration:line-through; opacity:0.6"{% endif %}>
                                     <td>{{ p.payment_date }}</td>
                                     <td>{{ "{:,.0f}".format(p.amount or 0) }}</td>
+                                    <td>
+                                        {% if p.discount %}
+                                            <span class="badge bg-info text-dark" title="Granted with this payment — not cash">{{ "{:,.0f}".format(p.discount) }}</span>
+                                        {% else %}<span class="text-muted">—</span>{% endif %}
+                                    </td>
                                     <td>
                                         {% if p.received_to_account %}
                                             <span class="badge bg-primary"><i class="fas fa-building-columns me-1"></i>{{ p.received_to_account.name }} ({{ p.received_to_account.type }})</span>
@@ -201,10 +206,10 @@
                                 </div>
                                 {% endif %}
                             {% else %}
-                                <tr><td colspan="5" class="text-center text-muted">No payments yet — will post to Cash/Bank accounts when paid</td></tr>
+                                <tr><td colspan="6" class="text-center text-muted">No payments yet — will post to Cash/Bank accounts when paid</td></tr>
                             {% endfor %}
                             </tbody>
-                            <tfoot><tr class="fw-bold"><td>Total Paid</td><td colspan="4">{{ "{:,.0f}".format(rental.total_paid or 0) }} | Pending {{ "{:,.0f}".format(pending_amount) }} | Receiving Accounts: Cash/Bank/Company only</td></tr></tfoot>
+                            <tfoot><tr class="fw-bold"><td>Total Paid</td><td colspan="5">{{ "{:,.0f}".format(rental.total_paid or 0) }}{% if discount_total %} + Discount {{ "{:,.0f}".format(discount_total) }}{% endif %} | Pending {{ "{:,.0f}".format(pending_amount) }} | Receiving Accounts: Cash/Bank/Company only</td></tr></tfoot>
                         </table>
                     </div>
                 </div>
@@ -284,6 +289,27 @@
                             <small class="text-muted">Pending: {{ "{:,.0f}".format(pending_amount) }}</small>
                         </div>
                         <div class="col-6">
+                            <label class="form-label">Discount (optional)</label>
+                            <input type="number" name="discount_amount" id="returnDiscountAmount" class="form-control" min="0" step="0.01" placeholder="0">
+                            <small class="text-muted">Waived off — no cash received</small>
+                        </div>
+                        <div class="col-12" id="returnDiscountExtra" style="display:none">
+                            <div class="row g-2">
+                                <div class="col-6">
+                                    <label class="form-label">Discount Reason</label>
+                                    <select name="discount_reason" class="form-select">
+                                        {% for value, label in discount_reason_options %}
+                                        <option value="{{ value }}">{{ label }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label">Discount Note</label>
+                                    <input type="text" name="discount_notes" class="form-control" placeholder="Why this concession">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-6">
                             <label class="form-label">Payment Mode</label>
                             <select name="payment_mode" class="form-select">
                                 <option value="cash">Cash</option>
@@ -334,6 +360,30 @@
                     <div class="row g-2">
                         <div class="col-6"><label class="form-label">Date</label><input type="date" name="payment_date" value="{{ today }}" class="form-control" required></div>
                         <div class="col-6"><label class="form-label">Amount *</label><input type="number" name="amount" class="form-control" min="0.01" step="0.01" required></div>
+                        <div class="col-6"><label class="form-label">Discount (optional)</label><input type="number" name="discount" id="paymentDiscount" class="form-control" min="0" step="0.01" placeholder="0"></div>
+                        <div class="col-12" id="paymentDiscountExtra" style="display:none">
+                            <div class="row g-2">
+                                <div class="col-6">
+                                    <label class="form-label">Discount Reason</label>
+                                    <select name="discount_reason" class="form-select">
+                                        {% for value, label in discount_reason_options %}
+                                        <option value="{{ value }}">{{ label }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label">Discount Note</label>
+                                    <input type="text" name="discount_notes" class="form-control" placeholder="Why this concession">
+                                </div>
+                            </div>
+                            <div class="alert alert-warning py-2 small mt-2">
+                                <i class="fas fa-info-circle me-1"></i>
+                                Cash + discount together clear the balance. Only the cash reaches
+                                <strong>{{ 'Cash / Bank' }}</strong>; the discount posts to Accounts as a
+                                <code>discount_given</code> entry with no money movement.
+                                Outstanding now: <strong>{{ "{:,.0f}".format(pending_amount) }}</strong> PKR.
+                            </div>
+                        </div>
                         <div class="col-12">
                             {{ combo_select('received_to_account_id', 'recvAccPayment',
                                receiving_account_options, required=true,
@@ -347,6 +397,95 @@
                         <div class="col-12"><button class="btn btn-outline-success w-100" type="submit"><i class="fas fa-plus me-1"></i>Add Payment to Cash/Bank + Accounts</button></div>
                     </div>
                 </form>
+            </div>
+        </div>
+
+        <!-- DISCOUNT / WAIVE OFF -->
+        <div class="card hdc-card mt-3">
+            <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-percent me-2"></i>Discount / Waive Off</span>
+                <small class="text-muted">No cash movement</small>
+            </div>
+            <div class="card-body">
+                {% if rental.billing_type == 'no_charge' %}
+                    <div class="alert alert-info py-2 small mb-0">
+                        This rental is <strong>No Charge</strong> (contract included) — there is nothing to discount.
+                    </div>
+                {% else %}
+                <form method="POST" action="{{ url_for('hdc_tool_rental_add_discount', rental_id=rental.id) }}">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+                    <div class="row g-2">
+                        <div class="col-6"><label class="form-label">Date</label><input type="date" name="discount_date" value="{{ today }}" class="form-control" required></div>
+                        <div class="col-6">
+                            <label class="form-label">Amount *</label>
+                            <input type="number" name="amount" class="form-control" min="0.01" step="0.01" required>
+                            <small class="text-muted">Outstanding: {{ "{:,.0f}".format(pending_amount) }}</small>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Reason</label>
+                            <select name="reason" class="form-select">
+                                {% for value, label in discount_reason_options %}
+                                <option value="{{ value }}">{{ label }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-12"><label class="form-label">Note</label><input type="text" name="notes" class="form-control" placeholder="Optional explanation"></div>
+                        <div class="col-12">
+                            <button class="btn btn-outline-warning w-100" type="submit"><i class="fas fa-percent me-1"></i>Grant Discount</button>
+                        </div>
+                        <div class="col-12">
+                            <div class="alert alert-secondary py-2 small mb-0">
+                                A discount shrinks what the customer owes without any cash entering an
+                                account. It posts to Accounts as a <code>discount_given</code> entry so
+                                the ledger can always explain the missing money.
+                            </div>
+                        </div>
+                    </div>
+                </form>
+
+                <hr class="my-3">
+                <h6 class="small text-uppercase text-muted">Granted Discounts</h6>
+                {% if discounts %}
+                <div class="table-responsive">
+                    <table class="table hdc-table table-sm mb-0">
+                        <thead><tr><th>Date</th><th>Amount</th><th>Reason</th><th></th></tr></thead>
+                        <tbody>
+                        {% for d in discounts %}
+                            <tr {% if d.is_void %}style="text-decoration:line-through; opacity:0.6"{% endif %}>
+                                <td>{{ d.discount_date }}<br><small class="text-muted">{{ d.discount_code }}</small></td>
+                                <td>{{ "{:,.0f}".format(d.amount or 0) }}</td>
+                                <td>
+                                    {{ d.reason_label }}
+                                    <br><small class="text-muted">{% if d.origin == 'payment' %}with a payment{% else %}standalone{% endif %}</small>
+                                    {% if d.notes %}<br><small>{{ d.notes }}</small>{% endif %}
+                                </td>
+                                <td>
+                                    {% if not d.is_void %}
+                                    <button class="btn btn-sm btn-outline-danger" data-bs-toggle="modal" data-bs-target="#voidDisc{{ d.id }}" title="Void"><i class="fas fa-ban"></i></button>
+                                    <div class="modal fade" id="voidDisc{{ d.id }}" tabindex="-1">
+                                      <div class="modal-dialog modal-sm">
+                                        <div class="modal-content hdc-modal">
+                                          <form method="POST" action="{{ url_for('hdc_tool_rental_discount_void', discount_id=d.id) }}">
+                                            <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+                                            <div class="modal-header"><h6 class="modal-title">Void Discount?</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                                            <div class="modal-body">Void {{ "{:,.0f}".format(d.amount) }} PKR discount? The amount becomes owed again and is removed from Accounts.<br><br><label class="form-label">Reason</label><input type="text" name="void_reason" class="form-control" placeholder="Reason"></div>
+                                            <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button type="submit" class="btn btn-danger">Void</button></div>
+                                          </form>
+                                        </div>
+                                      </div>
+                                    </div>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% endfor %}
+                        </tbody>
+                        <tfoot><tr class="fw-bold"><td>Total</td><td>{{ "{:,.0f}".format(discount_total) }}</td><td colspan="2"></td></tr></tfoot>
+                    </table>
+                </div>
+                {% else %}
+                    <p class="text-muted small mb-0">No discounts granted on this rental yet.</p>
+                {% endif %}
+                {% endif %}
             </div>
         </div>
 
@@ -507,6 +646,22 @@ function togglePaymentMode(){
         recvSelect.required = true;
     }
 }
+/* Discount extras only appear once a discount amount is typed, so the common
+   "just take the cash" flow keeps one field instead of four. */
+function bindDiscountExtras(inputId, extraId){
+    const input = document.getElementById(inputId);
+    const extra = document.getElementById(extraId);
+    if(!input || !extra) return;
+    const sync = function(){
+        const val = parseFloat(input.value || '0') || 0;
+        extra.style.display = val > 0 ? '' : 'none';
+    };
+    input.addEventListener('input', sync);
+    sync();
+}
+bindDiscountExtras('paymentDiscount', 'paymentDiscountExtra');
+bindDiscountExtras('returnDiscountAmount', 'returnDiscountExtra');
+
 function syncTransferStages(){
     const project = document.getElementById('transferProjectSelect');
     const stage = document.getElementById('transferStageSelect');

@@ -77,6 +77,7 @@ __all__ = [
     "category_rules_map",
     "save_cf_party",
     "ensure_party",
+    "sync_workers_as_parties",
     "save_cf_category",
     "save_cf_subcategory",
     "day_positions",
@@ -134,6 +135,14 @@ LOAN_PARTY_TYPES = ('lender', 'borrower')
 
 #: Types that mean "this party rents tools from HDC Tools".
 RENTAL_PARTY_TYPES = ('rental',)
+
+#: Types that mean "this party is one of our own workers".  Workers are
+#: counterparties too -- every advance, payment, tip and settlement is money
+#: moving between the company and a person -- so they belong in the same
+#: directory as lenders and customers.  They are filed under the *Other
+#: Parties* bucket on /hdc/parties (see routes.parties) so the directory keeps
+#: the three groups the team already knows.
+WORKER_PARTY_TYPES = ('worker',)
 
 #: The four loan movements a category can be tagged with (``loan_effect``).
 LOAN_EFFECTS = ('take', 'give', 'repay', 'recover')
@@ -1348,6 +1357,59 @@ def ensure_party(name, party_type='other', phone=None, note=None):
     db.session.add(row)
     db.session.flush()
     return row, True
+
+
+def sync_workers_as_parties(worker_ids=None, *, only_active=False):
+    """File every Worker in the Parties directory as a ``worker`` party.
+
+    Workers were missing from the directory even though advances, payments,
+    tips and settlements are all money moving between the company and a named
+    person -- so a worker could not be picked on a Party / Person field and the
+    Party list never answered "who did we pay this month?".
+
+    Deliberately conservative:
+
+    * **idempotent** — safe to call on every page load; only creates what is
+      missing;
+    * **non-destructive** — a name that is already filed as (say) a lender is
+      left alone (``ensure_party`` never reclassifies a specific type);
+    * **reviving** — a deactivated row is reactivated, because the worker is
+      still on the books;
+    * **renames follow** — when a worker is renamed the *new* name is added,
+      and the old party row is left for the entries that already point at it
+      (the ledger is immutable, so a rename must not rewrite history).
+
+    Returns ``(created, reactivated, total_workers)``.
+    """
+    from hdc.models.workforce import Worker
+
+    q = Worker.query
+    if worker_ids:
+        ids = [int(w) for w in worker_ids if str(w).strip()]
+        q = q.filter(Worker.id.in_(ids)) if ids else q.filter(Worker.id == 0)
+    if only_active:
+        q = q.filter(Worker.active_status == True)  # noqa: E712
+    workers = q.order_by(Worker.name.asc()).all()
+
+    created = 0
+    reactivated = 0
+    for w in workers:
+        nm = (w.name or '').strip()
+        if not nm:
+            continue
+        row = (CashFlowParty.query
+               .filter(func.lower(func.trim(CashFlowParty.name)) == nm.lower())
+               .first())
+        was_hidden = bool(row and not row.is_active)
+        _party, is_new = ensure_party(
+            nm, party_type='worker',
+            note=(f"Worker {w.worker_code}" + (f" — {w.role_type}" if w.role_type else ""))[:300],
+        )
+        if is_new:
+            created += 1
+        elif was_hidden:
+            reactivated += 1
+    return created, reactivated, len(workers)
 
 
 def save_cf_category(name, direction='both', notes=None, sort_order=0,

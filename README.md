@@ -75,6 +75,13 @@ CASHFLOW_MODEL.md       Cash Flow register + day close: what was ported from
 SHARED_EXPENSES.md      Shared Expenses: one bill split across FBM / HDC /
                         Home / N heads, why the money still moves only through
                         Accounts (link or post), and how the balances work
+TOOLS_DISCOUNT_WORKER_LEDGER_PARTIES.md
+                        HDC Tools discounts (how a concession posts to Accounts
+                        as `discount_given` with no cash movement), the
+                        consolidated worker statement (wages / advances /
+                        payments / tips / settlements, tips neutral), and
+                        workers filed in the Parties directory as `worker`
+                        parties while the Workers module stays as it was
 tests/                  differential smoke test vs the pre-split baseline
 ```
 

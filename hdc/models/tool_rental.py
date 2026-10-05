@@ -34,6 +34,20 @@ TOOL_SCRAP_REASON_LABELS = dict(TOOL_SCRAP_REASONS)
 MOVEMENT_PURCHASE_IN = 'purchase_in'
 MOVEMENT_SCRAP_OUT = 'scrap_out'
 
+# Why a customer was charged less than the rental earned.  Stored on
+# ToolRentalDiscount so the concession report can group by reason and so a
+# discount is never an unexplained hole in the receivable.
+TOOL_DISCOUNT_REASONS = (
+    ('goodwill', 'Goodwill / courtesy'),
+    ('negotiated', 'Negotiated rate'),
+    ('damage', 'Damaged / short tool compensation'),
+    ('delay', 'Late delivery compensation'),
+    ('long_term', 'Long-term / repeat customer'),
+    ('staff', 'Staff / internal courtesy'),
+    ('other', 'Other'),
+)
+TOOL_DISCOUNT_REASON_LABELS = dict(TOOL_DISCOUNT_REASONS)
+
 
 class ToolCategory(db.Model):
     __tablename__ = 'hdc_tool_category'
@@ -204,6 +218,9 @@ class ToolRental(db.Model):
     total_rented_qty = db.Column(db.Float, default=0.0)
     total_amount = db.Column(db.Float, default=0.0)
     total_paid = db.Column(db.Float, default=0.0)
+    # Concessions granted on this rental (cash never moved for this part).
+    # Mirrors ``hdc_tool_rental_discount``; see services.tool_rental.
+    total_discount = db.Column(db.Float, default=0.0)
     total_returned_qty = db.Column(db.Float, default=0.0)
 
     # computed helpers (not stored, but we store cached totals above for speed)
@@ -223,6 +240,9 @@ class ToolRental(db.Model):
     items = db.relationship('ToolRentalItem', backref='rental', lazy=True, cascade='all, delete-orphan')
     returns = db.relationship('ToolRentalReturn', backref='rental', lazy=True, cascade='all, delete-orphan')
     payments = db.relationship('ToolRentalPayment', backref='rental', lazy=True, cascade='all, delete-orphan')
+    discounts = db.relationship('ToolRentalDiscount', backref='rental', lazy=True,
+                                cascade='all, delete-orphan',
+                                foreign_keys='ToolRentalDiscount.rental_id')
     transfers = db.relationship('ToolRentalTransfer', backref='rental', lazy=True,
                                  cascade='all, delete-orphan',
                                  foreign_keys='ToolRentalTransfer.rental_id')
@@ -233,9 +253,17 @@ class ToolRental(db.Model):
 
     @property
     def total_pending_amount(self):
+        """Still owed = earned - cash received - discount granted."""
         if (self.billing_type or '').lower() == 'no_charge':
             return 0.0
-        return max(0.0, float(self.total_amount or 0.0) - float(self.total_paid or 0.0))
+        return max(0.0, float(self.total_amount or 0.0)
+                   - float(self.total_paid or 0.0)
+                   - float(self.total_discount or 0.0))
+
+    @property
+    def total_settled_amount(self):
+        """Cash + concession — what the customer has cleared in total."""
+        return float(self.total_paid or 0.0) + float(self.total_discount or 0.0)
 
     @property
     def current_location_label(self):
@@ -334,6 +362,9 @@ class ToolRentalPayment(db.Model):
 
     payment_date = db.Column(db.Date, default=_pkt_today)
     amount = db.Column(db.Float, default=0.0)
+    # Discount granted in the same settlement as this payment.  It clears part
+    # of the receivable but is NOT cash, so it is never added to ``amount``.
+    discount = db.Column(db.Float, default=0.0)
     payment_mode = db.Column(db.String(30), default='cash')  # cash / bank / online / credit
     received_to_account_id = db.Column(db.Integer, db.ForeignKey('hdc_account.id'), nullable=True)  # which cash/bank account received
     reference = db.Column(db.String(120))
@@ -345,6 +376,53 @@ class ToolRentalPayment(db.Model):
     created_by = db.Column(db.Integer, db.ForeignKey('hdc_user.id'), nullable=True)
 
     received_to_account = db.relationship('Account', foreign_keys=[received_to_account_id])
+
+
+class ToolRentalDiscount(db.Model):
+    """A concession granted on a tool rental — money the customer never pays.
+
+    Two flavours, both landing in this one table so the rental's outstanding
+    amount always has a documented reason for shrinking:
+
+    * **standalone / waive-off** (``payment_id`` is NULL) — "forget the last
+      2,000 PKR", granted on its own from the rental page;
+    * **settlement discount** (``payment_id`` set) — granted in the same breath
+      as a payment, e.g. cash 8,000 + discount 2,000 clears a 10,000 balance.
+
+    Voiding a payment voids its discount with it, so the receivable and the
+    Accounts ledger move together (nothing is stored twice).
+    """
+
+    __tablename__ = 'hdc_tool_rental_discount'
+    id = db.Column(db.Integer, primary_key=True)
+    discount_code = db.Column(db.String(30), unique=True, nullable=False)
+    rental_id = db.Column(db.Integer, db.ForeignKey('hdc_tool_rental.id'), nullable=False, index=True)
+    payment_id = db.Column(db.Integer, db.ForeignKey('hdc_tool_rental_payment.id'), nullable=True, index=True)
+    return_id = db.Column(db.Integer, db.ForeignKey('hdc_tool_rental_return.id'), nullable=True, index=True)
+
+    discount_date = db.Column(db.Date, default=_pkt_today)
+    amount = db.Column(db.Float, default=0.0)
+    reason = db.Column(db.String(40), default='goodwill')
+    notes = db.Column(db.String(500))
+
+    is_void = db.Column(db.Boolean, default=False)
+    void_reason = db.Column(db.String(250))
+    voided_at = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=_pkt_now_naive)
+    created_by = db.Column(db.Integer, db.ForeignKey('hdc_user.id'), nullable=True)
+
+    payment = db.relationship('ToolRentalPayment', foreign_keys=[payment_id])
+
+    @property
+    def reason_label(self):
+        return TOOL_DISCOUNT_REASON_LABELS.get(
+            (self.reason or '').strip().lower(),
+            (self.reason or '').replace('_', ' ').title() or 'Other')
+
+    @property
+    def origin(self):
+        """``payment`` when granted with a payment, else ``waive_off``."""
+        return 'payment' if self.payment_id else 'waive_off'
 
 
 class ToolRentalAccountTxn(db.Model):

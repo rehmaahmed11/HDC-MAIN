@@ -190,6 +190,9 @@
             <a href="{{ url_for('hdc_worker_ledger', wid=w.id) }}" class="small text-mint">
                 <i class="fas fa-book me-1"></i>Ledger
             </a>
+            <a href="{{ url_for('hdc_worker_statement', wid=w.id) }}" class="small text-primary ms-2">
+                <i class="fas fa-file-invoice-dollar me-1"></i>Statement
+            </a>
         </td>
         <td class="text-muted">{{ w.role_type or '—' }}</td>
         <td>{{ "{:,.0f}".format(w.base_daily_wage) }} PKR</td>
@@ -224,6 +227,9 @@
             </a>
             <a href="{{ url_for('hdc_worker_rate', wid=w.id) }}" class="btn btn-sm btn-outline-info ms-1" title="Update Rate">
                 <i class="fas fa-edit"></i>
+            </a>
+            <a href="{{ url_for('hdc_worker_statement', wid=w.id) }}" class="btn btn-sm btn-outline-primary ms-1" title="Worker Statement">
+                <i class="fas fa-file-invoice-dollar"></i>
             </a>
         </td>
     </tr>

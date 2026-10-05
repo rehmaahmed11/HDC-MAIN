@@ -305,6 +305,166 @@ def _worker_payable_snapshot(worker_id):
     return _worker_payable_snapshots([worker_id])[int(worker_id)]
 
 
+# --------------------------------------------------------------------------- #
+# worker statement — one readable ledger for wages, advances, tips, settlements
+# --------------------------------------------------------------------------- #
+
+#: Every kind of row a worker ledger can hold, with the wording the statement
+#: uses.  A worker's money is five things at once and the old screens showed
+#: them in five different places, so "what happened to this worker?" took five
+#: tabs to answer.  The statement shows all five in one running list.
+WORKER_LEDGER_ENTRY_TYPES = (
+    ('work', 'Work earned', 'Wage earned for attendance / time entries'),
+    ('advance', 'Advance', 'Cash given before the wage was due'),
+    ('payment', 'Payment', 'Cash paid against the wage owed'),
+    ('tip', 'Tip', 'Gratis cash on top of the wage — never reduces what is owed'),
+    ('settlement', 'Settlement', 'Shortfall written off when paying less than owed'),
+)
+
+WORKER_LEDGER_TYPE_LABELS = {value: label for value, label, _hint in WORKER_LEDGER_ENTRY_TYPES}
+WORKER_LEDGER_TYPE_HINTS = {value: hint for value, _label, hint in WORKER_LEDGER_ENTRY_TYPES}
+WORKER_LEDGER_TYPE_VALUES = tuple(value for value, _label, _hint in WORKER_LEDGER_ENTRY_TYPES)
+
+
+def worker_entry_type_label(value):
+    return WORKER_LEDGER_TYPE_LABELS.get((value or '').strip().lower(),
+                                         (value or '').replace('_', ' ').title() or '-')
+
+
+def worker_statement(worker_id, date_from=None, date_to=None, entry_types=None,
+                     include_void=True):
+    """One chronological statement for a worker.
+
+    Returns ``{'rows': [...], 'totals': {...}}``.
+
+    Every row carries the amount in the column that matches what it *did* to
+    the worker's money, plus the running balance after it:
+
+    * ``work``      → earned (+)
+    * ``advance``   → advanced (−)
+    * ``payment``   → paid (−)
+    * ``settlement``→ settled (−)
+    * ``tip``       → tip only, **0 effect on the balance** — a tip is gratis
+      cash given on top of the wage, so counting it as payment would silently
+      reduce what the worker is still owed.
+
+    The balance is computed from the *whole* ledger, not from the filtered
+    rows, so narrowing the date range or the type never changes what a row
+    says the worker was owed on that day.
+    """
+    wid = int(worker_id or 0)
+    wanted = None
+    if entry_types:
+        wanted = {str(t).strip().lower() for t in entry_types if str(t).strip()}
+
+    rows_all = (LabourLedger.query
+                .filter(LabourLedger.worker_id == wid)
+                .order_by(LabourLedger.activity_at.asc(), LabourLedger.id.asc())
+                .all())
+
+    # Resolve the wage a 'work' row mirrors once, in one query, instead of
+    # hitting TimeEntry per row -- the ledger can hold thousands of days.
+    te_ids = [int(r.time_entry_id) for r in rows_all
+              if (r.entry_type or '').strip().lower() == 'work' and r.time_entry_id]
+    wages = {}
+    if te_ids:
+        for chunk_start in range(0, len(te_ids), 400):
+            chunk = te_ids[chunk_start:chunk_start + 400]
+            for tid, wage, voided in (db.session.query(TimeEntry.id,
+                                                       TimeEntry.wage_calculated,
+                                                       TimeEntry.is_void)
+                                      .filter(TimeEntry.id.in_(chunk)).all()):
+                wages[int(tid)] = (0.0 if voided else float(wage or 0.0))
+
+    def _row_date(row):
+        d = getattr(row, 'date', None) or (row.activity_at.date() if row.activity_at else None)
+        return d
+
+    # --- pass 1: running balance over the *whole* ledger -------------------
+    running = 0.0
+    balance_map = {}
+    for row in rows_all:
+        if not bool(getattr(row, 'is_void', False)):
+            et = (row.entry_type or '').strip().lower()
+            amt = float(row.amount or 0.0)
+            if et == 'work':
+                running += float(wages.get(int(row.time_entry_id or 0), 0.0))
+            elif et in ('advance', 'payment', 'settlement'):
+                running -= amt
+            # tip → no change, see the docstring.
+        balance_map[int(row.id)] = running
+
+    # --- pass 2: build the view rows (filtered) ----------------------------
+    view_rows = []
+    for row in rows_all:
+        et = (row.entry_type or '').strip().lower()
+        if wanted and et not in wanted:
+            continue
+        d = _row_date(row)
+        if date_from and d and d < date_from:
+            continue
+        if date_to and d and d > date_to:
+            continue
+        if not include_void and bool(getattr(row, 'is_void', False)):
+            continue
+        amt = float(row.amount or 0.0)
+        wage_amt = float(wages.get(int(row.time_entry_id or 0), 0.0)) if et == 'work' else 0.0
+        view_rows.append({
+            '_hdc_entity': 'hdc_labour_ledger',
+            'id': int(row.id),
+            'row': row,
+            'entry_type': et,
+            'type_label': worker_entry_type_label(et),
+            'date': d,
+            'earned': wage_amt if et == 'work' else 0.0,
+            'advanced': amt if et == 'advance' else 0.0,
+            'paid': amt if et == 'payment' else 0.0,
+            'tip': amt if et == 'tip' else 0.0,
+            'settled': amt if et == 'settlement' else 0.0,
+            'is_void': bool(getattr(row, 'is_void', False)),
+            'running_balance': balance_map.get(int(row.id), 0.0),
+        })
+
+    # --- totals over the filtered rows -------------------------------------
+    totals = {'earned': 0.0, 'advanced': 0.0, 'paid': 0.0, 'tip': 0.0,
+              'settled': 0.0, 'count': 0}
+    for r in view_rows:
+        if r['is_void']:
+            continue
+        totals['count'] += 1
+        totals['earned'] += r['earned']
+        totals['advanced'] += r['advanced']
+        totals['paid'] += r['paid']
+        totals['tip'] += r['tip']
+        totals['settled'] += r['settled']
+    snap = _worker_payable_snapshots([wid])[wid]
+    totals['balance'] = float(snap['balance'] or 0.0)
+    totals['payable'] = float(snap['payable'] or 0.0)
+    totals['closing_balance'] = (float(balance_map.get(
+        int(rows_all[-1].id), 0.0)) if rows_all else 0.0)
+    return {'rows': view_rows, 'totals': totals}
+
+
+def worker_type_summary(worker_id):
+    """Per-type totals for a worker (the "where did it all go" strip)."""
+    rows = (db.session.query(LabourLedger.entry_type,
+                             func.coalesce(func.sum(LabourLedger.amount), 0.0),
+                             func.count(LabourLedger.id))
+            .filter(LabourLedger.worker_id == int(worker_id or 0),
+                    LabourLedger.is_void == False)  # noqa: E712
+            .group_by(LabourLedger.entry_type)
+            .all())
+    out = {value: {'amount': 0.0, 'count': 0} for value, _l, _h in WORKER_LEDGER_ENTRY_TYPES}
+    for etype, amount, count in rows:
+        key = (etype or '').strip().lower()
+        out.setdefault(key, {'amount': 0.0, 'count': 0})
+        out[key] = {'amount': float(amount or 0.0), 'count': int(count or 0)}
+    # 'work' rows mirror time entries, so their stored amount is not the wage.
+    snap = _worker_payable_snapshots([int(worker_id)])[int(worker_id)]
+    out.setdefault('work', {'amount': 0.0, 'count': 0})
+    return out, snap
+
+
 def _worker_tip_expenses(worker):
     """Return tip expenses authoritatively belonging to a worker.
 

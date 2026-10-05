@@ -16,7 +16,11 @@ from hdc.models.accounts import Expense
 from hdc.models.projects import Project, Stage
 from hdc.models.workforce import LabourLedger, LabourRateHistory, TimeEntry, Worker, WorkerRate, WorkerTrade
 from hdc.services.accounts import _accounts_post_labour_ledger_row, _accounts_set_void_by_source, _accounts_upsert_labour_ledger_txn
-from hdc.services.ledger import _linked_expense_for_labour_ledger, _worker_payable_snapshot
+from hdc.services.ledger import (
+    WORKER_LEDGER_ENTRY_TYPES, _linked_expense_for_labour_ledger,
+    _worker_payable_snapshot, worker_statement, worker_type_summary,
+)
+from hdc.services.cashflow_register import sync_workers_as_parties
 from hdc.services.lookups import _ensure_expense_category, _trade_options
 from hdc.services.record_permissions import exact_access_enabled, require_complete_grant
 from hdc.services.receipts import _receipt_company_profile
@@ -24,6 +28,24 @@ from hdc.services.timekeeping import _has_recent_duplicate, _reconcile_worker_ti
 from hdc.utils.dates import _pkt_now_naive, _pkt_today
 from hdc.utils.format import _activity_at_for, _amount_to_words, _flt, _parse_date
 from hdc.utils.normalize import _normalize_trade_name
+
+def _sync_worker_party(worker):
+    """Keep the Parties directory in step with this worker (best effort).
+
+    A worker is a counterparty: advances, payments, tips and settlements are
+    all money between the company and a named person, so they belong in
+    sidebar → Parties as a ``worker`` party.  The sync is idempotent and never
+    reclassifies an existing party, so a failure here must never block the
+    money movement it is describing.
+    """
+    try:
+        sync_workers_as_parties([worker.id] if worker is not None else None)
+    except Exception:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+
 
 def register(app):
     """Register Workers, trades, ledgers, advances, payments and rates."""
@@ -59,7 +81,9 @@ def register(app):
                     rate_per_sqft=_flt(request.form.get('rate_per_sqft')),
                     active_status=True)
                 db.session.add(w); db.session.commit()
-                flash(f'Worker "{w.name}" added.', 'success')
+                _sync_worker_party(w)
+                db.session.commit()
+                flash(f'Worker "{w.name}" added — also filed in Parties as a Worker party.', 'success')
             return redirect(url_for('hdc_workers'))
         workers = (Worker.query.options(selectinload(Worker.time_entries),
                                        selectinload(Worker.attendance),
@@ -177,6 +201,8 @@ def register(app):
         w.rate_per_sqft = _flt(request.form.get('rate_per_sqft'))
         w.active_status = (active_status == 'active')
         db.session.commit()
+        _sync_worker_party(w)
+        db.session.commit()
         flash(f'Worker "{w.name}" updated.', 'success')
         return redirect(url_for('hdc_workers'))
 
@@ -254,10 +280,29 @@ def register(app):
                            )
                            .order_by(LabourLedger.activity_at.asc(), LabourLedger.id.asc())
                            .all())
+        # Optional type filter: "show me only the advances" is the question an
+        # operator actually asks when a worker disputes a figure.
+        wanted = request.args.getlist('type')
+        if 'all' in wanted:
+            wanted = []
+        valid_types = {value for value, _label, _hint in WORKER_LEDGER_ENTRY_TYPES}
+        wanted = [t for t in wanted if t in valid_types]
+        if wanted:
+            full_ledger = [e for e in full_ledger
+                           if str(e.entry_type or '').strip().lower() in wanted]
+            pg_total_items = len(full_ledger)
+            pg_total_pages = max(1, (pg_total_items + per_page - 1) // per_page) if pg_total_items else 1
+            page = min(page, pg_total_pages)
+            start = (page - 1) * per_page
+            ledger_entries = full_ledger[start:start + per_page]
+
+        type_summary, _summary_snap = worker_type_summary(wid)
         pg_query = {
             'show_voided': (1 if filter_show_voided else 0),
             'per_page': per_page,
         }
+        if wanted:
+            pg_query['type'] = wanted
         return render_template('workers/worker_ledger.html',
             w=w,
             projects=projects,
@@ -269,6 +314,9 @@ def register(app):
             snap=snap,
             tip_rows=tip_rows,
             settlement_rows=settlement_rows,
+            entry_types=WORKER_LEDGER_ENTRY_TYPES,
+            selected_types=wanted,
+            type_summary=type_summary,
             pg_page=page,
             pg_total_pages=pg_total_pages,
             pg_total_items=pg_total_items,
@@ -278,6 +326,56 @@ def register(app):
             pg_query=pg_query,
         )
 
+
+    @app.route('/hdc/workers/<int:wid>/statement')
+    @login_required
+    def hdc_worker_statement(wid):
+        """One consolidated statement: wages, advances, payments, tips, settlements.
+
+        The ledger page splits a worker's money across four tables (ledger,
+        attendance, tips, settlements).  This page answers "what happened to
+        this worker?" in one chronological list with a running balance, and it
+        is the printable sheet handed to the worker at settlement time.
+        """
+        w = Worker.query.get_or_404(wid)
+        _reconcile_worker_time_entries(wid)
+        _repair_worker_work_ledger_links(wid)
+        _reconcile_worker_tip_ledger(w)
+        db.session.commit()
+
+        date_from = _parse_date(request.args.get('date_from')) if (request.args.get('date_from') or '').strip() else None
+        date_to = _parse_date(request.args.get('date_to')) if (request.args.get('date_to') or '').strip() else None
+        if date_from and date_to and date_from > date_to:
+            date_from, date_to = date_to, date_from
+
+        wanted = request.args.getlist('type')
+        if 'all' in wanted:
+            wanted = []
+        valid = {value for value, _label, _hint in WORKER_LEDGER_ENTRY_TYPES}
+        wanted = [t for t in wanted if t in valid]
+
+        # Default to *showing* voided rows, struck through — the same default as
+        # the classic ledger page.  A statement that silently drops a cancelled
+        # advance reads as if the money was never discussed.
+        show_voided = (request.args.get('show_voided') or '1').strip().lower() in ('1', 'true', 'on', 'yes')
+        data = worker_statement(wid, date_from=date_from, date_to=date_to,
+                                entry_types=wanted or None,
+                                include_void=show_voided)
+        type_summary, snap = worker_type_summary(wid)
+
+        return render_template('workers/worker_statement.html',
+            w=w,
+            rows=data['rows'],
+            totals=data['totals'],
+            snap=snap,
+            type_summary=type_summary,
+            entry_types=WORKER_LEDGER_ENTRY_TYPES,
+            selected_types=wanted,
+            date_from=(date_from.isoformat() if date_from else ''),
+            date_to=(date_to.isoformat() if date_to else ''),
+            show_voided=show_voided,
+            today=_pkt_today().isoformat(),
+        )
 
     @app.route('/hdc/workers/<int:wid>/advance', methods=['GET', 'POST'])
     @login_required
@@ -321,6 +419,8 @@ def register(app):
                 db.session.rollback()
                 flash(msg_txn or 'Unable to post advance in unified accounts.', 'danger')
                 return redirect(url_for('hdc_worker_ledger', wid=wid))
+            db.session.commit()
+            _sync_worker_party(w)
             db.session.commit()
             flash(f'Advance of {_flt(request.form.get("amount")):,.0f} recorded for {w.name}.', 'success')
             return redirect(url_for('hdc_worker_ledger', wid=wid))
@@ -552,6 +652,8 @@ def register(app):
                     db.session.rollback()
                     flash(msg_txn or 'Unable to post worker payment in unified accounts.', 'danger')
                     return redirect(url_for('hdc_worker_payment', wid=wid))
+            db.session.commit()
+            _sync_worker_party(w)
             db.session.commit()
             if tip_part > 0 and settlement_part > 0:
                 flash(

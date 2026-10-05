@@ -4,29 +4,43 @@
 
 {% block content %}
 <div class="row g-3 mt-1">
-    <div class="col-6 col-md-3">
+    <div class="col-6 col-md-2">
         <div class="kpi-card kpi-green">
             <div class="kpi-label">Total Earned</div>
             <div class="kpi-value small">{{ "{:,.0f}".format(snap.earned or 0) }}</div>
             <div class="kpi-sub">PKR from attendance</div>
         </div>
     </div>
-    <div class="col-6 col-md-3">
+    <div class="col-6 col-md-2">
         <div class="kpi-card kpi-orange">
-            <div class="kpi-label">Total Advanced</div>
+            <div class="kpi-label">Advances</div>
             <div class="kpi-value small">{{ "{:,.0f}".format(snap.advanced or 0) }}</div>
-            <div class="kpi-sub">PKR advances given</div>
+            <div class="kpi-sub">{{ type_summary.get('advance', {}).get('count', 0) }} given — deducted</div>
         </div>
     </div>
-    <div class="col-6 col-md-3">
+    <div class="col-6 col-md-2">
         <div class="kpi-card kpi-red">
-            <div class="kpi-label">Total Paid</div>
+            <div class="kpi-label">Payments</div>
             <div class="kpi-value small">{{ "{:,.0f}".format(snap.paid or 0) }}</div>
-            <div class="kpi-sub">PKR salary paid (tip excluded)</div>
+            <div class="kpi-sub">PKR salary paid — deducted</div>
         </div>
     </div>
-    <div class="col-6 col-md-3">
-        <div class="kpi-card {% if (snap.balance or 0) > 0 %}kpi-teal{% else %}kpi-profit{% endif %}">
+    <div class="col-6 col-md-2">
+        <div class="kpi-card kpi-teal">
+            <div class="kpi-label">Tips</div>
+            <div class="kpi-value small">{{ "{:,.0f}".format(snap.tip_paid or 0) }}</div>
+            <div class="kpi-sub">gratis — NOT deducted</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-2">
+        <div class="kpi-card kpi-purple">
+            <div class="kpi-label">Settled</div>
+            <div class="kpi-value small">{{ "{:,.0f}".format(snap.settled or 0) }}</div>
+            <div class="kpi-sub">shortfall written off</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-2">
+        <div class="kpi-card {% if (snap.balance or 0) > 0 %}kpi-teal{% else %}kpi-green{% endif %}">
             <div class="kpi-label">Balance Due</div>
             <div class="kpi-value small">{{ "{:,.0f}".format(snap.balance or 0) }}</div>
             <div class="kpi-sub">PKR owed to worker</div>
@@ -43,6 +57,9 @@
     </a>
     <a href="{{ url_for('hdc_worker_rate', wid=w.id) }}" class="btn btn-info btn-sm">
         <i class="fas fa-edit me-1"></i>Update Rate
+    </a>
+    <a href="{{ url_for('hdc_worker_statement', wid=w.id) }}" class="btn btn-outline-primary btn-sm">
+        <i class="fas fa-file-invoice-dollar me-1"></i>Statement
     </a>
     {% if filter_show_voided %}
     <a href="{{ url_for('hdc_worker_ledger', wid=w.id, show_voided=0) }}" class="btn btn-outline-dark btn-sm">
@@ -103,6 +120,39 @@
                         <span class="ms-2">{{ pg_total_items }} total entr{{ 'y' if pg_total_items == 1 else 'ies' }}</span>
                     {% endif %}
                 </span>
+            </div>
+            <div class="px-3 pt-3 pb-1">
+                <form method="GET" action="{{ url_for('hdc_worker_ledger', wid=w.id) }}" class="row g-2 align-items-end">
+                    <input type="hidden" name="show_voided" value="{{ 1 if filter_show_voided else 0 }}">
+                    <input type="hidden" name="per_page" value="{{ pg_per_page }}">
+                    <div class="col-12">
+                        <label class="form-label small mb-1">Show only</label>
+                        <div class="d-flex flex-wrap gap-2">
+                            {% for value, label, hint in entry_types %}
+                            <div class="form-check form-check-inline mb-0">
+                                <input class="form-check-input" type="checkbox" name="type" value="{{ value }}"
+                                       id="ltype_{{ value }}" {% if value in selected_types %}checked{% endif %}>
+                                <label class="form-check-label small" for="ltype_{{ value }}" title="{{ hint }}">{{ label }}</label>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    <div class="col-12 d-flex gap-2">
+                        <button type="submit" class="btn btn-sm btn-mint">Apply filter</button>
+                        <a href="{{ url_for('hdc_worker_ledger', wid=w.id, show_voided=1 if filter_show_voided else 0) }}" class="btn btn-sm btn-outline-secondary">Clear</a>
+                        <a href="{{ url_for('hdc_worker_statement', wid=w.id) }}" class="btn btn-sm btn-outline-primary ms-auto">
+                            <i class="fas fa-file-invoice-dollar me-1"></i>Open full statement
+                        </a>
+                    </div>
+                </form>
+                <div class="alert alert-secondary py-2 px-3 mt-2 mb-2 small">
+                    <strong>Reading the money:</strong>
+                    <span class="text-success">Work earned (+)</span> ·
+                    <span class="text-warning">Advance (−)</span> ·
+                    <span class="text-danger">Payment (−)</span> ·
+                    <span class="text-primary">Settlement (−)</span> ·
+                    <span class="text-info">Tip (0 — gratis cash on top of the wage, never deducted)</span>
+                </div>
             </div>
             <div class="table-responsive">
                 <table class="table hdc-table table-sm mb-0 ledger-grid-center">

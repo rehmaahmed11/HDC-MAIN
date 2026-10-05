@@ -37,6 +37,7 @@ def _accounts_reconciliation_findings():
     sync flow uses to write the linkage is mirrored here in reverse.
     """
     # Map: source_type prefix -> (Model, label, list_url_builder, void_attr)
+    from hdc.models.tool_rental import ToolRentalDiscount
     SOURCE_MAP = {
         'labour_ledger_advance':       (LabourLedger, 'Worker advance'),
         'labour_ledger_payment':       (LabourLedger, 'Worker payment'),
@@ -57,6 +58,10 @@ def _accounts_reconciliation_findings():
         'cash_flow_entry_in':          (CashFlowEntry, 'Cash Flow entry (in)'),
         'cash_flow_entry_out':         (CashFlowEntry, 'Cash Flow entry (out)'),
         'cash_flow_entry_transfer':    (CashFlowEntry, 'Cash Flow transfer'),
+        # HDC Tools: a granted discount posts its own ledger row, so a voided
+        # discount whose Accounts row stayed alive (or vice versa) is caught
+        # here instead of quietly disagreeing with the rental's outstanding.
+        'tool_rental_discount':        (ToolRentalDiscount, 'Tool rental discount'),
     }
 
     def _base_source_type(s):
@@ -323,10 +328,15 @@ _ACCOUNT_TXN_TYPES = (
     'advance_to_person',
     'purchase',
     'payroll',
+    # A concession granted to a customer (HDC Tools rental discounts).  No
+    # cash moves, so it is deliberately absent from the income/expense KPI
+    # sums below -- it lives in its own ``discount`` category.
+    'discount_given',
 )
 
 
-_ACCOUNT_TXN_CATEGORIES = ('salary', 'expense', 'advance', 'personal', 'transfer', 'income', 'purchase', 'payroll')
+_ACCOUNT_TXN_CATEGORIES = ('salary', 'expense', 'advance', 'personal', 'transfer',
+                           'income', 'purchase', 'payroll', 'discount')
 
 
 _ACCOUNT_TXN_TYPE_DEFAULT_CATEGORY = {
@@ -344,6 +354,7 @@ _ACCOUNT_TXN_TYPE_DEFAULT_CATEGORY = {
     'advance_to_person': 'advance',
     'purchase': 'purchase',
     'payroll': 'payroll',
+    'discount_given': 'discount',
 }
 
 
@@ -1792,6 +1803,14 @@ _ACCOUNT_INTENT_DEFAULT_RULES = {
     'payroll': _intent_rule('payroll', direction='pay', to_account=True, stage=True,
                             stage_required=True, related=True, related_type='worker',
                             reference=False),
+    # Ledger-only: the customer's account gives up the discount and nothing is
+    # received anywhere.  Never offered on the New Transaction dropdown (that
+    # list is ``_ACCOUNT_TXN_FORM_OPTIONS``) -- only the HDC Tools discount
+    # flow writes it.
+    'discount_given': _intent_rule('discount_given', label='Discount / Waive Off',
+                                   direction='', to_account=False, project=False,
+                                   stage=False, related=False, party=True,
+                                   sort_order=180),
 }
 
 
