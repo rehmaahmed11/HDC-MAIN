@@ -4,7 +4,7 @@
    is hidden; otherwise the caller passes every tool and the user chooses.
    Row buttons pre-fill the modal through data-tool-id / data-tool-name (see
    tool_inventory.html's bootstrap `show.bs.modal` listener). #}
-{% from "shared/_combo_field.html" import combo_field %}
+{% from "shared/_combo_field.html" import combo_field, combo_select %}
 
 {% macro purchase_modal(modal_id, tools, tool=None, today='', known_suppliers=[]) %}
 <div class="modal fade" id="{{ modal_id }}" tabindex="-1">
@@ -27,13 +27,13 @@
             </div>
           {% else %}
             <div class="col-12">
-              <label class="form-label">Tool *</label>
-              <select name="tool_id" class="form-select" required id="{{ modal_id }}Tool">
-                <option value="">Select Tool</option>
-                {% for t in tools %}
-                <option value="{{ t.id }}">{{ t.name }} ({{ t.tool_code }}) — owns {{ "%g"|format(t.total_quantity or 0) }} {{ t.unit }}</option>
-                {% endfor %}
-              </select>
+              {% set tool_options = [] %}
+              {% for t in tools %}
+                {% set _ = tool_options.append((t.id, t.name ~ ' (' ~ t.tool_code ~ ') — owns ' ~ ("%g"|format(t.total_quantity or 0)) ~ ' ' ~ t.unit)) %}
+              {% endfor %}
+              {{ combo_select('tool_id', modal_id ~ 'Tool', tool_options,
+                 label='Tool *', placeholder='Search tool name or code…',
+                 required=true, max_items=80) }}
             </div>
           {% endif %}
           <div class="col-6">
@@ -107,13 +107,13 @@
             </div>
           {% else %}
             <div class="col-12">
-              <label class="form-label">Tool *</label>
-              <select name="tool_id" class="form-select" required id="{{ modal_id }}Tool">
-                <option value="">Select Tool</option>
-                {% for t in tools %}
-                <option value="{{ t.id }}">{{ t.name }} ({{ t.tool_code }}) — in store {{ "%g"|format(t.available_qty) }} {{ t.unit }}</option>
-                {% endfor %}
-              </select>
+              {% set tool_options = [] %}
+              {% for t in tools %}
+                {% set _ = tool_options.append((t.id, t.name ~ ' (' ~ t.tool_code ~ ') — in store ' ~ ("%g"|format(t.available_qty)) ~ ' ' ~ t.unit)) %}
+              {% endfor %}
+              {{ combo_select('tool_id', modal_id ~ 'Tool', tool_options,
+                 label='Tool *', placeholder='Search tool name or code…',
+                 required=true, max_items=80) }}
             </div>
           {% endif %}
           <div class="col-6">

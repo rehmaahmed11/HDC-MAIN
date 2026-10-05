@@ -327,6 +327,10 @@ function comboMenus() {
   f1.select.value = '1';
   combo1.syncFromSelect();
   assert.equal(f1.input.value, 'Alice (W-1)', 'syncFromSelect mirrors the select');
+  f1.select.value = '2';
+  f1.select.dispatchEvent(new FakeEvent('change'));
+  assert.equal(f1.input.value, 'Bob (W-2)',
+    'programmatic select changes immediately mirror their visible label');
 
   // 9. required ownership moves to the visible input.
   const f2 = buildField('inp2', 'sel2', [
@@ -366,6 +370,22 @@ function comboMenus() {
   documentStub.activeElement = null;
   await wait(200);
   assert.equal(f3.select.value, '', 'picking/typing the placeholder clears the select');
+
+  // 11. dependent pickers do not suggest options hidden by their parent filter.
+  const hiddenStage = mkopt('22', 'Other project stage');
+  hiddenStage.hidden = true;
+  const f4 = buildField('inp4', 'sel4', [
+    mkopt('', 'No stage'),
+    mkopt('21', 'Foundation — Site A'),
+    hiddenStage,
+  ]);
+  HDCComboList.attach('inp4', 'sel4', { strict: true });
+  const menu4 = comboMenus()[comboMenus().length - 1];
+  documentStub.activeElement = f4.input;
+  f4.input.dispatchEvent(new FakeEvent('focus'));
+  assert.equal((menuHtml(menu4).match(/hdc-combo-item/g) || []).length, 1,
+    'hidden dependent option is excluded from searchable suggestions');
+  assert.ok(!/Other project stage/.test(menuHtml(menu4)));
 
   console.log('combo widget harness: all assertions passed');
 })().catch(err => {

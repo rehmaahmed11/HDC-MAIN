@@ -94,22 +94,15 @@
                 <div class="col-12" id="internalFields">
                     <div class="row g-3">
                         <div class="col-md-6">
-                            <label class="form-label" id="projectLabel">Site / project</label>
-                            <select name="project_id" id="rentalProjectSelect" class="form-select">
-                                <option value="">Select a site</option>
-                                {% for p in projects %}
-                                <option value="{{ p.id }}">{{ p.name }} ({{ p.project_code }})</option>
-                                {% endfor %}
-                            </select>
+                            {{ combo_select('project_id', 'rentalProjectSelect', project_options,
+                               label='Site / project', label_id='projectLabel',
+                               placeholder='Search site, project code, or client…',
+                               max_items=80) }}
                         </div>
                         <div class="col-md-6">
-                            <label class="form-label" id="stageLabel">Stage (optional)</label>
-                            <select name="stage_id" id="rentalStageSelect" class="form-select">
-                                <option value="">No stage</option>
-                                {% for s in stages %}
-                                <option value="{{ s.id }}" data-project-id="{{ s.project_id }}">{{ s.name }} — {{ s.project.name if s.project else '' }}</option>
-                                {% endfor %}
-                            </select>
+                            {{ combo_select('stage_id', 'rentalStageSelect', stage_options,
+                               label='Stage (optional)', label_id='stageLabel',
+                               placeholder='Search a stage…', max_items=80) }}
                         </div>
                     </div>
                 </div>
@@ -139,9 +132,14 @@
                     <div id="toolItemsContainer">
                         <div class="row g-2 mb-2 tool-item-row align-items-end">
                             <div class="col-md-6">
-                                <label class="form-label small">Tool</label>
-                                <select name="tool_id[]" class="form-select tool-select" required>
-                                    <option value="">Select a tool</option>
+                                <label class="form-label small" for="rentalToolSelect0Input">Tool</label>
+                                <input type="text" id="rentalToolSelect0Input" class="form-control tool-select-search"
+                                       placeholder="Search tool name or code…" autocomplete="off"
+                                       role="combobox" aria-expanded="false" aria-autocomplete="list" aria-label="Tool"
+                                       data-hdc-combo="rentalToolSelect0" data-hdc-combo-strict="true" data-hdc-combo-manual="true">
+                                <select name="tool_id[]" id="rentalToolSelect0" class="form-select tool-select d-none" required
+                                        data-hdc-combo-source>
+                                    <option value=""></option>
                                     {% for t in tools %}
                                     <option value="{{ t.id }}" data-rate="{{ t.rental_rate_per_day }}" data-avail="{{ t.available_qty }}">{{ t.name }} ({{ t.tool_code }}) — {{ "%.0f"|format(t.available_qty) }} available</option>
                                     {% endfor %}
@@ -181,6 +179,18 @@
                             <input type="checkbox" class="form-check-input mt-0" id="selectAllTransferTools" onchange="toggleAllTransferTools(this.checked)">
                             <span class="form-check-label">Select all</span>
                         </label>
+                    </div>
+                    <div class="row g-2 mb-2">
+                        <div class="col-md-6">
+                            <label class="form-label small mb-1" for="transferToolSearchInput">Find a tool at this location</label>
+                            <input type="text" id="transferToolSearchInput" class="form-control"
+                                   placeholder="Search available tool names or codes…" autocomplete="off"
+                                   role="combobox" aria-expanded="false" aria-autocomplete="list"
+                                   data-hdc-combo="transferToolSearchSelect" data-hdc-combo-strict="true" data-hdc-combo-manual="true">
+                            <select id="transferToolSearchSelect" class="form-select d-none"
+                                    data-hdc-combo-source><option value=""></option></select>
+                            <small class="text-muted">Choose a suggestion to tick its row; checkboxes allow multiple tools.</small>
+                        </div>
                     </div>
                     <div id="transferToolsList" class="transfer-tools-list border rounded p-2">
                         <div class="small text-muted">Select a From holder/location above to see available tools.</div>
@@ -353,11 +363,16 @@
 function filterStages(projectId, stageId){
     const stage = document.getElementById(stageId);
     if(!stage) return;
+    let selectionCleared = false;
     Array.from(stage.options).forEach(function(option){
         const visible = !option.value || !projectId || option.dataset.projectId === projectId;
         option.hidden = !visible;
-        if(!visible && option.selected) stage.value = '';
+        if(!visible && option.selected){
+            stage.value = '';
+            selectionCleared = true;
+        }
     });
+    if(selectionCleared) stage.dispatchEvent(new Event('change', {bubbles:true}));
 }
 function syncRentalStages(){
     const project = document.getElementById('rentalProjectSelect');
@@ -421,6 +436,54 @@ function toggleAllTransferTools(checked){
     });
     document.getElementById('transferToolsError')?.classList.add('d-none');
     updateSelectAllTransferTools();
+}
+
+function syncTransferToolSearch(lines){
+    const input = document.getElementById('transferToolSearchInput');
+    const select = document.getElementById('transferToolSearchSelect');
+    if(!select) return;
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = '';
+    select.replaceChildren(placeholder);
+    (lines || []).forEach(function(line){
+        const option = document.createElement('option');
+        option.value = String(line.item_id);
+        const name = line.name || ('Tool #' + line.tool_id);
+        const code = line.code ? ' (' + line.code + ')' : '';
+        const qty = line.qty == null ? '' : ' — ' + line.qty + ' ' + (line.unit || '') + ' available';
+        option.textContent = name + code + qty;
+        select.appendChild(option);
+    });
+    select.value = '';
+    if(input) input.value = '';
+}
+
+function wireTransferToolSearch(){
+    const input = document.getElementById('transferToolSearchInput');
+    const select = document.getElementById('transferToolSearchSelect');
+    if(!input || !select || !window.HDCComboList || input.__hdcCombo) return;
+    input.__hdcCombo = window.HDCComboList.attach(input, select, {
+        strict: true,
+        maxItems: 80,
+        emptyText: 'No tools available at this From location.'
+    });
+    input.addEventListener('focus', function(){
+        // After one item is selected, focusing again opens the complete list
+        // so the next multi-select choice is just as easy to find.
+        if(!select.value) return;
+        select.value = '';
+        input.value = '';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    select.addEventListener('change', function(){
+        if(!select.value) return;
+        const checkbox = Array.from(document.querySelectorAll('.transfer-item-checkbox'))
+            .find(function(box){ return box.value === select.value; });
+        if(!checkbox) return;
+        checkbox.checked = true;
+        checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+    });
 }
 
 function transferDefaultRate(sourceRate, dailyRate, billingType){
@@ -504,6 +567,7 @@ function renderSourceTools(){
 
     const sourceKey = sourceSelect.value || '';
     const source = TRANSFER_SOURCES.find(function(item){ return item.key === sourceKey; });
+    syncTransferToolSearch(source ? source.lines : []);
     list.replaceChildren();
     document.getElementById('transferToolsError')?.classList.add('d-none');
 
@@ -650,8 +714,16 @@ function toggleTxnType(){
 // ── Picking a tool fills its saved rate (until the operator overrides it) ──
 function wireToolRow(row){
     const sel = row.querySelector('select.tool-select');
+    const search = row.querySelector('input.tool-select-search');
     const rate = row.querySelector('input.rental-rate-input');
     if(!sel || !rate) return;
+    if(search && window.HDCComboList && !search.__hdcCombo){
+        search.__hdcCombo = window.HDCComboList.attach(search, sel, {
+            strict: true,
+            maxItems: 80,
+            emptyText: 'No matching tools. Choose a listed tool.'
+        });
+    }
     sel.addEventListener('change', function(){
         const opt = sel.options[sel.selectedIndex];
         const saved = opt && opt.getAttribute('data-rate');
@@ -664,6 +736,7 @@ function wireToolRow(row){
 document.getElementById('rentalProjectSelect')?.addEventListener('change', syncRentalStages);
 document.getElementById('sourceRental')?.addEventListener('change', renderSourceTools);
 document.querySelectorAll('.tool-item-row').forEach(wireToolRow);
+wireTransferToolSearch();
 document.getElementById('createRentalForm')?.addEventListener('submit', function(event){
     if(!transferMode()) return;
     const selected = document.querySelectorAll('.transfer-item-checkbox:checked');
@@ -682,16 +755,25 @@ document.getElementById('createRentalForm')?.addEventListener('submit', function
 toggleTxnType();
 syncRentalStages();
 
+let nextToolComboIndex = 1;
+
 function addToolRow(){
     const container = document.getElementById('toolItemsContainer');
     if(!container) return;
+    const selectId = 'rentalToolSelect' + nextToolComboIndex++;
+    const inputId = selectId + 'Input';
     const row = document.createElement('div');
     row.className = 'row g-2 mb-2 tool-item-row align-items-end';
     row.innerHTML = `
         <div class="col-md-6">
-            <label class="form-label small">Tool</label>
-            <select name="tool_id[]" class="form-select tool-select" required>
-                <option value="">Select a tool</option>
+            <label class="form-label small" for="${inputId}">Tool</label>
+            <input type="text" id="${inputId}" class="form-control tool-select-search"
+                   placeholder="Search tool name or code…" autocomplete="off"
+                   role="combobox" aria-expanded="false" aria-autocomplete="list" aria-label="Tool"
+                   data-hdc-combo="${selectId}" data-hdc-combo-strict="true" data-hdc-combo-manual="true">
+            <select name="tool_id[]" id="${selectId}" class="form-select tool-select d-none" required
+                    data-hdc-combo-source>
+                <option value=""></option>
                 {% for t in tools %}
                 <option value="{{ t.id }}" data-rate="{{ t.rental_rate_per_day }}" data-avail="{{ t.available_qty }}">{{ t.name }} ({{ t.tool_code }}) — {{ "%.0f"|format(t.available_qty) }} available</option>
                 {% endfor %}

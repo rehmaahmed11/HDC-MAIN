@@ -4,6 +4,7 @@
 
 {% block content %}
 {% set tools_active = 'reports' %}
+{% from "shared/_combo_field.html" import combo_field, combo_select %}
 {% include "tool_rental/_tools_nav.html" %}
 
 <div class="row g-3 mt-1">
@@ -27,9 +28,22 @@
     </div>
     <div class="card-body">
         <form method="GET" class="row g-2">
-            <div class="col-md-2"><label class="form-label">Search</label><input type="text" name="q" value="{{ filters.search_text or '' }}" class="form-control" placeholder="Code / Customer"></div>
-            <div class="col-md-2"><label class="form-label">Site / Project</label><select name="project_id" class="form-select"><option value="">All Sites</option>{% for p in projects %}<option value="{{ p.id }}" {% if filters.project_id==p.id %}selected{% endif %}>{{ p.name }}</option>{% endfor %}</select></div>
-            <div class="col-md-2"><label class="form-label">Tool</label><select name="tool_id" class="form-select"><option value="">All Tools</option>{% for t in tools %}<option value="{{ t.id }}" {% if filters.tool_id==t.id %}selected{% endif %}>{{ t.name }}</option>{% endfor %}</select></div>
+            <div class="col-md-2">
+                {{ combo_field('q', 'toolReportSearch', known_customers,
+                   label='Search', value=filters.search_text or '',
+                   placeholder='Rental code or customer…', max_items=60) }}
+            </div>
+            <div class="col-md-2">
+                {{ combo_select('project_id', 'reportProject', project_options,
+                   label='Site / Project',
+                   placeholder='Search site, project, or client…',
+                   selected=filters.project_id, max_items=80) }}
+            </div>
+            <div class="col-md-2">
+                {{ combo_select('tool_id', 'reportTool', tool_options,
+                   label='Tool', placeholder='Search tool name or code…',
+                   selected=filters.tool_id, max_items=80) }}
+            </div>
             <div class="col-md-2"><label class="form-label">Renter Type</label><select name="renter_type" class="form-select"><option value="">All</option><option value="internal" {% if filters.renter_type=='internal' %}selected{% endif %}>Internal</option><option value="external" {% if filters.renter_type=='external' %}selected{% endif %}>External</option></select></div>
             <div class="col-md-1"><label class="form-label">Status</label><select name="status" class="form-select"><option value="">All</option><option value="active" {% if filters.status=='active' %}selected{% endif %}>Active</option><option value="partially_returned" {% if filters.status=='partially_returned' %}selected{% endif %}>Partial</option><option value="returned" {% if filters.status=='returned' %}selected{% endif %}>Returned</option><option value="overdue" {% if filters.status=='overdue' %}selected{% endif %}>Overdue</option><option value="closed" {% if filters.status=='closed' %}selected{% endif %}>Closed</option></select></div>
             <div class="col-md-1"><label class="form-label">Payment</label><select name="payment_status" class="form-select"><option value="">All</option><option value="unpaid" {% if filters.payment_status=='unpaid' %}selected{% endif %}>Unpaid</option><option value="partial" {% if filters.payment_status=='partial' %}selected{% endif %}>Partial</option><option value="paid" {% if filters.payment_status=='paid' %}selected{% endif %}>Paid</option><option value="credit" {% if filters.payment_status=='credit' %}selected{% endif %}>Credit</option><option value="no_charge" {% if filters.payment_status=='no_charge' %}selected{% endif %}>No Charge</option></select></div>

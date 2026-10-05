@@ -41,7 +41,7 @@ os.environ.setdefault('HDC_BOOTSTRAP_ADMIN_PASSWORD', 'Admin@1234')
 from hdc.app import create_app                                    # noqa: E402
 from hdc.extensions import db                                     # noqa: E402
 from hdc.models.accounts import Account                           # noqa: E402
-from hdc.models.projects import Project                           # noqa: E402
+from hdc.models.projects import Project, Stage                    # noqa: E402
 from hdc.models.tool_rental import (                              # noqa: E402
     Tool, ToolCategory, ToolRental,
 )
@@ -55,16 +55,38 @@ REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
 #: page -> {field the form posts: combo input id that must sit next to it}
 NAME_FIELDS = {
+    '/hdc/tool-rental': {'q': 'rentalSearch'},
     '/hdc/tool-rental/new': {'customer_name': 'rentalCustomerName'},
     '/hdc/tool-rental/<id>': {'to_customer_name': 'transferCustomerName'},
     '/hdc/tool-rental/inventory': {'supplier': 'toolSupplier'},
     '/hdc/tool-rental/tool/<id>': {'supplier': 'purchaseModalSupplier'},
+    '/hdc/tool-rental/reports': {'q': 'toolReportSearch'},
 }
-#: id-valued lists: the select keeps name= and posts the id, so the visible
-#: input carries no name of its own.
+#: closed-set lists: the select keeps name= and posts the chosen value, so
+#: the visible input carries no name of its own.
 ID_FIELDS = {
+    '/hdc/tool-rental/new': {
+        'source_rental_id': ('sourceRental',),
+        'project_id': ('rentalProjectSelect',),
+        'stage_id': ('rentalStageSelect',),
+        'tool_id[]': ('rentalToolSelect0',),
+        'received_to_account_id': ('recvAccount',),
+    },
     '/hdc/tool-rental/<id>': {
+        'to_project_id': ('transferProjectSelect',),
+        'to_stage_id': ('transferStageSelect',),
         'received_to_account_id': ('recvAccReturn', 'recvAccPayment'),
+    },
+    '/hdc/tool-rental/inventory': {
+        'tool_id': ('purchaseModalTool', 'scrapModalTool'),
+    },
+    '/hdc/tool-rental/tracking': {
+        'tool_id': ('trackingTool',),
+        'project_id': ('trackingProject',),
+    },
+    '/hdc/tool-rental/reports': {
+        'tool_id': ('reportTool',),
+        'project_id': ('reportProject',),
     },
 }
 
@@ -139,19 +161,27 @@ class NameComboFieldTestCase(unittest.TestCase):
     def test_every_tools_page_renders_a_combo_for_every_name_field(self):
         rental = self._rental()
         urls = {
+            '/hdc/tool-rental': '/hdc/tool-rental',
             '/hdc/tool-rental/new': '/hdc/tool-rental/new',
             '/hdc/tool-rental/<id>': '/hdc/tool-rental/%d' % rental.id,
             '/hdc/tool-rental/inventory': '/hdc/tool-rental/inventory',
             '/hdc/tool-rental/tool/<id>': '/hdc/tool-rental/tool/%d' % self.tool.id,
+            '/hdc/tool-rental/tracking': '/hdc/tool-rental/tracking',
+            '/hdc/tool-rental/reports': '/hdc/tool-rental/reports',
         }
         for key, url in urls.items():
             html = self.client.get(url).get_data(as_text=True)
-            for field_name, input_id in NAME_FIELDS[key].items():
+            for field_name, input_id in NAME_FIELDS.get(key, {}).items():
                 self._assert_combo_pair(html, field_name, input_id)
             for field_name, input_ids in ID_FIELDS.get(key, {}).items():
                 for input_id in input_ids:
                     self._assert_combo_pair(html, field_name, input_id,
                                             input_carries_name=False)
+            if key == '/hdc/tool-rental/inventory':
+                self.assertIn('data-hdc-combo="toolCategorySelect"', html)
+                self.assertIn('data-hdc-combo="inventoryCategorySelect"', html)
+                self.assertIn('data-hdc-combo-source', html,
+                              'manual category combos retain the no-script select fallback')
 
     def _assert_combo_pair(self, html, field_name, input_id,
                            input_carries_name=True):
@@ -172,9 +202,57 @@ class NameComboFieldTestCase(unittest.TestCase):
                              '%s: the hidden select must not also carry name=%s '
                              '(the form would post the field twice)'
                              % (input_id, field_name))
+        else:
+            self.assertNotIn('name="%s"' % field_name, input_tag.group(),
+                             '%s: the visible id-picker input must not post an id' % input_id)
+            self.assertIn('name="%s"' % field_name, select_tag.group(),
+                          '%s: the source select must post the chosen record id' % input_id)
         self.assertIn('data-hdc-combo-source', select_tag.group(),
                       '%s: the no-JS fallback in base.html keys off '
                       'data-hdc-combo-source' % input_id)
+
+    def test_fixed_enumerations_remain_native_selects(self):
+        rental = self._rental()
+        pages = {
+            '/hdc/tool-rental': ('status',),
+            '/hdc/tool-rental/new': ('txn_type', 'billing_type', 'renter_type', 'payment_mode'),
+            '/hdc/tool-rental/%d' % rental.id: ('payment_mode',),
+            '/hdc/tool-rental/reports': ('renter_type', 'status', 'billing_type'),
+        }
+        for url, field_names in pages.items():
+            html = self.client.get(url).get_data(as_text=True)
+            for field_name in field_names:
+                self.assertRegex(
+                    html,
+                    r'<select[^>]*name="%s"' % re.escape(field_name),
+                    '%s on %s should remain a fixed-choice native select' % (field_name, url),
+                )
+
+    def test_site_client_stage_and_tool_choices_are_all_searchable(self):
+        stage = Stage(project_id=self.site.id, name='Foundation')
+        db.session.add(stage)
+        db.session.commit()
+
+        html = self.client.get('/hdc/tool-rental/new').get_data(as_text=True)
+        self.assertIn('Client: Owner A', html,
+                      'searching a client name should find its site/project option')
+        self.assertIn('Foundation — Site A (P-A) — Client: Owner A', html)
+        self.assertIn('data-project-id="%s"' % self.site.id, html,
+                      'stage options must retain their parent-site filter metadata')
+        self.assertIn('Vibrator (TOOL-0001)', html,
+                      'the repeated tool picker must include searchable tool labels')
+        self.assertIn('data-hdc-combo-manual="true"', html,
+                      'dynamic tool rows must attach the strict combo themselves')
+        self.assertIn('data-hdc-combo="transferToolSearchSelect"', html,
+                      'the transfer multi-select also exposes its available tool names to the shared combo')
+        transfer_picker_select = re.search(
+            r'<select[^>]*id="transferToolSearchSelect"[^>]*>', html)
+        self.assertIsNotNone(transfer_picker_select)
+        self.assertNotIn('name=', transfer_picker_select.group(),
+                         'transfer tool checkboxes, not the search helper, submit selected rows')
+        self.assertIn('checkbox.checked = true', html,
+                      'choosing a transfer tool suggestion should select its checkbox row')
+        self.assertIn('strict: true', html)
 
     def test_no_bare_text_box_is_left_for_a_name_field(self):
         """A name field must not regress to a plain <input type="text">."""
@@ -194,6 +272,20 @@ class NameComboFieldTestCase(unittest.TestCase):
             source = fh.read()
         self.assertIn("querySelectorAll('input[data-hdc-combo]')", source)
         self.assertIn('DOMContentLoaded', source)
+        self.assertIn("data-hdc-combo-strict", source)
+        self.assertIn("data-hdc-combo-manual", source)
+        self.assertIn('o.hidden', source)
+        self.assertIn("select.addEventListener('change'", source)
+
+    def test_no_script_fallback_preserves_the_named_combo_control(self):
+        with open(os.path.join(REPO_ROOT, 'templates/hdc/shared/base.html'),
+                  encoding='utf-8') as fh:
+            source = fh.read()
+        self.assertIn('select[data-hdc-combo-source][name]', source)
+        self.assertIn('input[data-hdc-combo][data-hdc-combo-strict="true"]', source)
+        # Name-valued combos own name= on the input, so they must not be hidden
+        # when JavaScript is unavailable.
+        self.assertNotIn('input[data-hdc-combo] { display: none !important; }', source)
 
     # ------------------------------------------------------ the post paths
     def test_new_customer_name_still_posts(self):

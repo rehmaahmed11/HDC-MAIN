@@ -1254,6 +1254,98 @@ tr[data-hdc-void="1"] > td .text-warning {
 
 .tools-chain-arrow { opacity: 0.45; font-weight: 800; }
 
+/* Global tool tracking: keep the wide audit table aligned, but let the table
+   itself scroll on smaller screens rather than letting long location names
+   stretch the page. */
+.tool-tracking-table {
+    width: 100%;
+    min-width: 1080px;
+    table-layout: fixed;
+}
+
+.tool-tracking-table .tracking-tool-col { width: 16%; }
+.tool-tracking-table .tracking-stock-col { width: 12%; }
+.tool-tracking-table .tracking-current-col { width: 17%; }
+.tool-tracking-table .tracking-chain-col { width: 25%; }
+.tool-tracking-table .tracking-movement-col { width: 18%; }
+.tool-tracking-table .tracking-action-col { width: 12%; }
+
+.tool-tracking-table thead th {
+    white-space: normal;
+    line-height: 1.35;
+    vertical-align: bottom;
+}
+
+.tool-tracking-table tbody td {
+    vertical-align: top;
+    overflow-wrap: anywhere;
+}
+
+.tool-tracking-table .tool-row { border-left: 4px solid transparent; }
+.tool-tracking-table .tool-row.has-pending { border-left-color: #f59e0b; }
+
+.tool-tracking-tool-name {
+    display: block;
+    overflow-wrap: anywhere;
+}
+
+.tool-tracking-current {
+    display: inline-flex;
+    align-items: flex-start;
+    gap: 5px;
+    max-width: 100%;
+    padding: 6px 10px;
+    white-space: normal;
+    text-align: left;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+
+.tool-tracking-current > i { flex: 0 0 auto; margin-top: .15em; }
+
+.tool-tracking-chain {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+.tool-tracking-chain .c {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 100%;
+    padding: 4px 10px;
+    border: 1px solid var(--card-border);
+    border-radius: 999px;
+    background: var(--card-header-bg);
+    font-size: .72rem;
+    font-weight: 600;
+    line-height: 1.35;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+.tool-tracking-chain .c.active {
+    border-color: transparent;
+    background: linear-gradient(135deg, #16a34a, #22c55e);
+    color: #fff;
+    box-shadow: 0 4px 12px rgba(34, 197, 94, .35);
+}
+
+.tool-tracking-chain .arrow { flex: 0 0 auto; opacity: .4; font-weight: 800; }
+.tool-tracking-movement-labels { overflow-wrap: anywhere; }
+.tool-tracking-movement-type { white-space: normal; overflow-wrap: anywhere; }
+.tool-tracking-actions .btn { white-space: nowrap; }
+.tool-tracking-detail-table { min-width: 600px; }
+.tool-tracking-detail-table thead th,
+.tool-tracking-detail-table tbody td {
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+.tool-tracking-modal .tools-chip { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.tool-tracking-modal .modal-body { min-width: 0; }
+
 .tools-recon-total {
     font-size: 1.05rem;
     font-weight: 800;

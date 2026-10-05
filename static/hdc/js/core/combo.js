@@ -118,7 +118,7 @@
                 function getOptions() {
                     var all = Array.from(select.options).filter(function (o) {
                         if (!opts.includeEmpty && !o.value) return false;
-                        if (o.style && o.style.display === 'none') return false;
+                        if (o.hidden || (o.style && o.style.display === 'none')) return false;
                         return true;
                     });
                     var q = (input.value || '').toLowerCase().trim();
@@ -229,6 +229,10 @@
                     if (opts.clearOnInput !== false) select.value = '';
                     render();
                 });
+                // Keep the visible label in sync when another page control
+                // changes the hidden select (dependent pickers, modal
+                // preselection, or a server-driven option refresh).
+                select.addEventListener('change', function () { syncFromSelect(true); });
                 window.addEventListener('resize', placeMenu);
                 window.addEventListener('scroll', placeMenu, true);
                 input.addEventListener('keydown', function (e) {
@@ -295,22 +299,25 @@
     // Any input carrying data-hdc-combo="<select id>" is wired on
     // DOMContentLoaded, so a template only has to render the pair — no
     // per-page script, and no way for the markup and the wiring to drift
-    // apart.  Templates that need strict picking or a "+ Add new" row keep
-    // calling HDCComboList.attach() themselves and simply do not carry the
-    // attribute.
+    // apart. data-hdc-combo-strict selects closed-set records/keys;
+    // name-valued inputs remain non-strict so a new name can be typed. Repeated fields
+    // may set data-hdc-combo-manual and call attach() with page-specific opts.
     function wireCombos(root) {
         var nodes = (root || document).querySelectorAll('input[data-hdc-combo]');
         for (var i = 0; i < nodes.length; i++) {
             var input = nodes[i];
-            if (input.__hdcCombo) continue;
+            // A page may need a manual strict attachment (for example a
+            // repeated tool picker); it still uses the data attribute for the
+            // no-JS fallback but owns its own attach options.
+            if (input.__hdcCombo || input.getAttribute('data-hdc-combo-manual') !== null) continue;
             var selectId = input.getAttribute('data-hdc-combo');
             var select = selectId ? document.getElementById(selectId) : null;
             if (!select) continue;
             var opts = {
-                // Non-strict on purpose: a name that is not in the list is a
-                // NEW name (the tools customer/supplier fields have no master
-                // table), and the input owns name= so it still posts.
-                strict: false,
+                // Name-valued combos accept a new typed name; combo_select()
+                // inputs set data-hdc-combo-strict so only a real listed
+                // option can supply the selected value.
+                strict: input.getAttribute('data-hdc-combo-strict') === 'true',
                 maxItems: parseInt(input.getAttribute('data-hdc-combo-max') || '50', 10),
                 emptyText: input.getAttribute('data-hdc-combo-empty') ||
                            'No match — keep typing to use a new name.'

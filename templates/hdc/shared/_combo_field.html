@@ -1,7 +1,7 @@
 {# ── Searchable combo field (the "every name is searchable" rule) ──────────
-   Renders a type-to-search combo box for any field that asks the operator to
-   name a person / party / supplier: customer on a tool rental, supplier on a
-   tool purchase, and so on.
+   Renders a type-to-search combo for recurring name-valued fields where a
+   typed value can create a new name: customers/clients, suppliers, parties,
+   and similar entities. Closed-set existing-data pickers use combo_select() below.
 
    Markup contract (mirrors static/hdc/js/core/combo.js):
 
@@ -31,7 +31,7 @@
            data-hdc-combo="{{ field_id }}"
            {% if max_items %}data-hdc-combo-max="{{ max_items }}"{% endif %}
            {% if empty_text %}data-hdc-combo-empty="{{ empty_text }}"{% endif %}>
-    <select id="{{ field_id }}" class="form-select d-none" aria-hidden="true" tabindex="-1"
+    <select id="{{ field_id }}" class="form-select d-none"
             data-hdc-combo-source
             {% if required %}required{% endif %}>
         <option value=""></option>
@@ -43,29 +43,34 @@
 </div>
 {% endmacro %}
 
-{# ── Same rule, id-valued list ─────────────────────────────────────────────
-   For lists whose value is an id (an account, a project, a stage) the select
-   keeps ``name=`` and posts the id; the visible input only ever holds the
-   label the operator picked.  The widget is attached non-strict so a half
-   typed label can never be mistaken for a choice.
+{# ── Same rule, strict select-valued list ───────────────────────────────────
+   For lists that must select existing data (usually an account, project,
+   stage, or tool record), the select keeps ``name=`` and posts the chosen
+   option value (normally an id; some location pickers use a composite key).
+   The visible input only holds a label from a real option: typing alone does
+   not count as a choice. Optional third tuple members render data-* attributes
+   on options for dependent pickers (for example stage -> project).
 #}
 {% macro combo_select(name, field_id, options, label='', placeholder='', required=false,
                       hint='', selected='', max_items=60,
-                      empty_text='') %}
+                      empty_text='', label_id='') %}
 <div class="hdc-combo-field">
-    {% if label %}<label class="form-label"{% if field_id %} for="{{ field_id }}Input"{% endif %}>{{ label }}</label>{% endif %}
+    {% if label %}<label class="form-label"{% if field_id %} for="{{ field_id }}Input"{% endif %}{% if label_id %} id="{{ label_id }}"{% endif %}>{{ label }}</label>{% endif %}
     <input type="text" id="{{ field_id }}Input" class="form-control"
            placeholder="{{ placeholder }}"
            autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list"
-           data-hdc-combo="{{ field_id }}"
+           data-hdc-combo="{{ field_id }}" data-hdc-combo-strict="true"
            {% if max_items %}data-hdc-combo-max="{{ max_items }}"{% endif %}
            {% if empty_text %}data-hdc-combo-empty="{{ empty_text }}"{% endif %}>
     <select id="{{ field_id }}" name="{{ name }}" class="form-select d-none"
-            aria-hidden="true" tabindex="-1" data-hdc-combo-source
+            data-hdc-combo-source
             {% if required %}required{% endif %}>
         <option value=""></option>
-        {% for value, text in options %}
-        <option value="{{ value }}"{% if selected is not none and selected|string == value|string %}selected{% endif %}>{{ text }}</option>
+        {% for option in options %}
+        {% set value = option[0] %}
+        {% set text = option[1] %}
+        {% set option_data = option[2] if option|length > 2 else {} %}
+        <option value="{{ value }}"{% for data_name, data_value in option_data.items() %} data-{{ data_name }}="{{ data_value }}"{% endfor %}{% if selected is not none and selected|string == value|string %} selected{% endif %}>{{ text }}</option>
         {% endfor %}
     </select>
     {% if hint %}<small class="text-muted d-block">{{ hint }}</small>{% endif %}

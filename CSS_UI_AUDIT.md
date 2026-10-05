@@ -37,15 +37,21 @@ The JSON it prints is the evidence behind every number in this document.
 
 ## 1. THE RULE — every name field is a searchable combo box
 
-> **Rule.** Any field that asks the operator to supply a *name* — a customer,
-> a supplier, a party, a person, an account, a project — must render as a
-> **type-to-search combo box** (visible text input + hidden source `<select>`,
-> wired by `static/hdc/js/core/combo.js`). It must **not** be a bare
-> `<input type="text">` and it must **not** be a bare `<select>` that the
-> operator has to scroll.
+> **Rule.** If the operator must choose an existing data-backed name — a
+> customer/client, supplier, party, person, account, site/project, stage, tool,
+> category, rental source, or any other named record — render a **type-to-search
+> combo box** (visible text input + hidden source `<select>`, wired by
+> `static/hdc/js/core/combo.js`). Never leave a long data-backed name list as a
+> bare `<select>` that the operator must scroll.
 >
-> A name that is not yet in the list is a **new** name and must still post —
-> the widget is attached *non-strict* and the visible input owns `name=`.
+> Use a **strict select-valued combo** (`combo_select`) when choosing from
+> closed-set data: the hidden select owns `name=` and posts the chosen option
+> value (normally a record id; some location pickers use a composite key), and
+> typing without selecting a real option is not a choice. Use a **name-valued combo**
+> (`combo_field`) for recurring customer/supplier names that may be new: the
+> visible input owns `name=` and still posts a newly typed name. Enumerations,
+> dates, quantities, free-text search queries, and fields that define/rename a
+> master record are not pickers and stay native/plain text as appropriate.
 
 ### 1.1 Why
 
@@ -60,17 +66,17 @@ customer ledgers. The same happened with tool suppliers.
 
 | Piece | Role |
 |---|---|
-| `templates/hdc/shared/_combo_field.html` | `combo_field()` (name-valued) and `combo_select()` (id-valued) macros — one place that renders the pair correctly |
-| `static/hdc/js/core/combo.js` | `HDCComboList` widget **plus** an auto-wire pass: any `input[data-hdc-combo]` is wired on `DOMContentLoaded`, so a page only has to render the pair |
-| `templates/hdc/shared/base.html` | `<noscript>` fallback: without JS the source `<select>` is shown and the mirror input hidden, so the field still posts |
+| `templates/hdc/shared/_combo_field.html` | `combo_field()` (name-valued) and strict `combo_select()` (closed-set value) macros — one place that renders the pair correctly |
+| `static/hdc/js/core/combo.js` | `HDCComboList` widget **plus** auto-wire: `input[data-hdc-combo]` is wired on `DOMContentLoaded`; strict record/key selections, manual repeated pickers, dependent hidden options, and programmatic select updates are supported |
+| `templates/hdc/shared/base.html` | `<noscript>` fallback: strict combos show their named `<select>`; name-valued combos keep their named text input visible |
 | `hdc/services/tool_rental.py` | `known_tool_customers()` / `known_tool_suppliers()` — the distinct names the combo offers |
-| `tests/test_name_combo_fields.py` | 10 tests that fail if any tools name field regresses to a plain text box, or if the field stops posting |
+| `tests/test_name_combo_fields.py` | Regression tests keep Tools name/id pickers searchable and verify their posted values |
 
 ### 1.3 Fixed in this change (HDC Tools)
 
 | Page | Field | Before | After |
 |---|---|---|---|
-| `/hdc/tool-rental` — Create New Rental | `customer_name` | bare `<input type="text">` | searchable combo over every customer ever rented to |
+| `/hdc/tool-rental/new` — Create New Rental | `customer_name` | bare `<input type="text">` | searchable combo over every customer ever rented to |
 | `/hdc/tool-rental/<id>` — Move Tools (transfer) | `to_customer_name` | bare `<input type="text">` | searchable combo, same list |
 | `/hdc/tool-rental/<id>` — Submit Return | `received_to_account_id` | bare `<select>` (scroll a full account list) | searchable combo, still posts the account **id** |
 | `/hdc/tool-rental/<id>` — Add Payment Only | `received_to_account_id` | bare `<select>` | searchable combo |
@@ -80,6 +86,30 @@ customer ledgers. The same happened with tool suppliers.
 `customer_name` and `to_customer_name` share one list
 (`known_tool_customers()`), so the transfer target is the same spelling the
 rental was created with.
+
+### 1.3.1 HDC Tools data-backed pickers (rule reaffirmed 2026-10-05)
+
+Apply the same searchable picker anywhere the Tools section selects an
+existing name/id, including filters and modal forms—not just create forms:
+
+* **Rental create:** source rental, site/project (option label includes its
+  client), stage, tool lines, receiving account, and the existing/new customer
+  name field. The transfer flow also exposes its dynamic multi-select tool
+  rows through the shared combo so a picked suggestion checks the matching row;
+  per-tool quantities/rates remain on those rows.
+* **Rental detail / transfer:** destination site/project, dependent stage,
+  customer, and receiving accounts.
+* **Inventory / stock:** category and supplier pickers plus tool selection in
+  Add Stock and Scrap dialogs. The repeated tool line on New Rental is also a
+  strict combo, including rows added dynamically.
+* **Tracking / Reports / Rentals search:** tool and site filters, plus customer
+  suggestions in the rental-code/customer search fields.
+
+Keep enum choices (billing, status, condition, payment mode), dates, quantities,
+and master-data definition fields (for example the new Tool Name input) as
+ordinary controls. Existing-record id pickers use `combo_select()`; a typed
+client/customer/supplier name that is allowed to create a new name uses
+`combo_field()`.
 
 ### 1.4 Compliance matrix — the rest of the app
 
@@ -100,9 +130,11 @@ Legend: ✅ searchable combo · ⚠️ plain `<select>` (long list, scrollable) 
 | `/hdc/accounts/shared/parties` | party `name` (create/edit/rename rows) | ❌ **fix** |
 | `/hdc/accounts/shared/expenses/new` | `new_party_name`, split rows | ❌ **fix** |
 | `/hdc/accounts/shared/expenses`, `/ledger`, `/report`, `/settlements` | `party_id`, `from/to_party_id`, `category` | ⚠️ **fix** |
-| `/hdc/tool-rental` | `customer_name` | ✅ (fixed) |
-| `/hdc/tool-rental/<id>` | `to_customer_name`, `received_to_account_id` | ✅ (fixed) |
-| `/hdc/tool-rental/inventory`, `/tool/<id>` | `supplier` | ✅ (fixed) |
+| `/hdc/tool-rental` | customer search suggestions | ✅ |
+| `/hdc/tool-rental/new` | source rental, site/client, stage, tool, customer, receiving account | ✅ (expanded 2026-10-05) |
+| `/hdc/tool-rental/<id>` | destination site/stage/customer, receiving accounts | ✅ (expanded 2026-10-05) |
+| `/hdc/tool-rental/inventory`, `/tool/<id>` | category, tool, supplier pickers | ✅ |
+| `/hdc/tool-rental/tracking`, `/reports` | site/tool filters, customer suggestions | ✅ (expanded 2026-10-05) |
 | `/hdc/workers`, `/hdc/workers/<id>/*` | worker picker | ✅ · create/edit `name`, `worker_code` ➖ (that row *is* the new worker) |
 | `/hdc/subcontractors` | filter | ✅ · create/edit `name` ➖ |
 | `/hdc/subcontractors/<id>/attendance` | worker select, worker type | ⚠️ **fix** |
@@ -118,12 +150,14 @@ Legend: ✅ searchable combo · ⚠️ plain `<select>` (long list, scrollable) 
 | `/hdc/trades`, `/hdc/expense_categories`, `/hdc/estimation/formulas`, `/hdc/personal-management/categories`, `/hdc/office-management/allowance-categories`, `/hdc/tool-rental/inventory` category/tool `name` | master-data names | ➖ (defines a new row) |
 | `/hdc/users` | `username` | ➖ (defines a new user) |
 
-**Totals from the DOM audit:** 44 combo inputs across 16 pages — up from 38
-across 13 before this change (the six new pairs are `rentalCustomerName`,
-`transferCustomerName`, `recvAccReturn`, `recvAccPayment`, `toolSupplier`,
-`purchaseModalSupplier`). 81 name-ish fields are still without a combo, of
-which **≈ 25 are genuine rule violations** (marked ❌/⚠️ above); the rest are
-master-data definition fields where a combo would be wrong (§1.5).
+**Original DOM-audit totals (2026-09-29; historical baseline):** 44 combo
+inputs across 16 pages — up from 38 across 13 before that audit (the six
+pairs were `rentalCustomerName`, `transferCustomerName`, `recvAccReturn`,
+`recvAccPayment`, `toolSupplier`, `purchaseModalSupplier`). These figures
+predate the HDC Tools selector expansion in §1.3.1 and should not be treated as
+the current combo count. The original estimate was 81 name-ish fields still
+without a combo, of which ≈ 25 were rule violations; that count also needs a
+fresh DOM audit after the expansion.
 
 ### 1.5 Deliberate exceptions (do not "fix" these)
 

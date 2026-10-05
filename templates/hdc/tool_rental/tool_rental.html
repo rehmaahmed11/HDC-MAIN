@@ -9,6 +9,7 @@
    repeated here; they live on the Tracking / Reports pages. #}
 {% block content %}
 {% set tools_active = 'rentals' %}
+{% from "shared/_combo_field.html" import combo_field %}
 {% include "tool_rental/_tools_nav.html" %}
 
 <style>
@@ -110,8 +111,11 @@
     <div class="card-body">
         <form method="GET" action="{{ url_for('hdc_tool_rental') }}" class="row g-2 align-items-end" id="rentalFilterForm">
             <div class="col-md-5">
-                <label class="form-label">Search by rental code or customer</label>
-                <input type="search" name="q" value="{{ filters.search_text or '' }}" class="form-control" placeholder="e.g. RENT-00012 or Ali Traders">
+                {{ combo_field('q', 'rentalSearch', known_customers,
+                   label='Search by rental code or customer',
+                   value=filters.search_text or '',
+                   placeholder='Search a customer or type a rental code…',
+                   max_items=60) }}
             </div>
             <div class="col-md-4">
                 <label class="form-label">Show</label>
