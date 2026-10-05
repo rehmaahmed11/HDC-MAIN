@@ -162,6 +162,10 @@ function makeElement(tag, id) {
     addEventListener(type, fn) {
       (this._listeners[type] || (this._listeners[type] = [])).push(fn);
     },
+    removeEventListener(type, fn) {
+      const listeners = this._listeners[type] || [];
+      this._listeners[type] = listeners.filter(listener => listener !== fn);
+    },
     dispatchEvent(ev) {
       if (!ev.target) ev.target = this;
       const list = (this._listeners[ev.type] || []).slice();
@@ -223,6 +227,24 @@ function makeElement(tag, id) {
       child.parentNode = null;
       notifyMutation('childList', this);
       return child;
+    },
+    cloneNode(deep) {
+      const clone = makeElement(this.tagName.toLowerCase());
+      clone.id = this.id;
+      clone.name = this.name;
+      clone.type = this.type;
+      clone.placeholder = this.placeholder;
+      clone.value = this.value;
+      clone.hidden = this.hidden;
+      clone.disabled = this.disabled;
+      clone.required = this.required;
+      clone.selected = this.selected;
+      clone._attrs = Object.assign({}, this._attrs);
+      clone._text = this._text;
+      clone._defaultIndex = this._defaultIndex;
+      if (deep) this.children.forEach((child) => clone.appendChild(child.cloneNode(true)));
+      if (this.tagName === 'SELECT') clone.selectedIndex = this.selectedIndex;
+      return clone;
     },
     reset() {
       const walk = (node) => {
@@ -303,6 +325,7 @@ const windowStub = {
     disconnect() {}
   },
   addEventListener() {},
+  removeEventListener() {},
   setTimeout(fn) { fn(); return 0; },
   Event: FakeEvent,
   fetch(url, init) {
@@ -403,8 +426,8 @@ const categoryBlock = node('fieldset', 'txnCategoryBlock');
 categoryBlock.appendChild(node('span', 'txnCategoryLegend'));
 const categorySelect = node('select', 'txnCategory', { name: 'category_id' });
 option(categorySelect, '', 'Choose…');
-option(categorySelect, '10', 'Material & Purchase', { 'data-direction': 'out', 'data-party-mode': 'optional', 'data-project-mode': 'optional' });
-option(categorySelect, '11', 'Labour & Wages', { 'data-direction': 'out', 'data-party-mode': 'optional', 'data-project-mode': 'optional' });
+option(categorySelect, '10', 'Material & Purchase', { 'data-direction': 'out', 'data-party-mode': 'optional', 'data-project-mode': 'optional', 'data-multiple-subcategories': 'true' });
+option(categorySelect, '11', 'Labour & Wages', { 'data-direction': 'out', 'data-party-mode': 'optional', 'data-project-mode': 'optional', 'data-multiple-subcategories': 'false' });
 option(categorySelect, '20', 'Owner / Client Receipt', { 'data-direction': 'in', 'data-party-mode': 'optional', 'data-project-mode': 'required', 'data-project-effect': 'receipt', 'data-party-types': 'client' });
 categoryBlock.appendChild(categorySelect);
 const subcategorySelect = node('select', 'txnSubcategory', { name: 'subcategory_id' });
@@ -425,6 +448,43 @@ subcategoryError.classList.add('hdc-field-error');
 subcategoryError.setAttribute('data-error-for', 'subcategory_id');
 categoryBlock.appendChild(subcategoryError);
 body.appendChild(categoryBlock);
+
+const materialItemsField = node('div', 'txnMaterialItemsField', { hidden: true });
+const addMaterialButton = node('button', 'txnAddMaterialItem');
+const materialItemsList = node('div', 'txnMaterialItemsList');
+const materialItemRow = makeElement('div');
+materialItemRow.setAttribute('data-material-item-row', '');
+materialItemRow.setAttribute('data-row-index', '0');
+const materialItemLabel = makeElement('label');
+materialItemLabel.setAttribute('for', 'txnMaterialItemInput0');
+materialItemRow.appendChild(materialItemLabel);
+const materialItemInput = makeElement('input');
+materialItemInput.id = 'txnMaterialItemInput0';
+materialItemInput.classList.add('form-control');
+materialItemInput.setAttribute('data-material-input', '');
+materialItemRow.appendChild(materialItemInput);
+const materialItemSelect = makeElement('select');
+materialItemSelect.id = 'txnMaterialItemSelect0';
+materialItemSelect.name = 'subcategory_ids';
+materialItemSelect.disabled = true;
+materialItemSelect.setAttribute('data-material-select', '');
+option(materialItemSelect, '', 'Choose material…');
+option(materialItemSelect, '101', 'Cement', { 'data-category': '10' });
+option(materialItemSelect, '102', 'Steel / Saria', { 'data-category': '10' });
+option(materialItemSelect, '111', 'Mason', { 'data-category': '11' });
+materialItemRow.appendChild(materialItemSelect);
+const removeMaterialButton = makeElement('button');
+removeMaterialButton.hidden = true;
+removeMaterialButton.setAttribute('data-remove-material-item', '');
+materialItemRow.appendChild(removeMaterialButton);
+materialItemsList.appendChild(materialItemRow);
+const materialItemError = node('div', 'txnMaterialItemError');
+materialItemError.classList.add('hdc-field-error');
+materialItemError.setAttribute('data-error-for', 'subcategory_ids');
+materialItemsField.appendChild(addMaterialButton);
+materialItemsField.appendChild(materialItemsList);
+materialItemsField.appendChild(materialItemError);
+body.appendChild(materialItemsField);
 
 const whoBlock = node('fieldset', 'txnWhoBlock');
 const partyInput = node('input', 'txnPartyInput');
@@ -616,6 +676,54 @@ check('selecting a subcategory then switching category clears it', () => {
   assert.equal(subcategorySelect.options.find(o => o.value === '111').disabled, false);
   categorySelect.value = '10';
   change(categorySelect);
+});
+
+check('material purchases support multiple searchable item rows and the plus action', () => {
+  direction.value = 'out';
+  change(direction);
+  categorySelect.value = '10';
+  change(categorySelect);
+  assert.equal(materialItemsField.hidden, false,
+    'the material item list appears when Material & Purchase is selected');
+  assert.equal(subcategorySelect.disabled, true,
+    'the old one-item selector is not submitted alongside the item rows');
+
+  materialItemInput.focus();
+  type(materialItemInput, 'steel');
+  assert.match(menuHtml('txnMaterialItemSelect0_menu'), /Steel \/ Saria/,
+    'material names are searchable in the shared combo list');
+  press(materialItemInput, 'Enter');
+  assert.equal(materialItemSelect.value, '102');
+
+  addMaterialButton.dispatchEvent(new FakeEvent('click'));
+  let rows = materialItemsList.querySelectorAll('[data-material-item-row]');
+  assert.equal(rows.length, 2, 'the plus button adds another item row');
+  const secondInput = rows[1].querySelector('[data-material-input]');
+  const secondSelect = rows[1].querySelector('[data-material-select]');
+  secondInput.focus();
+  type(secondInput, 'cement');
+  press(secondInput, 'Enter');
+  assert.equal(secondSelect.value, '101', 'the new row has its own searchable selector');
+
+  // Duplicate item names are stopped before posting; users can remove the row.
+  secondSelect.value = materialItemSelect.value;
+  const before = FORM._submitted;
+  FORM.dispatchEvent(new FakeEvent('submit'));
+  assert.equal(FORM._submitted, before);
+  assert.match(materialItemError.textContent, /duplicate material items/i);
+  rows[1].querySelector('[data-remove-material-item]').dispatchEvent(new FakeEvent('click'));
+  assert.equal(materialItemsList.querySelectorAll('[data-material-item-row]').length, 1);
+  materialItemSelect.value = '';
+  materialItemInput.value = '';
+
+  // Reset removes extra rows and their combo menus/listeners, then clears the
+  // remaining draft selection just like the server-rendered initial form.
+  addMaterialButton.dispatchEvent(new FakeEvent('click'));
+  assert.equal(materialItemsList.querySelectorAll('[data-material-item-row]').length, 2);
+  resetButton.dispatchEvent(new FakeEvent('click'));
+  assert.equal(materialItemsList.querySelectorAll('[data-material-item-row]').length, 1);
+  assert.equal(materialItemsField.hidden, true);
+  assert.equal(materialItemSelect.value, '');
 });
 
 check('the wrong-direction category is not offered for Money In', () => {

@@ -33,6 +33,7 @@ from datetime import datetime, timedelta
 
 from flask import current_app
 from sqlalchemy import func, or_
+from sqlalchemy.orm import selectinload
 
 from hdc.extensions import db
 from hdc.models.accounts import Account, AccountTransaction
@@ -43,6 +44,7 @@ from hdc.models.cashflow import (
     CashFlowCategory,
     CashFlowEntry,
     CashFlowEntryAudit,
+    CashFlowEntryItem,
     CashFlowParty,
     CashFlowSubcategory,
 )
@@ -55,6 +57,7 @@ __all__ = [
     "CF_DIR_TRANSFER",
     "CF_DIRECTIONS",
     "CF_DIRECTION_LABELS",
+    "MAX_CASH_FLOW_ENTRY_ITEMS",
     "SRC_MANUAL",
     "validate_manual_cash_flow",
     "save_manual_cash_flow_entry",
@@ -102,6 +105,11 @@ CF_DIRECTION_LABELS = {
     CF_DIR_OUT: 'Spent',
     CF_DIR_TRANSFER: 'Transfer',
 }
+
+# A single material receipt can describe several material types.  The parent
+# cash-flow entry still owns one total amount and one ledger posting.
+MAX_CASH_FLOW_ENTRY_ITEMS = 20
+_MULTI_ITEM_CATEGORY_NAMES = {'material & purchase', 'material purchase', 'material purchases'}
 
 SRC_MANUAL = 'MANUAL_CASH_FLOW'
 SRC_QUICK_ENTRY = 'CASH_FLOW_QUICK_ENTRY'
@@ -289,6 +297,14 @@ def _cf_snapshot(entry):
         'destination_account_id': entry.destination_account_id,
         'category_id': entry.category_id,
         'subcategory_id': entry.subcategory_id,
+        'items': [
+            {
+                'subcategory_id': item.subcategory_id,
+                'name': item.item_name,
+                'sort_order': item.sort_order,
+            }
+            for item in (entry.items or [])
+        ],
         'party_id': entry.party_id,
         'party_name': entry.party_name,
         'party_type': entry.party_type,
@@ -616,7 +632,8 @@ def _cf_build_tx_payload(direction, amount, account, destination, description, n
 
 def save_manual_cash_flow_entry(*, direction, amount, account_id, destination_account_id=None,
                                 category_id=None, category_name=None, subcategory_id=None,
-                                subcategory_name=None, party_id=None, party_name=None,
+                                subcategory_ids=None, subcategory_name=None,
+                                party_id=None, party_name=None,
                                 party_type=None, description=None, note=None, reference=None,
                                 date_posted=None, idempotency_key=None, actor=None,
                                 create_missing=True, project_id=None, stage_id=None,
@@ -637,7 +654,9 @@ def save_manual_cash_flow_entry(*, direction, amount, account_id, destination_ac
     rules — a category that needs a party (or a project) cannot be posted
     without one, and a party whose known type is not allowed on that category is
     refused.  The form hides those fields for a reason; this is the same rule
-    enforced where it counts.
+    enforced where it counts. ``subcategory_ids`` is the optional ordered list
+    of item types on one purchase (one amount / one ledger posting); every id
+    is resolved and checked against the selected category here.
     """
     from hdc.utils.sqlite import begin_sqlite_write
     begin_sqlite_write(db.session.connection())
@@ -680,11 +699,40 @@ def save_manual_cash_flow_entry(*, direction, amount, account_id, destination_ac
 
     cat = None
     sub = None
+    selected_subcategories = []
     if direction != CF_DIR_TRANSFER:
         cat = _cf_resolve_category(direction, category_id, category_name,
                                    required=True, create_if_missing=create_missing)
-        sub = _cf_resolve_subcategory(cat, subcategory_id, subcategory_name,
-                                      create_if_missing=create_missing)
+        raw_item_ids = (list(subcategory_ids) if isinstance(subcategory_ids, (list, tuple))
+                        else ([subcategory_ids] if subcategory_ids not in (None, '') else []))
+        if raw_item_ids:
+            if len(raw_item_ids) > MAX_CASH_FLOW_ENTRY_ITEMS:
+                raise ValueError(f'Choose no more than {MAX_CASH_FLOW_ENTRY_ITEMS} items.')
+            seen_item_ids = set()
+            for raw_item_id in raw_item_ids:
+                raw_item_id = str(raw_item_id or '').strip()
+                if not raw_item_id:
+                    continue
+                try:
+                    item_id = int(raw_item_id)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError('Choose an item from the searchable list.') from exc
+                if item_id in seen_item_ids:
+                    raise ValueError('Choose each material item only once.')
+                seen_item_ids.add(item_id)
+                item = _cf_resolve_subcategory(
+                    cat, subcategory_id=item_id, create_if_missing=False)
+                if not item.is_active:
+                    raise ValueError(f'"{item.name}" is no longer available. Choose an active item.')
+                selected_subcategories.append(item)
+
+            if (len(selected_subcategories) > 1
+                    and not category_field_rules(cat)['multiple_subcategories']):
+                raise ValueError(f'"{cat.name}" accepts one item at a time.')
+            sub = selected_subcategories[0] if selected_subcategories else None
+        else:
+            sub = _cf_resolve_subcategory(cat, subcategory_id, subcategory_name,
+                                          create_if_missing=create_missing)
 
     # ── a project receipt is about the project, not about a typed name ───────
     # The owner/client is derived from the project, so the same client can never
@@ -805,6 +853,18 @@ def save_manual_cash_flow_entry(*, direction, amount, account_id, destination_ac
     # forensic scan can find each other (was missing → register/ledger drift).
     tx.source_type = f'cash_flow_entry_{entry.direction}'
     tx.source_id = int(entry.id)
+    db.session.flush()
+
+    # Preserve every selected item as an ordered detail on the same entry.
+    # The parent remains the sole cash movement, so this does not split the
+    # amount or create extra ledger rows.
+    for index, item in enumerate(selected_subcategories):
+        entry.items.append(CashFlowEntryItem(
+            subcategory_id=int(item.id),
+            item_name=(item.name or '')[:120],
+            sort_order=index,
+            created_at=_pkt_now_naive(),
+        ))
     db.session.flush()
 
     _cf_write_audit(entry, 'Created', after=_cf_snapshot(entry), actor=actor)
@@ -939,7 +999,8 @@ def _cf_sync_project_effect_void(entry, *, make_void, reason=None):
 
 def amend_manual_cash_flow_entry(entry, *, direction=None, amount=None, account_id=None,
                                  destination_account_id=None, category_id=None, category_name=None,
-                                 subcategory_id=None, subcategory_name=None, party_id=None,
+                                 subcategory_id=None, subcategory_ids=None,
+                                 subcategory_name=None, party_id=None,
                                  party_name=None, party_type=None, description=None, note=None,
                                  reference=None, date_posted=None, reason=None, actor=None,
                                  project_id=None, stage_id=None, create_missing=True, commit=True):
@@ -955,6 +1016,18 @@ def amend_manual_cash_flow_entry(entry, *, direction=None, amount=None, account_
 
     old_snapshot = _cf_snapshot(entry)
     reason_txt = (reason or '').strip() or 'Amended'
+    replacement_subcategory_ids = subcategory_ids
+    if replacement_subcategory_ids is None and entry.items:
+        # The existing correction form edits one category/subcategory pair. If
+        # it leaves the legacy first item selected, retain the complete item
+        # list rather than quietly dropping the additional material details.
+        try:
+            unchanged_first = (subcategory_id is None or
+                               int(subcategory_id) == int(entry.subcategory_id or 0))
+        except (TypeError, ValueError):
+            unchanged_first = False
+        if unchanged_first:
+            replacement_subcategory_ids = [item.subcategory_id for item in entry.items]
 
     # 1. Reverse the old posting.
     void_manual_cash_flow_entry(
@@ -975,6 +1048,7 @@ def amend_manual_cash_flow_entry(entry, *, direction=None, amount=None, account_
         category_id=(category_id if category_id is not None else entry.category_id),
         category_name=category_name,
         subcategory_id=(subcategory_id if subcategory_id is not None else entry.subcategory_id),
+        subcategory_ids=replacement_subcategory_ids,
         subcategory_name=subcategory_name,
         party_id=(party_id if party_id is not None else entry.party_id),
         party_name=(party_name if party_name is not None else entry.party_name),
@@ -1117,7 +1191,7 @@ def register_rows(*, date_from=None, date_to=None, account_id=None, direction=No
     ``date_from`` / ``date_to`` are inclusive calendar dates; ``date_to`` is
     widened to the end of that day so a same-day entry is never cut off.
     """
-    q = CashFlowEntry.query
+    q = CashFlowEntry.query.options(selectinload(CashFlowEntry.items))
     if not include_void:
         q = q.filter(CashFlowEntry.is_void == False)  # noqa: E712
     if date_from is not None:
@@ -1180,6 +1254,10 @@ def register_row_dicts(rows):
     out = []
     for r in rows or []:
         amount = float(from_minor(r.amount_minor)) if r.amount_minor is not None else float(r.amount or 0.0)
+        item_names = [str(item.item_name or '').strip()
+                      for item in (r.items or []) if str(item.item_name or '').strip()]
+        if not item_names and r.subcategory is not None:
+            item_names = [(r.subcategory.name or '').strip()] if r.subcategory.name else []
         out.append({
             # lets the list template tag the row for "entered by" lookup
             '_hdc_entity': 'hdc_cash_flow_entry',
@@ -1197,7 +1275,8 @@ def register_row_dicts(rows):
             'destination_account_id': r.destination_account_id,
             'category': (r.category.name if r.category else ''),
             'category_id': r.category_id,
-            'subcategory': (r.subcategory.name if r.subcategory else ''),
+            'subcategory': ' · '.join(item_names),
+            'subcategories': item_names,
             'party_name': (r.party_name or ''),
             'party_type': (r.party_type or ''),
             'description': (r.description or ''),
@@ -1247,6 +1326,12 @@ def party_options(active_only=True):
     return q.order_by(CashFlowParty.name.asc()).all()
 
 
+def _supports_multiple_subcategories(category):
+    """Whether a category's entry can list several named item types."""
+    name = ' '.join(str(getattr(category, 'name', '') or '').strip().lower().split())
+    return bool(category is not None and name in _MULTI_ITEM_CATEGORY_NAMES)
+
+
 def category_field_rules(category):
     """The field rules a category carries, as a plain dict.
 
@@ -1262,6 +1347,7 @@ def category_field_rules(category):
             'party_types': (),
             'loan_effect': '',
             'project_effect': '',
+            'multiple_subcategories': False,
         }
     effect = category.project_effect_value
     return {
@@ -1273,6 +1359,7 @@ def category_field_rules(category):
         'party_types': tuple(category.allowed_party_types),
         'loan_effect': (category.loan_effect or '').strip().lower(),
         'project_effect': effect,
+        'multiple_subcategories': _supports_multiple_subcategories(category),
     }
 
 

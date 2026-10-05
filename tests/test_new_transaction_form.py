@@ -35,9 +35,9 @@ from flask import g
 from hdc.app import create_app
 from hdc.extensions import db
 from hdc.models.accounts import Account, AccountTransaction
-from hdc.models.cashflow import CashFlowEntry, CashFlowParty, CashFlowSubcategory
+from hdc.models.cashflow import CashFlowEntry, CashFlowEntryItem, CashFlowParty, CashFlowSubcategory
 from hdc.models.projects import Project
-from hdc.services.cashflow_register import category_options, subcategory_options
+from hdc.services.cashflow_register import category_options, register_row_dicts, subcategory_options
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HARNESS = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -204,6 +204,26 @@ class NewTransactionTestCase(unittest.TestCase):
             self.assertIn('{% include "accounts/_new_transaction_form.html" %}',
                           _read(template_path), template_path)
 
+    def test_material_purchase_items_are_searchable_and_can_be_added_in_rows(self):
+        html = self.client.get(MONEY_CENTER_URL).get_data(as_text=True)
+        for needle in (
+            'id="txnMaterialItemsField"',
+            'id="txnMaterialItemsList"',
+            'id="txnAddMaterialItem"',
+            'data-material-item-row',
+            'data-material-input',
+            'data-material-select',
+            'name="subcategory_ids"',
+            'Search material name',
+            'data-multiple-subcategories="true"',
+        ):
+            self.assertIn(needle, html, needle)
+        script = _read('static/hdc/js/pages/new_transaction.js')
+        self.assertIn("attachCombo(input, select", script,
+                      'each added material row must use the searchable combo list')
+        self.assertIn('addMaterialItemRow', script,
+                      'the plus button must create another material item row')
+
     def test_the_pickers_render_the_database_vocabulary(self):
         html = _html.unescape(self.client.get(NEW_TXN_URL).get_data(as_text=True))
         for account in ('Company Cash', 'Drawer Cash', 'MCB 1109'):
@@ -247,6 +267,82 @@ class NewTransactionTestCase(unittest.TestCase):
         self.assertIsNotNone(entry.account_tx_id, 'the entry must post to the ledger')
         tx = db.session.get(AccountTransaction, entry.account_tx_id)
         self.assertEqual(tx.amount_minor, entry.amount_minor)
+
+    def test_material_purchase_posts_many_items_as_one_cash_movement(self):
+        cat = self._categories()['Material & Purchase']
+        subs = self._subcategories('Material & Purchase')
+        before_entries = CashFlowEntry.query.count()
+        before_transactions = AccountTransaction.query.count()
+        response = self._submit({
+            'direction': 'out', 'date': '2026-09-22', 'amount': '42,500',
+            'account_id': self.cash.id, 'category_id': cat.id,
+            'subcategory_ids': [subs['Cement'].id, subs['Steel / Saria'].id],
+            'party_name': 'Zubair Transport', 'project_id': self.project.id,
+            'reference': 'MAT-42',
+        }, url=MONEY_CENTER_URL)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(CashFlowEntry.query.count(), before_entries + 1,
+                         'multiple item names stay on one register entry')
+        self.assertEqual(AccountTransaction.query.count(), before_transactions + 1,
+                         'the amount is posted once, not once per item')
+
+        entry = CashFlowEntry.query.order_by(CashFlowEntry.id.desc()).first()
+        items = (CashFlowEntryItem.query.filter_by(entry_id=entry.id)
+                 .order_by(CashFlowEntryItem.sort_order).all())
+        self.assertEqual([item.item_name for item in items], ['Cement', 'Steel / Saria'])
+        self.assertEqual(entry.subcategory_id, subs['Cement'].id,
+                         'the first item remains available to legacy readers')
+        self.assertEqual(entry.amount_minor, 4_250_000)
+        self.assertEqual(entry.reference, 'MAT-42')
+        self.assertEqual(register_row_dicts([entry])[0]['subcategory'], 'Cement · Steel / Saria')
+
+    def test_duplicate_material_items_are_rejected_without_posting(self):
+        cat = self._categories()['Material & Purchase']
+        cement = self._subcategories('Material & Purchase')['Cement']
+        before = CashFlowEntry.query.count()
+        response = self._submit({
+            'direction': 'out', 'date': '2026-09-22', 'amount': '100',
+            'account_id': self.cash.id, 'category_id': cat.id,
+            'subcategory_ids': [cement.id, cement.id],
+        }, follow=True)
+        self.assertIn('each material item only once', self._error_text(response))
+        self.assertEqual(CashFlowEntry.query.count(), before)
+
+    def test_only_material_purchase_accepts_multiple_items(self):
+        category = self._categories()['Labour & Wages']
+        labour_items = self._subcategories('Labour & Wages')
+        before = CashFlowEntry.query.count()
+        response = self._submit({
+            'direction': 'out', 'date': '2026-09-22', 'amount': '100',
+            'account_id': self.cash.id, 'category_id': category.id,
+            'subcategory_ids': [labour_items['Mason'].id, labour_items['Labor'].id],
+        }, follow=True)
+        self.assertIn('accepts one item at a time', self._error_text(response))
+        self.assertEqual(CashFlowEntry.query.count(), before)
+
+    def test_material_purchase_rejects_wrong_category_and_inactive_items(self):
+        categories = self._categories()
+        material_category = categories['Material & Purchase']
+        labour_item = self._subcategories('Labour & Wages')['Mason']
+        before = CashFlowEntry.query.count()
+        response = self._submit({
+            'direction': 'out', 'date': '2026-09-22', 'amount': '100',
+            'account_id': self.cash.id, 'category_id': material_category.id,
+            'subcategory_ids': [labour_item.id],
+        }, follow=True)
+        self.assertIn('not a subcategory', self._error_text(response))
+        self.assertEqual(CashFlowEntry.query.count(), before)
+
+        cement = self._subcategories('Material & Purchase')['Cement']
+        cement.is_active = False
+        db.session.commit()
+        response = self._submit({
+            'direction': 'out', 'date': '2026-09-22', 'amount': '100',
+            'account_id': self.cash.id, 'category_id': material_category.id,
+            'subcategory_ids': [cement.id],
+        }, follow=True)
+        self.assertIn('no longer available', self._error_text(response))
+        self.assertEqual(CashFlowEntry.query.count(), before)
 
     # ── Money In ─────────────────────────────────────────────────────────────
 
@@ -413,6 +509,21 @@ class NewTransactionTestCase(unittest.TestCase):
         self.assertOptionSelected(html, sub.id, 'subcategory')
         self.assertOptionSelected(html, self.cash.id, 'account')
         self.assertOptionSelected(html, self.project.id, 'project')
+
+    def test_rejected_multiple_material_items_replay_without_loss(self):
+        category = self._categories()['Material & Purchase']
+        subs = self._subcategories('Material & Purchase')
+        response = self._submit({
+            'direction': 'out', 'date': '2026-09-21', 'amount': 'not-money',
+            'account_id': self.cash.id, 'category_id': category.id,
+            'subcategory_ids': [subs['Cement'].id, subs['Steel / Saria'].id],
+        }, follow=True)
+        html = response.get_data(as_text=True)
+        self.assertIn('must be a valid number', html)
+        self.assertIn('id="txnMaterialItemInput1"', html,
+                      'the replayed form must retain a row for each item')
+        self.assertOptionSelected(html, subs['Cement'].id, 'first material item')
+        self.assertOptionSelected(html, subs['Steel / Saria'].id, 'second material item')
 
     def test_a_clean_render_does_not_replay_an_old_draft(self):
         self._submit({'direction': 'out', 'date': '2026-09-21', 'amount': '',

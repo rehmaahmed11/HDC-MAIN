@@ -4,7 +4,35 @@
 {% set dir = sel.get('direction') or '' %}
 {% set err = txn_error or '' %}
 {% set selected_rules = (category_rules or {}).get(sel.get('category_id'), {}) %}
-{% set more_has_values = v.get('party_name') or v.get('project_id') or v.get('subcategory_id') or v.get('reference') or v.get('description') or v.get('note') or selected_rules.get('party_mode') == 'required' or selected_rules.get('project_mode') == 'required' %}
+{% set more_has_values = v.get('party_name') or v.get('project_id') or v.get('subcategory_id') or v.get('subcategory_ids') or v.get('reference') or v.get('description') or v.get('note') or selected_rules.get('party_mode') == 'required' or selected_rules.get('project_mode') == 'required' %}
+{% set txn_item_ids = sel.get('subcategory_ids') or [] %}
+{% if not txn_item_ids and sel.get('subcategory_id') %}{% set txn_item_ids = [sel.get('subcategory_id')] %}{% endif %}
+{% if not txn_item_ids %}{% set txn_item_ids = [''] %}{% endif %}
+
+{% macro txn_material_item_row(index, selected_id, category_rows) %}
+<div class="hdc-txn-material-row" data-material-item-row data-row-index="{{ index }}">
+    <div class="hdc-field hdc-txn-material-picker">
+        <label class="form-label" for="txnMaterialItemInput{{ index }}">Material name <span class="hdc-optional">optional</span></label>
+        <input type="text" id="txnMaterialItemInput{{ index }}" class="form-control"
+               data-material-input data-combo-input placeholder="Search material name"
+               autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list">
+        <select name="subcategory_ids" id="txnMaterialItemSelect{{ index }}"
+                class="form-select" data-material-select disabled>
+            <option value="">Choose material…</option>
+            {% for c in category_rows %}
+                {% for s in c.subcategories if s.is_active %}
+                <option value="{{ s.id }}" data-category="{{ c.id }}"
+                        {% if selected_id and selected_id|string == s.id|string %}selected{% endif %}>{{ s.name }}</option>
+                {% endfor %}
+            {% endfor %}
+        </select>
+    </div>
+    <button type="button" class="btn btn-outline-secondary hdc-txn-material-remove"
+            data-remove-material-item aria-label="Remove material item" title="Remove item" hidden>
+        <i class="fas fa-xmark" aria-hidden="true"></i><span class="visually-hidden">Remove item</span>
+    </button>
+</div>
+{% endmacro %}
 
 <form method="POST" id="hdcTxnForm" class="hdc-txn-form" data-hdc-txn-form
       action="{{ form_action|default(url_for('hdc_new_transaction')) }}">
@@ -119,10 +147,30 @@
                         data-party-types="{{ (rules.get('party_types') or [])|join(',') }}"
                         data-loan-effect="{{ rules.get('loan_effect', '') }}"
                         data-project-effect="{{ rules.get('project_effect', '') }}"
+                        data-multiple-subcategories="{{ 'true' if rules.get('multiple_subcategories') else 'false' }}"
                         {% if sel.get('category_id') == c.id %}selected{% endif %}>{{ c.name }}</option>
                 {% endfor %}
             </select>
             <div class="hdc-field-error" data-error-for="category_id" hidden></div>
+        </div>
+
+        <div class="hdc-txn-material-items" id="txnMaterialItemsField" hidden>
+            <div class="hdc-txn-material-heading">
+                <div>
+                    <div class="form-label mb-1">Material items</div>
+                    <div class="hdc-field-hint mt-0">Search and add each material on the same purchase. Enter the total amount above.</div>
+                </div>
+                <button type="button" class="btn btn-outline-primary hdc-txn-add-material"
+                        id="txnAddMaterialItem">
+                    <i class="fas fa-plus me-1" aria-hidden="true"></i>Add item
+                </button>
+            </div>
+            <div class="hdc-txn-material-rows" id="txnMaterialItemsList">
+                {% for item_id in txn_item_ids %}
+                    {{ txn_material_item_row(loop.index0, item_id, categories) }}
+                {% endfor %}
+            </div>
+            <div class="hdc-field-error" data-error-for="subcategory_ids" hidden></div>
         </div>
 
         <details class="hdc-txn-more" id="txnMoreDetails"

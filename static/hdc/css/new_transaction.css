@@ -20,6 +20,35 @@
 .hdc-txn-core { margin-bottom: 14px; }
 .hdc-txn-category { margin-bottom: 14px; }
 .hdc-field { min-width: 0; }
+
+/* Material purchases can tag several item types on one cash movement. */
+.hdc-txn-material-items { margin: 0 0 14px; }
+.hdc-txn-material-heading {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 9px;
+}
+.hdc-txn-material-heading .form-label { font-weight: 700; }
+.hdc-txn-material-heading .hdc-field-hint { max-width: 560px; }
+.hdc-txn-material-rows { display: grid; gap: 9px; }
+.hdc-txn-material-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+    gap: 8px;
+    padding: 10px;
+    border: 1px solid var(--card-border);
+    border-radius: 11px;
+    background: var(--card-bg);
+}
+.hdc-txn-material-picker { min-width: 0; }
+.hdc-txn-material-remove,
+.hdc-txn-add-material { min-height: 44px; border-radius: 10px; font-weight: 700; }
+.hdc-txn-material-remove { min-width: 44px; padding: 8px; }
+.hdc-txn-add-material { white-space: nowrap; }
+.hdc-txn-material-row [data-material-input] { width: 100%; }
 .hdc-req { color: #dc2626; font-weight: 700; }
 .hdc-optional { color: var(--text-muted); font-size: .72rem; font-weight: 500; }
 
@@ -222,6 +251,11 @@
 }
 .hdc-form-error[hidden] { display: none !important; }
 [data-theme="dark"] .hdc-form-error { background: rgba(127,29,29,.28); border-color: #7f1d1d; color: #fecaca; }
+
+@media (max-width: 420px) {
+    .hdc-txn-material-heading { align-items: flex-start; flex-direction: column; }
+    .hdc-txn-add-material { width: 100%; }
+}
 
 @media (min-width: 576px) {
     .hdc-dir-group { grid-template-columns: repeat(3, minmax(0, 1fr)); }

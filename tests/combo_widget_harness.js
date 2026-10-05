@@ -129,6 +129,16 @@ function makeElement(tag, id) {
     addEventListener(type, fn) {
       (this._listeners[type] || (this._listeners[type] = [])).push(fn);
     },
+    removeEventListener(type, fn) {
+      const listeners = this._listeners[type] || [];
+      this._listeners[type] = listeners.filter(listener => listener !== fn);
+    },
+    removeChild(child) {
+      const index = this.children.indexOf(child);
+      if (index !== -1) this.children.splice(index, 1);
+      if (child.parentNode === this) child.parentNode = null;
+      return child;
+    },
     dispatchEvent(ev) {
       ev.target = this;
       const list = (this._listeners[ev.type] || []).slice();
@@ -199,15 +209,24 @@ const windowStub = {
   innerWidth: 1200,
   innerHeight: 800,
   MutationObserver: class {
-    constructor(callback) { this._cb = callback; this._target = null; this._options = null; }
+    constructor(callback) { this._cb = callback; this._record = null; }
     observe(target, options) {
-      this._target = target;
-      this._options = options;
-      observers.push({ target, options, callback: this._cb });
+      this._record = { target, options, callback: this._cb };
+      observers.push(this._record);
     }
-    disconnect() {}
+    disconnect() {
+      const index = observers.indexOf(this._record);
+      if (index !== -1) observers.splice(index, 1);
+    }
   },
-  addEventListener() {},
+  _listeners: {},
+  addEventListener(type, fn) {
+    (this._listeners[type] || (this._listeners[type] = [])).push(fn);
+  },
+  removeEventListener(type, fn) {
+    const listeners = this._listeners[type] || [];
+    this._listeners[type] = listeners.filter(listener => listener !== fn);
+  },
   Event: FakeEvent,
 };
 
@@ -386,6 +405,28 @@ function comboMenus() {
   assert.equal((menuHtml(menu4).match(/hdc-combo-item/g) || []).length, 1,
     'hidden dependent option is excluded from searchable suggestions');
   assert.ok(!/Other project stage/.test(menuHtml(menu4)));
+
+  // 12. destroy detaches listeners/observers and removes the document-level menu.
+  const beforeResizeListeners = (windowStub._listeners.resize || []).length;
+  const beforeScrollListeners = (windowStub._listeners.scroll || []).length;
+  const beforeObserverCount = observers.length;
+  const f5 = buildField('inp5', 'sel5', [
+    mkopt('', 'Select'),
+    mkopt('31', 'Material'),
+  ]);
+  const combo5 = HDCComboList.attach('inp5', 'sel5', { strict: true });
+  const menu5 = comboMenus()[comboMenus().length - 1];
+  assert.equal((windowStub._listeners.resize || []).length, beforeResizeListeners + 1);
+  assert.equal((windowStub._listeners.scroll || []).length, beforeScrollListeners + 1);
+  assert.equal(observers.length, beforeObserverCount + 2);
+  combo5.destroy();
+  combo5.destroy(); // destroying twice is safe
+  assert.equal(menu5.parentNode, null, 'destroy removes the menu from <body>');
+  assert.equal((windowStub._listeners.resize || []).length, beforeResizeListeners);
+  assert.equal((windowStub._listeners.scroll || []).length, beforeScrollListeners);
+  assert.equal(observers.length, beforeObserverCount, 'destroy disconnects mutation observers');
+  assert.equal((f5.input._listeners.focus || []).length, 0, 'destroy removes input listeners');
+  assert.equal((f5.select._listeners.change || []).length, 0, 'destroy removes select listeners');
 
   console.log('combo widget harness: all assertions passed');
 })().catch(err => {

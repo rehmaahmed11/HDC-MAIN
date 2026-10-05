@@ -146,6 +146,11 @@
         var subcategoryField = byId('txnSubcategoryField');
         var subcategorySelect = byId('txnSubcategory');
         var subcategoryHint = byId('txnSubcategoryHint');
+        var materialItemsField = byId('txnMaterialItemsField');
+        var materialItemsList = byId('txnMaterialItemsList');
+        var addMaterialItemButton = byId('txnAddMaterialItem');
+        var materialRowCounter = 0;
+        var maxMaterialItems = 20;
         var moreDetails = byId('txnMoreDetails');
         var whoBlock = byId('txnWhoBlock');
         var partyField = byId('txnPartyField');
@@ -300,6 +305,10 @@
             if (!option) return fallback;
             var value = (option.getAttribute('data-' + name) || '').trim().toLowerCase();
             return value || fallback;
+        }
+
+        function categorySupportsMultipleSubcategories() {
+            return categoryRule('multiple-subcategories', 'false') === 'true';
         }
 
         function allowedPartyTypes() {
@@ -503,6 +512,51 @@
             }
         }
 
+        function materialItemRows() {
+            return materialItemsList
+                ? Array.prototype.slice.call(materialItemsList.querySelectorAll('[data-material-item-row]'))
+                : [];
+        }
+
+        function filterMaterialItemRows(enabled, categoryId) {
+            if (!materialItemsList) return;
+            var rows = materialItemRows();
+            rows.forEach(function (row) {
+                var select = row.querySelector('[data-material-select]');
+                var input = row.querySelector('[data-material-input]');
+                if (select) {
+                    Array.prototype.forEach.call(select.options, function (option) {
+                        if (!option.value) {
+                            option.hidden = false;
+                            option.disabled = false;
+                            return;
+                        }
+                        var owns = !!categoryId && option.getAttribute('data-category') === categoryId;
+                        option.hidden = !owns;
+                        option.disabled = !owns;
+                    });
+                    var selected = select.options[select.selectedIndex];
+                    if (selected && selected.value && (selected.hidden || selected.disabled)) {
+                        select.value = '';
+                        if (input) input.value = '';
+                    }
+                    select.disabled = !enabled;
+                    if (input && input.__hdcMaterialCombo && input.__hdcMaterialCombo.syncFromSelect) {
+                        input.__hdcMaterialCombo.syncFromSelect();
+                    }
+                }
+                if (input) input.disabled = !enabled;
+            });
+            if (addMaterialItemButton) {
+                addMaterialItemButton.disabled = !enabled || rows.length >= maxMaterialItems;
+                addMaterialItemButton.setAttribute('aria-disabled', addMaterialItemButton.disabled ? 'true' : 'false');
+            }
+            rows.forEach(function (row) {
+                var remove = row.querySelector('[data-remove-material-item]');
+                if (remove) remove.hidden = rows.length <= 1;
+            });
+        }
+
         function filterSubcategories() {
             if (!subcategorySelect) return;
             var categoryId = categorySelect ? categorySelect.value : '';
@@ -520,17 +574,20 @@
             if (selected && selected.value && (selected.hidden || selected.disabled)) {
                 subcategorySelect.value = '';
             }
+            var multiItems = categorySupportsMultipleSubcategories()
+                && currentDirection() !== DIRECTION_TRANSFER;
             if (subcategoryField) {
-                subcategoryField.hidden = !visible || currentDirection() === DIRECTION_TRANSFER;
+                subcategoryField.hidden = !visible || currentDirection() === DIRECTION_TRANSFER || multiItems;
             }
-            if (subcategorySelect) {
-                subcategorySelect.disabled = currentDirection() === DIRECTION_TRANSFER || !visible;
-            }
+            subcategorySelect.disabled = currentDirection() === DIRECTION_TRANSFER || !visible || multiItems;
+            if (materialItemsField) materialItemsField.hidden = !multiItems;
+            filterMaterialItemRows(multiItems, categoryId);
             if (subcategoryHint) {
                 subcategoryHint.textContent = '';
                 subcategoryHint.hidden = true;
             }
             setFieldError(form, 'subcategory_id', '');
+            if (multiItems) setFieldError(form, 'subcategory_ids', '');
         }
 
         /* ── 3. account / party / project pickers ────────────────────────── */
@@ -563,8 +620,8 @@
 
         function attachCombo(inputId, selectId, comboOptions) {
             if (!window.HDCComboList) return null;
-            var input = byId(inputId);
-            var select = byId(selectId);
+            var input = typeof inputId === 'string' ? byId(inputId) : inputId;
+            var select = typeof selectId === 'string' ? byId(selectId) : selectId;
             if (!input || !select) return null;
             var combo = window.HDCComboList.attach(input, select, comboOptions);
             if (combo && comboOptions && comboOptions.onAdd) {
@@ -576,6 +633,115 @@
                 });
             }
             return combo;
+        }
+
+        function wireMaterialItemRow(row) {
+            if (!row) return;
+            var input = row.querySelector('[data-material-input]');
+            var select = row.querySelector('[data-material-select]');
+            var remove = row.querySelector('[data-remove-material-item]');
+            if (input && select && !input.__hdcMaterialCombo) {
+                input.__hdcMaterialCombo = attachCombo(input, select, {
+                    strict: true,
+                    includeEmpty: true,
+                    maxItems: 50,
+                    emptyText: 'No material names found.'
+                });
+                input.addEventListener('focus', function () {
+                    input.setAttribute('aria-expanded', 'true');
+                });
+                input.addEventListener('blur', function () {
+                    input.setAttribute('aria-expanded', 'false');
+                });
+            }
+            if (select && !select.__hdcMaterialChangeWired) {
+                select.__hdcMaterialChangeWired = true;
+                select.addEventListener('change', function () {
+                    setFieldError(form, 'subcategory_ids', '');
+                });
+            }
+            if (remove && !remove.__hdcMaterialRemoveWired) {
+                remove.__hdcMaterialRemoveWired = true;
+                remove.addEventListener('click', function () {
+                    var rows = materialItemRows();
+                    if (rows.length <= 1 || !materialItemsList) return;
+                    if (input && input.__hdcMaterialCombo
+                            && typeof input.__hdcMaterialCombo.destroy === 'function') {
+                        input.__hdcMaterialCombo.destroy();
+                    }
+                    materialItemsList.removeChild(row);
+                    filterMaterialItemRows(categorySupportsMultipleSubcategories(),
+                        categorySelect ? categorySelect.value : '');
+                    setFieldError(form, 'subcategory_ids', '');
+                });
+            }
+            var rowIndex = parseInt(row.getAttribute('data-row-index') || '-1', 10);
+            if (isFinite(rowIndex) && rowIndex > materialRowCounter) materialRowCounter = rowIndex;
+        }
+
+        function ensureMaterialItemCombos() {
+            materialItemRows().forEach(wireMaterialItemRow);
+        }
+
+        function addMaterialItemRow() {
+            if (!materialItemsList || !categorySupportsMultipleSubcategories()) return;
+            var rows = materialItemRows();
+            if (!rows.length || rows.length >= maxMaterialItems) return;
+            var row = rows[0].cloneNode(true);
+            var rowIndex = ++materialRowCounter;
+            var input = row.querySelector('[data-material-input]');
+            var select = row.querySelector('[data-material-select]');
+            var remove = row.querySelector('[data-remove-material-item]');
+            var label = row.querySelector('label');
+            if (input) {
+                input.id = 'txnMaterialItemInput' + rowIndex;
+                input.value = '';
+                input.disabled = false;
+                input.removeAttribute('aria-controls');
+                input.removeAttribute('aria-expanded');
+                input.__hdcMaterialCombo = null;
+            }
+            if (label && input) label.setAttribute('for', input.id);
+            if (select) {
+                select.id = 'txnMaterialItemSelect' + rowIndex;
+                select.value = '';
+                select.disabled = false;
+                select.__hdcMaterialChangeWired = false;
+            }
+            if (remove) remove.hidden = false;
+            row.setAttribute('data-row-index', rowIndex);
+            materialItemsList.appendChild(row);
+            wireMaterialItemRow(row);
+            filterMaterialItemRows(true, categorySelect ? categorySelect.value : '');
+            if (input) input.focus();
+        }
+
+        function clearMaterialItemRows() {
+            if (!materialItemsList) return;
+            var rows = materialItemRows();
+            rows.slice(1).forEach(function (row) {
+                var input = row.querySelector('[data-material-input]');
+                if (input && input.__hdcMaterialCombo
+                        && typeof input.__hdcMaterialCombo.destroy === 'function') {
+                    input.__hdcMaterialCombo.destroy();
+                }
+                materialItemsList.removeChild(row);
+            });
+            var first = materialItemRows()[0];
+            if (first) {
+                var input = first.querySelector('[data-material-input]');
+                var select = first.querySelector('[data-material-select]');
+                if (input) input.value = '';
+                if (select) {
+                    select.value = '';
+                    if (input && input.__hdcMaterialCombo
+                            && input.__hdcMaterialCombo.syncFromSelect) {
+                        input.__hdcMaterialCombo.syncFromSelect();
+                    }
+                }
+            }
+            filterMaterialItemRows(false, categorySelect ? categorySelect.value : '');
+            if (materialItemsField) materialItemsField.hidden = true;
         }
 
         function ensureCombos() {
@@ -612,6 +778,7 @@
                     onAdd: function () { openAddModal('project'); }
                 });
             }
+            ensureMaterialItemCombos();
         }
 
         /* ── 4. "+ Add New …" modals ─────────────────────────────────────── */
@@ -816,7 +983,7 @@
             clearErrors(form);
             var firstBad = null;
             function fail(field, message, control) {
-                setFieldError(form, field, message);
+                setFieldError(form, field, message, control);
                 if (!firstBad) firstBad = control || form.querySelector('[name="' + field + '"]');
             }
 
@@ -850,14 +1017,34 @@
                 if (categorySelect && !categorySelect.value) {
                     fail('category_id', 'Choose a category.', categorySelect);
                 }
-                var sub = subcategorySelect && subcategorySelect.value
-                    ? subcategorySelect.options[subcategorySelect.selectedIndex] : null;
-                if (sub && categorySelect && sub.getAttribute('data-category') !== categorySelect.value) {
-                    /* Belt and braces: the picker clears this itself, but a
-                       hand-edited DOM must not be able to smuggle it through. */
-                    subcategorySelect.value = '';
-                    fail('subcategory_id', 'That subcategory does not belong to the chosen category.',
-                        subcategorySelect);
+                if (categorySupportsMultipleSubcategories()) {
+                    var seenMaterialIds = Object.create(null);
+                    materialItemRows().forEach(function (row) {
+                        var input = row.querySelector('[data-material-input]');
+                        var select = row.querySelector('[data-material-select]');
+                        var itemId = select ? select.value : '';
+                        var option = select && select.selectedIndex >= 0
+                            ? select.options[select.selectedIndex] : null;
+                        if (!itemId && input && input.value.trim()) {
+                            fail('subcategory_ids', 'Choose a material name from the search list.', input);
+                        } else if (itemId && option && categorySelect
+                                && option.getAttribute('data-category') !== categorySelect.value) {
+                            fail('subcategory_ids', 'Choose a material from this category.', input);
+                        } else if (itemId && seenMaterialIds[itemId]) {
+                            fail('subcategory_ids', 'Remove duplicate material items.', input);
+                        }
+                        if (itemId) seenMaterialIds[itemId] = true;
+                    });
+                } else {
+                    var sub = subcategorySelect && subcategorySelect.value
+                        ? subcategorySelect.options[subcategorySelect.selectedIndex] : null;
+                    if (sub && categorySelect && sub.getAttribute('data-category') !== categorySelect.value) {
+                        /* Belt and braces: the picker clears this itself, but a
+                           hand-edited DOM must not be able to smuggle it through. */
+                        subcategorySelect.value = '';
+                        fail('subcategory_id', 'That subcategory does not belong to the chosen category.',
+                            subcategorySelect);
+                    }
                 }
                 /* The category decides whether a party / project is required;
                    the server checks the same rules again. */
@@ -916,6 +1103,9 @@
         }
 
         directionSelect.addEventListener('change', applyDirection);
+        if (addMaterialItemButton) {
+            addMaterialItemButton.addEventListener('click', addMaterialItemRow);
+        }
         if (categorySelect) {
             categorySelect.addEventListener('change', function () {
                 filterSubcategories();
@@ -945,6 +1135,7 @@
         if (resetButton) {
             resetButton.addEventListener('click', function () {
                 form.reset();
+                clearMaterialItemRows();
                 if (moreDetails) moreDetails.open = false;
                 clearErrors(form);
                 setDirection('', { silent: true });
