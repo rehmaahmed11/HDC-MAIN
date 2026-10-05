@@ -253,6 +253,20 @@ identity itself is on Tracking and the one-tool position page. Creating a
 rental has its own page (`/hdc/tool-rental/new`), opened by the hub's
 **New Rental** action.
 
+### Tracking and Reports: compact list, full details on demand
+
+Tracking is grouped by the **current site, customer, or warehouse** rather than
+repeating one row for every tool. Each row previews tool types and quantities
+at that location; **View** opens a scrollable detail with every tool/rental
+holding, its full current movement path, and the tool movement log. Selecting a
+site filters to that current site, including partial transfers.
+
+Reports keep one summary row per site or individual outside customer. **View**
+opens the site's tool totals, rental line items, and complete movement paths.
+The detailed rental register also stays compact: use its **View** action for the
+full rental record. Customer groups are keyed by customer name, so unrelated
+external customers are never combined into one project bucket.
+
 ---
 
 ## 7. Demo data

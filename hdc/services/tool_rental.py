@@ -563,20 +563,14 @@ def global_tool_locations(search_tool_id=None, search_project_id=None, search_te
                       .order_by(ToolMovementLog.timestamp.asc(), ToolMovementLog.id.asc())
                       .all())
         if search_project_id:
-            has_match = False
-            if last_log and last_log.rental_id:
-                rental = db.session.get(ToolRental, last_log.rental_id)
-                if rental and int(rental.project_id or 0) == int(search_project_id):
-                    has_match = True
-            if not has_match:
-                exists = (db.session.query(ToolRentalItem.id)
-                          .join(ToolRental, ToolRental.id == ToolRentalItem.rental_id)
-                          .filter(ToolRentalItem.tool_id == tool.id,
-                                  ToolRental.project_id == search_project_id,
-                                  ToolRentalItem.qty_pending > 0)
-                          .first())
-                if exists:
-                    has_match = True
+            # The current position ledger is authoritative. Looking only at a
+            # rental's origin or the tool's last movement misses partial
+            # transfers that are still held at a site after later movements.
+            has_match = bool(ledger_row and any(
+                holding.get('loc_type') == 'own_project'
+                and int(holding.get('project_id') or 0) == int(search_project_id)
+                for holding in ledger_row.get('holdings', [])
+            ))
             if not has_match:
                 continue
         if ledger_row:

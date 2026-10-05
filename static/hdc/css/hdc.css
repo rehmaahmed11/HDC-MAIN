@@ -1254,21 +1254,19 @@ tr[data-hdc-void="1"] > td .text-warning {
 
 .tools-chain-arrow { opacity: 0.45; font-weight: 800; }
 
-/* Global tool tracking: keep the wide audit table aligned, but let the table
-   itself scroll on smaller screens rather than letting long location names
-   stretch the page. */
+/* Tracking keeps the first glance short: one compact row per location. The
+   complete tool holdings and long movement paths live in the View modal. */
 .tool-tracking-table {
     width: 100%;
-    min-width: 1080px;
+    min-width: 820px;
     table-layout: fixed;
 }
 
-.tool-tracking-table .tracking-tool-col { width: 16%; }
-.tool-tracking-table .tracking-stock-col { width: 12%; }
-.tool-tracking-table .tracking-current-col { width: 17%; }
-.tool-tracking-table .tracking-chain-col { width: 25%; }
-.tool-tracking-table .tracking-movement-col { width: 18%; }
-.tool-tracking-table .tracking-action-col { width: 12%; }
+.tool-tracking-table .tracking-location-col { width: 26%; }
+.tool-tracking-table .tracking-tools-col { width: 39%; }
+.tool-tracking-table .tracking-qty-col { width: 10%; }
+.tool-tracking-table .tracking-rentals-col { width: 15%; }
+.tool-tracking-table .tracking-action-col { width: 10%; }
 
 .tool-tracking-table thead th {
     white-space: normal;
@@ -1277,21 +1275,25 @@ tr[data-hdc-void="1"] > td .text-warning {
 }
 
 .tool-tracking-table tbody td {
-    vertical-align: top;
+    vertical-align: middle;
     overflow-wrap: anywhere;
 }
 
 .tool-tracking-table .tool-row { border-left: 4px solid transparent; }
 .tool-tracking-table .tool-row.has-pending { border-left-color: #f59e0b; }
 
-.tool-tracking-tool-name {
+.tool-tracking-preview {
     display: block;
-    overflow-wrap: anywhere;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
 }
 
 .tool-tracking-current {
     display: inline-flex;
-    align-items: flex-start;
+    align-items: center;
     gap: 5px;
     max-width: 100%;
     padding: 6px 10px;
@@ -1301,7 +1303,7 @@ tr[data-hdc-void="1"] > td .text-warning {
     overflow-wrap: anywhere;
 }
 
-.tool-tracking-current > i { flex: 0 0 auto; margin-top: .15em; }
+.tool-tracking-current > i { flex: 0 0 auto; }
 
 .tool-tracking-chain {
     display: flex;
@@ -1334,10 +1336,8 @@ tr[data-hdc-void="1"] > td .text-warning {
 }
 
 .tool-tracking-chain .arrow { flex: 0 0 auto; opacity: .4; font-weight: 800; }
-.tool-tracking-movement-labels { overflow-wrap: anywhere; }
 .tool-tracking-movement-type { white-space: normal; overflow-wrap: anywhere; }
-.tool-tracking-actions .btn { white-space: nowrap; }
-.tool-tracking-detail-table { min-width: 600px; }
+.tool-tracking-detail-table { min-width: 720px; }
 .tool-tracking-detail-table thead th,
 .tool-tracking-detail-table tbody td {
     white-space: normal;
@@ -1345,6 +1345,45 @@ tr[data-hdc-void="1"] > td .text-warning {
 }
 .tool-tracking-modal .tools-chip { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 .tool-tracking-modal .modal-body { min-width: 0; }
+.tool-tracking-modal td[rowspan] { vertical-align: middle; }
+
+.tool-report-location-table { min-width: 700px; }
+.tool-report-rentals-table { min-width: 980px; }
+.tool-report-detail-table { min-width: 560px; }
+.tool-report-location-modal .modal-body { min-width: 0; }
+.tool-report-rental-detail {
+    padding: 14px;
+    margin-bottom: 12px;
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    background: var(--card-bg);
+}
+.tool-report-chain {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 10px;
+    border: 1px solid var(--card-border);
+    border-radius: 10px;
+    background: var(--card-header-bg);
+}
+.tool-report-chain-step {
+    max-width: 100%;
+    padding: 4px 10px;
+    border: 1px solid var(--card-border);
+    border-radius: 999px;
+    background: var(--card-bg);
+    font-size: .75rem;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+.tool-report-chain-step.current {
+    color: #fff;
+    border-color: transparent;
+    background: linear-gradient(135deg, #16a34a, #22c55e);
+}
+.tool-report-chain-arrow { flex: 0 0 auto; opacity: .45; font-weight: 800; }
 
 .tools-recon-total {
     font-size: 1.05rem;
