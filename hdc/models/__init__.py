@@ -8,7 +8,7 @@ from hdc.models.projects import CustomFormula, Estimation, EstimationStage, Proj
 from hdc.models.shared_expenses import SharedExpense, SharedExpenseShare, SharedParty, SharedSettlement
 from hdc.models.subcontract import SubcontractAttendance, SubcontractEvent, SubcontractLabourAttendance, SubcontractLabourPayment, SubcontractLabourWorker, SubcontractPayment, SubcontractTeamAttendance, Subcontractor
 from hdc.models.workforce import Attendance, AttendanceDay, AttendanceMark, LabourLedger, LabourRateHistory, PayrollItem, PayrollRun, TimeEntry, Worker, WorkerRate, WorkerTrade
-from hdc.models.cashflow import AccountReconciliation, CashDayAccountPosition, CashDayLock, CashFlowCategory, CashFlowEntry, CashFlowEntryAudit, CashFlowParty, CashFlowSubcategory
+from hdc.models.cashflow import AccountReconciliation, CashDayAccountPosition, CashDayLock, CashFlowCategory, CashFlowEntry, CashFlowEntryAudit, CashFlowEntryItem, CashFlowParty, CashFlowSubcategory
 from hdc.models.loans import Loan, LoanMovement
 from hdc.models.tool_rental import Tool, ToolCategory, ToolMovementLog, ToolRental, ToolRentalAccountTxn, ToolRentalDiscount, ToolRentalItem, ToolRentalPayment, ToolRentalReturn, ToolRentalReturnItem, ToolRentalTransfer, ToolRentalTransferItem
 
@@ -28,6 +28,7 @@ __all__ = [
     "CashFlowCategory",
     "CashFlowEntry",
     "CashFlowEntryAudit",
+    "CashFlowEntryItem",
     "CashFlowParty",
     "CashFlowSubcategory",
     "CustomFormula",

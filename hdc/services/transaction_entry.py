@@ -44,6 +44,7 @@ from hdc.models.cashflow import CashFlowCategory, CashFlowSubcategory
 from hdc.models.projects import Project
 from hdc.services.accounts import _create_account
 from hdc.services.cashflow_register import (
+    MAX_CASH_FLOW_ENTRY_ITEMS,
     _cf_normalize_direction,
     category_options,
     category_rules_map,
@@ -51,6 +52,7 @@ from hdc.services.cashflow_register import (
     party_type_options,
     save_manual_cash_flow_entry,
     save_cf_party,
+    subcategory_options,
 )
 from hdc.services.lookups import _next_project_code
 from hdc.utils.dates import _pkt_now_naive, _pkt_today
@@ -99,6 +101,7 @@ ENTRY_FORM_FIELDS = (
     'destination_account_id',
     'category_id',
     'subcategory_id',
+    'subcategory_ids',
     'party_name',
     'party_type',
     'project_id',
@@ -135,7 +138,23 @@ def entry_form_values(form):
     Only :data:`ENTRY_FORM_FIELDS` survive, so nothing a caller happens to put
     in ``request.form`` can leak into the session draft.
     """
-    return {name: (form.get(name) or '').strip() for name in ENTRY_FORM_FIELDS}
+    values = {}
+    for name in ENTRY_FORM_FIELDS:
+        if name == 'subcategory_ids':
+            continue
+        values[name] = (form.get(name) or '').strip()
+
+    getlist = getattr(form, 'getlist', None)
+    if callable(getlist):
+        raw_items = getlist('subcategory_ids')
+    else:
+        raw_items = form.get('subcategory_ids') or []
+        if not isinstance(raw_items, (list, tuple)):
+            raw_items = [raw_items]
+    values['subcategory_ids'] = [str(value).strip() for value in raw_items if str(value or '').strip()]
+    if values['subcategory_ids'] and not values.get('subcategory_id'):
+        values['subcategory_id'] = values['subcategory_ids'][0]
+    return values
 
 
 def create_entry_from_form(form, *, actor=None, commit=True):
@@ -147,6 +166,12 @@ def create_entry_from_form(form, *, actor=None, commit=True):
     subcategory pairing, project, day lock, overdraft — lives in the engine and
     stays authoritative; this function only marshals the request.
     """
+    getlist = getattr(form, 'getlist', None)
+    subcategory_ids = getlist('subcategory_ids') if callable(getlist) else form.get('subcategory_ids')
+    if subcategory_ids is None:
+        subcategory_ids = []
+    elif not isinstance(subcategory_ids, (list, tuple)):
+        subcategory_ids = [subcategory_ids]
     return save_manual_cash_flow_entry(
         direction=form.get('direction'),
         amount=form.get('amount'),
@@ -155,6 +180,7 @@ def create_entry_from_form(form, *, actor=None, commit=True):
         category_id=(_payload_int(form, 'category_id') or None),
         category_name=(form.get('category_name') or '').strip() or None,
         subcategory_id=(_payload_int(form, 'subcategory_id') or None),
+        subcategory_ids=subcategory_ids,
         subcategory_name=(form.get('subcategory_name') or '').strip() or None,
         party_id=(_payload_int(form, 'party_id') or None),
         party_name=(form.get('party_name') or '').strip() or None,
@@ -207,8 +233,18 @@ def pop_entry_form():
         # draft, so a caller can merge something else underneath (a deep-link
         # pre-fill) without the blanks silently overwriting it.
         return {}, ''
-    clean = {name: values.get(name, '') for name in ENTRY_FORM_FIELDS}
-    clean = {k: (v if isinstance(v, str) else str(v or '')) for k, v in clean.items()}
+    clean = {}
+    for name in ENTRY_FORM_FIELDS:
+        raw = values.get(name, '')
+        if name == 'subcategory_ids':
+            if isinstance(raw, (list, tuple)):
+                clean[name] = [str(value).strip() for value in raw if str(value or '').strip()]
+            elif str(raw or '').strip():
+                clean[name] = [str(raw).strip()]
+            else:
+                clean[name] = []
+        else:
+            clean[name] = raw if isinstance(raw, str) else str(raw or '')
     return clean, str(error)
 
 
@@ -272,6 +308,32 @@ def money_accounts(active_only=True):
     return q.order_by(Account.name.asc(), Account.id.asc()).all()
 
 
+def _selected_subcategory_ids(category_id, values):
+    """Active item ids from a saved form draft, scoped to its selected category."""
+    raw = (values or {}).get('subcategory_ids') or []
+    if not isinstance(raw, (list, tuple)):
+        raw = [raw]
+    if not raw and (values or {}).get('subcategory_id'):
+        raw = [(values or {}).get('subcategory_id')]
+    if not category_id:
+        return []
+    try:
+        available = {int(row.id) for row in subcategory_options(int(category_id))}
+    except (TypeError, ValueError):
+        return []
+    selected = []
+    for value in raw:
+        try:
+            item_id = int(str(value or '').strip())
+        except (TypeError, ValueError):
+            continue
+        if item_id in available:
+            selected.append(item_id)
+            if len(selected) >= MAX_CASH_FLOW_ENTRY_ITEMS:
+                break
+    return selected
+
+
 def entry_form_context(form_values=None, error=None):
     """The template data the New Transaction form renders from.
 
@@ -286,20 +348,26 @@ def entry_form_context(form_values=None, error=None):
     """
     values = dict(form_values or {})
     today = _pkt_today().isoformat()
+    category_id = _payload_int(values, 'category_id')
+    selected_item_ids = _selected_subcategory_ids(category_id, values)
+    selected_subcategory_id = (_payload_int(values, 'subcategory_id') or
+                               (selected_item_ids[0] if selected_item_ids else None))
+    selection = resolve_entry_selection(
+        direction=values.get('direction'),
+        account_id=_payload_int(values, 'account_id'),
+        destination_account_id=_payload_int(values, 'destination_account_id'),
+        category_id=category_id,
+        subcategory_id=selected_subcategory_id,
+        project_id=_payload_int(values, 'project_id'),
+    )
+    selection['subcategory_ids'] = selected_item_ids
     return {
         # A fresh key per render: the engine turns the second post of the same
         # key into a no-op, so a double-click can never post the money twice.
         'form_token': secrets.token_hex(16),
         'txn_values': values,
         'txn_error': error or '',
-        'txn_selection': resolve_entry_selection(
-            direction=values.get('direction'),
-            account_id=_payload_int(values, 'account_id'),
-            destination_account_id=_payload_int(values, 'destination_account_id'),
-            category_id=_payload_int(values, 'category_id'),
-            subcategory_id=_payload_int(values, 'subcategory_id'),
-            project_id=_payload_int(values, 'project_id'),
-        ),
+        'txn_selection': selection,
         'txn_date_value': values.get('date') or today,
         'txn_today': today,
         # The pickers' vocabulary.  Everything comes from the register tables —

@@ -224,18 +224,17 @@
                     }
                 }
 
-                input.addEventListener('focus', render);
-                input.addEventListener('input', function () {
+                var destroyed = false;
+                var onFocus = function () { render(); };
+                var onInput = function () {
                     if (opts.clearOnInput !== false) select.value = '';
                     render();
-                });
+                };
                 // Keep the visible label in sync when another page control
                 // changes the hidden select (dependent pickers, modal
                 // preselection, or a server-driven option refresh).
-                select.addEventListener('change', function () { syncFromSelect(true); });
-                window.addEventListener('resize', placeMenu);
-                window.addEventListener('scroll', placeMenu, true);
-                input.addEventListener('keydown', function (e) {
+                var onSelectChange = function () { syncFromSelect(true); };
+                var onKeydown = function (e) {
                     if (menu.classList.contains('d-none')) return;
                     if (e.key === 'ArrowDown') {
                         e.preventDefault();
@@ -251,45 +250,79 @@
                     } else if (e.key === 'Escape') {
                         menu.classList.add('d-none');
                     }
-                });
-                input.addEventListener('blur', function () {
+                };
+                var onBlur = function () {
                     setTimeout(function () {
+                        if (destroyed) return;
                         syncByExact();
                         menu.classList.add('d-none');
                     }, 120);
-                });
-                menu.addEventListener('mousemove', function (e) {
+                };
+                var onMenuMousemove = function (e) {
                     var row = e.target.closest('.hdc-combo-item');
                     if (!row) return;
                     state.idx = parseInt(row.getAttribute('data-idx') || '-1', 10);
                     highlight();
-                });
-                menu.addEventListener('mousedown', function (e) {
+                };
+                var onMenuMousedown = function (e) {
                     var row = e.target.closest('.hdc-combo-item');
                     if (!row) return;
                     e.preventDefault();
                     pick(parseInt(row.getAttribute('data-idx') || '-1', 10));
-                });
+                };
+
+                input.addEventListener('focus', onFocus);
+                input.addEventListener('input', onInput);
+                select.addEventListener('change', onSelectChange);
+                window.addEventListener('resize', placeMenu);
+                window.addEventListener('scroll', placeMenu, true);
+                input.addEventListener('keydown', onKeydown);
+                input.addEventListener('blur', onBlur);
+                menu.addEventListener('mousemove', onMenuMousemove);
+                menu.addEventListener('mousedown', onMenuMousedown);
 
                 // Page code rebuilds these selects as direction / type /
                 // project change and rewrites option labels when balances
                 // refresh; mirror every such change into the input text.
+                var optionsObserver = null;
+                var requiredObserver = null;
                 if (window.MutationObserver) {
-                    new MutationObserver(function () { syncFromSelect(false); })
-                        .observe(select, { childList: true, subtree: true });
-                    new MutationObserver(function () {
+                    optionsObserver = new MutationObserver(function () { syncFromSelect(false); });
+                    optionsObserver.observe(select, { childList: true, subtree: true });
+                    requiredObserver = new MutationObserver(function () {
                         if (requiredEchoGuard) {
                             requiredEchoGuard = false;
                             return;
                         }
                         syncRequired();
-                    }).observe(select, { attributes: true, attributeFilter: ['required'] });
+                    });
+                    requiredObserver.observe(select, { attributes: true, attributeFilter: ['required'] });
                 }
                 syncRequired();
 
                 return {
                     refresh: render,
-                    syncFromSelect: function () { syncFromSelect(true); }
+                    syncFromSelect: function () { syncFromSelect(true); },
+                    destroy: function () {
+                        if (destroyed) return;
+                        destroyed = true;
+                        input.removeEventListener('focus', onFocus);
+                        input.removeEventListener('input', onInput);
+                        input.removeEventListener('keydown', onKeydown);
+                        input.removeEventListener('blur', onBlur);
+                        select.removeEventListener('change', onSelectChange);
+                        menu.removeEventListener('mousemove', onMenuMousemove);
+                        menu.removeEventListener('mousedown', onMenuMousedown);
+                        window.removeEventListener('resize', placeMenu);
+                        window.removeEventListener('scroll', placeMenu, true);
+                        if (optionsObserver) optionsObserver.disconnect();
+                        if (requiredObserver) requiredObserver.disconnect();
+                        menu.classList.add('d-none');
+                        if (menu.parentNode) menu.parentNode.removeChild(menu);
+                        if (input.getAttribute('aria-controls') === menu.id) {
+                            input.removeAttribute('aria-controls');
+                        }
+                    }
                 };
             }
         };

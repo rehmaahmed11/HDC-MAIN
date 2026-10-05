@@ -34,6 +34,7 @@ __all__ = [
     "CashFlowCategory",
     "CashFlowEntry",
     "CashFlowEntryAudit",
+    "CashFlowEntryItem",
     "CashFlowParty",
     "CashFlowSubcategory",
 ]
@@ -256,6 +257,14 @@ class CashFlowEntry(db.Model):
     account_tx = db.relationship('AccountTransaction', foreign_keys=[account_tx_id])
     project = db.relationship('Project', foreign_keys=[project_id])
     stage = db.relationship('Stage', foreign_keys=[stage_id])
+    # A single cash movement may cover more than one material type.  Keep the
+    # original subcategory_id as the first-item compatibility field and retain
+    # the complete, ordered item list below.
+    items = db.relationship(
+        'CashFlowEntryItem',
+        back_populates='entry',
+        order_by='CashFlowEntryItem.sort_order',
+    )
 
     @property
     def entry_date(self):
@@ -274,6 +283,35 @@ class CashFlowEntry(db.Model):
 
     def __repr__(self):  # pragma: no cover - debugging aid
         return f"<CashFlowEntry {self.id}:{self.direction}:{self.amount}>"
+
+
+class CashFlowEntryItem(db.Model):
+    """A named item/type included in one cash-flow entry.
+
+    A material purchase is still one cash movement with one amount and one
+    ledger posting.  These detail rows let the operator tag that movement with
+    several material types while preserving the historical single
+    ``CashFlowEntry.subcategory_id`` field (which points at the first item).
+    ``item_name`` is a snapshot so later renaming/deactivating a subcategory
+    cannot rewrite what an old receipt contained.
+    """
+
+    __tablename__ = 'hdc_cash_flow_entry_item'
+    id = db.Column(db.Integer, primary_key=True)
+    entry_id = db.Column(db.Integer, db.ForeignKey('hdc_cash_flow_entry.id'),
+                         nullable=False)
+    subcategory_id = db.Column(db.Integer,
+                               db.ForeignKey('hdc_cash_flow_subcategory.id'),
+                               nullable=False)
+    item_name = db.Column(db.String(120), nullable=False)
+    sort_order = db.Column(db.Integer, default=0, nullable=False)
+    created_at = db.Column(db.DateTime, default=_pkt_now_naive)
+
+    entry = db.relationship('CashFlowEntry', back_populates='items')
+    subcategory = db.relationship('CashFlowSubcategory')
+
+    def __repr__(self):  # pragma: no cover - debugging aid
+        return f"<CashFlowEntryItem {self.id}:{self.item_name!r}>"
 
 
 class CashFlowEntryAudit(db.Model):

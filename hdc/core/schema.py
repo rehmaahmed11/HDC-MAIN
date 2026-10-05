@@ -1346,6 +1346,16 @@ def _ensure_cashflow_schema():
         )
         """,
         """
+        CREATE TABLE IF NOT EXISTS hdc_cash_flow_entry_item (
+            id INTEGER PRIMARY KEY,
+            entry_id INTEGER NOT NULL REFERENCES hdc_cash_flow_entry(id),
+            subcategory_id INTEGER NOT NULL REFERENCES hdc_cash_flow_subcategory(id),
+            item_name VARCHAR(120) NOT NULL,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at DATETIME
+        )
+        """,
+        """
         CREATE TABLE IF NOT EXISTS hdc_cash_flow_entry_audit (
             id INTEGER PRIMARY KEY,
             entry_id INTEGER NOT NULL REFERENCES hdc_cash_flow_entry(id),
@@ -1418,6 +1428,8 @@ def _ensure_cashflow_schema():
             "CREATE INDEX IF NOT EXISTS idx_hdc_cfe_category ON hdc_cash_flow_entry(category_id)",
             "CREATE INDEX IF NOT EXISTS idx_hdc_cfe_project ON hdc_cash_flow_entry(project_id)",
             "CREATE INDEX IF NOT EXISTS idx_hdc_cfe_tx ON hdc_cash_flow_entry(account_tx_id)",
+            "CREATE INDEX IF NOT EXISTS idx_hdc_cfei_entry ON hdc_cash_flow_entry_item(entry_id, sort_order)",
+            "CREATE INDEX IF NOT EXISTS idx_hdc_cfei_subcategory ON hdc_cash_flow_entry_item(subcategory_id)",
             "CREATE INDEX IF NOT EXISTS idx_hdc_cfe_audit_entry ON hdc_cash_flow_entry_audit(entry_id, id)",
             "CREATE INDEX IF NOT EXISTS idx_hdc_accrec_account_date ON hdc_account_reconciliation(account_id, reconciliation_date)",
             "CREATE INDEX IF NOT EXISTS idx_hdc_cdp_account ON hdc_cash_day_position(account_id, position_date)",
