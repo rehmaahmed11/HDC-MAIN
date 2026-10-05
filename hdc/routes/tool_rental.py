@@ -14,19 +14,21 @@ from hdc.models.accounts import Account
 from hdc.models.projects import Project, Stage
 from hdc.models.tool_rental import (
     TOOL_SCRAP_REASONS, Tool, ToolCategory, ToolMovementLog, ToolPurchase, ToolRental,
-    ToolRentalItem, ToolRentalPayment, ToolRentalReturn, ToolRentalReturnItem,
-    ToolRentalTransfer, ToolRentalTransferItem
+    ToolRentalDiscount, ToolRentalItem, ToolRentalPayment, ToolRentalReturn,
+    ToolRentalReturnItem, ToolRentalTransfer, ToolRentalTransferItem
 )
 from hdc.services.cashflow_register import ensure_party
 from hdc.services.tool_rental import (
     _ensure_tool_category, _next_rental_code, _next_tool_code,
-    _parse_date, create_movement_log, get_rental_tracking_chain,
+    _parse_date, create_movement_log, discount_reason_options, get_rental_tracking_chain,
     get_receiving_accounts, global_tool_locations,
     known_tool_customers, known_tool_suppliers,
     post_tool_rental_payment_to_accounts, recalc_rental_totals,
-    record_tool_purchase, record_tool_scrap, rental_transfer_chain, search_rentals,
-    tool_available_for_integrity, tool_kpis, tool_purchases, tool_scraps, tool_stock_aggregates,
-    void_tool_rental_payment_in_accounts
+    record_tool_purchase, record_tool_scrap,
+    record_tool_rental_discount, rental_discount_rows, rental_transfer_chain,
+    search_rentals, tool_available_for_integrity, tool_kpis, tool_purchases,
+    tool_scraps, tool_stock_aggregates, void_discounts_for_payment,
+    void_tool_rental_discount, void_tool_rental_payment_in_accounts
 )
 from hdc.services.tool_tracking import (
     LOC_CUSTOMER, LOC_OWN_PROJECT, LOC_STORE, WAREHOUSE_LABEL,
@@ -1232,7 +1234,13 @@ def register(app):
         ]
 
         pending_tools = float(rental.total_rented_qty or 0) - float(rental.total_returned_qty or 0)
-        pending_amount = float(rental.total_amount or 0) - float(rental.total_paid or 0) if rental.billing_type!='no_charge' else 0.0
+        # Outstanding = earned - cash received - discounts granted, so the
+        # figure on this page can never drift from the rental's own totals.
+        pending_amount = float(rental.total_pending_amount or 0.0)
+
+        # Discounts granted on this rental (cash never moved for them).
+        discounts = rental_discount_rows(rental.id)
+        discount_total = sum(float(d.amount or 0.0) for d in discounts if not d.is_void)
 
         # account txns for this rental payments
         from hdc.models.accounts import AccountTransaction
@@ -1266,6 +1274,9 @@ def register(app):
             pending_tools=pending_tools,
             pending_amount=pending_amount,
             acct_links=acct_links,
+            discounts=discounts,
+            discount_total=discount_total,
+            discount_reason_options=discount_reason_options(),
             today=_pkt_today().isoformat()
         )
 
@@ -1335,7 +1346,9 @@ def register(app):
         amount_paid = max(0.0, _flt(amount_paid_raw))
 
         if payment_type == 'full':
-            pending_amt = float(rental.total_amount or 0) - float(rental.total_paid or 0)
+            # Discount-aware: "pay everything still owed" means the outstanding
+            # balance, which discounts have already reduced.
+            pending_amt = float(rental.total_pending_amount or 0.0)
             amount_paid = max(0.0, pending_amt) if rental.billing_type!='no_charge' else 0.0
         elif payment_type == 'no_payment' or rental.billing_type=='no_charge':
             amount_paid = 0.0
@@ -1394,13 +1407,20 @@ def register(app):
                 notes=f'Return {ret_rec.id}: {qty_ret} pcs'
             )
 
+        # A return can settle the bill partly with cash and partly with a
+        # discount ("forget the last 2,000"), so read it before the payment.
+        discount_amt = max(0.0, _flt(request.form.get('discount_amount')))
+        discount_reason = (request.form.get('discount_reason') or 'goodwill').strip().lower()
+        discount_notes = (request.form.get('discount_notes') or '').strip()
+
         pay_record = None
-        if amount_paid > 0 and rental.billing_type!='no_charge':
+        if (amount_paid > 0 or discount_amt > 0) and rental.billing_type!='no_charge':
             pay_record = ToolRentalPayment(
                 rental_id=rental.id,
                 return_id=ret_rec.id,
                 payment_date=return_date,
                 amount=amount_paid,
+                discount=discount_amt,
                 payment_mode=(request.form.get('payment_mode') or 'cash').strip().lower(),
                 received_to_account_id=int(recv_acc.id) if recv_acc else None,
                 reference=(request.form.get('payment_reference') or '').strip(),
@@ -1409,12 +1429,25 @@ def register(app):
             )
             db.session.add(pay_record)
             db.session.flush()
-            # post to accounts
-            ok_acc, msg_acc, _ = post_tool_rental_payment_to_accounts(pay_record, rental=rental, commit=False)
-            if not ok_acc:
-                db.session.rollback()
-                flash(msg_acc or 'Unable to post rental payment in accounts.', 'danger')
-                return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+            # post the cash leg to accounts
+            if amount_paid > 0:
+                ok_acc, msg_acc, _ = post_tool_rental_payment_to_accounts(pay_record, rental=rental, commit=False)
+                if not ok_acc:
+                    db.session.rollback()
+                    flash(msg_acc or 'Unable to post rental payment in accounts.', 'danger')
+                    return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+            # ...and the discount leg, so the receivable shrinks by both
+            if discount_amt > 0:
+                _drow, ok_disc, msg_disc = record_tool_rental_discount(
+                    rental.id, discount_amt, discount_date=return_date,
+                    reason=discount_reason, notes=discount_notes,
+                    payment_id=pay_record.id, return_id=ret_rec.id,
+                    created_by=current_user.id if hasattr(current_user,'id') else None,
+                    commit=False)
+                if not ok_disc:
+                    db.session.rollback()
+                    flash(msg_disc or 'Unable to post rental discount.', 'danger')
+                    return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
         elif payment_type=='credit' and rental.billing_type!='no_charge':
             rental.payment_status = 'credit'
 
@@ -1463,10 +1496,24 @@ def register(app):
         reference = (request.form.get('reference') or '').strip()
         notes = (request.form.get('notes') or '').strip()
 
+        # Optional discount granted in the same settlement: cash + discount
+        # together clear the balance, but only the cash reaches an account.
+        discount_amt = max(0.0, _flt(request.form.get('discount')))
+        discount_reason = (request.form.get('discount_reason') or 'goodwill').strip().lower()
+        discount_notes = (request.form.get('discount_notes') or '').strip()
+        if discount_amt > 0:
+            # Cash + concession together may not exceed the bill.
+            outstanding = float(rental.total_pending_amount or 0.0)
+            if discount_amt > max(0.0, outstanding - amount) + 0.001:
+                flash(f'Discount {discount_amt:,.2f} plus this {amount:,.2f} payment exceeds '
+                      f'the outstanding {outstanding:,.2f} PKR.', 'danger')
+                return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+
         pay = ToolRentalPayment(
             rental_id=rental.id,
             payment_date=pay_date,
             amount=amount,
+            discount=discount_amt,
             payment_mode=payment_mode,
             received_to_account_id=int(recv_acc.id),
             reference=reference,
@@ -1482,9 +1529,26 @@ def register(app):
             flash(msg_acc or 'Unable to post payment in accounts.', 'danger')
             return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
 
+        disc_row = None
+        if discount_amt > 0:
+            disc_row, ok_disc, msg_disc = record_tool_rental_discount(
+                rental.id, discount_amt, discount_date=pay_date,
+                reason=discount_reason, notes=discount_notes,
+                payment_id=pay.id,
+                created_by=current_user.id if hasattr(current_user,'id') else None,
+                commit=False)
+            if not ok_disc:
+                db.session.rollback()
+                flash(msg_disc or 'Unable to post discount in accounts.', 'danger')
+                return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+
         recalc_rental_totals(rental.id)
         db.session.commit()
-        flash(f'Payment {amount:.2f} PKR received in {recv_acc.name} (Cash/Bank). Pending: {rental.total_pending_amount:.2f}', 'success')
+        msg = f'Payment {amount:.2f} PKR received in {recv_acc.name} (Cash/Bank).'
+        if disc_row is not None:
+            msg += f' Discount {disc_row.amount:,.2f} PKR granted ({disc_row.reason_label}).'
+        msg += f' Pending: {rental.total_pending_amount:.2f}'
+        flash(msg, 'success')
         return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
 
     @app.route('/hdc/tool-rental/payment/<int:payment_id>/void', methods=['POST'])
@@ -1495,13 +1559,20 @@ def register(app):
         if pay.is_void:
             flash('Payment already voided.', 'info')
             return redirect(url_for('hdc_tool_rental_detail', rental_id=pay.rental_id))
+        reason = (request.form.get('void_reason') or '').strip() or 'Voided by user'
         pay.is_void = True
-        pay.void_reason = (request.form.get('void_reason') or '').strip() or 'Voided by user'
+        pay.void_reason = reason
         pay.voided_at = _pkt_now_naive()
         void_tool_rental_payment_in_accounts(pay.id)
+        # A discount granted alongside this payment goes with it: leaving it
+        # alive would keep the bill settled for money the customer never paid.
+        voided_discounts = void_discounts_for_payment(pay.id, reason=reason)
         recalc_rental_totals(pay.rental_id)
         db.session.commit()
-        flash('Payment voided and removed from accounts.', 'warning')
+        msg = 'Payment voided and removed from accounts.'
+        if voided_discounts:
+            msg += f' {voided_discounts} linked discount(s) voided with it.'
+        flash(msg, 'warning')
         return redirect(url_for('hdc_tool_rental_detail', rental_id=pay.rental_id))
 
     @app.route('/hdc/tool-rental/payment/<int:payment_id>/receipt')
@@ -1522,13 +1593,90 @@ def register(app):
             account_used=(pay.received_to_account.name if pay.received_to_account else 'Company Cash'),
             amount=float(pay.amount or 0.0),
             amount_words=_amount_to_words(pay.amount or 0.0),
-            note=(pay.notes or f'Rental {rental.rental_code}'),
+            note=((pay.notes or f'Rental {rental.rental_code}')
+                  + (f' | Discount granted: {float(pay.discount or 0.0):,.2f} PKR (no cash)'
+                     if float(pay.discount or 0.0) > 0 else '')),
             reference_id=f'tool_rental_payment#{pay.id}',
             recent_entries=[],
             recent_entries_title='',
             back_url=url_for('hdc_tool_rental_detail', rental_id=rental.id),
             print_label='Print / Save PDF'
         )
+
+    # ------------------ DISCOUNT / WAIVE OFF ------------------
+    @app.route('/hdc/tool-rental/<int:rental_id>/discount', methods=['POST'])
+    @login_required
+    @_money_write_required()
+    def hdc_tool_rental_add_discount(rental_id):
+        """Grant a standalone discount (no cash involved) on a rental.
+
+        This is the "waive off the rest" action: the bill shrinks, nothing is
+        received into Cash/Bank, and the concession is posted to Accounts on
+        its own so the ledger can always explain the missing money.
+        """
+        rental = ToolRental.query.get_or_404(rental_id)
+        if rental.billing_type == 'no_charge':
+            flash('This rental is No Charge (contract included) - there is nothing to discount.', 'info')
+            return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+        if rental.is_void:
+            flash('Rental is voided.', 'danger')
+            return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+
+        amount = max(0.0, _flt(request.form.get('amount')))
+        if amount <= 0:
+            flash('Discount amount must be greater than zero.', 'danger')
+            return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+
+        disc_date_raw = (request.form.get('discount_date') or '').strip()
+        try:
+            disc_date = datetime.strptime(disc_date_raw, '%Y-%m-%d').date() if disc_date_raw else _pkt_today()
+        except Exception:
+            disc_date = _pkt_today()
+
+        reason = (request.form.get('reason') or 'goodwill').strip().lower()
+        notes = (request.form.get('notes') or '').strip()
+
+        row, ok_disc, msg_disc = record_tool_rental_discount(
+            rental.id, amount, discount_date=disc_date, reason=reason, notes=notes,
+            created_by=current_user.id if hasattr(current_user, 'id') else None,
+            commit=False)
+        if not ok_disc:
+            db.session.rollback()
+            flash(msg_disc or 'Unable to record discount.', 'danger')
+            return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+
+        recalc_rental_totals(rental.id)
+        db.session.commit()
+        flash(f'Discount {row.amount:,.2f} PKR granted ({row.reason_label}). '
+              f'Outstanding is now {rental.total_pending_amount:,.2f} PKR.', 'success')
+        return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+
+    @app.route('/hdc/tool-rental/discount/<int:discount_id>/void', methods=['POST'])
+    @login_required
+    @_money_write_required()
+    def hdc_tool_rental_discount_void(discount_id):
+        """Take a granted discount back — the amount is owed again."""
+        row = db.session.get(ToolRentalDiscount, discount_id)
+        if row is None:
+            flash('Discount not found.', 'danger')
+            return redirect(url_for('hdc_tool_rental'))
+        rental_id = int(row.rental_id)
+        if row.is_void:
+            flash('Discount is already voided.', 'info')
+            return redirect(url_for('hdc_tool_rental_detail', rental_id=rental_id))
+        _row, ok_disc, msg_disc = void_tool_rental_discount(
+            discount_id,
+            reason=(request.form.get('void_reason') or '').strip(),
+            commit=False)
+        if not ok_disc:
+            db.session.rollback()
+            flash(msg_disc or 'Unable to void discount.', 'danger')
+            return redirect(url_for('hdc_tool_rental_detail', rental_id=rental_id))
+        recalc_rental_totals(rental_id)
+        db.session.commit()
+        flash(f'Discount of {row.amount:,.2f} PKR voided — it is owed again and '
+              f'removed from accounts.', 'warning')
+        return redirect(url_for('hdc_tool_rental_detail', rental_id=rental_id))
 
     # ------------------ TRANSFER SITE TO SITE ------------------
     @app.route('/hdc/tool-rental/<int:rental_id>/transfer', methods=['POST'])

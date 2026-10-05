@@ -6,9 +6,11 @@ from sqlalchemy import func, or_
 from hdc.extensions import db
 from hdc.models.accounts import Account
 from hdc.models.tool_rental import (
-    MOVEMENT_PURCHASE_IN, MOVEMENT_SCRAP_OUT, TOOL_SCRAP_REASONS, Tool, ToolCategory,
-    ToolMovementLog, ToolPurchase, ToolRental, ToolRentalAccountTxn, ToolRentalItem,
-    ToolRentalPayment, ToolRentalReturn, ToolRentalReturnItem, ToolRentalTransfer, ToolScrap
+    MOVEMENT_PURCHASE_IN, MOVEMENT_SCRAP_OUT, TOOL_DISCOUNT_REASONS, TOOL_DISCOUNT_REASON_LABELS,
+    TOOL_SCRAP_REASONS, Tool, ToolCategory,
+    ToolMovementLog, ToolPurchase, ToolRental, ToolRentalAccountTxn, ToolRentalDiscount,
+    ToolRentalItem, ToolRentalPayment, ToolRentalReturn, ToolRentalReturnItem,
+    ToolRentalTransfer, ToolScrap
 )
 from hdc.services.record_permissions import integrity_message, integrity_query, record_code_query
 from hdc.utils.dates import _pkt_now_naive, _pkt_today
@@ -43,6 +45,11 @@ def _next_scrap_code():
     last_id = record_code_query(db.session.query(func.max(ToolScrap.id)), ToolScrap.__tablename__).scalar()
     nxt = int(last_id or 0) + 1
     return f"SCRAP-{nxt:05d}"
+
+def _next_discount_code():
+    last_id = record_code_query(db.session.query(func.max(ToolRentalDiscount.id)), ToolRentalDiscount.__tablename__).scalar()
+    nxt = int(last_id or 0) + 1
+    return f"DISC-{nxt:05d}"
 
 def _ensure_tool_category(name):
     name = (name or '').strip()
@@ -305,10 +312,19 @@ def recalc_rental_totals(rental_id):
         ToolRentalPayment.is_void == False
     ).scalar() or 0.0
 
+    # A discount settles part of the receivable without cash ever moving, so
+    # it is summed from its own register (hdc_tool_rental_discount) exactly
+    # like payments are -- one row per reason, voidable on its own.
+    total_discount = db.session.query(func.coalesce(func.sum(ToolRentalDiscount.amount), 0.0)).filter(
+        ToolRentalDiscount.rental_id == rental.id,
+        ToolRentalDiscount.is_void == False
+    ).scalar() or 0.0
+
     rental.total_rented_qty = total_rented
     rental.total_returned_qty = total_returned
     rental.total_amount = total_amount if total_amount>0 else float(rental.total_amount or 0)
     rental.total_paid = float(total_paid)
+    rental.total_discount = min(float(total_discount), max(0.0, float(rental.total_amount or 0.0)))
 
     if rental.is_void:
         rental.status = 'closed'
@@ -325,7 +341,9 @@ def recalc_rental_totals(rental_id):
     if (rental.billing_type or '').lower() == 'no_charge':
         rental.payment_status = 'no_charge'
     else:
-        pending_amt = max(0.0, float(rental.total_amount or 0) - float(total_paid))
+        pending_amt = max(0.0, float(rental.total_amount or 0)
+                          - float(total_paid)
+                          - float(rental.total_discount or 0.0))
         if pending_amt <= 0.001 and float(rental.total_amount or 0) > 0:
             rental.payment_status = 'paid'
         elif float(total_paid) > 0 and pending_amt > 0:
@@ -789,3 +807,220 @@ def void_tool_rental_payment_in_accounts(payment_id):
     from hdc.services.accounts import _accounts_set_void_by_source
     _accounts_set_void_by_source('tool_rental_payment', int(payment_id), True)
     return True
+
+
+# --------------------------------------------------------------------------- #
+# discounts — settling a rental partly (or fully) by concession, not by cash
+# --------------------------------------------------------------------------- #
+
+def rental_discount_rows(rental_id, include_void=True):
+    """Discount rows for one rental, oldest first (``[]`` when none)."""
+    q = ToolRentalDiscount.query.filter(ToolRentalDiscount.rental_id == int(rental_id or 0))
+    if not include_void:
+        q = q.filter(ToolRentalDiscount.is_void == False)  # noqa: E712
+    return q.order_by(ToolRentalDiscount.discount_date.asc(),
+                      ToolRentalDiscount.id.asc()).all()
+
+
+def rental_discount_total(rental_id):
+    """Total non-void discount granted on a rental."""
+    val = (db.session.query(func.coalesce(func.sum(ToolRentalDiscount.amount), 0.0))
+           .filter(ToolRentalDiscount.rental_id == int(rental_id or 0),
+                   ToolRentalDiscount.is_void == False)  # noqa: E712
+           .scalar() or 0.0)
+    return float(val)
+
+
+def discount_reason_options():
+    """``(value, label)`` pairs for the discount reason combo."""
+    return tuple(TOOL_DISCOUNT_REASONS)
+
+
+def discount_reason_label(value):
+    return TOOL_DISCOUNT_REASON_LABELS.get(
+        (value or '').strip().lower(),
+        (value or '').replace('_', ' ').title() or 'Other')
+
+
+def record_tool_rental_discount(rental_id, amount, discount_date=None, reason='goodwill',
+                                notes='', payment_id=None, return_id=None,
+                                created_by=None, commit=False):
+    """Grant a discount on a rental.  Returns ``(row, ok, message)``.
+
+    A discount is the part of the bill the customer never pays: it shrinks the
+    outstanding amount exactly like cash does, but no money enters an account.
+    It is refused when it would exceed what is still owed, so the rental can
+    never read as over-settled.
+
+    ``payment_id`` set means "granted while taking this payment" — voiding that
+    payment voids the discount with it.
+    """
+    rental = db.session.get(ToolRental, int(rental_id or 0))
+    if not rental:
+        return None, False, 'Rental not found.'
+    if rental.is_void:
+        return None, False, 'Rental is voided.'
+    if (rental.billing_type or '').strip().lower() == 'no_charge':
+        return None, False, 'This rental is No Charge — there is nothing to discount.'
+    amt = round(max(0.0, float(amount or 0.0)), 2)
+    if amt <= 0:
+        return None, False, 'Discount amount must be greater than zero.'
+
+    # Refresh the cached totals first: a discount is often granted in the same
+    # breath as a payment, and ``rental.total_paid`` would still be stale --
+    # which is exactly how cash + concession could together exceed the bill.
+    recalc_rental_totals(rental.id)
+    db.session.flush()
+    already = rental_discount_total(rental.id)
+    outstanding = max(0.0, float(rental.total_amount or 0.0)
+                      - float(rental.total_paid or 0.0) - already)
+    if outstanding <= 0.001:
+        return None, False, 'This rental is already fully settled — nothing left to discount.'
+    if amt > outstanding + 0.001:
+        return None, False, (f'Discount {amt:,.2f} exceeds the outstanding '
+                             f'{outstanding:,.2f} PKR on this rental.')
+
+    rsn = (reason or '').strip().lower()
+    if rsn not in dict(TOOL_DISCOUNT_REASONS):
+        rsn = 'other'
+
+    row = ToolRentalDiscount(
+        discount_code=_next_discount_code(),
+        rental_id=rental.id,
+        payment_id=(int(payment_id) if payment_id else None),
+        return_id=(int(return_id) if return_id else None),
+        discount_date=(discount_date or _pkt_today()),
+        amount=amt,
+        reason=rsn,
+        notes=(notes or '').strip() or None,
+        created_by=created_by,
+    )
+    db.session.add(row)
+    db.session.flush()
+
+    ok_acc, msg_acc, _txns = post_tool_rental_discount_to_accounts(row, rental=rental, commit=False)
+    if not ok_acc:
+        # Never leave a discount that the ledger does not know about: the
+        # rental would read as settled while Accounts still shows the debt.
+        db.session.rollback()
+        return None, False, (msg_acc or 'Unable to post discount in accounts.')
+
+    recalc_rental_totals(rental.id)
+    if commit:
+        db.session.commit()
+    return row, True, ''
+
+
+def post_tool_rental_discount_to_accounts(discount, rental=None, commit=False):
+    """Mirror a granted discount into the unified ledger.
+
+    The customer's own account gives up the amount (``from_account_id``) and
+    nothing is received anywhere, which is why the row carries its own
+    ``discount_given`` type / ``discount`` category: it moves the receivable
+    without ever touching a cash or bank balance.
+    """
+    from hdc.services.accounts import _create_account_transaction
+    if not discount or float(discount.amount or 0) <= 0:
+        return False, 'Discount amount must be >0', []
+    if discount.is_void:
+        return False, 'Discount is voided', []
+
+    rental = rental or db.session.get(ToolRental, int(discount.rental_id or 0))
+    if not rental:
+        return False, 'Rental not found', []
+
+    from hdc.models.accounts import AccountTransaction
+    existing = (AccountTransaction.query
+                .filter(
+                    func.lower(func.coalesce(AccountTransaction.source_type, '')).like('tool_rental_discount%'),
+                    AccountTransaction.source_id == int(discount.id),
+                    AccountTransaction.is_void == False  # noqa: E712
+                )
+                .first())
+    if existing:
+        return True, 'Already posted', [existing]
+
+    cust_acc = _get_or_create_customer_account(rental)
+    if not cust_acc:
+        return False, 'Unable to resolve customer account', []
+
+    disc_date = discount.discount_date or _pkt_today()
+    date_str = disc_date.isoformat() if hasattr(disc_date, 'isoformat') else str(disc_date)
+
+    party_name = (rental.customer_name if rental.renter_type == 'external'
+                  else (rental.project.name if rental.project else 'Internal Site'))
+
+    if rental.renter_type == 'external' and (rental.customer_name or '').strip():
+        from hdc.services.cashflow_register import ensure_party
+        ensure_party(rental.customer_name, party_type='rental')
+
+    reason_txt = discount_reason_label(discount.reason)
+    note_txt = (f'Tool Rental Discount {rental.rental_code} - {reason_txt} '
+                f'({discount.discount_code})').strip()[:400]
+    if discount.notes:
+        note_txt = (note_txt + ' - ' + str(discount.notes))[:400]
+
+    payload = {
+        'date': date_str,
+        'amount': float(discount.amount or 0),
+        'type': 'discount_given',
+        'from_account_id': cust_acc.id,
+        'to_account_id': None,
+        'executed_by_account_id': cust_acc.id,
+        'project_id': rental.project_id,
+        'stage_id': rental.stage_id,
+        'related_entity_type': 'tool_rental',
+        'related_entity_id': rental.id,
+        'party_name': party_name,
+        'category': 'discount',
+        'note': note_txt,
+        'reference_id': f'tool_rental_discount#{discount.id}',
+        'source_type': 'tool_rental_discount',
+        'source_id': discount.id,
+        'group_id': f'tool-rent-{rental.id}-disc-{discount.id}',
+    }
+
+    ok, msg, txns = _create_account_transaction(payload, commit=False)
+    if not ok:
+        return False, msg, []
+    db.session.flush()
+    if commit:
+        db.session.commit()
+    return True, '', txns
+
+
+def void_tool_rental_discount(discount_id, reason='', commit=False):
+    """Void a discount and put the amount back on what the customer owes."""
+    row = db.session.get(ToolRentalDiscount, int(discount_id or 0))
+    if not row:
+        return None, False, 'Discount not found.'
+    if row.is_void:
+        return None, False, 'Discount is already voided.'
+    row.is_void = True
+    row.void_reason = (reason or '').strip() or 'Voided by user'
+    row.voided_at = _pkt_now_naive()
+    void_tool_rental_discount_in_accounts(row.id)
+    recalc_rental_totals(row.rental_id)
+    if commit:
+        db.session.commit()
+    return row, True, ''
+
+
+def void_tool_rental_discount_in_accounts(discount_id):
+    from hdc.services.accounts import _accounts_set_void_by_source
+    _accounts_set_void_by_source('tool_rental_discount', int(discount_id), True)
+    return True
+
+
+def void_discounts_for_payment(payment_id, reason=''):
+    """Void every discount granted alongside a payment (payment voided)."""
+    rows = (ToolRentalDiscount.query
+            .filter(ToolRentalDiscount.payment_id == int(payment_id or 0),
+                    ToolRentalDiscount.is_void == False)  # noqa: E712
+            .all())
+    for row in rows:
+        row.is_void = True
+        row.void_reason = (reason or '').strip() or 'Voided with its payment'
+        row.voided_at = _pkt_now_naive()
+        void_tool_rental_discount_in_accounts(row.id)
+    return len(rows)

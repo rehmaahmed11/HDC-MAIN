@@ -15,7 +15,14 @@ added here exists everywhere at once:
   automatically, and every ``rental`` party is offered back on the HDC
   Tools customer combo.
 * **Other Parties** — clients, suppliers, workers, staff, subcontractors —
-  round out the picker's vocabulary.
+  round out the picker's vocabulary.  Workers are filed here automatically
+  (typed ``worker``) because advances, payments, tips and settlements are all
+  money moving between the company and a named person; the Workers module
+  itself is untouched and stays the place to manage wages and rates.
+
+Workers are synced into this directory on every page load (idempotent — it
+only adds what is missing) and whenever a worker is created, renamed, or paid.
+**Sync Workers** re-runs it on demand.
 
 Directory reads are open to every signed-in role; adding or changing a
 party is an admin/accountant money write (``_money_write_required``).
@@ -29,13 +36,17 @@ from hdc.extensions import _money_write_required, db
 from hdc.models.cashflow import CashFlowEntry, CashFlowParty
 from hdc.models.loans import Loan
 from hdc.models.tool_rental import ToolRental
+from hdc.models.workforce import LabourLedger, Worker
 from hdc.services.cashflow_register import (
     LOAN_PARTY_TYPES,
     RENTAL_PARTY_TYPES,
     PARTY_TYPES,
+    WORKER_PARTY_TYPES,
     party_type_label,
     save_cf_party,
+    sync_workers_as_parties,
 )
+from hdc.services.ledger import _worker_payable_snapshots
 
 #: The three buckets the directory shows, in rendering order.
 #: ``(key, label, icon, hint, type values)`` — an empty type tuple means
@@ -51,7 +62,9 @@ PARTY_GROUPS = (
      tuple(RENTAL_PARTY_TYPES)),
     ('other', 'Other Parties', 'fa-users',
      ('Everyone else the Party / Person picker offers — clients, suppliers, '
-      'workers, staff, subcontractors.'),
+      'workers, staff, subcontractors. Workers are synced here automatically '
+      'from the Workers module (typed "Worker / Labour") and link straight to '
+      'their statement.'),
      ()),
 )
 
@@ -101,6 +114,53 @@ def _rental_stats():
             for key, count, paid in rows if key}
 
 
+def _worker_stats():
+    """``{lower(trim(name)): dict}`` — the worker behind a party name, if any.
+
+    Matching is by name because that is how the ledger already refers to a
+    worker (``party_name`` on the account transaction, ``worker_id`` on the
+    labour ledger).  The Worker row gives the directory a live link to the
+    statement, and the ledger aggregates give the money columns.
+    """
+    workers = Worker.query.all()
+    if not workers:
+        return {}
+    by_name = {}
+    for w in workers:
+        key = (w.name or '').strip().lower()
+        if key:
+            by_name[key] = w
+    snaps = _worker_payable_snapshots([w.id for w in workers])
+
+    rows = (db.session.query(LabourLedger.worker_id,
+                             LabourLedger.entry_type,
+                             func.coalesce(func.sum(LabourLedger.amount), 0.0))
+            .filter(LabourLedger.is_void == False)  # noqa: E712
+            .group_by(LabourLedger.worker_id, LabourLedger.entry_type)
+            .all())
+    counts = {}
+    for wid, etype, amount in rows:
+        bucket = counts.setdefault(int(wid), {'advance': 0.0, 'payment': 0.0,
+                                              'tip': 0.0, 'settlement': 0.0})
+        key = (etype or '').strip().lower()
+        if key in bucket:
+            bucket[key] = float(amount or 0.0)
+
+    out = {}
+    for key, w in by_name.items():
+        snap = snaps.get(int(w.id), {})
+        money = counts.get(int(w.id), {})
+        out[key] = {
+            'worker': w,
+            'advance': float(money.get('advance', 0.0)),
+            'payment': float(money.get('payment', 0.0)),
+            'tip': float(money.get('tip', 0.0)),
+            'settlement': float(money.get('settlement', 0.0)),
+            'balance': float(snap.get('balance', 0.0) or 0.0),
+        }
+    return out
+
+
 def register(app):
     """Register the Parties directory page (sidebar module)."""
 
@@ -126,6 +186,16 @@ def register(app):
                     else:
                         flash(f'That party already existed — it is listed under '
                               f'{label}.', 'info')
+
+                elif action == 'sync_workers':
+                    created, reactivated, total = sync_workers_as_parties()
+                    db.session.commit()
+                    if created or reactivated:
+                        flash(f'Workers synced: {created} added, {reactivated} '
+                              f're-activated, out of {total} workers on the books.',
+                              'success')
+                    else:
+                        flash(f'All {total} workers are already in the directory.', 'info')
 
                 elif action == 'toggle_party':
                     party = db.session.get(CashFlowParty, request.form.get('party_id', type=int) or 0)
@@ -154,10 +224,18 @@ def register(app):
         search = (request.args.get('q') or '').strip()
         needle = search.lower()
 
+        # Keep the directory in step with the Workers module.  Cheap and
+        # idempotent: it only creates what is missing, so it can run on every
+        # page load without ever touching an existing classification.
+        auto_added, auto_revived, worker_total = sync_workers_as_parties()
+        if auto_added or auto_revived:
+            db.session.commit()
+
         parties = CashFlowParty.query.order_by(CashFlowParty.name.asc()).all()
         entry_counts = _entry_counts()
         loan_counts = _loan_counts()
         rental_stats = _rental_stats()
+        worker_stats = _worker_stats()
 
         groups = []
         for key, label, icon, hint, type_values in PARTY_GROUPS:
@@ -180,6 +258,7 @@ def register(app):
                     'loans': loan_counts.get(pname_key, 0),
                     'rentals': rentals,
                     'rental_paid': paid,
+                    'worker': worker_stats.get(pname_key),
                 })
             active_rows = sum(1 for r in rows if r['party'].is_active)
             groups.append({
@@ -197,6 +276,9 @@ def register(app):
                        if p.is_active and _party_bucket(p.party_type) == bucket)
 
         active_total = sum(1 for p in parties if p.is_active)
+        worker_count = sum(1 for p in parties
+                           if p.is_active
+                           and (p.party_type or '').strip().lower() in WORKER_PARTY_TYPES)
 
         type_choices = [
             ('loan', 'Loan Parties',
@@ -217,6 +299,9 @@ def register(app):
                 'loan': _count('loan'),
                 'rental': _count('rental'),
                 'other': _count('other'),
+                'worker': worker_count,
+                'worker_total': worker_total,
                 'active_total': active_total,
+                'auto_added': auto_added,
             },
         )

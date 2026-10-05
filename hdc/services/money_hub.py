@@ -33,7 +33,7 @@ from hdc.models.materials import PurchaseV2, Supplier, SupplierLedger
 from hdc.models.office import OfficeExpense, OfficeStaff, OfficeStaffLedger
 from hdc.models.projects import Project, Stage
 from hdc.models.subcontract import SubcontractPayment, Subcontractor
-from hdc.models.tool_rental import ToolRental, ToolRentalPayment
+from hdc.models.tool_rental import ToolRental, ToolRentalDiscount, ToolRentalPayment
 from hdc.models.workforce import LabourLedger, Worker
 from hdc.services.accounts import (
     _ACCOUNT_COMPANY_TYPES,
@@ -706,7 +706,15 @@ def get_pending_payables_detailed():
                 continue
             paid = float(db.session.query(func.coalesce(func.sum(ToolRentalPayment.amount), 0.0))
                          .filter(ToolRentalPayment.rental_id == r.id, ToolRentalPayment.is_void == False).scalar() or 0.0)
-            pending = max(0.0, total - paid)
+            # A discount settles part of the bill without cash, so it has to
+            # come off here too -- otherwise Money Center advertised a debt the
+            # rental itself had already written off.
+            discount = float(db.session.query(func.coalesce(func.sum(ToolRentalDiscount.amount), 0.0))
+                             .filter(ToolRentalDiscount.rental_id == r.id, ToolRentalDiscount.is_void == False).scalar() or 0.0)
+            if (r.billing_type or '').strip().lower() == 'no_charge':
+                pending = 0.0
+            else:
+                pending = max(0.0, total - paid - discount)
             if pending > 0.01:
                 tool_rentals_receivable.append({
                     "id": r.id,
@@ -714,6 +722,7 @@ def get_pending_payables_detailed():
                     "code": f"TR-{r.id}",
                     "pending": pending,
                     "paid": paid,
+                    "discount": discount,
                     "total": total,
                     "type": "tool_rental",
                 })
