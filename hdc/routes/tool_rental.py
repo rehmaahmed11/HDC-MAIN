@@ -31,7 +31,8 @@ from hdc.services.tool_rental import (
 from hdc.services.tool_tracking import (
     LOC_CUSTOMER, LOC_OWN_PROJECT, LOC_STORE, WAREHOUSE_LABEL,
     allocate_transfer_qty, dashboard_summary, inventory_rows, location_summary,
-    record_transfer_items, tool_item_summary, tool_ledger, tool_position
+    record_transfer_items, tool_item_summary, tool_ledger, tool_position,
+    tracking_location_groups,
 )
 from hdc.utils.dates import _pkt_now_naive, _pkt_today
 from hdc.utils.format import _flt, _amount_to_words
@@ -1672,7 +1673,9 @@ def register(app):
         tool_id = request.args.get('tool_id', type=int)
         project_id = request.args.get('project_id', type=int)
         q = (request.args.get('q') or '').strip() or None
-        locations = global_tool_locations(search_tool_id=tool_id, search_project_id=project_id, search_text=q)
+        tool_locations = global_tool_locations(
+            search_tool_id=tool_id, search_project_id=project_id, search_text=q)
+        locations = tracking_location_groups(tool_locations, project_id=project_id)
         projects = Project.query.order_by(Project.name.asc()).all()
         tools = Tool.query.filter(Tool.is_void==False).order_by(Tool.name.asc()).all()
         kpis = tool_kpis()
@@ -1712,28 +1715,86 @@ def register(app):
         total_pending_amount = sum(float(r.total_pending_amount or 0) for r in rentals)
 
         tool_breakdown = {}
-        for r in rentals:
-            for item in r.items:
-                tid = item.tool_id
-                if tid not in tool_breakdown:
-                    tool_breakdown[tid] = {'tool': item.tool, 'rented':0, 'returned':0, 'pending':0, 'amount':0}
-                tool_breakdown[tid]['rented'] += float(item.qty_rented or 0)
-                tool_breakdown[tid]['returned'] += float(item.qty_returned or 0)
-                tool_breakdown[tid]['pending'] += float(item.qty_pending or 0)
-                tool_breakdown[tid]['amount'] += float(item.amount or 0)
-
         site_breakdown = {}
+        report_rentals = []
         for r in rentals:
-            key = r.project_id or 0
-            label = r.project.name if r.project else (r.customer_name or 'External')
-            if key not in site_breakdown:
-                site_breakdown[key] = {'label': label, 'rented':0, 'pending_tools':0, 'amount':0, 'paid':0, 'pending_amount':0, 'count':0}
-            site_breakdown[key]['rented'] += float(r.total_rented_qty or 0)
-            site_breakdown[key]['pending_tools'] += float(r.total_pending_tools or 0)
-            site_breakdown[key]['amount'] += float(r.total_amount or 0) if r.billing_type!='no_charge' else 0
-            site_breakdown[key]['paid'] += float(r.total_paid or 0)
-            site_breakdown[key]['pending_amount'] += float(r.total_pending_amount or 0)
-            site_breakdown[key]['count'] += 1
+            if r.renter_type == 'internal':
+                project_id = int(r.project_id or 0)
+                key = ('site', project_id)
+                if r.project:
+                    label = r.project.name or f'Project #{project_id}'
+                    client = (r.project.client or '').strip()
+                else:
+                    label = 'Internal — No Site' if not project_id else f'Project #{project_id}'
+                    client = ''
+                location_type = 'site'
+            else:
+                customer = (r.customer_name or 'External Customer').strip()
+                key = ('customer', customer.casefold())
+                label = customer
+                client = ''
+                location_type = 'customer'
+
+            site = site_breakdown.setdefault(key, {
+                'label': label,
+                'client': client,
+                'location_type': location_type,
+                'rented': 0.0,
+                'pending_tools': 0.0,
+                'amount': 0.0,
+                'paid': 0.0,
+                'pending_amount': 0.0,
+                'count': 0,
+                'tool_map': {},
+                'rentals': [],
+            })
+            rental_items = list(r.items)
+            rental_detail = {
+                'rental': r,
+                'items': rental_items,
+                'tool_count': len({int(item.tool_id) for item in rental_items}),
+                'tracking_chain': list(r.tracking_chain),
+            }
+            report_rentals.append(rental_detail)
+            site['rentals'].append(rental_detail)
+
+            site['rented'] += float(r.total_rented_qty or 0)
+            site['pending_tools'] += float(r.total_pending_tools or 0)
+            site['amount'] += float(r.total_amount or 0) if r.billing_type != 'no_charge' else 0
+            site['paid'] += float(r.total_paid or 0)
+            site['pending_amount'] += float(r.total_pending_amount or 0)
+            site['count'] += 1
+
+            for item in rental_detail['items']:
+                tid = int(item.tool_id)
+                tool_row = tool_breakdown.setdefault(tid, {
+                    'tool': item.tool, 'rented': 0.0, 'returned': 0.0,
+                    'pending': 0.0, 'amount': 0.0,
+                })
+                tool_row['rented'] += float(item.qty_rented or 0)
+                tool_row['returned'] += float(item.qty_returned or 0)
+                tool_row['pending'] += float(item.qty_pending or 0)
+                tool_row['amount'] += float(item.amount or 0)
+
+                site_tool = site['tool_map'].setdefault(tid, {
+                    'tool': item.tool, 'rented': 0.0, 'returned': 0.0,
+                    'pending': 0.0, 'amount': 0.0, 'rental_ids': set(),
+                })
+                site_tool['rented'] += float(item.qty_rented or 0)
+                site_tool['returned'] += float(item.qty_returned or 0)
+                site_tool['pending'] += float(item.qty_pending or 0)
+                site_tool['amount'] += float(item.amount or 0)
+                site_tool['rental_ids'].add(int(r.id))
+
+        for site in site_breakdown.values():
+            site['tools'] = list(site.pop('tool_map').values())
+            for row in site['tools']:
+                row['rental_count'] = len(row.pop('rental_ids'))
+            site['tools'].sort(
+                key=lambda row: ((getattr(row['tool'], 'name', '') or '').casefold(),
+                                 (getattr(row['tool'], 'tool_code', '') or '').casefold()),
+            )
+            site['tool_count'] = len(site['tools'])
 
         projects = Project.query.order_by(Project.name.asc()).all()
         tools = Tool.query.filter(Tool.is_void==False).order_by(Tool.name.asc()).all()
@@ -1771,6 +1832,7 @@ def register(app):
 
         return render_template('tool_rental/tool_reports.html',
             rentals=rentals,
+            report_rentals=report_rentals,
             filters=filters,
             total_rented=total_rented,
             total_returned=total_returned,

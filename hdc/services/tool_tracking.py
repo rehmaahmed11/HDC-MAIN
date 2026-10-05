@@ -1000,6 +1000,148 @@ def location_summary(ledger=None):
     return rows
 
 
+def tracking_location_groups(tool_rows, project_id=None):
+    """Group the Tracking list by current site/customer instead of tool.
+
+    A location can hold several tool types, and a tool can be split across
+    several locations or rentals. The list page needs one compact row per
+    location; this keeps per-tool/per-rental holdings (including each movement
+    path) together for the View dialog.
+    """
+    selected_project = int(project_id or 0)
+    tool_rows = list(tool_rows or ())
+    project_ids = {
+        int(holding.get('project_id') or 0)
+        for row in tool_rows for holding in (row.get('holdings') or ())
+        if holding.get('loc_type') == LOC_OWN_PROJECT and holding.get('project_id')
+    }
+    project_info = {}
+    if project_ids:
+        project_info = {
+            int(pid): {'name': name or f'Project #{pid}', 'client': (client or '').strip()}
+            for pid, name, client in db.session.query(
+                Project.id, Project.name, Project.client
+            ).filter(Project.id.in_(project_ids)).all()
+        }
+    groups = {}
+
+    def location_key(loc_type, project, stage, customer):
+        if loc_type == LOC_OWN_PROJECT:
+            # Keep one summary row for the site even when its tools sit in
+            # different stages; each holding retains its exact stage below.
+            return (LOC_OWN_PROJECT, int(project or 0), 0, '')
+        if loc_type == LOC_CUSTOMER:
+            return (LOC_CUSTOMER, 0, 0, (customer or '').strip().casefold())
+        return (LOC_STORE, 0, 0, '')
+
+    def add_tool_holding(row, holding):
+        tool = row.get('tool')
+        if not tool:
+            return
+        loc_type = holding.get('loc_type') or LOC_STORE
+        project = int(holding.get('project_id') or 0)
+        stage = int(holding.get('stage_id') or 0)
+        customer = holding.get('customer_name')
+
+        # A site filter means show only rows for that current site, not every
+        # other place where the same tool type may also have stock.
+        if selected_project and (loc_type != LOC_OWN_PROJECT
+                                 or project != selected_project):
+            return
+
+        key = location_key(loc_type, project, stage, customer)
+        holding_label = holding.get('label') or WAREHOUSE_LABEL
+        if loc_type == LOC_OWN_PROJECT:
+            info = project_info.get(project, {})
+            label = info.get('name') or holding_label.split(' > ', 1)[0]
+            client_label = info.get('client') or ''
+        else:
+            label = holding_label
+            client_label = customer or ''
+        group = groups.setdefault(key, {
+            'loc_type': loc_type,
+            'label': label,
+            'client': client_label,
+            'project_id': project,
+            'stage_id': 0 if loc_type == LOC_OWN_PROJECT else stage,
+            'customer_name': customer,
+            'qty': 0.0,
+            'overdue_qty': 0.0,
+            'tool_map': {},
+            'rental_ids': set(),
+            'stage_ids': set(),
+        })
+        if loc_type == LOC_OWN_PROJECT and stage:
+            group['stage_ids'].add(stage)
+
+        tool_id = int(getattr(tool, 'id', 0) or row.get('tool_id') or 0)
+        tool_slot = group['tool_map'].setdefault(tool_id, {
+            'tool': tool,
+            'qty': 0.0,
+            'holdings': [],
+            'movement_logs': row.get('chain') or [],
+        })
+        qty = max(0.0, float(holding.get('qty') or 0.0))
+        tool_slot['qty'] = _round_qty(tool_slot['qty'] + qty)
+        group['qty'] = _round_qty(group['qty'] + qty)
+        if holding.get('overdue'):
+            group['overdue_qty'] = _round_qty(group['overdue_qty'] + qty)
+        rental = holding.get('rental')
+        if rental:
+            group['rental_ids'].add(int(rental.id))
+        tool_slot['holdings'].append(holding)
+
+    for row in tool_rows or ():
+        store_qty = max(0.0, float(row.get('in_store_qty') or 0.0))
+        if store_qty > EPS:
+            add_tool_holding(row, {
+                'qty': store_qty,
+                'loc_type': LOC_STORE,
+                'label': WAREHOUSE_LABEL,
+                'project_id': 0,
+                'stage_id': 0,
+                'customer_name': None,
+                'rental': None,
+                'chain': [],
+                'days_out': 0,
+                'days_here': 0,
+                'overdue': False,
+                'pending_amount': 0.0,
+            })
+        for holding in row.get('holdings') or ():
+            add_tool_holding(row, holding)
+
+    type_order = {LOC_OWN_PROJECT: 0, LOC_CUSTOMER: 1, LOC_STORE: 2}
+    result = []
+    for group in groups.values():
+        tools = sorted(
+            group.pop('tool_map').values(),
+            key=lambda item: ((getattr(item['tool'], 'name', '') or '').casefold(),
+                              (getattr(item['tool'], 'tool_code', '') or '').casefold()),
+        )
+        group['tools'] = tools
+        group['tool_count'] = len(tools)
+        group['rental_count'] = len(group.pop('rental_ids'))
+        group['stage_count'] = len(group.pop('stage_ids'))
+        group['qty'] = _round_qty(group['qty'])
+        group['overdue_qty'] = _round_qty(group['overdue_qty'])
+        preview = [
+            f"{item['tool'].name} ×{item['qty']:g} {item['tool'].unit or 'pcs'}"
+            for item in tools[:2]
+        ]
+        if len(tools) > 2:
+            preview.append(f"+{len(tools) - 2} more")
+        group['tool_preview'] = ' · '.join(preview)
+        result.append(group)
+
+    result.sort(key=lambda group: (
+        type_order.get(group['loc_type'], 9),
+        -group['qty'],
+        (group['label'] or '').casefold(),
+    ))
+    return result
+
+
 # --------------------------------------------------------------------------- #
 # inventory list: the same ledger, filtered — so the two pages can't disagree
 # --------------------------------------------------------------------------- #

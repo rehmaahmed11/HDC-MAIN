@@ -1,23 +1,22 @@
 {% extends "shared/base.html" %}
 {% block title %}Tool Tracking{% endblock %}
-{% block page_heading %}Tool Tracking — movement history of every tool{% endblock %}
+{% block page_heading %}Tool Tracking — current locations and movement history{% endblock %}
 
 {% block content %}
 {% set tools_active = 'tracking' %}
 {% from "shared/_combo_field.html" import combo_select %}
 {% include "tool_rental/_tools_nav.html" %}
 
-
 <div class="row g-3 mt-1">
     <div class="col-6 col-md-3"><div class="kpi-card kpi-blue"><div class="kpi-icon"><i class="fas fa-tools"></i></div><div class="kpi-value">{{ "%.0f"|format(kpis.total_tools) }}</div><div class="kpi-label">Total Owned</div></div></div>
     <div class="col-6 col-md-3"><div class="kpi-card kpi-green"><div class="kpi-icon"><i class="fas fa-warehouse"></i></div><div class="kpi-value">{{ "%.0f"|format(kpis.available) }}</div><div class="kpi-label">In Warehouse</div></div></div>
     <div class="col-6 col-md-3"><div class="kpi-card kpi-orange"><div class="kpi-icon"><i class="fas fa-map-location-dot"></i></div><div class="kpi-value">{{ "%.0f"|format(kpis.rented_out) }}</div><div class="kpi-label">Out on Sites / Customers</div></div></div>
-    <div class="col-6 col-md-3"><div class="kpi-card kpi-purple"><div class="kpi-icon"><i class="fas fa-route"></i></div><div class="kpi-value">{{ locations|length }}</div><div class="kpi-label">Tools Tracked</div></div></div>
+    <div class="col-6 col-md-3"><div class="kpi-card kpi-purple"><div class="kpi-icon"><i class="fas fa-location-dot"></i></div><div class="kpi-value">{{ locations|length }}</div><div class="kpi-label">Locations Tracked</div></div></div>
 </div>
 
 <div class="card hdc-card mt-3">
     <div class="card-header hdc-card-header d-flex justify-content-between">
-        <span><i class="fas fa-search me-2"></i>Search Where Are All My Tools — by Site / Tool / Text</span>
+        <span><i class="fas fa-search me-2"></i>Find Tools by Site / Tool / Text</span>
         <div class="d-flex gap-2">
             <a href="{{ url_for('hdc_tool_rental') }}" class="btn btn-sm btn-outline-secondary">Rentals</a>
             <a href="{{ url_for('hdc_tool_rental_reports') }}" class="btn btn-sm btn-outline-secondary">Reports</a>
@@ -38,11 +37,11 @@
                    selected=selected_project, max_items=80) }}
             </div>
             <div class="col-md-3">
-                <label class="form-label">Search Text</label>
-                <input type="text" name="q" value="{{ q or '' }}" class="form-control" placeholder="Tool name, code">
+                <label class="form-label">Search Tool</label>
+                <input type="text" name="q" value="{{ q or '' }}" class="form-control" placeholder="Tool name or code">
             </div>
             <div class="col-md-3 d-flex align-items-end gap-2">
-                <button type="submit" class="btn btn-mint"><i class="fas fa-search me-1"></i>Search Tracking</button>
+                <button type="submit" class="btn btn-mint"><i class="fas fa-search me-1"></i>Search</button>
                 <a href="{{ url_for('hdc_tool_rental_tracking') }}" class="btn btn-outline-secondary">Reset</a>
             </div>
         </form>
@@ -50,84 +49,62 @@
 </div>
 
 <div class="card hdc-card mt-3">
-    <div class="card-header hdc-card-header"><i class="fas fa-map me-2"></i>Global Tool Locations — current location is green</div>
+    <div class="card-header hdc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span><i class="fas fa-map me-2"></i>Current Holdings by Site / Customer</span>
+        <small class="text-muted">One compact row per location · View opens all tools and movement details</small>
+    </div>
     <div class="table-responsive tool-tracking-table-scroll">
         <table class="table hdc-table table-sm mb-0 tool-tracking-table">
             <colgroup>
-                <col class="tracking-tool-col">
-                <col class="tracking-stock-col">
-                <col class="tracking-current-col">
-                <col class="tracking-chain-col">
-                <col class="tracking-movement-col">
+                <col class="tracking-location-col">
+                <col class="tracking-tools-col">
+                <col class="tracking-qty-col">
+                <col class="tracking-rentals-col">
                 <col class="tracking-action-col">
             </colgroup>
             <thead>
                 <tr>
-                    <th scope="col">Tool</th>
-                    <th scope="col">Owned / Available / Out</th>
                     <th scope="col">Current Location</th>
-                    <th scope="col">Movement Chain</th>
-                    <th scope="col">Last Movement</th>
-                    <th scope="col">Actions</th>
+                    <th scope="col">Tools at This Location</th>
+                    <th scope="col" class="text-center">Qty</th>
+                    <th scope="col" class="text-center">Rentals / Attention</th>
+                    <th scope="col" class="text-center">Details</th>
                 </tr>
             </thead>
             <tbody>
             {% for loc in locations %}
-                <tr class="tool-row {% if loc.rented_out_qty>0 %}has-pending{% endif %}">
-                    <td>
-                        <strong class="tool-tracking-tool-name">{{ loc.tool.name }}</strong>
-                        <small class="d-block mt-1"><span class="badge bg-secondary">{{ loc.tool.tool_code }}</span>
-                            {{ loc.tool.unit }} | {{ loc.tool.category.name if loc.tool.category else 'No Cat' }}
-                        </small>
-                    </td>
-                    <td>
-                        <div>Owned: <strong>{{ "%g"|format(loc.owned_qty) }}</strong></div>
-                        <div>Available: <span class="badge bg-success">{{ "%g"|format(loc.in_store_qty) }}</span></div>
-                        <div>Out: <span class="badge bg-warning text-dark">{{ "%g"|format(loc.rented_out_qty) }}</span></div>
-                    </td>
+                <tr class="tool-row {% if loc.rental_count>0 %}has-pending{% endif %}">
                     <td>
                         <span class="badge bg-success tool-tracking-current">
-                            <i class="fas fa-location-dot" aria-hidden="true"></i>
-                            <span>{{ loc.current_label }}</span>
+                            {% if loc.loc_type=='store' %}<i class="fas fa-warehouse" aria-hidden="true"></i>
+                            {% elif loc.loc_type=='own_project' %}<i class="fas fa-building" aria-hidden="true"></i>
+                            {% else %}<i class="fas fa-user-tag" aria-hidden="true"></i>{% endif %}
+                            <span>{{ loc.label }}</span>
                         </span>
-                        {% if loc.holdings|length > 1 %}<small class="d-block text-muted mt-1">Split across {{ loc.holdings|length }} locations</small>{% endif %}
+                        {% if loc.loc_type=='own_project' %}
+                            <small class="d-block text-muted mt-1">HDC site{% if loc.client %} · Client: {{ loc.client }}{% endif %}{% if loc.stage_count>0 %} · {{ loc.stage_count }} stage{% if loc.stage_count != 1 %}s{% endif %}{% endif %}</small>
+                        {% elif loc.loc_type=='customer' %}<small class="d-block text-muted mt-1">External customer</small>
+                        {% else %}<small class="d-block text-muted mt-1">Available stock</small>{% endif %}
                     </td>
                     <td>
-                        <div class="tool-tracking-chain">
-                            {% if loc.chain|length==0 %}
-                                <span class="c">Warehouse / Store</span>
-                            {% else %}
-                                {% for m in loc.chain %}
-                                    <span class="c {% if loop.last %}active{% endif %}" title="{{ m.timestamp }} — {{ m.movement_type }} — {{ m.qty }} qty">
-                                        {{ m.to_location_label }}
-                                    </span>
-                                    {% if not loop.last %}<span class="arrow" aria-hidden="true">›</span>{% endif %}
-                                {% endfor %}
-                            {% endif %}
-                        </div>
+                        <span class="tool-tracking-preview" title="{{ loc.tool_preview }}">{{ loc.tool_preview }}</span>
+                        <small class="d-block text-muted">{{ loc.tool_count }} tool type{% if loc.tool_count != 1 %}s{% endif %}</small>
                     </td>
-                    <td>
-                        {% if loc.last_log %}
-                            <div class="text-nowrap">{{ loc.last_log.timestamp.strftime('%Y-%m-%d %H:%M') if loc.last_log.timestamp else '' }}</div>
-                            <span class="badge bg-secondary tool-tracking-movement-type">{{ loc.last_log.movement_type }}</span>
-                            <div class="small tool-tracking-movement-labels">
-                                {{ loc.last_log.from_location_label }} <span aria-hidden="true">→</span>
-                                <strong>{{ loc.last_log.to_location_label }}</strong>
-                            </div>
-                            <small class="d-block">Qty: {{ "%.0f"|format(loc.last_log.qty or 0) }}</small>
-                        {% else %}
-                            <span class="text-muted">In Warehouse — never rented</span>
-                        {% endif %}
+                    <td class="text-center fw-bold">{{ "%.0f"|format(loc.qty) }}</td>
+                    <td class="text-center">
+                        <span class="badge bg-secondary">{{ loc.rental_count }} rental{% if loc.rental_count != 1 %}s{% endif %}</span>
+                        {% if loc.overdue_qty>0 %}<small class="d-block text-danger fw-semibold">{{ "%.0f"|format(loc.overdue_qty) }} overdue qty</small>{% endif %}
                     </td>
-                    <td class="tool-tracking-actions">
-                        <div class="d-flex flex-wrap gap-1">
-                            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('hdc_tool_rental_tool_position', tool_id=loc.tool.id) }}" title="Full position + stock history" aria-label="Full position and stock history for {{ loc.tool.name }}"><i class="fas fa-map-location-dot"></i></a>
-                            <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#detailModal{{ loc.tool.id }}"><i class="fas fa-eye me-1" aria-hidden="true"></i>History</button>
-                        </div>
+                    <td class="text-center">
+                        <button type="button" class="btn btn-sm btn-outline-primary"
+                                data-bs-toggle="modal" data-bs-target="#detailModal{{ loop.index }}"
+                                aria-label="View all tools and movement details at {{ loc.label }}">
+                            <i class="fas fa-eye me-1" aria-hidden="true"></i>View
+                        </button>
                     </td>
                 </tr>
             {% else %}
-                <tr><td colspan="6" class="text-center text-muted py-4">No tools found. Add tools in Inventory first.</td></tr>
+                <tr><td colspan="5" class="text-center text-muted py-4">No current holdings match these filters.</td></tr>
             {% endfor %}
             </tbody>
         </table>
@@ -135,61 +112,88 @@
 </div>
 
 {% for loc in locations %}
-<div class="modal fade tool-tracking-modal" id="detailModal{{ loc.tool.id }}" tabindex="-1" aria-labelledby="detailModalLabel{{ loc.tool.id }}" aria-hidden="true">
-    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+<div class="modal fade tool-tracking-modal" id="detailModal{{ loop.index }}" tabindex="-1"
+     aria-labelledby="detailModalLabel{{ loop.index }}" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
         <div class="modal-content hdc-modal">
             <div class="modal-header">
-                <h6 class="modal-title" id="detailModalLabel{{ loc.tool.id }}">{{ loc.tool.name }} — Movement History</h6>
+                <div>
+                    <h5 class="modal-title mb-1" id="detailModalLabel{{ loop.index }}">
+                        <i class="fas fa-map-location-dot me-2"></i>{{ loc.label }} — Full Tool Details
+                    </h5>
+                    <small class="text-muted">{{ loc.tool_count }} tool type{% if loc.tool_count != 1 %}s{% endif %} · {{ "%.0f"|format(loc.qty) }} total qty · {{ loc.rental_count }} active rental{% if loc.rental_count != 1 %}s{% endif %}</small>
+                </div>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
-                <h6 class="small text-uppercase text-muted fw-bold">Where the pieces are right now</h6>
-                <div class="table-responsive">
-                    <table class="table hdc-table table-sm mb-3 tool-tracking-detail-table">
-                        <thead><tr><th scope="col">Location</th><th scope="col" class="text-center">Qty</th><th scope="col" class="text-center">Days out</th><th scope="col">Rental</th></tr></thead>
+                <h6 class="small text-uppercase text-muted fw-bold">Tools held here and their movement paths</h6>
+                <div class="table-responsive mb-4">
+                    <table class="table hdc-table table-sm mb-0 tool-tracking-detail-table">
+                        <thead><tr><th>Tool</th><th class="text-center">Qty Here</th><th>Rental / Holder</th><th>Full Movement Chain</th></tr></thead>
                         <tbody>
-                        {% if loc.in_store_qty > 0 %}
-                            <tr>
-                                <td><span class="tools-chip chip-store"><i class="fas fa-warehouse" aria-hidden="true"></i>Warehouse / Store</span></td>
-                                <td class="text-center fw-bold">{{ "%g"|format(loc.in_store_qty) }}</td>
-                                <td class="text-center text-muted">–</td><td class="text-muted">–</td>
-                            </tr>
-                        {% endif %}
-                        {% for h in loc.holdings %}
-                            <tr>
-                                <td>
-                                    <span class="tools-chip {% if h.loc_type=='own_project' %}chip-own{% elif h.loc_type=='customer' %}chip-customer{% else %}chip-store{% endif %}"><i class="fas fa-location-dot" aria-hidden="true"></i>{{ h.label }}</span>
-                                    {% if h.overdue %}<span class="badge bg-danger ms-1">overdue</span>{% endif %}
-                                </td>
-                                <td class="text-center fw-bold">{{ "%g"|format(h.qty) }}</td>
-                                <td class="text-center">{{ h.days_out }}</td>
-                                <td>{% if h.rental %}<a href="{{ url_for('hdc_tool_rental_detail', rental_id=h.rental.id) }}">{{ h.rental.rental_code }}</a>{% else %}-{% endif %}</td>
-                            </tr>
+                        {% for tool_detail in loc.tools %}
+                            {% for holding in tool_detail.holdings %}
+                                <tr>
+                                    {% if loop.first %}
+                                    <td rowspan="{{ tool_detail.holdings|length }}">
+                                        <a href="{{ url_for('hdc_tool_rental_tool_position', tool_id=tool_detail.tool.id) }}" class="fw-bold text-decoration-none">{{ tool_detail.tool.name }}</a>
+                                        <small class="d-block text-muted">{{ tool_detail.tool.tool_code }} · {{ tool_detail.tool.unit or 'pcs' }}</small>
+                                        {% if tool_detail.holdings|length>1 %}<small class="d-block text-muted mt-1">{{ tool_detail.holdings|length }} active holdings</small>{% endif %}
+                                    </td>
+                                    {% endif %}
+                                    <td class="text-center fw-bold">{{ "%.0f"|format(holding.qty) }} {{ tool_detail.tool.unit or 'pcs' }}</td>
+                                    <td>
+                                        {% if holding.rental %}
+                                            <a href="{{ url_for('hdc_tool_rental_detail', rental_id=holding.rental.id) }}" class="badge bg-secondary text-decoration-none">{{ holding.rental.rental_code }}</a>
+                                            <small class="d-block">{{ holding.rental.rental_date }}</small>
+                                            <small class="d-block text-muted">At: {{ holding.label }}</small>
+                                            <small class="d-block {% if holding.overdue %}text-danger fw-bold{% else %}text-muted{% endif %}">
+                                                {{ holding.days_out }} days out{% if holding.overdue %} · overdue{% endif %}
+                                            </small>
+                                            {% if holding.pending_amount>0 %}<small class="d-block text-danger">{{ "{:,.0f}".format(holding.pending_amount) }} pending</small>{% endif %}
+                                        {% else %}
+                                            <span class="tools-chip chip-store"><i class="fas fa-warehouse" aria-hidden="true"></i>In store / available</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if holding.chain %}
+                                            <div class="tool-tracking-chain">
+                                                {% for step in holding.chain %}
+                                                    <span class="c {% if step.is_current %}active{% endif %}" title="{{ step.date or '' }}">{{ step.label }}</span>
+                                                    {% if not loop.last %}<span class="arrow" aria-hidden="true">›</span>{% endif %}
+                                                {% endfor %}
+                                            </div>
+                                        {% else %}
+                                            <span class="text-muted">Warehouse / Store — no movement chain</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                            {% endfor %}
                         {% endfor %}
                         </tbody>
                     </table>
                 </div>
-                <h6 class="small text-uppercase text-muted fw-bold">Movement history</h6>
-                <div class="tool-tracking-chain mb-3">
-                    {% for m in loc.chain %}
-                        <span class="c {% if loop.last %}active{% endif %}">{{ m.to_location_label }}</span>
-                        {% if not loop.last %}<span class="arrow" aria-hidden="true">›</span>{% endif %}
-                    {% endfor %}
-                    {% if loc.chain|length==0 %}<span class="c">Warehouse / Store (No movement)</span>{% endif %}
-                </div>
+
+                <h6 class="small text-uppercase text-muted fw-bold">Full tool movement log <small class="text-normal">(includes earlier locations)</small></h6>
                 <div class="table-responsive">
                     <table class="table hdc-table table-sm mb-0 tool-tracking-detail-table">
-                        <thead><tr><th scope="col">Date</th><th scope="col">Type</th><th scope="col">From</th><th scope="col">To</th><th scope="col">Qty</th><th scope="col">Rental</th></tr></thead>
+                        <thead><tr><th>Tool</th><th>Date</th><th>Type</th><th>From</th><th>To</th><th class="text-center">Qty</th></tr></thead>
                         <tbody>
-                        {% for m in loc.chain %}
-                            <tr>
-                                <td>{{ m.timestamp.strftime('%Y-%m-%d %H:%M') if m.timestamp else '' }}</td>
-                                <td><span class="badge bg-secondary tool-tracking-movement-type">{{ m.movement_type }}</span></td>
-                                <td>{{ m.from_location_label }}</td>
-                                <td><strong>{{ m.to_location_label }}</strong> {% if loop.last %}<span class="badge bg-success">Current</span>{% endif %}</td>
-                                <td>{{ "%.0f"|format(m.qty or 0) }}</td>
-                                <td>{% if m.rental_id %}<a href="{{ url_for('hdc_tool_rental_detail', rental_id=m.rental_id) }}">{{ m.rental.rental_code if m.rental else m.rental_id }}</a>{% else %}-{% endif %}</td>
-                            </tr>
+                        {% for tool_detail in loc.tools %}
+                            {% for movement in tool_detail.movement_logs %}
+                                <tr>
+                                    <td>{{ tool_detail.tool.name }} <small class="text-muted">{{ tool_detail.tool.tool_code }}</small></td>
+                                    <td class="text-nowrap">{{ movement.timestamp.strftime('%Y-%m-%d %H:%M') if movement.timestamp else '' }}</td>
+                                    <td><span class="badge bg-secondary tool-tracking-movement-type">{{ movement.movement_type }}</span></td>
+                                    <td>{{ movement.from_location_label }}</td>
+                                    <td>{{ movement.to_location_label }}</td>
+                                    <td class="text-center">{{ "%.0f"|format(movement.qty or 0) }}</td>
+                                </tr>
+                            {% else %}
+                                <tr><td colspan="6" class="text-center text-muted">No movement history for {{ tool_detail.tool.name }}.</td></tr>
+                            {% endfor %}
+                        {% else %}
+                            <tr><td colspan="6" class="text-center text-muted">No tools in this location.</td></tr>
                         {% endfor %}
                         </tbody>
                     </table>

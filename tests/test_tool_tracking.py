@@ -13,6 +13,7 @@ Pins the behaviour described in TOOLS_TRACKING_SYSTEM.md:
   - the dashboard stays a simple item-wise stock + unpaid-rent summary
     (no repeated tracking/audit blocks) and its filters narrow the list
   - a customer's unpaid rent is split per item, but own-site money is not
+  - tracking and reports group tools per site/customer and expand long paths on View
   - the dashboard / position pages / JSON feed all render
 
 Run with:
@@ -838,6 +839,139 @@ class ToolTrackingTestCase(unittest.TestCase):
         self.assertIn('tool-tracking-chain', html)
         self.assertIn('Chand Contractor', html)
         self.assertNotIn('Example: Site1 &gt; Site2', html)
+
+    def test_tracking_groups_tools_by_location_and_only_expands_long_chain_on_view(self):
+        vibrator = self._make_tool('TOOL-0001', 'Concrete Vibrator', 10)
+        jackhammer = self._make_tool('TOOL-0002', 'Jack Hammer', 6)
+        site_c = Project(name='Site C', project_code='P-C', client='Owner C',
+                         location='Islamabad', contract_type='lump_sum',
+                         owner_lump_sum=3_000_000)
+        db.session.add(site_c)
+        db.session.commit()
+        rental = self._rent([(vibrator, 5), (jackhammer, 3)],
+                            renter_type='internal', project=self.site_a)
+
+        for destination in (self.site_b, site_c):
+            response = self.client.post(f'/hdc/tool-rental/{rental.id}/transfer', data={
+                '_csrf_token': self._token(), 'to_type': 'site',
+                'to_project_id': str(destination.id), 'to_stage_id': '',
+                'qty_transferred': '8',
+                'transfer_date': _pkt_today().isoformat(),
+            }, follow_redirects=True)
+            self.assertEqual(response.status_code, 200)
+
+        response = self.client.get('/hdc/tool-rental/tracking')
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        table_start = html.index(
+            '<table class="table hdc-table table-sm mb-0 tool-tracking-table">')
+        table_end = html.index('</table>', table_start)
+        summary_table = html[table_start:table_end]
+        modal_start = html.index('<div class="modal fade tool-tracking-modal"')
+        details = html[modal_start:]
+
+        self.assertIn('Site C', summary_table)
+        self.assertIn('Concrete Vibrator', summary_table)
+        self.assertIn('Jack Hammer', summary_table)
+        self.assertIn('2 tool types', summary_table)
+        self.assertIn('data-bs-target="#detailModal', summary_table)
+        # The list stays short; the complete route is only in the View dialog.
+        self.assertNotIn('Site A', summary_table)
+        self.assertIn('Site A', details)
+        self.assertIn('Site B', details)
+        self.assertIn('Site C', details)
+
+        filtered = self.client.get(
+            f'/hdc/tool-rental/tracking?project_id={site_c.id}')
+        self.assertEqual(filtered.status_code, 200)
+        filtered_html = filtered.get_data(as_text=True)
+        filtered_start = filtered_html.index(
+            '<table class="table hdc-table table-sm mb-0 tool-tracking-table">')
+        filtered_end = filtered_html.index('</table>', filtered_start)
+        filtered_summary = filtered_html[filtered_start:filtered_end]
+        self.assertIn('Site C', filtered_summary)
+        self.assertNotIn('Site B', filtered_summary)
+        self.assertNotIn('Warehouse / Store', filtered_summary)
+
+    def test_tracking_rolls_different_stages_up_to_one_site_row(self):
+        site_c = Project(name='Site C', project_code='P-C', client='Owner C',
+                         location='Islamabad', contract_type='lump_sum',
+                         owner_lump_sum=3_000_000)
+        db.session.add(site_c)
+        db.session.flush()
+        stage_a = Stage(project_id=site_c.id, name='Foundation',
+                        contract_basis='Lump Sum', lump_sum_value=100_000)
+        stage_b = Stage(project_id=site_c.id, name='Roof Work',
+                        contract_basis='Lump Sum', lump_sum_value=100_000)
+        db.session.add_all([stage_a, stage_b])
+        db.session.commit()
+
+        vibrator = self._make_tool('TOOL-0001', 'Concrete Vibrator', 10)
+        jackhammer = self._make_tool('TOOL-0002', 'Jack Hammer', 6)
+        self._rent([(vibrator, 4)], renter_type='internal',
+                   project=site_c, stage=stage_a)
+        self._rent([(jackhammer, 2)], renter_type='internal',
+                   project=site_c, stage=stage_b)
+
+        response = self.client.get('/hdc/tool-rental/tracking')
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        table_start = html.index(
+            '<table class="table hdc-table table-sm mb-0 tool-tracking-table">')
+        table_end = html.index('</table>', table_start)
+        summary = html[table_start:table_end]
+
+        self.assertIn('Site C', summary)
+        self.assertIn('2 tool types', summary)
+        self.assertIn('2 stages', summary)
+        self.assertIn('Concrete Vibrator', summary)
+        self.assertIn('Jack Hammer', summary)
+
+    def test_reports_group_each_site_or_customer_and_open_full_tool_chain_details(self):
+        vibrator = self._make_tool('TOOL-0001', 'Concrete Vibrator', 10)
+        jackhammer = self._make_tool('TOOL-0002', 'Jack Hammer', 6)
+        drill = self._make_tool('TOOL-0003', 'Core Drill', 5)
+        site_c = Project(name='Site C', project_code='P-C', client='Owner C',
+                         location='Islamabad', contract_type='lump_sum',
+                         owner_lump_sum=3_000_000)
+        db.session.add(site_c)
+        db.session.commit()
+
+        internal = self._rent([(vibrator, 5), (jackhammer, 3)],
+                              renter_type='internal', project=self.site_a)
+        for destination in (self.site_b, site_c):
+            response = self.client.post(f'/hdc/tool-rental/{internal.id}/transfer', data={
+                '_csrf_token': self._token(), 'to_type': 'site',
+                'to_project_id': str(destination.id), 'to_stage_id': '',
+                'qty_transferred': '8',
+                'transfer_date': _pkt_today().isoformat(),
+            }, follow_redirects=True)
+            self.assertEqual(response.status_code, 200)
+        self._rent([(drill, 2)], renter_type='external', customer_name='Ali Traders')
+        self._rent([(drill, 1)], renter_type='external', customer_name='Bilal Construction')
+
+        response = self.client.get('/hdc/tool-rental/reports')
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        summary_start = html.index(
+            '<table class="table hdc-table table-sm mb-0 tool-report-location-table">')
+        summary_end = html.index('</table>', summary_start)
+        summary = html[summary_start:summary_end]
+        modal_start = html.index('<div class="modal fade tool-report-location-modal"')
+        details = html[modal_start:]
+
+        # Internal site plus two distinct customers must remain three groups.
+        self.assertEqual(html.count('class="modal fade tool-report-location-modal"'), 3)
+        self.assertIn('Site A', summary)
+        self.assertIn('Ali Traders', summary)
+        self.assertIn('Bilal Construction', summary)
+        self.assertIn('data-bs-target="#reportLocationModal', summary)
+        self.assertNotIn('Site B', summary)
+        self.assertIn('Concrete Vibrator', details)
+        self.assertIn('Jack Hammer', details)
+        self.assertIn('Site A', details)
+        self.assertIn('Site B', details)
+        self.assertIn('Site C', details)
 
 
 if __name__ == '__main__':

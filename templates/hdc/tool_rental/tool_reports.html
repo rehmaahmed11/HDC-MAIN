@@ -151,54 +151,45 @@
             </div>
         </div>
 
-        <div class="card hdc-card mt-3">
-            <div class="card-header hdc-card-header"><i class="fas fa-map-location-dot me-2"></i>Per Site / Customer Breakdown</div>
-            <div class="table-responsive">
-                <table class="table hdc-table table-sm mb-0">
-                    <thead><tr><th>Site / Customer</th><th>Rentals</th><th>Rented</th><th>Pend Tools</th><th>Pend Amt</th></tr></thead>
-                    <tbody>
-                    {% for sid, data in site_breakdown.items() %}
-                        <tr><td>{{ data.label }}</td><td>{{ data.count }}</td><td>{{ "%.0f"|format(data.rented) }}</td><td>{{ "%.0f"|format(data.pending_tools) }}</td><td>{{ "{:,.0f}".format(data.pending_amount) }}</td></tr>
-                    {% else %}
-                        <tr><td colspan="5" class="text-center text-muted">No data</td></tr>
-                    {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
     </div>
 
     <div class="col-md-9">
         <div class="card hdc-card">
-            <div class="card-header hdc-card-header"><i class="fas fa-list me-2"></i>Detailed Rentals — {{ rentals|length }} records | Click to view tracking chain</div>
+            <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-list me-2"></i>Detailed Rentals — {{ rentals|length }} records</span>
+                <small class="text-muted">Compact list — View opens the complete rental record</small>
+            </div>
             <div class="table-responsive">
-                <table class="table hdc-table table-sm mb-0">
-                    <thead><tr><th>Code</th><th>Date</th><th>Renter</th><th>Location</th><th>Tools</th><th>Tracking Chain</th><th>Amount Details</th><th>Pending Tools / Amount</th><th>Status</th></tr></thead>
+                <table class="table hdc-table table-sm mb-0 tool-report-rentals-table">
+                    <thead><tr><th>Code</th><th>Date</th><th>Renter</th><th>Site / Customer</th><th>Tools</th><th>Amount</th><th>Pending</th><th>Status</th><th>View</th></tr></thead>
                     <tbody>
-                    {% for r in rentals %}
-                        <tr style="cursor:pointer" onclick="location.href='{{ url_for('hdc_tool_rental_detail', rental_id=r.id) }}'">
+                    {% for rental_detail in report_rentals %}
+                        {% set r = rental_detail.rental %}
+                        <tr>
                             <td><span class="badge bg-secondary">{{ r.rental_code }}</span></td>
-                            <td>{{ r.rental_date }}<br><small>Exp: {{ r.expected_return_date or '-' }}</small></td>
+                            <td class="text-nowrap">{{ r.rental_date }}<br><small>Exp: {{ r.expected_return_date or '-' }}</small></td>
                             <td><span class="badge {% if r.renter_type=='internal' %}bg-primary{% else %}bg-info{% endif %}">{{ r.renter_type }}</span><br><small>{{ r.billing_type }}</small></td>
-                            <td>{% if r.renter_type=='internal' %}{{ r.project.name if r.project else '-' }}{% else %}{{ r.customer_name }}{% endif %}</td>
-                            <td>{{ "%.0f"|format(r.total_rented_qty or 0) }}<br><small>Ret: {{ "%.0f"|format(r.total_returned_qty or 0) }}</small></td>
-                            <td style="max-width:200px">
-                                <div style="display:flex; flex-wrap:wrap; gap:4px">
-                                {% for label in r.tracking_chain %}
-                                    <span style="padding:2px 8px; border-radius:999px; font-size:0.7rem; border:1px solid var(--card-border); {% if loop.last %}background:#16a34a; color:#fff; border-color:transparent{% else %}background:var(--card-header-bg){% endif %}">{{ label }}</span>
-                                {% endfor %}
-                                </div>
+                            <td>{% if r.renter_type=='internal' %}{{ r.project.name if r.project else '-' }}{% else %}{{ r.customer_name or 'External Customer' }}{% endif %}</td>
+                            <td class="text-nowrap">
+                                <strong>{{ rental_detail.tool_count }} type(s)</strong><br>
+                                <small>{{ "%.0f"|format(r.total_rented_qty or 0) }} qty · Ret {{ "%.0f"|format(r.total_returned_qty or 0) }}</small>
                             </td>
-                            <td>
+                            <td class="text-nowrap">
                                 {% if r.billing_type=='no_charge' %}<span class="badge bg-secondary">No Charge</span>{% else %}
-                                T: {{ "{:,.0f}".format(r.total_amount or 0) }}<br>P: {{ "{:,.0f}".format(r.total_paid or 0) }}<br><strong class="text-danger">Pend: {{ "{:,.0f}".format(r.total_pending_amount) }}</strong>
+                                T: {{ "{:,.0f}".format(r.total_amount or 0) }}<br>P: {{ "{:,.0f}".format(r.total_paid or 0) }}
                                 {% endif %}
                             </td>
-                            <td>
-                                Tools: <span class="badge {% if r.total_pending_tools>0 %}bg-warning text-dark{% else %}bg-success{% endif %}">{{ "%.0f"|format(r.total_pending_tools) }}</span><br>
-                                {% if r.billing_type!='no_charge' %}<small>Amt: {{ "{:,.0f}".format(r.total_pending_amount) }}</small>{% endif %}
+                            <td class="text-nowrap">
+                                <span class="badge {% if r.total_pending_tools>0 %}bg-warning text-dark{% else %}bg-success{% endif %}">{{ "%.0f"|format(r.total_pending_tools) }} tools</span>
+                                {% if r.billing_type!='no_charge' %}<small class="d-block">{{ "{:,.0f}".format(r.total_pending_amount) }} due</small>{% endif %}
                             </td>
                             <td><span class="badge {% if r.status=='active' %}bg-primary{% elif r.status=='partially_returned' %}bg-warning text-dark{% elif r.status=='overdue' %}bg-danger{% else %}bg-success{% endif %}">{{ r.status }}</span><br><span class="badge bg-secondary">{{ r.payment_status }}</span></td>
+                            <td>
+                                <a class="btn btn-sm btn-outline-primary" href="{{ url_for('hdc_tool_rental_detail', rental_id=r.id) }}"
+                                   title="View tools, payments and complete movement history">
+                                    <i class="fas fa-eye me-1" aria-hidden="true"></i>View
+                                </a>
+                            </td>
                         </tr>
                     {% else %}
                         <tr><td colspan="9" class="text-center text-muted py-4">No rentals match filters. Try different date range / site / tool.</td></tr>
@@ -209,4 +200,140 @@
         </div>
     </div>
 </div>
+
+<div class="row g-3 mt-3">
+    <div class="col-12">
+        <div class="card hdc-card">
+            <div class="card-header hdc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <span><i class="fas fa-map-location-dot me-2"></i>By Site / Client</span>
+                <small class="text-muted">One compact line per location — View opens all tools and movement paths</small>
+            </div>
+            <div class="table-responsive">
+                <table class="table hdc-table table-sm mb-0 tool-report-location-table">
+                    <thead><tr><th>Site / Customer</th><th class="text-center">Rentals</th><th class="text-center">Tool Types</th><th class="text-center">Rented</th><th class="text-center">Pending</th><th class="text-end">Pending Amt</th><th class="text-center">View</th></tr></thead>
+                    <tbody>
+                    {% for sid, data in site_breakdown.items() %}
+                        <tr>
+                            <td>
+                                <strong>{{ data.label }}</strong>
+                                {% if data.client %}<small class="d-block text-muted">Client: {{ data.client }}</small>{% endif %}
+                            </td>
+                            <td class="text-center">{{ data.count }}</td>
+                            <td class="text-center"><span class="badge bg-secondary">{{ data.tool_count }}</span></td>
+                            <td class="text-center">{{ "%.0f"|format(data.rented) }}</td>
+                            <td class="text-center">{{ "%.0f"|format(data.pending_tools) }}</td>
+                            <td class="text-end">{{ "{:,.0f}".format(data.pending_amount) }}</td>
+                            <td class="text-center">
+                                <button type="button" class="btn btn-sm btn-outline-primary"
+                                        data-bs-toggle="modal" data-bs-target="#reportLocationModal{{ loop.index }}"
+                                        aria-label="View tools and movement details for {{ data.label }}">
+                                    <i class="fas fa-eye me-1" aria-hidden="true"></i>View
+                                </button>
+                            </td>
+                        </tr>
+                    {% else %}
+                        <tr><td colspan="7" class="text-center text-muted">No data</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# Expanded location report: the summary table above stays one line per
+   site/customer; all tool lines and their potentially long chains live here. #}
+{% for sid, data in site_breakdown.items() %}
+<div class="modal fade tool-report-location-modal" id="reportLocationModal{{ loop.index }}" tabindex="-1"
+     aria-labelledby="reportLocationModalLabel{{ loop.index }}" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content hdc-modal">
+            <div class="modal-header">
+                <div>
+                    <h5 class="modal-title mb-1" id="reportLocationModalLabel{{ loop.index }}">
+                        <i class="fas {% if data.location_type=='site' %}fa-building{% else %}fa-user-tag{% endif %} me-2"></i>{{ data.label }}
+                    </h5>
+                    {% if data.client %}<small class="text-muted">Client: {{ data.client }}</small>{% endif %}
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row g-2 mb-3 text-center">
+                    <div class="col-6 col-md"><div class="border rounded-3 p-2"><small class="text-muted d-block">Rentals</small><strong>{{ data.count }}</strong></div></div>
+                    <div class="col-6 col-md"><div class="border rounded-3 p-2"><small class="text-muted d-block">Tool Types</small><strong>{{ data.tool_count }}</strong></div></div>
+                    <div class="col-6 col-md"><div class="border rounded-3 p-2"><small class="text-muted d-block">Rented Qty</small><strong>{{ "%.0f"|format(data.rented) }}</strong></div></div>
+                    <div class="col-6 col-md"><div class="border rounded-3 p-2"><small class="text-muted d-block">Pending Tools</small><strong>{{ "%.0f"|format(data.pending_tools) }}</strong></div></div>
+                    <div class="col-6 col-md"><div class="border rounded-3 p-2"><small class="text-muted d-block">Pending Amount</small><strong>{{ "{:,.0f}".format(data.pending_amount) }}</strong></div></div>
+                </div>
+
+                <h6 class="small text-uppercase text-muted fw-bold"><i class="fas fa-tools me-1"></i>Tool Totals at This Site / Client</h6>
+                <div class="table-responsive mb-4">
+                    <table class="table hdc-table table-sm mb-0 tool-report-detail-table">
+                        <thead><tr><th>Tool</th><th>Rental Count</th><th>Rented</th><th>Returned</th><th>Pending</th><th>Amount</th></tr></thead>
+                        <tbody>
+                        {% for tool_row in data.tools %}
+                            <tr>
+                                <td>
+                                    {% if tool_row.tool %}<a href="{{ url_for('hdc_tool_rental_tool_position', tool_id=tool_row.tool.id) }}" class="fw-bold text-decoration-none">{{ tool_row.tool.name }}</a>
+                                    {% else %}<strong>Tool</strong>{% endif %}
+                                    <small class="d-block text-muted">{{ tool_row.tool.tool_code if tool_row.tool else '' }}</small>
+                                </td>
+                                <td class="text-center">{{ tool_row.rental_count }}</td>
+                                <td class="text-center">{{ "%.0f"|format(tool_row.rented) }}</td>
+                                <td class="text-center">{{ "%.0f"|format(tool_row.returned) }}</td>
+                                <td class="text-center"><span class="badge {% if tool_row.pending>0 %}bg-warning text-dark{% else %}bg-success{% endif %}">{{ "%.0f"|format(tool_row.pending) }}</span></td>
+                                <td class="text-end">{{ "{:,.0f}".format(tool_row.amount) }}</td>
+                            </tr>
+                        {% else %}
+                            <tr><td colspan="6" class="text-center text-muted">No tool details in this filter.</td></tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <h6 class="small text-uppercase text-muted fw-bold"><i class="fas fa-route me-1"></i>Rentals and Full Movement Paths</h6>
+                {% for rental_detail in data.rentals %}
+                    {% set r = rental_detail.rental %}
+                    <section class="tool-report-rental-detail">
+                        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
+                            <div>
+                                <a class="badge bg-secondary text-decoration-none" href="{{ url_for('hdc_tool_rental_detail', rental_id=r.id) }}">{{ r.rental_code }}</a>
+                                <span class="small text-muted ms-1">{{ r.rental_date }}</span>
+                                <span class="badge {% if r.status=='overdue' %}bg-danger{% elif r.status=='active' %}bg-primary{% elif r.status=='partially_returned' %}bg-warning text-dark{% else %}bg-success{% endif %} ms-1">{{ r.status }}</span>
+                            </div>
+                            <a href="{{ url_for('hdc_tool_rental_detail', rental_id=r.id) }}" class="btn btn-sm btn-outline-secondary">Open rental</a>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="table hdc-table table-sm mb-2 tool-report-detail-table">
+                                <thead><tr><th>Tool</th><th>Rented</th><th>Returned</th><th>Pending</th></tr></thead>
+                                <tbody>
+                                {% for item in rental_detail['items'] %}
+                                    <tr>
+                                        <td>{{ item.tool.name if item.tool else item.tool_id }} <small class="text-muted">{{ item.tool.tool_code if item.tool else '' }}</small></td>
+                                        <td>{{ "%.0f"|format(item.qty_rented or 0) }}</td>
+                                        <td>{{ "%.0f"|format(item.qty_returned or 0) }}</td>
+                                        <td>{{ "%.0f"|format(item.qty_pending or 0) }}</td>
+                                    </tr>
+                                {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="tool-report-chain" aria-label="Full movement chain">
+                            {% for label in rental_detail.tracking_chain %}
+                                <span class="tool-report-chain-step {% if loop.last %}current{% endif %}">{{ label }}</span>
+                                {% if not loop.last %}<span class="tool-report-chain-arrow" aria-hidden="true">›</span>{% endif %}
+                            {% else %}
+                                <span class="text-muted">No movement history recorded.</span>
+                            {% endfor %}
+                        </div>
+                    </section>
+                {% else %}
+                    <p class="text-muted mb-0">No rentals in this report.</p>
+                {% endfor %}
+            </div>
+            <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button></div>
+        </div>
+    </div>
+</div>
+{% endfor %}
 {% endblock %}
