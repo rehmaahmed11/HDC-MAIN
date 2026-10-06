@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""The Parties module (sidebar → Parties): one directory, three consumers.
+"""The Parties module (sidebar → Parties): directory + per-party ledger.
 
 Parties live in a single table (``hdc_cash_flow_party``) that every
-*Party / Person* picker reads.  The directory at ``/hdc/parties`` groups them
-by the job they do:
+*Party / Person* picker reads.  The directory at ``/hdc/parties`` is one
+ledger-style list with KPI category filters and a searchable name combo:
 
 * **Loan Parties** (``lender`` / ``borrower``) — what the loan Money In /
   Money Out categories in the CF Register offer (*Loan Received*, *Loan
@@ -11,7 +11,11 @@ by the job they do:
 * **External Customers** (``rental``) — the HDC Tools rental parties.  An
   external tool rental syncs its customer here automatically, and every
   rental party is offered back in the HDC Tools customer search.
-* **Other Parties** — clients, suppliers, workers, staff, subcontractors.
+* **Workers** — synced from the Workers module.
+* **Other Parties** — clients, suppliers, staff, subcontractors.
+
+Opening a party (``/hdc/parties/<id>``) shows that name's dated
+``hdc_account_txn`` rows — the same payments as Accounts → All Entries.
 
 Covered:
 
@@ -50,8 +54,11 @@ os.environ.setdefault('HDC_ENV', 'test')
 os.environ.setdefault('HDC_SECRET_KEY', 'unit-test-secret')
 os.environ.setdefault('HDC_BOOTSTRAP_ADMIN_PASSWORD', 'Admin@1234')
 
+from sqlalchemy import func                                        # noqa: E402
+
 from hdc.app import create_app                                     # noqa: E402
 from hdc.extensions import db                                      # noqa: E402
+from hdc.models.accounts import Account, AccountTransaction        # noqa: E402
 from hdc.models.auth import HDCUser                                # noqa: E402
 from hdc.models.cashflow import CashFlowParty                      # noqa: E402
 from hdc.models.projects import Project                            # noqa: E402
@@ -139,11 +146,17 @@ class PartiesModuleTestCase(unittest.TestCase):
             session['_user_id'] = str(self.users[role])
             session['_fresh'] = True
 
-    def _group_html(self, html, key):
-        """The slice of the page between one group card and the next."""
-        start = html.index('id="parties-group-%s"' % key)
-        nxt = html.find('id="parties-group-', start + 1)
-        return html[start:nxt if nxt != -1 else None]
+    def _filter(self, **params):
+        qs = '&'.join('%s=%s' % item for item in params.items() if item[1] not in (None, ''))
+        url = PARTIES_URL + (('?' + qs) if qs else '')
+        return self.client.get(url).get_data(as_text=True)
+
+    @staticmethod
+    def _ledger_table(html):
+        """The directory table only — the add-party combo lists every name."""
+        start = html.index('id="parties-ledger"')
+        table = html.index('<table', start)
+        return html[table:html.index('</table>', table)]
 
     def _create_external_rental(self, customer='Zeesab Hardware'):
         token = self._token()
@@ -167,31 +180,43 @@ class PartiesModuleTestCase(unittest.TestCase):
         return rental
 
     # ── the directory page ───────────────────────────────────────────────────
-    def test_page_renders_the_three_groups_for_every_role(self):
+    def test_page_renders_kpis_ledger_and_combos_for_every_role(self):
         for role in ('admin', 'accountant', 'staff', 'manager'):
             self._as(role)
             response = self.client.get(PARTIES_URL)
             self.assertEqual(response.status_code, 200, role)
             html = response.get_data(as_text=True)
-            for key in ('loan', 'rental', 'other'):
-                self.assertIn('id="parties-group-%s"' % key, html, (role, key))
+            for label in ('Loan Parties', 'External Customers', 'Workers',
+                          'Other Parties', 'All Parties'):
+                self.assertIn(label, html, (role, label))
+            self.assertIn('id="parties-ledger"', html, role)
             self.assertIn('Add Party', html, role)
+            self.assertIn('data-hdc-combo="partyName"', html, role)
+            self.assertIn('data-hdc-combo="partyNameFilter"', html, role)
+            self.assertIn('name="category"', html, role)
+            self.assertIn('name="q"', html, role)
+            self.assertRegex(html, r'<select[^>]*name="party_type"', role)
 
-    def test_add_party_lands_in_the_right_group(self):
+    def test_add_party_lands_in_the_right_category_and_opens_its_ledger(self):
         token = self._token()
         response = self.client.post(PARTIES_URL, data={
             '_csrf_token': token, 'action': 'add_party',
             'name': 'Chacha Lender', 'party_type': 'lender',
             'phone': '0300-1112223'}, follow_redirects=True)
         self.assertEqual(response.status_code, 200)
+        body = response.get_data(as_text=True)
+        self.assertIn('Chacha Lender', body)
+        self.assertIn('Financials — by date', body)
         with self.app.app_context():
             party = CashFlowParty.query.filter_by(name='Chacha Lender').one()
             self.assertEqual(party.party_type, 'lender')
+            party_id = party.id
 
         html = self.client.get(PARTIES_URL).get_data(as_text=True)
-        loan_html = self._group_html(html, 'loan')
-        self.assertIn('Chacha Lender', loan_html)
-        self.assertNotIn('Chacha Lender', self._group_html(html, 'rental'))
+        self.assertIn('Chacha Lender', html)
+        self.assertIn('/hdc/parties/%d' % party_id, html)
+        self.assertIn('Chacha Lender', self._ledger_table(self._filter(category='loan')))
+        self.assertNotIn('Chacha Lender', self._ledger_table(self._filter(category='rental')))
 
     def test_toggle_party_hides_and_restores_it(self):
         with self.app.app_context():
@@ -265,9 +290,9 @@ class PartiesModuleTestCase(unittest.TestCase):
             self.assertEqual(party.party_type, 'rental')
 
         html = self.client.get(PARTIES_URL).get_data(as_text=True)
-        rental_html = self._group_html(html, 'rental')
-        self.assertIn('Zeesab Hardware', rental_html)
-        self.assertNotIn('Zeesab Hardware', self._group_html(html, 'loan'))
+        self.assertIn('Zeesab Hardware', html)
+        self.assertIn('Zeesab Hardware', self._ledger_table(self._filter(category='rental')))
+        self.assertNotIn('Zeesab Hardware', self._ledger_table(self._filter(category='loan')))
 
     def test_rental_payment_syncs_an_older_rentals_customer(self):
         # A rental that predates the directory: only the payment syncs it.
@@ -336,6 +361,63 @@ class PartiesModuleTestCase(unittest.TestCase):
             # Unknown types never invent a classification.
             row, _ = ensure_party('Weird Type Co', party_type='hacker')
             self.assertEqual(row.party_type, 'other')
+
+    def test_search_and_name_combo_filter_the_ledger(self):
+        with self.app.app_context():
+            save_cf_party('Akram Lender', party_type='lender')
+            save_cf_party('Bilal Hardware', party_type='rental', phone='0300-555')
+            db.session.commit()
+            bilal_id = CashFlowParty.query.filter_by(name='Bilal Hardware').one().id
+
+        self.assertIn('Akram Lender', self._ledger_table(self._filter(q='akram')))
+        self.assertNotIn('Bilal Hardware', self._ledger_table(self._filter(q='akram')))
+        self.assertIn('Bilal Hardware', self._ledger_table(self._filter(q='0300-555')))
+        named = self._ledger_table(self._filter(party_id=str(bilal_id)))
+        self.assertIn('Bilal Hardware', named)
+        self.assertNotIn('Akram Lender', named)
+
+    def test_party_payment_shows_on_ledger_and_in_all_entries(self):
+        """One posted row: party statement and Accounts → All Entries agree."""
+        with self.app.app_context():
+            party, _ = save_cf_party('Khan Traders', party_type='supplier')
+            db.session.commit()
+            party_id = party.id
+            cash = Account.query.filter(
+                func.lower(Account.type) == 'cash',
+                Account.is_void == False).first()  # noqa: E712
+            if cash is None:
+                cash = Account(name='Parties Test Cash', type='cash', status='active')
+                db.session.add(cash)
+                db.session.flush()
+            txn = AccountTransaction(
+                date=_pkt_today(), amount=2500, type='party_payment',
+                from_account_id=cash.id, executed_by_account_id=cash.id,
+                party_name='Khan Traders', category='expense',
+                note='Paint bill', reference_id='SMOKE-PARTY-1')
+            db.session.add(txn)
+            db.session.commit()
+            txn_id = txn.id
+
+        ledger = self.client.get('/hdc/parties/%d' % party_id)
+        self.assertEqual(ledger.status_code, 200)
+        html = ledger.get_data(as_text=True)
+        self.assertIn('Khan Traders', html)
+        self.assertIn('Paint bill', html)
+        self.assertIn('2,500', html)
+        self.assertIn('Party Payment', html)
+        self.assertIn('Running Balance', html)
+        self.assertIn('party_name=Khan', html)
+
+        entries = self.client.get('/hdc/accounts/entries?party_name=Khan%20Traders')
+        self.assertEqual(entries.status_code, 200)
+        entries_html = entries.get_data(as_text=True)
+        self.assertIn('Khan Traders', entries_html)
+        self.assertIn('id="txn-%d"' % txn_id, entries_html)
+        self.assertIn('data-hdc-combo="entriesPartyName"', entries_html)
+
+        directory = self.client.get(PARTIES_URL).get_data(as_text=True)
+        self.assertIn('Khan Traders', directory)
+        self.assertIn('2,500', directory)
 
 
 if __name__ == '__main__':

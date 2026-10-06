@@ -3,6 +3,7 @@
 {% block page_heading %}All Entries Ledger{% endblock %}
 
 {% block content %}
+{% from "shared/_combo_field.html" import combo_field %}
 <div class="d-flex justify-content-between align-items-center mb-3">
     <div class="small text-muted">Every entry, with filters, search and receipts. Void, restore or correct one from here.</div>
     <a href="{{ url_for('hdc_accounts', show_auto_person=(1 if show_auto_person else 0), date_from=filter_date_from, date_to=filter_date_to) }}" class="btn btn-outline-secondary">Back To Accounts</a>
@@ -84,8 +85,10 @@
                 </select>
             </div>
             <div class="col-md-4">
-                <label class="form-label">Party Name <small class="text-muted">(free text)</small></label>
-                <input type="text" name="party_name" class="form-control" value="{{ filter_party_name or '' }}" placeholder="e.g. supplier name, person...">
+                {{ combo_field('party_name', 'entriesPartyName', party_name_options or [],
+                   label='Party Name', placeholder='Search or type a party…',
+                   value=filter_party_name or '', max_items=80,
+                   hint='Searchable list — same names as Parties.') }}
             </div>
             <div class="col-md-4">
                 <label class="form-label">Date Range</label>
@@ -174,7 +177,7 @@
             <tbody>
                 {% for r in history_rows %}
                 {% set dir = account_tx_direction_for_type(r.type) %}
-                <tr {{ r|hdc_row_attrs }} {% if latest_print_txn and (latest_print_txn.id == r.id) %}class="table-warning"{% elif r.is_void %}class="table-secondary"{% endif %}>
+                <tr id="txn-{{ r.id }}" {{ r|hdc_row_attrs }} {% if latest_print_txn and (latest_print_txn.id == r.id) %}class="table-warning"{% elif r.is_void %}class="table-secondary"{% endif %}>
                     <td>
                         <div class="fw-semibold">{{ (r.type or '')|replace('_', ' ')|title }}</div>
                         <div class="small text-muted">
@@ -197,9 +200,9 @@
                     <td>
                         {% if r.to_account %}
                             <span class="text-truncate-cell d-inline-block" title="{{ r.to_account.name }}">{{ r.to_account.name }}</span>
-                            {% if r.party_name %}<span class="text-muted"> ({{ r.party_name }})</span>{% endif %}
+                            {% if r.party_name %}<span class="text-muted"> (<a href="{{ url_for('hdc_parties', q=r.party_name) }}">{{ r.party_name }}</a>)</span>{% endif %}
                         {% else %}
-                            <span class="text-truncate-cell d-inline-block" title="{{ r.party_name or '-' }}">{{ r.party_name or '-' }}</span>
+                            <span class="text-truncate-cell d-inline-block" title="{{ r.party_name or '-' }}">{% if r.party_name %}<a href="{{ url_for('hdc_parties', q=r.party_name) }}">{{ r.party_name }}</a>{% else %}-{% endif %}</span>
                         {% endif %}
                     </td>
                     <td>

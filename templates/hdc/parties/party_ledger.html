@@ -1,0 +1,156 @@
+{% extends "shared/base.html" %}
+{% block title %}{{ party.name }} — Party Ledger{% endblock %}
+{% block page_heading %}{{ party.name }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+    <div>
+        <div class="small text-muted">
+            <span class="badge bg-light text-dark border">{{ type_label }}</span>
+            <span class="ms-1">{{ category_label }}</span>
+            {% if not party.is_active %}<span class="badge bg-secondary ms-1">Hidden</span>{% endif %}
+        </div>
+        {% if party.phone %}<div class="small text-muted mt-1"><i class="fas fa-phone me-1"></i>{{ party.phone }}</div>{% endif %}
+        {% if party.note %}<div class="small text-muted">{{ party.note }}</div>{% endif %}
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+        {% if (current_user.role or '')|trim|lower in ('admin', 'accountant') %}
+        <a href="{{ url_for('hdc_accounts_entries', party_name=party.name) }}" class="btn btn-sm btn-outline-primary">
+            <i class="fas fa-receipt me-1"></i>All Entries
+        </a>
+        <a href="{{ url_for('hdc_new_transaction') }}" class="btn btn-sm btn-success">
+            <i class="fas fa-sack-dollar me-1"></i>Record Money
+        </a>
+        {% endif %}
+        {% if statement.worker %}
+        <a href="{{ url_for('hdc_worker_ledger', wid=statement.worker.worker.id) }}" class="btn btn-sm btn-outline-warning">
+            <i class="fas fa-hard-hat me-1"></i>Worker Ledger
+        </a>
+        {% endif %}
+        <a href="{{ url_for('hdc_parties', category=category) }}" class="btn btn-sm btn-outline-secondary">
+            <i class="fas fa-arrow-left me-1"></i>Back to Parties
+        </a>
+    </div>
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col-6 col-md-3">
+        <div class="kpi-card kpi-green h-100">
+            <div class="kpi-label">Money In</div>
+            <div class="kpi-value small">{{ "{:,.0f}".format(statement.total_in) }}</div>
+            <div class="kpi-sub">Received from this party</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="kpi-card kpi-red h-100">
+            <div class="kpi-label">Money Out</div>
+            <div class="kpi-value small">{{ "{:,.0f}".format(statement.total_out) }}</div>
+            <div class="kpi-sub">Paid to this party</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="kpi-card {% if statement.balance >= 0 %}kpi-teal{% else %}kpi-orange{% endif %} h-100">
+            <div class="kpi-label">Balance</div>
+            <div class="kpi-value small">{{ "{:,.0f}".format(statement.balance) }}</div>
+            <div class="kpi-sub">{% if statement.balance >= 0 %}Net received{% else %}Net paid out{% endif %}</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="kpi-card kpi-blue h-100">
+            <div class="kpi-label">Posted Entries</div>
+            <div class="kpi-value">{{ statement.entry_count }}</div>
+            <div class="kpi-sub">Same rows as Accounts → All Entries</div>
+        </div>
+    </div>
+</div>
+
+{% if statement.rental_due or statement.worker or statement.loan_outstanding %}
+<div class="alert alert-info py-2 small mb-3">
+    {% if statement.rental_due %}
+    <div><i class="fas fa-screwdriver-wrench me-1"></i>HDC Tools still due: <strong>{{ "{:,.0f}".format(statement.rental_due) }} PKR</strong> across {{ statement.rentals }} rental(s).</div>
+    {% endif %}
+    {% if statement.worker and statement.worker.balance %}
+    <div><i class="fas fa-hard-hat me-1"></i>Worker balance due: <strong>{{ "{:,.0f}".format(statement.worker.balance) }} PKR</strong>.</div>
+    {% endif %}
+    {% if statement.loan_outstanding %}
+    <div><i class="fas fa-money-bill-transfer me-1"></i>Open loan principal: <strong>{{ "{:,.0f}".format(statement.loan_outstanding) }} PKR</strong> ({{ statement.open_loans }} loan(s)).</div>
+    {% endif %}
+</div>
+{% endif %}
+
+<div class="card hdc-card">
+    <div class="card-header hdc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span><i class="fas fa-book me-2"></i>Financials — by date &amp; time</span>
+        <div class="d-flex gap-2">
+            {% if include_void %}
+            <a href="{{ url_for('hdc_party_ledger', party_id=party.id) }}" class="btn btn-sm btn-outline-dark">Hide voided</a>
+            {% else %}
+            <a href="{{ url_for('hdc_party_ledger', party_id=party.id, show_voided=1) }}" class="btn btn-sm btn-outline-dark">Show voided</a>
+            {% endif %}
+        </div>
+    </div>
+    <div class="table-responsive">
+        <table class="table hdc-table table-sm mb-0 party-ledger-table text-center">
+            <thead>
+                <tr>
+                    <th>Date &amp; Time</th>
+                    <th>Type</th>
+                    <th class="text-start">From → To</th>
+                    <th class="text-start">Note / Ref</th>
+                    <th class="text-end">In</th>
+                    <th class="text-end">Out</th>
+                    <th class="text-end">Running Balance</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in statement.rows %}
+                <tr {{ row.txn|hdc_row_attrs }} class="{% if row.is_void %}table-light text-muted{% endif %}">
+                    <td class="text-nowrap">{{ fmt_pkt(row.timestamp) }}</td>
+                    <td>
+                        {{ row.tx_type }}
+                        {% if row.is_void %}<span class="badge bg-secondary ms-1">Voided</span>{% endif %}
+                    </td>
+                    <td class="text-start small">{{ row.flow or '–' }}</td>
+                    <td class="text-start small">
+                        {% if row.note %}<div>{{ row.note }}</div>{% endif %}
+                        {% for ref in row.references %}
+                            {% if ref.url %}
+                            <a href="{{ ref.url }}" class="me-2">{{ ref.label }}</a>
+                            {% else %}
+                            <span class="text-muted me-2">{{ ref.label }}</span>
+                            {% endif %}
+                        {% endfor %}
+                    </td>
+                    <td class="text-end">{% if row.money_in %}{{ "{:,.2f}".format(row.money_in) }}{% else %}–{% endif %}</td>
+                    <td class="text-end">{% if row.money_out %}{{ "{:,.2f}".format(row.money_out) }}{% else %}–{% endif %}</td>
+                    <td class="text-end fw-semibold {% if row.running_balance < 0 %}text-danger{% endif %}">{{ "{:,.2f}".format(row.running_balance) }}</td>
+                    <td>
+                        <a href="{{ url_for('hdc_accounts_entries', party_name=party.name) }}#txn-{{ row.id }}" class="btn btn-sm btn-outline-secondary" title="Open this party in All Entries">
+                            <i class="fas fa-arrow-up-right-from-square" aria-hidden="true"></i>
+                        </a>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="8" class="text-center text-muted py-4">
+                        No posted entries for this party yet. Record money (New Transaction, CF Register, HDC Tools payment, worker payment) and it lands here and in All Entries together.
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+            {% if statement.rows %}
+            <tfoot>
+                <tr class="table-light fw-semibold">
+                    <td colspan="4" class="text-end">Totals</td>
+                    <td class="text-end">{{ "{:,.2f}".format(statement.total_in) }}</td>
+                    <td class="text-end">{{ "{:,.2f}".format(statement.total_out) }}</td>
+                    <td class="text-end">{{ "{:,.2f}".format(statement.balance) }}</td>
+                    <td></td>
+                </tr>
+            </tfoot>
+            {% endif %}
+        </table>
+    </div>
+</div>
+{% endblock %}
