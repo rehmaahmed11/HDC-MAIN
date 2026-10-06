@@ -55,15 +55,19 @@ RECENT_RENTALS_ON_NEW = 10
 TRANSFER_SOURCE_LIMIT = 60
 
 
-def _transfer_source_key(rental_id, loc_type, project_id=None, stage_id=None, customer_name=None):
-    """Encode one rental + one actual holding location for the From picker."""
+def _transfer_location_key(loc_type, project_id=None, stage_id=None, customer_name=None):
+    """Encode one actual holding location (shared by several rentals)."""
     return '|'.join((
-        str(int(rental_id)),
         str(loc_type or ''),
         str(int(project_id or 0)),
         str(int(stage_id or 0)),
         quote((customer_name or '').strip(), safe=''),
     ))
+
+
+def _transfer_source_key(rental_id, loc_type, project_id=None, stage_id=None, customer_name=None):
+    """Encode one rental + one actual holding location for the From picker."""
+    return f"{int(rental_id)}|{_transfer_location_key(loc_type, project_id, stage_id, customer_name)}"
 
 
 def _tool_project_option_label(project):
@@ -614,6 +618,8 @@ def register(app):
                     'project_id': project_id,
                     'stage_id': stage_id,
                     'customer_name': customer_name,
+                    'location_key': _transfer_location_key(
+                        loc_type, project_id, stage_id, customer_name),
                     'pending': 0.0,
                     'billing': rental.billing_type,
                     'lines_by_id': {},
@@ -653,6 +659,60 @@ def register(app):
             (s['key'], f"{s['code']} — {s['holder']} ({s['pending']:g} available)")
             for s in transfer_sources
         ]
+
+        # The transfer form can now be searched from either direction: start
+        # with a current site/location and then choose its tools, or start with
+        # a tool and narrow the location list to places that actually hold it.
+        # Keep the exact rental+location source keys above for the final move;
+        # these grouped options are only a convenient way to find that source.
+        transfer_location_groups = {}
+        transfer_tool_groups = {}
+        for source in transfer_sources:
+            location = transfer_location_groups.setdefault(source['location_key'], {
+                'key': source['location_key'],
+                'label': source['holder'],
+                'pending': 0.0,
+                'tool_ids': set(),
+                'tool_qtys': {},
+            })
+            location['pending'] += float(source['pending'] or 0)
+            for line in source['lines']:
+                tool_id = int(line['tool_id'])
+                location['tool_ids'].add(tool_id)
+                location['tool_qtys'][str(tool_id)] = (
+                    location['tool_qtys'].get(str(tool_id), 0.0) + float(line['qty'] or 0)
+                )
+                tool_group = transfer_tool_groups.setdefault(tool_id, {
+                    'id': tool_id,
+                    'name': line['name'],
+                    'code': line['code'],
+                    'qty': 0.0,
+                    'location_keys': set(),
+                })
+                tool_group['qty'] += float(line['qty'] or 0)
+                tool_group['location_keys'].add(source['location_key'])
+
+        transfer_locations = sorted(
+            ({**location, 'tool_ids': sorted(location['tool_ids'])}
+             for location in transfer_location_groups.values()),
+            key=lambda location: location['label'].lower(),
+        )
+        transfer_location_options = [
+            (location['key'], f"{location['label']} ({location['pending']:g} available)")
+            for location in transfer_locations
+        ]
+        transfer_tools = sorted(
+            ({**tool, 'location_keys': sorted(tool['location_keys'])}
+             for tool in transfer_tool_groups.values()),
+            key=lambda tool: (tool['name'].lower(), tool['code']),
+        )
+        transfer_tool_options = [
+            (tool['id'], f"{tool['name']}" +
+             (f" ({tool['code']})" if tool['code'] else '') +
+             f" — {tool['qty']:g} out at {len(tool['location_keys'])} location" +
+             ('' if len(tool['location_keys']) == 1 else 's'))
+            for tool in transfer_tools
+        ]
         receiving_accounts = get_receiving_accounts()
         receiving_account_options = [
             (a.id, f"{a.name} ({a.type})") for a in receiving_accounts
@@ -672,6 +732,10 @@ def register(app):
             created_rental=created_rental,
             transfer_sources=transfer_sources,
             transfer_source_options=transfer_source_options,
+            transfer_locations=transfer_locations,
+            transfer_location_options=transfer_location_options,
+            transfer_tools=transfer_tools,
+            transfer_tool_options=transfer_tool_options,
             receiving_account_options=receiving_account_options,
             today=_pkt_today().isoformat(),
         )

@@ -4,9 +4,9 @@
 
 {# The rental creation form lives on its own page so the Rentals hub stays a
    simple summary + list. The operator chooses the transaction first. A new
-   rental shows the stock tool picker; a transfer follows From → rent type → To
-   → the pending tools at From (with per-tool rates) → other settings. The
-   destination site/customer fields still adapt to the selected renter type,
+   rental shows the stock tool picker; a transfer can find its source site-first
+   or tool-first, then follows rent type → To → available tools (with per-tool
+   rates) → other settings. The destination site/customer fields adapt to the selected renter type,
    and a no-additional-rent choice hides the rate inputs without hiding tools.
 
    Every rental made here shows below the form, newest first, with the one just
@@ -41,7 +41,7 @@
 <div class="tool-rental-form-header">
     <div>
         <h2><i class="fas fa-plus me-2" aria-hidden="true"></i><span id="pageFormHeading">New Rental</span></h2>
-        <div class="tool-rental-form-subtitle">Choose the transaction first. Transfers follow From → rent type → To → tools → other settings; new rentals appear below.</div>
+        <div class="tool-rental-form-subtitle">Choose the transaction first. For transfers, find tools by site or find a tool to see where it is currently out; new rentals appear below.</div>
     </div>
     <a href="{{ url_for('hdc_tool_rental') }}" class="btn btn-outline-secondary">
         <i class="fas fa-arrow-left me-1" aria-hidden="true"></i>Back to rentals
@@ -63,14 +63,47 @@
                     <small class="text-muted d-block">Choose the transaction first; the next fields follow the selected flow.</small>
                 </div>
 
-                {# Transfer flow order: from → rent type → to → choose tools → other settings. #}
+                {# Transfer source can be found site-first or tool-first. The
+                   final source is still one exact rental + physical location,
+                   which keeps the transfer ledger precise when a site has
+                   received tools through more than one rental. #}
                 <div class="col-12 d-none" id="transferSourceField">
-                    {{ combo_select('source_rental_id', 'sourceRental', transfer_source_options,
-                       label='From — current holder / rental',
-                       placeholder='Search a rental code or holder…',
-                       required=true,
-                       hint='Choose the current holder and location. Only tool quantities physically at this From location will be listed below.',
-                       max_items=80) }}
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label class="form-label" for="transferSearchMode">Find transfer source by</label>
+                            <select id="transferSearchMode" class="form-select" onchange="syncTransferSearchMode(true)">
+                                <option value="site">Site / location first</option>
+                                <option value="tool">Tool first</option>
+                            </select>
+                            <small class="text-muted d-block">Choose a site to see its tools, or choose a tool to see only locations where it is currently out.</small>
+                        </div>
+                        <div class="col-md-8" id="transferFromSiteField">
+                            {{ combo_select('transfer_location_key', 'transferFromSite', transfer_location_options,
+                               label='From site / current location',
+                               placeholder='Search a site or holder…',
+                               required=true,
+                               hint='Only current locations holding rented tools are listed.',
+                               max_items=80, empty_text='No current locations hold rented tools.') }}
+                        </div>
+                        <div class="col-md-8 d-none" id="transferFindToolField">
+                            {{ combo_select('transfer_tool_id', 'transferFindTool', transfer_tool_options,
+                               label='Find a tool that is currently out',
+                               placeholder='Search tool name or code…',
+                               required=true,
+                               hint='Only tools with a quantity still out are listed.',
+                               max_items=80, empty_text='No tools are currently out on rent.') }}
+                        </div>
+                        <div class="col-12 d-none" id="transferSourceRentalField">
+                            {{ combo_select('source_rental_id', 'sourceRental', transfer_source_options,
+                               label='From rental / holder',
+                               placeholder='Search a rental code or holder…',
+                               hint='More than one active rental holds tools at this location. Choose which rental to transfer from.',
+                               max_items=80, empty_text='No matching rental at this location.') }}
+                        </div>
+                        <div class="col-12">
+                            <small id="transferSourceInstructions" class="text-muted">Select a site/location to see its available tools.</small>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="col-md-6" id="billingField">
@@ -172,8 +205,8 @@
                     <input type="hidden" name="transfer_selection_enabled" value="1">
                     <div class="d-flex flex-wrap align-items-start justify-content-between gap-2 mb-2">
                         <div>
-                            <label class="form-label fw-semibold mb-0">Tools available at the selected "From" holder</label>
-                            <small id="transferToolsSummary" class="text-muted d-block">Select a From holder/location above to see its available tools.</small>
+                            <label class="form-label fw-semibold mb-0">Tools available at the selected source</label>
+                            <small id="transferToolsSummary" class="text-muted d-block">Select a site/location or find a tool above to see current holdings.</small>
                         </div>
                         <label class="form-check d-flex align-items-center gap-2 mb-0">
                             <input type="checkbox" class="form-check-input mt-0" id="selectAllTransferTools" onchange="toggleAllTransferTools(this.checked)">
@@ -415,9 +448,154 @@ function toggleRenter(){
 }
 
 const TRANSFER_SOURCES = {{ transfer_sources | tojson }};
+const TRANSFER_LOCATIONS = {{ transfer_locations | tojson }};
 
 function transferMode(){
     return document.getElementById('txnType')?.value === 'transfer';
+}
+
+function transferCombo(selectId, inputId){
+    return {
+        select: document.getElementById(selectId),
+        input: document.getElementById(inputId)
+    };
+}
+
+function clearTransferCombo(selectId, inputId){
+    const combo = transferCombo(selectId, inputId);
+    if(combo.select) combo.select.value = '';
+    if(combo.input) combo.input.value = '';
+}
+
+function clearTransferSourceSelection(){
+    clearTransferCombo('sourceRental', 'sourceRentalInput');
+}
+
+function filterTransferLocations(){
+    const mode = document.getElementById('transferSearchMode')?.value || 'site';
+    const toolId = document.getElementById('transferFindTool')?.value || '';
+    const siteCombo = transferCombo('transferFromSite', 'transferFromSiteInput');
+    if(!siteCombo.select) return;
+
+    const visibleLocations = TRANSFER_LOCATIONS.filter(function(location){
+        return mode !== 'tool' || !toolId ||
+            (location.tool_ids || []).some(function(id){ return String(id) === String(toolId); });
+    });
+    const visibleKeys = new Set(visibleLocations.map(function(location){ return String(location.key); }));
+    const locationsByKey = new Map(visibleLocations.map(function(location){
+        return [String(location.key), location];
+    }));
+    Array.from(siteCombo.select.options).forEach(function(option){
+        if(!option.value) return;
+        const location = locationsByKey.get(String(option.value));
+        option.hidden = !location;
+        if(!location) return;
+        const quantity = mode === 'tool' && toolId
+            ? (location.tool_qtys || {})[String(toolId)]
+            : location.pending;
+        const qualifier = mode === 'tool' && toolId
+            ? ' of this tool out' : ' tools available';
+        option.textContent = location.label + ' (' + quantity + qualifier + ')';
+    });
+    if(siteCombo.select.value && !visibleKeys.has(String(siteCombo.select.value))){
+        clearTransferCombo('transferFromSite', 'transferFromSiteInput');
+    }
+}
+
+function updateTransferSourceChoices(){
+    const mode = document.getElementById('transferSearchMode')?.value || 'site';
+    const locationKey = document.getElementById('transferFromSite')?.value || '';
+    const toolId = document.getElementById('transferFindTool')?.value || '';
+    const sourceSelect = document.getElementById('sourceRental');
+    const sourceInput = document.getElementById('sourceRentalInput');
+    const sourceField = document.getElementById('transferSourceRentalField');
+    if(!sourceSelect || !sourceInput || !sourceField) return;
+
+    const readyToSearch = !!locationKey && (mode !== 'tool' || !!toolId);
+    const candidates = readyToSearch ? TRANSFER_SOURCES.filter(function(source){
+        return String(source.location_key) === String(locationKey) &&
+            (mode !== 'tool' || (source.lines || []).some(function(line){
+                return String(line.tool_id) === String(toolId);
+            }));
+    }) : [];
+    const candidateKeys = new Set(candidates.map(function(source){ return String(source.key); }));
+    Array.from(sourceSelect.options).forEach(function(option){
+        option.hidden = !!option.value && !candidateKeys.has(String(option.value));
+    });
+
+    const selectedStillMatches = candidateKeys.has(String(sourceSelect.value || ''));
+    const requiresSourceChoice = candidates.length > 1;
+    let selectedKey = selectedStillMatches ? sourceSelect.value : '';
+    if(candidates.length === 1) selectedKey = candidates[0].key;
+    if(!requiresSourceChoice) selectedKey = candidates.length === 1 ? candidates[0].key : '';
+
+    sourceField.classList.toggle('d-none', !requiresSourceChoice);
+    sourceSelect.disabled = !transferMode();
+    sourceSelect.required = transferMode() && requiresSourceChoice;
+    sourceInput.disabled = !transferMode() || !requiresSourceChoice;
+    sourceSelect.value = selectedKey;
+    const selectedOption = Array.from(sourceSelect.options).find(function(option){
+        return String(option.value) === String(selectedKey);
+    });
+    sourceInput.value = selectedOption && selectedKey ? selectedOption.textContent : '';
+
+    const instructions = document.getElementById('transferSourceInstructions');
+    if(instructions){
+        const selectedLocation = TRANSFER_LOCATIONS.find(function(location){
+            return String(location.key) === String(locationKey);
+        });
+        const selectedTool = document.getElementById('transferFindTool');
+        const selectedToolOption = selectedTool && selectedTool.options[selectedTool.selectedIndex];
+        if(!readyToSearch){
+            instructions.textContent = mode === 'tool'
+                ? 'Choose a tool first. The next field will show only locations where it is currently out.'
+                : 'Select a site/location to see its available tools.';
+        } else if(!candidates.length){
+            instructions.textContent = 'No active rental at this location holds the selected tool.';
+        } else if(requiresSourceChoice){
+            instructions.textContent = 'More than one active rental holds tools here. Choose the rental to transfer from.';
+        } else {
+            const locationLabel = selectedLocation ? selectedLocation.label : 'this location';
+            const toolLabel = mode === 'tool' && selectedToolOption
+                ? ' for ' + selectedToolOption.textContent.split(' — out at ')[0]
+                : '';
+            instructions.textContent = 'Available tools at ' + locationLabel + toolLabel +
+                ' will appear below. Select the tools to transfer.';
+        }
+    }
+    renderSourceTools();
+}
+
+function syncTransferSearchMode(reset){
+    const modeSelect = document.getElementById('transferSearchMode');
+    const mode = modeSelect?.value || 'site';
+    const active = transferMode();
+    const siteField = document.getElementById('transferFromSiteField');
+    const toolField = document.getElementById('transferFindToolField');
+    const siteCombo = transferCombo('transferFromSite', 'transferFromSiteInput');
+    const toolCombo = transferCombo('transferFindTool', 'transferFindToolInput');
+
+    if(reset){
+        clearTransferCombo('transferFromSite', 'transferFromSiteInput');
+        clearTransferCombo('transferFindTool', 'transferFindToolInput');
+        clearTransferSourceSelection();
+    }
+    const hasTool = !!(toolCombo.select && toolCombo.select.value);
+    const showTool = active && mode === 'tool';
+    const showSite = active && (mode === 'site' || hasTool);
+    siteField?.classList.toggle('d-none', !showSite);
+    toolField?.classList.toggle('d-none', !showTool);
+    setPanelControlsEnabled(siteField, showSite);
+    setPanelControlsEnabled(toolField, showTool);
+    if(siteCombo.select) siteCombo.select.required = showSite;
+    if(toolCombo.select) toolCombo.select.required = showTool;
+    if(siteCombo.input) siteCombo.input.disabled = !showSite;
+    if(toolCombo.input) toolCombo.input.disabled = !showTool;
+
+    filterTransferLocations();
+    if(!showSite) clearTransferCombo('transferFromSite', 'transferFromSiteInput');
+    if(!showTool) clearTransferCombo('transferFindTool', 'transferFindToolInput');
+    updateTransferSourceChoices();
 }
 
 function updateSelectAllTransferTools(){
@@ -493,7 +671,7 @@ function transferDefaultRate(sourceRate, dailyRate, billingType){
     return source || daily;
 }
 
-function createTransferToolRow(line){
+function createTransferToolRow(line, initiallySelected){
     const row = document.createElement('div');
     row.className = 'row g-2 align-items-center py-2 transfer-tool-row border-bottom';
 
@@ -508,6 +686,7 @@ function createTransferToolRow(line){
     checkbox.id = 'transferItem' + String(line.item_id);
     checkbox.className = 'form-check-input mt-1 transfer-item-checkbox';
     checkbox.disabled = !transferMode();
+    checkbox.checked = !!initiallySelected;
     checkbox.addEventListener('change', function(){
         document.getElementById('transferToolsError')?.classList.add('d-none');
         updateSelectAllTransferTools();
@@ -572,10 +751,13 @@ function renderSourceTools(){
     document.getElementById('transferToolsError')?.classList.add('d-none');
 
     if(!source){
-        summary.textContent = 'Select a From holder/location above to see available tools.';
+        const mode = document.getElementById('transferSearchMode')?.value || 'site';
+        summary.textContent = mode === 'tool'
+            ? 'Choose a tool and then one of its current locations.'
+            : 'Choose a site/location to see the tools currently out there.';
         const empty = document.createElement('div');
         empty.className = 'small text-muted';
-        empty.textContent = 'Available tools will appear here after you choose the From holder/location.';
+        empty.textContent = 'Available tools will appear here after you choose a current source location.';
         list.appendChild(empty);
         updateSelectAllTransferTools();
         return;
@@ -588,8 +770,12 @@ function renderSourceTools(){
         empty.textContent = 'There are no tools still out on this rental.';
         list.appendChild(empty);
     } else {
+        const mode = document.getElementById('transferSearchMode')?.value || 'site';
+        const toolId = mode === 'tool'
+            ? (document.getElementById('transferFindTool')?.value || '') : '';
         source.lines.forEach(function(line){
-            list.appendChild(createTransferToolRow(line));
+            const preselected = !!toolId && String(line.tool_id) === String(toolId);
+            list.appendChild(createTransferToolRow(line, preselected));
         });
     }
     syncBilling();
@@ -706,6 +892,7 @@ function toggleTxnType(){
     }
 
     toggleRenter();
+    syncTransferSearchMode(!transfer);
     syncBilling();
     renderSourceTools();
     toggleSettle();
@@ -734,6 +921,15 @@ function wireToolRow(row){
 }
 
 document.getElementById('rentalProjectSelect')?.addEventListener('change', syncRentalStages);
+document.getElementById('transferFindTool')?.addEventListener('change', function(){
+    clearTransferCombo('transferFromSite', 'transferFromSiteInput');
+    clearTransferSourceSelection();
+    syncTransferSearchMode(false);
+});
+document.getElementById('transferFromSite')?.addEventListener('change', function(){
+    clearTransferSourceSelection();
+    updateTransferSourceChoices();
+});
 document.getElementById('sourceRental')?.addEventListener('change', renderSourceTools);
 document.querySelectorAll('.tool-item-row').forEach(wireToolRow);
 wireTransferToolSearch();

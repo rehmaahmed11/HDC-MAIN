@@ -300,6 +300,49 @@ class ToolTrackingTestCase(unittest.TestCase):
         self.assertIn(str(source.id), html)
         self.assertIn(str(source.items[0].id), html)
 
+    def test_transfer_picker_lists_only_locations_and_tools_with_live_holdings(self):
+        vib = self._make_tool('TOOL-0001', 'Vibrator', 10)
+        jack = self._make_tool('TOOL-0002', 'Jack Hammer', 5)
+        self._make_tool('TOOL-0003', 'Idle Saw', 3)
+        empty_site = Project(name='Site C', project_code='P-C', client='Owner C')
+        db.session.add(empty_site)
+        db.session.commit()
+        # The same site can have several active rentals; the site-first list
+        # should still show that location once, while the exact source picker
+        # can disambiguate the rental when needed.
+        self._rent([(vib, 4)], renter_type='internal', project=self.site_a)
+        self._rent([(vib, 2)], renter_type='internal', project=self.site_a)
+        self._rent([(jack, 2)], renter_type='internal', project=self.site_b)
+
+        response = self.client.get('/hdc/tool-rental/new')
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+
+        def picker_options(select_id):
+            start = html.index(f'<select id="{select_id}"')
+            end = html.index('</select>', start)
+            return html[start:end]
+
+        site_options = picker_options('transferFromSite')
+        self.assertIn(f'own_project|{self.site_a.id}|0|', site_options)
+        self.assertIn(f'own_project|{self.site_b.id}|0|', site_options)
+        self.assertEqual(site_options.count(f'value="own_project|{self.site_a.id}|0|"'), 1)
+        self.assertIn('Site A', site_options)
+        self.assertIn('Site B', site_options)
+        self.assertNotIn('Site C', site_options)
+
+        tool_options = picker_options('transferFindTool')
+        self.assertIn('Vibrator', tool_options)
+        self.assertIn('Jack Hammer', tool_options)
+        self.assertNotIn('Idle Saw', tool_options)
+        self.assertIn('out at 1 location', tool_options)
+
+        # The client narrows sites from the current position rows, not from
+        # every project or from tools that merely exist in inventory.
+        self.assertIn('source.location_key', html)
+        self.assertIn('location.tool_ids', html)
+        self.assertIn('transfer_item_id[]', html)
+
     def test_transfer_rental_moves_only_checked_tools_and_uses_destination_rate(self):
         vib = self._make_tool('TOOL-0001', 'Vibrator', 10, rate=500)
         jack = self._make_tool('TOOL-0002', 'Jack Hammer', 5, rate=300)
