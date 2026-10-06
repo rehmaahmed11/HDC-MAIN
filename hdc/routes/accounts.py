@@ -25,6 +25,7 @@ from hdc.utils.dates import _pkt_now_naive, _pkt_today
 from hdc.utils.format import _amount_to_words, _flt, _parse_date
 from hdc.utils.money import sync_money_fields
 from hdc.services.loans import attach_ledger_transaction, find_open_loan
+from hdc.services.parties import known_party_names
 from hdc.utils.normalize import _normalize_account_group, _normalize_account_mode, _normalize_account_tx_direction, _normalize_account_tx_type, _normalize_name_ci, _normalize_related_entity_type
 
 def register(app):
@@ -919,6 +920,7 @@ def register(app):
             filter_group_id=group_id,
             filter_reference_id=reference_id,
             filter_party_name=party_name,
+            party_name_options=known_party_names(),
             filter_worker_id=worker_id_f,
             filter_date_from=(date_from.isoformat() if date_from else ''),
             filter_date_to=(date_to.isoformat() if date_to else ''),

@@ -1,168 +1,30 @@
-"""HDC routes: Parties — the shared counterparty directory (sidebar module).
+"""HDC routes: Parties — directory + per-party financial ledger.
 
-  /hdc/parties            list, search, add and activate/deactivate parties
+  /hdc/parties                 ledger-style list, KPI category filters, search
+  /hdc/parties/<id>            one party's dated transaction statement
 
-Parties live in one table — ``hdc_cash_flow_party``, the same table the CF
-Register and the New Transaction *Party / Person* picker read — so a party
-added here exists everywhere at once:
-
-* **Loan Parties** (``lender`` / ``borrower``) are what the loan Money In /
-  Money Out categories in the CF Register offer: *Loan Received*, *Loan
-  Given*, *Loan Repayment* and *Loan Recovery* shorten their party list to
-  these people.
-* **External Customers** (``rental``) are the HDC Tools rental parties.
-  An external tool rental (and its payments) syncs its customer here
-  automatically, and every ``rental`` party is offered back on the HDC
-  Tools customer combo.
-* **Other Parties** — clients, suppliers, workers, staff, subcontractors —
-  round out the picker's vocabulary.  Workers are filed here automatically
-  (typed ``worker``) because advances, payments, tips and settlements are all
-  money moving between the company and a named person; the Workers module
-  itself is untouched and stays the place to manage wages and rates.
-
-Workers are synced into this directory on every page load (idempotent — it
-only adds what is missing) and whenever a worker is created, renamed, or paid.
-**Sync Workers** re-runs it on demand.
-
-Directory reads are open to every signed-in role; adding or changing a
-party is an admin/accountant money write (``_money_write_required``).
+Parties live in ``hdc_cash_flow_party`` — the same table the CF Register and
+the New Transaction *Party / Person* picker read.  Money lives in
+``hdc_account_txn``: a payment tagged with the party name is one ledger row,
+so the party statement and Accounts → All Entries show the same entries.
 """
 
 from flask import flash, redirect, render_template, request, url_for
 from flask_login import login_required
-from sqlalchemy import func
 
 from hdc.extensions import _money_write_required, db
-from hdc.models.cashflow import CashFlowEntry, CashFlowParty
-from hdc.models.loans import Loan
-from hdc.models.tool_rental import ToolRental
-from hdc.models.workforce import LabourLedger, Worker
+from hdc.models.cashflow import CashFlowParty
 from hdc.services.cashflow_register import (
-    LOAN_PARTY_TYPES,
-    RENTAL_PARTY_TYPES,
-    PARTY_TYPES,
-    WORKER_PARTY_TYPES,
-    party_type_label,
-    save_cf_party,
-    sync_workers_as_parties,
+    party_type_label, save_cf_party, sync_workers_as_parties,
 )
-from hdc.services.ledger import _worker_payable_snapshots
-
-#: The three buckets the directory shows, in rendering order.
-#: ``(key, label, icon, hint, type values)`` — an empty type tuple means
-#: "everything not claimed by the other buckets".
-PARTY_GROUPS = (
-    ('loan', 'Loan Parties', 'fa-money-bill-transfer',
-     ('Loan Money In / Money Out in the CF Register — Loan Received, Loan Given, '
-      'Loan Repayment and Loan Recovery — offer only these parties.'),
-     tuple(LOAN_PARTY_TYPES)),
-    ('rental', 'External Customers', 'fa-screwdriver-wrench',
-     ('Rental parties for HDC Tools. External tool rentals and their payments '
-      'are synced here automatically; add a customer here before renting to them.'),
-     tuple(RENTAL_PARTY_TYPES)),
-    ('other', 'Other Parties', 'fa-users',
-     ('Everyone else the Party / Person picker offers — clients, suppliers, '
-      'workers, staff, subcontractors. Workers are synced here automatically '
-      'from the Workers module (typed "Worker / Labour") and link straight to '
-      'their statement.'),
-     ()),
+from hdc.services.parties import (
+    PARTY_CATEGORIES, build_party_directory, category_label, party_category,
+    party_ledger, type_choice_groups,
 )
-
-
-def _party_bucket(party_type):
-    """Which directory group a ``party_type`` belongs to."""
-    ptype = (party_type or 'other').strip().lower() or 'other'
-    if ptype in LOAN_PARTY_TYPES:
-        return 'loan'
-    if ptype in RENTAL_PARTY_TYPES:
-        return 'rental'
-    return 'other'
-
-
-def _entry_counts():
-    """``{lower(trim(party_name)): register entries}`` for every party."""
-    rows = (db.session.query(func.lower(func.trim(CashFlowEntry.party_name)),
-                             func.count(CashFlowEntry.id))
-            .filter(CashFlowEntry.party_name.isnot(None))
-            .group_by(func.lower(func.trim(CashFlowEntry.party_name)))
-            .all())
-    return {key: int(count) for key, count in rows if key}
-
-
-def _loan_counts():
-    """``{lower(trim(party_name)): non-void loans}`` per counterparty."""
-    rows = (db.session.query(func.lower(func.trim(Loan.party_name)),
-                             func.count(Loan.id))
-            .filter(Loan.status != 'void')
-            .group_by(func.lower(func.trim(Loan.party_name)))
-            .all())
-    return {key: int(count) for key, count in rows if key}
-
-
-def _rental_stats():
-    """``{lower(trim(customer_name)): (rentals, paid)}`` for external rentals."""
-    rows = (db.session.query(func.lower(func.trim(ToolRental.customer_name)),
-                             func.count(ToolRental.id),
-                             func.coalesce(func.sum(ToolRental.total_paid), 0.0))
-            .filter(ToolRental.renter_type == 'external',
-                    ToolRental.is_void == False,  # noqa: E712
-                    ToolRental.customer_name.isnot(None),
-                    func.trim(func.coalesce(ToolRental.customer_name, '')) != '')
-            .group_by(func.lower(func.trim(ToolRental.customer_name)))
-            .all())
-    return {key: (int(count), float(paid or 0.0))
-            for key, count, paid in rows if key}
-
-
-def _worker_stats():
-    """``{lower(trim(name)): dict}`` — the worker behind a party name, if any.
-
-    Matching is by name because that is how the ledger already refers to a
-    worker (``party_name`` on the account transaction, ``worker_id`` on the
-    labour ledger).  The Worker row gives the directory a live link to the
-    statement, and the ledger aggregates give the money columns.
-    """
-    workers = Worker.query.all()
-    if not workers:
-        return {}
-    by_name = {}
-    for w in workers:
-        key = (w.name or '').strip().lower()
-        if key:
-            by_name[key] = w
-    snaps = _worker_payable_snapshots([w.id for w in workers])
-
-    rows = (db.session.query(LabourLedger.worker_id,
-                             LabourLedger.entry_type,
-                             func.coalesce(func.sum(LabourLedger.amount), 0.0))
-            .filter(LabourLedger.is_void == False)  # noqa: E712
-            .group_by(LabourLedger.worker_id, LabourLedger.entry_type)
-            .all())
-    counts = {}
-    for wid, etype, amount in rows:
-        bucket = counts.setdefault(int(wid), {'advance': 0.0, 'payment': 0.0,
-                                              'tip': 0.0, 'settlement': 0.0})
-        key = (etype or '').strip().lower()
-        if key in bucket:
-            bucket[key] = float(amount or 0.0)
-
-    out = {}
-    for key, w in by_name.items():
-        snap = snaps.get(int(w.id), {})
-        money = counts.get(int(w.id), {})
-        out[key] = {
-            'worker': w,
-            'advance': float(money.get('advance', 0.0)),
-            'payment': float(money.get('payment', 0.0)),
-            'tip': float(money.get('tip', 0.0)),
-            'settlement': float(money.get('settlement', 0.0)),
-            'balance': float(snap.get('balance', 0.0) or 0.0),
-        }
-    return out
 
 
 def register(app):
-    """Register the Parties directory page (sidebar module)."""
+    """Register the Parties directory and the per-party ledger."""
 
     @app.route('/hdc/parties', methods=['GET', 'POST'])
     @login_required
@@ -186,6 +48,7 @@ def register(app):
                     else:
                         flash(f'That party already existed — it is listed under '
                               f'{label}.', 'info')
+                    return redirect(url_for('hdc_party_ledger', party_id=row.id))
 
                 elif action == 'sync_workers':
                     created, reactivated, total = sync_workers_as_parties()
@@ -198,7 +61,8 @@ def register(app):
                         flash(f'All {total} workers are already in the directory.', 'info')
 
                 elif action == 'toggle_party':
-                    party = db.session.get(CashFlowParty, request.form.get('party_id', type=int) or 0)
+                    party = db.session.get(
+                        CashFlowParty, request.form.get('party_id', type=int) or 0)
                     if party is None:
                         flash('Party not found.', 'danger')
                     else:
@@ -220,88 +84,51 @@ def register(app):
                 flash(f'Unable to complete the action: {exc}', 'danger')
             return redirect(url_for('hdc_parties'))
 
-        # ── listing ────────────────────────────────────────────────────────
         search = (request.args.get('q') or '').strip()
-        needle = search.lower()
+        category = (request.args.get('category') or '').strip().lower()
+        status = (request.args.get('status') or '').strip().lower()
+        party_id = request.args.get('party_id', type=int)
 
-        # Keep the directory in step with the Workers module.  Cheap and
-        # idempotent: it only creates what is missing, so it can run on every
-        # page load without ever touching an existing classification.
         auto_added, auto_revived, worker_total = sync_workers_as_parties()
         if auto_added or auto_revived:
             db.session.commit()
 
-        parties = CashFlowParty.query.order_by(CashFlowParty.name.asc()).all()
-        entry_counts = _entry_counts()
-        loan_counts = _loan_counts()
-        rental_stats = _rental_stats()
-        worker_stats = _worker_stats()
-
-        groups = []
-        for key, label, icon, hint, type_values in PARTY_GROUPS:
-            rows = []
-            for party in parties:
-                if key == 'other':
-                    if _party_bucket(party.party_type) != 'other':
-                        continue
-                elif _party_bucket(party.party_type) != key:
-                    continue
-                if needle and needle not in (party.name or '').lower() \
-                        and needle not in (party.phone or '').lower():
-                    continue
-                pname_key = (party.name or '').strip().lower()
-                rentals, paid = rental_stats.get(pname_key, (0, 0.0))
-                rows.append({
-                    'party': party,
-                    'type_label': party_type_label(party.party_type),
-                    'entries': entry_counts.get(pname_key, 0),
-                    'loans': loan_counts.get(pname_key, 0),
-                    'rentals': rentals,
-                    'rental_paid': paid,
-                    'worker': worker_stats.get(pname_key),
-                })
-            active_rows = sum(1 for r in rows if r['party'].is_active)
-            groups.append({
-                'key': key,
-                'label': label,
-                'icon': icon,
-                'hint': hint,
-                'rows': rows,
-                'active_count': active_rows,
-                'total_count': len(rows),
-            })
-
-        def _count(bucket):
-            return sum(1 for p in parties
-                       if p.is_active and _party_bucket(p.party_type) == bucket)
-
-        active_total = sum(1 for p in parties if p.is_active)
-        worker_count = sum(1 for p in parties
-                           if p.is_active
-                           and (p.party_type or '').strip().lower() in WORKER_PARTY_TYPES)
-
-        type_choices = [
-            ('loan', 'Loan Parties',
-             [(value, lbl) for value, lbl in PARTY_TYPES if value in LOAN_PARTY_TYPES]),
-            ('rental', 'External Customers (HDC Tools)',
-             [(value, lbl) for value, lbl in PARTY_TYPES if value in RENTAL_PARTY_TYPES]),
-            ('other', 'Other Parties',
-             [(value, lbl) for value, lbl in PARTY_TYPES
-              if value not in LOAN_PARTY_TYPES and value not in RENTAL_PARTY_TYPES]),
-        ]
+        directory = build_party_directory(
+            search=search, category=category, party_id=party_id, status=status)
+        directory['counts']['worker_total'] = worker_total
+        directory['counts']['auto_added'] = auto_added
 
         return render_template(
             'parties/parties_directory.html',
-            groups=groups,
-            type_choices=type_choices,
+            rows=directory['rows'],
+            counts=directory['counts'],
+            party_options=directory['party_options'],
+            name_options=directory['name_options'],
+            type_choices=type_choice_groups(),
+            categories=PARTY_CATEGORIES,
             search=search,
-            counts={
-                'loan': _count('loan'),
-                'rental': _count('rental'),
-                'other': _count('other'),
-                'worker': worker_count,
-                'worker_total': worker_total,
-                'active_total': active_total,
-                'auto_added': auto_added,
-            },
+            category=category,
+            category_label=category_label(category) if category else 'All Parties',
+            status=status,
+            selected_party_id=party_id or '',
+        )
+
+    @app.route('/hdc/parties/<int:party_id>')
+    @login_required
+    def hdc_party_ledger(party_id):
+        party = db.session.get(CashFlowParty, int(party_id or 0))
+        if party is None:
+            flash('Party not found.', 'danger')
+            return redirect(url_for('hdc_parties'))
+
+        include_void = (request.args.get('show_voided') or '').strip() in ('1', 'true', 'yes')
+        statement = party_ledger(party, include_void=include_void)
+        return render_template(
+            'parties/party_ledger.html',
+            party=party,
+            category=party_category(party.party_type),
+            category_label=category_label(party_category(party.party_type)),
+            type_label=party_type_label(party.party_type),
+            statement=statement,
+            include_void=include_void,
         )

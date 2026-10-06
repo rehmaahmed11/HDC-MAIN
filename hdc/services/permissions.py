@@ -71,7 +71,7 @@ PAGE_TREE = [
         {'id': 'tool_tracking', 'label': 'Tool tracking & reports', 'paths': [r'^/hdc/tool-rental/(?:tracking|reports)(?:/|$)']},
     ]},
     {'id': 'parties_section', 'label': 'Parties', 'children': [
-        {'id': 'parties', 'label': 'All parties', 'paths': [r'^/hdc/parties$']},
+        {'id': 'parties', 'label': 'All parties', 'paths': [r'^/hdc/parties(?:/|$)']},
     ]},
     {'id': 'reports_section', 'label': 'Reports', 'children': [
         {'id': 'reports', 'label': 'Reports', 'paths': [r'^/hdc/reports$']},

@@ -13,7 +13,7 @@ from hdc.core.flags import _runtime_flag_get, _runtime_flag_set
 from hdc.extensions import db
 from hdc.models.accounts import (Account, AccountIntentRule, AccountTransaction, Expense,
                                  OwnerPayment, PersonalExpense)
-from hdc.models.cashflow import CashFlowEntry
+from hdc.models.cashflow import CashFlowEntry, CashFlowParty
 from hdc.models.materials import PurchaseV2, Supplier, SupplierLedger, UsageLogV2
 from hdc.models.office import OfficeExpense, OfficeStaff, OfficeStaffLedger
 from hdc.models.projects import Project, Stage
@@ -1997,7 +1997,14 @@ def _account_reference_links(txn_row):
         nm = _account_entity_label(et, eid) or f'Office Staff #{eid}'
         _push(f'Office Staff: {nm}', url_for('hdc_office_staff_ledger', sid=eid))
     elif (txn_row.party_name or '').strip():
-        _push(f'Party: {txn_row.party_name}', '')
+        nm = (txn_row.party_name or '').strip()
+        party = (CashFlowParty.query
+                 .filter(func.lower(func.trim(CashFlowParty.name)) == nm.lower())
+                 .order_by(CashFlowParty.is_active.desc(), CashFlowParty.id.asc())
+                 .first())
+        party_url = (url_for('hdc_party_ledger', party_id=party.id) if party
+                     else url_for('hdc_parties', q=nm))
+        _push(f'Party: {nm}', party_url)
     if (txn_row.reference_id or '').strip():
         _push(f'Ref: {txn_row.reference_id}', '')
     _push(f'Txn #{txn_row.id}', '')
