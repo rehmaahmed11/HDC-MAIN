@@ -147,10 +147,29 @@ RENTAL_PARTY_TYPES = ('rental',)
 #: Types that mean "this party is one of our own workers".  Workers are
 #: counterparties too -- every advance, payment, tip and settlement is money
 #: moving between the company and a person -- so they belong in the same
-#: directory as lenders and customers.  They are filed under the *Other
-#: Parties* bucket on /hdc/parties (see routes.parties) so the directory keeps
-#: the three groups the team already knows.
+#: directory as lenders and customers.  They get their own *Workers* bucket on
+#: /hdc/parties (hdc.services.parties) so advances and wages are one click away.
 WORKER_PARTY_TYPES = ('worker',)
+
+#: Types that mean "this party owns a project we build" -- the project's
+#: ``client`` name.  They used to be swept into the catch-all *Other Parties*
+#: bucket, which read as "unclassified" on the directory and on their ledger
+#: page, so they now have a Clients / Owners bucket of their own.
+CLIENT_PARTY_TYPES = ('client',)
+
+#: Types that mean "we buy material, tools or services from this party".
+#: Like clients, suppliers are a real, high-volume group (every purchase and
+#: every supplier payment is money out to them), so they get their own
+#: Suppliers bucket instead of sitting in the catch-all.
+SUPPLIER_PARTY_TYPES = ('supplier',)
+
+#: Every party type that has a bucket of its own on /hdc/parties.  Anything
+#: outside this set (office staff, subcontractors, one-off names) stays in the
+#: *Other Parties* catch-all.
+BUCKETED_PARTY_TYPES = (
+    LOAN_PARTY_TYPES + RENTAL_PARTY_TYPES + WORKER_PARTY_TYPES
+    + CLIENT_PARTY_TYPES + SUPPLIER_PARTY_TYPES
+)
 
 #: The four loan movements a category can be tagged with (``loan_effect``).
 LOAN_EFFECTS = ('take', 'give', 'repay', 'recover')

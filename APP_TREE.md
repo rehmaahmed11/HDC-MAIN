@@ -1231,6 +1231,12 @@ Parties — Loan & Rental Directory  →  /hdc/parties
 │   └── Table columns: Party | Type | Entries | Loans | Tool Rentals | Tool Income (PKR) | Status | Action
 ├── Card: External Customers
 │   └── Table columns: Party | Type | Entries | Loans | Tool Rentals | Tool Income (PKR) | Status | Action
+├── Card: Workers
+│   └── Table columns: Party | Type | Entries | Loans | Tool Rentals | Tool Income (PKR) | Status | Action
+├── Card: Clients / Owners
+│   └── Table columns: Party | Type | Entries | Loans | Tool Rentals | Tool Income (PKR) | Status | Action
+├── Card: Suppliers / Vendors
+│   └── Table columns: Party | Type | Entries | Loans | Tool Rentals | Tool Income (PKR) | Status | Action
 └── Card: Other Parties
     └── Table columns: Party | Type | Entries | Loans | Tool Rentals | Tool Income (PKR) | Status | Action
 ```
