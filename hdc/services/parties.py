@@ -7,7 +7,8 @@ the party page and Accounts → All Entries cannot disagree.
 
 This module:
 
-* groups parties into filterable categories (loan / rental / worker / other);
+* groups parties into filterable categories (loan / rental / worker / client /
+  supplier / other);
 * batches In / Out / balance per name from the ledger (no N+1);
 * builds the chronological party statement (date+time, running balance).
 """
@@ -24,7 +25,8 @@ from hdc.models.loans import Loan
 from hdc.models.tool_rental import ToolRental
 from hdc.models.workforce import LabourLedger, Worker
 from hdc.services.cashflow_register import (
-    LOAN_PARTY_TYPES, PARTY_TYPES, RENTAL_PARTY_TYPES, WORKER_PARTY_TYPES,
+    BUCKETED_PARTY_TYPES, CLIENT_PARTY_TYPES, LOAN_PARTY_TYPES, PARTY_TYPES,
+    RENTAL_PARTY_TYPES, SUPPLIER_PARTY_TYPES, WORKER_PARTY_TYPES,
     party_type_label,
 )
 from hdc.services.ledger import _worker_payable_snapshots
@@ -39,8 +41,12 @@ PARTY_CATEGORIES = (
      'HDC Tools rental customers — an external rental syncs its name here.'),
     ('worker', 'Workers', 'fa-hard-hat', 'kpi-green',
      'Workers synced from the Workers module (advances, payments, tips).'),
+    ('client', 'Clients / Owners', 'fa-building', 'kpi-indigo',
+     'Project owners and clients — the people whose projects we build.'),
+    ('supplier', 'Suppliers / Vendors', 'fa-truck-field', 'kpi-slate',
+     'Material, tool and service suppliers we buy from.'),
     ('other', 'Other Parties', 'fa-users', 'kpi-purple',
-     'Clients, suppliers, staff, subcontractors and everyone else.'),
+     'Office staff, subcontractors and everyone else.'),
 )
 
 PARTY_CATEGORY_KEYS = tuple(item[0] for item in PARTY_CATEGORIES)
@@ -52,7 +58,14 @@ def party_name_key(name):
 
 
 def party_category(party_type):
-    """Which filter bucket a ``party_type`` belongs to."""
+    """Which filter bucket a ``party_type`` belongs to.
+
+    Clients (project owners) and suppliers used to fall through to ``other``,
+    which made their ledger read "Other Parties" even though the badge next to
+    it said *Client / Owner* or *Supplier / Vendor*; they now have buckets of
+    their own.  Only office staff, subcontractors and untyped names remain in
+    the catch-all.
+    """
     ptype = (party_type or 'other').strip().lower() or 'other'
     if ptype in LOAN_PARTY_TYPES:
         return 'loan'
@@ -60,6 +73,10 @@ def party_category(party_type):
         return 'rental'
     if ptype in WORKER_PARTY_TYPES:
         return 'worker'
+    if ptype in CLIENT_PARTY_TYPES:
+        return 'client'
+    if ptype in SUPPLIER_PARTY_TYPES:
+        return 'supplier'
     return 'other'
 
 
@@ -243,6 +260,8 @@ def build_party_directory(*, search='', category='', party_id=None, status=''):
         'loan': _count('loan'),
         'rental': _count('rental'),
         'worker': _count('worker'),
+        'client': _count('client'),
+        'supplier': _count('supplier'),
         'other': _count('other'),
         'active_total': sum(1 for p in parties if p.is_active),
         'all': len(parties),
@@ -378,7 +397,12 @@ def party_ledger(party, *, include_void=False):
 
 
 def type_choice_groups():
-    """Add-party <optgroup> structure used by the directory form."""
+    """Add-party <optgroup> structure used by the directory form.
+
+    The optgroups mirror the KPI/filter buckets: every type with a bucket of
+    its own is offered under that bucket's name, so choosing "Client / Owner"
+    here is what files the party under *Clients / Owners* on the directory.
+    """
     return [
         ('loan', 'Loan Parties',
          [(value, label) for value, label in PARTY_TYPES if value in LOAN_PARTY_TYPES]),
@@ -386,9 +410,11 @@ def type_choice_groups():
          [(value, label) for value, label in PARTY_TYPES if value in RENTAL_PARTY_TYPES]),
         ('worker', 'Workers',
          [(value, label) for value, label in PARTY_TYPES if value in WORKER_PARTY_TYPES]),
+        ('client', 'Clients / Owners',
+         [(value, label) for value, label in PARTY_TYPES if value in CLIENT_PARTY_TYPES]),
+        ('supplier', 'Suppliers / Vendors',
+         [(value, label) for value, label in PARTY_TYPES if value in SUPPLIER_PARTY_TYPES]),
         ('other', 'Other Parties',
          [(value, label) for value, label in PARTY_TYPES
-          if value not in LOAN_PARTY_TYPES
-          and value not in RENTAL_PARTY_TYPES
-          and value not in WORKER_PARTY_TYPES]),
+          if value not in BUCKETED_PARTY_TYPES]),
     ]

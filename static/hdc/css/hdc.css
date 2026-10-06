@@ -682,6 +682,7 @@ a .kpi-card:hover,
 .kpi-red     { background: linear-gradient(135deg, #dc2626, #fb7185); }
 .kpi-purple  { background: linear-gradient(135deg, #4f46e5, #7c3aed); }
 .kpi-indigo  { background: linear-gradient(135deg, #4338ca, #6366f1); }
+.kpi-slate   { background: linear-gradient(135deg, #475569, #64748b); }
 .kpi-profit  { background: linear-gradient(135deg, #15803d, #22c55e); }
 .kpi-loss    { background: linear-gradient(135deg, #be123c, #ef4444); }
 .kpi-active  { background: linear-gradient(135deg, #1d4ed8, #22d3ee); }

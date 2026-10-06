@@ -12,7 +12,10 @@ ledger-style list with KPI category filters and a searchable name combo:
   external tool rental syncs its customer here automatically, and every
   rental party is offered back in the HDC Tools customer search.
 * **Workers** — synced from the Workers module.
-* **Other Parties** — clients, suppliers, staff, subcontractors.
+* **Clients / Owners** (``client``) — the project owners whose projects we
+  build.
+* **Suppliers / Vendors** (``supplier``) — material, tool and service vendors.
+* **Other Parties** — office staff, subcontractors, one-off names.
 
 Opening a party (``/hdc/parties/<id>``) shows that name's dated
 ``hdc_account_txn`` rows — the same payments as Accounts → All Entries.
@@ -187,6 +190,7 @@ class PartiesModuleTestCase(unittest.TestCase):
             self.assertEqual(response.status_code, 200, role)
             html = response.get_data(as_text=True)
             for label in ('Loan Parties', 'External Customers', 'Workers',
+                          'Clients / Owners', 'Suppliers / Vendors',
                           'Other Parties', 'All Parties'):
                 self.assertIn(label, html, (role, label))
             self.assertIn('id="parties-ledger"', html, role)
@@ -236,6 +240,50 @@ class PartiesModuleTestCase(unittest.TestCase):
             'party_id': party_id}, follow_redirects=True)
         with self.app.app_context():
             self.assertTrue(db.session.get(CashFlowParty, party_id).is_active)
+
+    def test_clients_and_suppliers_get_a_category_of_their_own(self):
+        """A project owner / supplier is filed under its own bucket, not 'Other'."""
+        with self.app.app_context():
+            save_cf_party('Al-Rehman Builders', party_type='client')
+            save_cf_party('City Cement Depot', party_type='supplier')
+            save_cf_party('Office Helper', party_type='staff')
+            db.session.commit()
+
+        client_table = self._ledger_table(self._filter(category='client'))
+        supplier_table = self._ledger_table(self._filter(category='supplier'))
+        other_table = self._ledger_table(self._filter(category='other'))
+
+        self.assertIn('Al-Rehman Builders', client_table)
+        self.assertNotIn('Al-Rehman Builders', supplier_table)
+        self.assertNotIn('Al-Rehman Builders', other_table)
+
+        self.assertIn('City Cement Depot', supplier_table)
+        self.assertNotIn('City Cement Depot', client_table)
+        self.assertNotIn('City Cement Depot', other_table)
+
+        # …while the types without a bucket still share the catch-all.
+        self.assertIn('Office Helper', other_table)
+
+        # …and each party's own page is labelled by its bucket.
+        with self.app.app_context():
+            client_id = CashFlowParty.query.filter_by(name='Al-Rehman Builders').one().id
+            supplier_id = CashFlowParty.query.filter_by(name='City Cement Depot').one().id
+        self.assertIn('Clients / Owners',
+                      self.client.get('/hdc/parties/%d' % client_id).get_data(as_text=True))
+        self.assertIn('Suppliers / Vendors',
+                      self.client.get('/hdc/parties/%d' % supplier_id).get_data(as_text=True))
+
+    def test_party_category_files_every_type_into_a_bucket(self):
+        from hdc.services.parties import PARTY_CATEGORY_KEYS, party_category
+        for value, expected in (('lender', 'loan'), ('borrower', 'loan'),
+                                ('rental', 'rental'), ('worker', 'worker'),
+                                ('client', 'client'), ('supplier', 'supplier'),
+                                ('staff', 'other'), ('subcontractor', 'other'),
+                                ('other', 'other'), ('', 'other'), (None, 'other')):
+            self.assertEqual(party_category(value), expected, value)
+        # every bucket the page offers is one a party can actually land in
+        self.assertIn('client', PARTY_CATEGORY_KEYS)
+        self.assertIn('supplier', PARTY_CATEGORY_KEYS)
 
     def test_staff_can_read_the_directory_but_not_write_it(self):
         self._as('staff')

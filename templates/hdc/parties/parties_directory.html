@@ -7,7 +7,7 @@
 
 {# KPI cards are also the category filter. The active card is the current view. #}
 <div class="row g-3 mt-1 mb-3">
-    <div class="col-6 col-md">
+    <div class="col-6 col-md-4 col-lg-3 col-xxl-2">
         <a href="{{ url_for('hdc_parties', q=search, status=status) }}" class="text-decoration-none">
             <div class="kpi-card kpi-teal h-100{% if not category %} kpi-filter-active{% endif %}">
                 <div class="kpi-icon"><i class="fas fa-address-book"></i></div>
@@ -18,7 +18,7 @@
         </a>
     </div>
     {% for key, label, icon, colour, hint in categories %}
-    <div class="col-6 col-md">
+    <div class="col-6 col-md-4 col-lg-3 col-xxl-2">
         <a href="{{ url_for('hdc_parties', category=key, q=search, status=status) }}" class="text-decoration-none" title="{{ hint }}">
             <div class="kpi-card {{ colour }} h-100{% if category == key %} kpi-filter-active{% endif %}">
                 <div class="kpi-icon"><i class="fas {{ icon }}"></i></div>
@@ -62,6 +62,7 @@
                         </select>
                         <div class="hdc-field-hint">
                             Loan Parties feed loan Money In / Out; External Customers feed HDC Tools.
+                            The type you pick also decides which category card this party is filed under.
                         </div>
                     </div>
                     <div class="mb-2">
@@ -183,6 +184,10 @@
                                 No loan parties yet — add your lenders and borrowers.
                                 {% elif category == 'rental' %}
                                 No external customers yet — add one, or create an external HDC Tools rental.
+                                {% elif category == 'client' %}
+                                No clients / owners yet — add a project owner, or pick Client / Owner when adding a party.
+                                {% elif category == 'supplier' %}
+                                No suppliers yet — add a material, tool or service vendor as Supplier / Vendor.
                                 {% else %}
                                 No parties in this view yet.
                                 {% endif %}
