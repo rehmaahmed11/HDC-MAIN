@@ -5,8 +5,8 @@
 {# The rental creation form lives on its own page so the Rentals hub stays a
    simple summary + list. The operator chooses the transaction first. A new
    rental shows the stock tool picker; a transfer can find its source site-first
-   or tool-first, then follows rent type → To → available tools (with per-tool
-   rates) → other settings. The destination site/customer fields adapt to the selected renter type,
+   or tool-first, then lists the available tools (with per-tool rates) right
+   below the holder picker, before rent type → To → other settings. The destination site/customer fields adapt to the selected renter type,
    and a no-additional-rent choice hides the rate inputs without hiding tools.
 
    Every rental made here shows below the form, newest first, with the one just
@@ -121,6 +121,37 @@
                     </div>
                 </div>
 
+                <div class="col-12 d-none" id="transferToolsPanel">
+                    <input type="hidden" name="transfer_selection_enabled" value="1">
+                    <div class="d-flex flex-wrap align-items-start justify-content-between gap-2 mb-2">
+                        <div>
+                            <label class="form-label fw-semibold mb-0">Tools available at the selected holders</label>
+                            <small id="transferToolsSummary" class="text-muted d-block">Select a site/location or find a tool above to see current holdings.</small>
+                        </div>
+                        <label class="form-check d-flex align-items-center gap-2 mb-0">
+                            <input type="checkbox" class="form-check-input mt-0" id="selectAllTransferTools" onchange="toggleAllTransferTools(this.checked)">
+                            <span class="form-check-label">Select all tools</span>
+                        </label>
+                    </div>
+                    <div class="row g-2 mb-2">
+                        <div class="col-md-6">
+                            <label class="form-label small mb-1" for="transferToolSearchInput">Find a tool among the ticked holders</label>
+                            <input type="text" id="transferToolSearchInput" class="form-control"
+                                   placeholder="Search available tool names or codes…" autocomplete="off"
+                                   role="combobox" aria-expanded="false" aria-autocomplete="list"
+                                   data-hdc-combo="transferToolSearchSelect" data-hdc-combo-strict="true" data-hdc-combo-manual="true">
+                            <select id="transferToolSearchSelect" class="form-select d-none"
+                                    data-hdc-combo-source><option value=""></option></select>
+                            <small class="text-muted">Choose a suggestion to tick its row; checkboxes allow multiple tools.</small>
+                        </div>
+                    </div>
+                    <div id="transferToolsList" class="transfer-tools-list border rounded p-2">
+                        <div class="small text-muted">Select a From site/location above to see the tools of each holder there.</div>
+                    </div>
+                    <small id="transferBillingHint" class="text-muted d-block mt-2"></small>
+                    <div id="transferToolsError" class="small text-danger d-none mt-2" role="alert">Select at least one tool to transfer.</div>
+                </div>
+
                 <div class="col-md-6" id="billingField">
                     <label class="form-label" id="billingLabel">How should rent be charged?</label>
                     <select name="billing_type" id="billingType" class="form-select" required onchange="syncBilling()">
@@ -214,37 +245,6 @@
                     <div class="alert alert-info mb-2">There are no tools in stock yet. Add tools in Inventory before creating a rental.</div>
                     <a href="{{ url_for('hdc_tool_rental_inventory') }}" class="btn btn-outline-primary"><i class="fas fa-warehouse me-1" aria-hidden="true"></i>Open Inventory</a>
                     {% endif %}
-                </div>
-
-                <div class="col-12 d-none" id="transferToolsPanel">
-                    <input type="hidden" name="transfer_selection_enabled" value="1">
-                    <div class="d-flex flex-wrap align-items-start justify-content-between gap-2 mb-2">
-                        <div>
-                            <label class="form-label fw-semibold mb-0">Tools available at the selected holders</label>
-                            <small id="transferToolsSummary" class="text-muted d-block">Select a site/location or find a tool above to see current holdings.</small>
-                        </div>
-                        <label class="form-check d-flex align-items-center gap-2 mb-0">
-                            <input type="checkbox" class="form-check-input mt-0" id="selectAllTransferTools" onchange="toggleAllTransferTools(this.checked)">
-                            <span class="form-check-label">Select all tools</span>
-                        </label>
-                    </div>
-                    <div class="row g-2 mb-2">
-                        <div class="col-md-6">
-                            <label class="form-label small mb-1" for="transferToolSearchInput">Find a tool among the ticked holders</label>
-                            <input type="text" id="transferToolSearchInput" class="form-control"
-                                   placeholder="Search available tool names or codes…" autocomplete="off"
-                                   role="combobox" aria-expanded="false" aria-autocomplete="list"
-                                   data-hdc-combo="transferToolSearchSelect" data-hdc-combo-strict="true" data-hdc-combo-manual="true">
-                            <select id="transferToolSearchSelect" class="form-select d-none"
-                                    data-hdc-combo-source><option value=""></option></select>
-                            <small class="text-muted">Choose a suggestion to tick its row; checkboxes allow multiple tools.</small>
-                        </div>
-                    </div>
-                    <div id="transferToolsList" class="transfer-tools-list border rounded p-2">
-                        <div class="small text-muted">Select a From site/location above to see the tools of each holder there.</div>
-                    </div>
-                    <small id="transferBillingHint" class="text-muted d-block mt-2"></small>
-                    <div id="transferToolsError" class="small text-danger d-none mt-2" role="alert">Select at least one tool to transfer.</div>
                 </div>
 
                 <div class="col-12" id="otherSettings">

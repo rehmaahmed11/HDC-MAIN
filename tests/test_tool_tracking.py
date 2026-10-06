@@ -286,11 +286,13 @@ class ToolTrackingTestCase(unittest.TestCase):
         response = self.client.get('/hdc/tool-rental/new')
         self.assertEqual(response.status_code, 200)
         html = response.get_data(as_text=True)
-        # The transfer UI is ordered so the destination and available-tool list
-        # depend on the source selection, with rates controlled by rent type.
+        # The transfer UI is ordered so the available-tool list sits directly
+        # below the From holder picker (holder list → tools), and the
+        # destination follows, with rates controlled by rent type.
         ordered_ids = [
-            'id="txnType"', 'id="transferSourceField"', 'id="billingType"',
-            'id="renterType"', 'id="transferToolsPanel"', 'id="otherSettings"',
+            'id="txnType"', 'id="transferSourceField"', 'id="transferHoldersList"',
+            'id="transferToolsPanel"', 'id="billingType"',
+            'id="renterType"', 'id="otherSettings"',
         ]
         positions = [html.index(marker) for marker in ordered_ids]
         self.assertEqual(positions, sorted(positions))
