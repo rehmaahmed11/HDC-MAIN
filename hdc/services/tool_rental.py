@@ -400,10 +400,12 @@ def rental_transfer_chain(rental_id):
 
     A "Transfer Rental" closes one rental and opens another for the new holder,
     linking them through ``ToolRentalTransfer.to_rental_id``.  Starting from any
-    rental in that lineage, walk backwards to the first holder and forwards to
-    the last, and return the ordered holder labels so the UI can render e.g.
-    ``Ali Traders > Site B > Site C``.  A rental with no transfer links returns
-    a single-element list (just itself).
+    rental in that lineage, walk backwards to the first holder(s) and forwards
+    to the last, and return the ordered holder labels so the UI can render e.g.
+    ``Ali Traders > Site B > Site C``.  When one transfer merged several holders
+    into the new rental, every one of those holders is listed, so the chain
+    reads ``Holder A > Holder B > Site C`` instead of silently dropping one.
+    A rental with no transfer links returns a single-element list (just itself).
     """
     rental = db.session.get(ToolRental, rental_id)
     if not rental:
@@ -411,18 +413,23 @@ def rental_transfer_chain(rental_id):
     seen = {int(rental.id)}
     ids = [int(rental.id)]
 
-    # backwards: who handed this rental over to us?
-    cur = int(rental.id)
-    while True:
-        prev = (ToolRentalTransfer.query
-                .filter(ToolRentalTransfer.to_rental_id == cur)
-                .order_by(ToolRentalTransfer.transfer_date.desc(), ToolRentalTransfer.id.desc())
-                .first())
-        if not prev or int(prev.rental_id) in seen:
-            break
-        ids.insert(0, int(prev.rental_id))
-        seen.add(int(prev.rental_id))
-        cur = int(prev.rental_id)
+    # backwards: everyone who handed tools over to this rental. A single-holder
+    # transfer has one parent; a merged multi-holder transfer has several, all
+    # listed oldest hand-over first.
+    frontier = [int(rental.id)]
+    while frontier:
+        cur = frontier.pop(0)
+        parents = (ToolRentalTransfer.query
+                   .filter(ToolRentalTransfer.to_rental_id == cur)
+                   .order_by(ToolRentalTransfer.transfer_date.asc(), ToolRentalTransfer.id.asc())
+                   .all())
+        fresh = [int(parent.rental_id) for parent in parents
+                 if int(parent.rental_id) not in seen]
+        if fresh:
+            at = ids.index(cur) if cur in ids else 0
+            ids[at:at] = fresh
+            seen.update(fresh)
+            frontier.extend(fresh)
 
     # forwards: who did we hand it over to?
     cur = int(rental.id)
@@ -441,8 +448,14 @@ def rental_transfer_chain(rental_id):
     labels = []
     for rid in ids:
         r = db.session.get(ToolRental, rid)
-        if r:
-            labels.append(_rental_holder_label(r))
+        if not r:
+            continue
+        label = _rental_holder_label(r)
+        # Two holders of one merge can carry the same label (e.g. the same site
+        # under two rentals) — a chain is the path, so collapse repeats.
+        if labels and labels[-1] == label:
+            continue
+        labels.append(label)
     return labels
 
 

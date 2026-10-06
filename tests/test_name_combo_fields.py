@@ -64,9 +64,13 @@ NAME_FIELDS = {
 }
 #: closed-set lists: the select keeps name= and posts the chosen value, so
 #: the visible input carries no name of its own.
+#:
+#: ``source_rental_id`` is deliberately absent for /hdc/tool-rental/new: a site
+#: can hold tools under several rentals, so the transfer form now lists every
+#: holder as a ``source_rental_id[]`` checkbox with a "Select all holders"
+#: toggle (pinned by tests/test_tool_tracking.py) instead of forcing one choice.
 ID_FIELDS = {
     '/hdc/tool-rental/new': {
-        'source_rental_id': ('sourceRental',),
         'project_id': ('rentalProjectSelect',),
         'stage_id': ('rentalStageSelect',),
         'tool_id[]': ('rentalToolSelect0',),
