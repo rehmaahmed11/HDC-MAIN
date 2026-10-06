@@ -22,7 +22,9 @@ no page repeats the same numbers twice.
 - Pages: `templates/hdc/tool_rental/tool_dashboard.html`, `tool_position.html`,
   `tool_inventory.html`, `tool_rental.html`, `tool_new_rental.html`, `_stock_forms.html`
 - Tests: `tests/test_tool_tracking.py` (20 cases),
-  `tests/test_tool_stock_lifecycle.py` (22 cases)
+  `tests/test_tool_stock_lifecycle.py` (22 cases),
+  `tests/test_tool_new_rental_smoke.py` (New Rental form → smoke result →
+  Tracking + Reports)
 
 ---
 
