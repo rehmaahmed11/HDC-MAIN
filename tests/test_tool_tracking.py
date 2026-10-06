@@ -42,9 +42,10 @@ from hdc.app import create_app                                    # noqa: E402
 from hdc.extensions import db                                     # noqa: E402
 from hdc.models.projects import Project, Stage                    # noqa: E402
 from hdc.models.tool_rental import (                              # noqa: E402
-    Tool, ToolCategory, ToolRental, ToolRentalItem, ToolRentalTransfer,
-    ToolRentalTransferItem,
+    Tool, ToolCategory, ToolRental, ToolRentalItem, ToolRentalPayment,
+    ToolRentalTransfer, ToolRentalTransferItem,
 )
+from hdc.services.tool_rental import rental_transfer_chain        # noqa: E402
 from hdc.services.tool_tracking import (                          # noqa: E402
     LOC_CUSTOMER, LOC_OWN_PROJECT, LOC_STORE, WAREHOUSE_LABEL,
     allocate_transfer_qty, dashboard_summary, location_summary,
@@ -513,6 +514,143 @@ class ToolTrackingTestCase(unittest.TestCase):
         self.assertEqual(ToolRental.query.count(), 1)
         self.assertEqual(float(source.total_pending_tools), 4.0)
         self.assertEqual(ToolRentalTransfer.query.count(), 0)
+
+    def test_transfer_form_lists_every_holder_at_a_site_with_select_all(self):
+        """A site's tools can come from several rentals — all must be pickable."""
+        vib = self._make_tool('TOOL-0001', 'Vibrator', 10)
+        jack = self._make_tool('TOOL-0002', 'Jack Hammer', 5)
+        first = self._rent([(vib, 4)], renter_type='internal', project=self.site_a)
+        second = self._rent([(jack, 3)], renter_type='internal', project=self.site_a)
+
+        html = self.client.get('/hdc/tool-rental/new').get_data(as_text=True)
+
+        # Both holders of Site A reach the page with their exact source keys,
+        # instead of the form forcing the operator to choose a single one.
+        site_key = f'own_project|{self.site_a.id}|0|'
+        self.assertIn(f'"{first.id}|{site_key}"', html)
+        self.assertIn(f'"{second.id}|{site_key}"', html)
+        # The holder picker is a checkbox list (with select-all), so tools from
+        # several rentals can move together in one transfer.
+        self.assertIn('id="transferHoldersList"', html)
+        self.assertIn('id="selectAllTransferHolders"', html)
+        self.assertIn('toggleAllTransferHolders', html)
+        self.assertIn("box.name = 'source_rental_id[]'", html)
+        self.assertIn('transfer-holder-checkbox', html)
+        self.assertIn('selectedTransferSources', html)
+        self.assertIn('Select all holders', html)
+        # The old single-choice combo is gone: choosing one holder would hide
+        # the other holders' tools at the same site.
+        self.assertNotIn('id="sourceRental"', html)
+
+    def test_transfer_moves_tools_from_several_holders_in_one_transfer(self):
+        vib = self._make_tool('TOOL-0001', 'Vibrator', 10, rate=500)
+        jack = self._make_tool('TOOL-0002', 'Jack Hammer', 5, rate=300)
+        vib_holder = self._rent([(vib, 4)], renter_type='internal',
+                                project=self.site_a, billing='per_day')
+        jack_holder = self._rent([(jack, 3)], renter_type='internal',
+                                 project=self.site_a, billing='per_day')
+        vib_item = next(i for i in vib_holder.items if i.tool_id == vib.id)
+        jack_item = next(i for i in jack_holder.items if i.tool_id == jack.id)
+        site_key = f'own_project|{self.site_a.id}|0|'
+
+        response = self.client.post('/hdc/tool-rental/create', data={
+            '_csrf_token': self._token(),
+            'txn_type': 'transfer',
+            'source_rental_id[]': [f'{vib_holder.id}|{site_key}',
+                                   f'{jack_holder.id}|{site_key}'],
+            'transfer_selection_enabled': '1',
+            'transfer_item_id[]': [str(vib_item.id), str(jack_item.id)],
+            f'transfer_rate_{vib_item.id}': '650',
+            f'transfer_rate_{jack_item.id}': '350',
+            'billing_type': 'per_day',
+            'renter_type': 'internal',
+            'project_id': str(self.site_b.id),
+            'rental_date': _pkt_today().isoformat(),
+            'settle_choice': 'add_credit',
+        }, follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        self.assertIn('Vibrator x4', html)
+        self.assertIn('Jack Hammer x3', html)
+
+        new_rental = (ToolRental.query
+                      .filter(ToolRental.id.notin_([vib_holder.id, jack_holder.id]))
+                      .order_by(ToolRental.id.desc()).first())
+        self.assertIsNotNone(new_rental)
+        self.assertEqual(new_rental.renter_type, 'internal')
+        self.assertEqual(new_rental.project_id, self.site_b.id)
+        self.assertEqual(float(new_rental.total_rented_qty), 7.0)
+        self.assertEqual(sorted(int(i.tool_id) for i in new_rental.items), [vib.id, jack.id])
+        self.assertEqual({int(i.tool_id): float(i.rate) for i in new_rental.items},
+                         {vib.id: 650.0, jack.id: 350.0})
+
+        # Each holder keeps its own hand-over row, and every row walks forward
+        # to the same new rental.
+        transfers = ToolRentalTransfer.query.order_by(ToolRentalTransfer.id.asc()).all()
+        self.assertEqual([t.rental_id for t in transfers],
+                         [vib_holder.id, jack_holder.id])
+        self.assertEqual({t.to_rental_id for t in transfers}, {new_rental.id})
+        self.assertEqual(sorted(float(t.qty_transferred) for t in transfers), [3.0, 4.0])
+        self.assertEqual(sorted(i.rental_item_id for i in
+                                ToolRentalTransferItem.query.all()),
+                         sorted([vib_item.id, jack_item.id]))
+        # Both holders merged into one destination: the chain names the path
+        # once, not the same site twice.
+        self.assertEqual(rental_transfer_chain(new_rental.id),
+                         ['Site A', 'Site B'])
+
+        db.session.refresh(vib_item)
+        db.session.refresh(jack_item)
+        self.assertEqual(float(vib_item.qty_pending), 0.0)
+        self.assertEqual(float(jack_item.qty_pending), 0.0)
+        self.assertEqual(vib_holder.payment_status, 'credit')
+        self.assertEqual(jack_holder.payment_status, 'credit')
+
+        ledger = tool_ledger()
+        self.assertEqual([(h['label'], h['qty'])
+                          for h in self._row(ledger, vib.id)['holdings']],
+                         [('Site B', 4.0)])
+        self.assertEqual([(h['label'], h['qty'])
+                          for h in self._row(ledger, jack.id)['holdings']],
+                         [('Site B', 3.0)])
+        self.assertTrue(tools_reconciliation(ledger)['balanced'])
+
+    def test_transfer_from_several_holders_settles_each_holders_rent(self):
+        vib = self._make_tool('TOOL-0001', 'Vibrator', 10, rate=500)
+        jack = self._make_tool('TOOL-0002', 'Jack Hammer', 5, rate=300)
+        vib_holder = self._rent([(vib, 2)], renter_type='internal',
+                                project=self.site_a, billing='per_day')
+        jack_holder = self._rent([(jack, 2)], renter_type='internal',
+                                 project=self.site_a, billing='per_day')
+        vib_item = next(i for i in vib_holder.items if i.tool_id == vib.id)
+        jack_item = next(i for i in jack_holder.items if i.tool_id == jack.id)
+        site_key = f'own_project|{self.site_a.id}|0|'
+
+        response = self.client.post('/hdc/tool-rental/create', data={
+            '_csrf_token': self._token(),
+            'txn_type': 'transfer',
+            'source_rental_id[]': [f'{vib_holder.id}|{site_key}',
+                                   f'{jack_holder.id}|{site_key}'],
+            'transfer_selection_enabled': '1',
+            'transfer_item_id[]': [str(vib_item.id), str(jack_item.id)],
+            'billing_type': 'fixed_fee',
+            'renter_type': 'internal',
+            'project_id': str(self.site_b.id),
+            'rental_date': _pkt_today().isoformat(),
+            'settle_choice': 'pay_now',
+        }, follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('Finalised', response.get_data(as_text=True))
+
+        # Every contributing holder's rent is collected (and posted) on its own.
+        payments = ToolRentalPayment.query.order_by(ToolRentalPayment.id.asc()).all()
+        self.assertEqual([p.rental_id for p in payments],
+                         [vib_holder.id, jack_holder.id])
+        self.assertEqual([float(p.amount) for p in payments], [1000.0, 600.0])
+        db.session.refresh(vib_holder)
+        db.session.refresh(jack_holder)
+        self.assertEqual(float(vib_holder.total_pending_amount), 0.0)
+        self.assertEqual(float(jack_holder.total_pending_amount), 0.0)
 
     def test_allocate_transfer_qty_never_exceeds_request(self):
         vib = self._make_tool('TOOL-0001', 'Vibrator', 30)

@@ -655,16 +655,13 @@ def register(app):
             active_rental_order.get(source['id'], TRANSFER_SOURCE_LIMIT),
             source['holder'].lower(),
         ))
-        transfer_source_options = [
-            (s['key'], f"{s['code']} — {s['holder']} ({s['pending']:g} available)")
-            for s in transfer_sources
-        ]
-
         # The transfer form can now be searched from either direction: start
-        # with a current site/location and then choose its tools, or start with
-        # a tool and narrow the location list to places that actually hold it.
-        # Keep the exact rental+location source keys above for the final move;
-        # these grouped options are only a convenient way to find that source.
+        # with a current site/location and then choose its holders/tools, or
+        # start with a tool and narrow the location list to places that
+        # actually hold it. The exact rental+location source keys above stay on
+        # the page (as ``TRANSFER_SOURCES``) so the holder checkboxes can post
+        # the precise source of every moved tool; the grouped lists below are
+        # only a convenient way to find those sources.
         transfer_location_groups = {}
         transfer_tool_groups = {}
         for source in transfer_sources:
@@ -731,7 +728,6 @@ def register(app):
             recent_rentals=recent_rentals,
             created_rental=created_rental,
             transfer_sources=transfer_sources,
-            transfer_source_options=transfer_source_options,
             transfer_locations=transfer_locations,
             transfer_location_options=transfer_location_options,
             transfer_tools=transfer_tools,
@@ -740,56 +736,133 @@ def register(app):
             today=_pkt_today().isoformat(),
         )
 
-    # ------------------ TRANSFER RENTAL (settle old holder, start new cycle) ------------------
-    def _create_transfer_rental():
-        """Transfer selected tools from an existing holder into a new rental.
+    # ------------------ TRANSFER RENTAL (settle old holder(s), start new cycle) ------------------
+    def _transfer_from_parts(rental, location):
+        """Where one source rental's tools are physically leaving from.
 
-        The source rental is the "from" holder. The operator chooses the new
-        rent type, destination, and the pending tool lines to move. Unselected
-        lines stay on the source rental; selected lines are recorded as a
-        per-tool transfer and receive the destination rate entered on the form.
+        Returns ``(from_type, project_id, stage_id, customer_name, label)``.
         """
-        source_selection = request.form.get('source_rental_id')
-        source_id, source_location = _parse_transfer_source_key(source_selection)
-        source = db.session.get(ToolRental, source_id) if source_id else None
-        if not source or source.is_void:
+        if location:
+            if location['loc_type'] == LOC_OWN_PROJECT:
+                project = db.session.get(Project, location['project_id'])
+                stage = (db.session.get(Stage, location['stage_id'])
+                         if location['stage_id'] else None)
+                label = project.name if project else f"Project #{location['project_id']}"
+                if stage:
+                    label += f' > {stage.name}'
+                return ('site', location['project_id'] or None,
+                        location['stage_id'] or None, None, label)
+            if location['loc_type'] == LOC_CUSTOMER:
+                label = location['customer_name'] or 'External Customer'
+                return ('customer', None, None,
+                        location['customer_name'] or None, label)
+            return 'warehouse', None, None, None, WAREHOUSE_LABEL
+
+        # No exact location posted (legacy forms): fall back to the rental's own
+        # last hand-over target, else where the rental was originally opened.
+        last_transfer = (ToolRentalTransfer.query
+                         .filter_by(rental_id=rental.id)
+                         .order_by(ToolRentalTransfer.transfer_date.desc(),
+                                   ToolRentalTransfer.id.desc())
+                         .first())
+        label = rental.current_location_label or 'Unknown'
+        if last_transfer:
+            return (last_transfer.to_type or 'site', last_transfer.to_project_id,
+                    last_transfer.to_stage_id, last_transfer.to_customer_name,
+                    label)
+        return ('site' if rental.renter_type == 'internal' else 'customer',
+                rental.project_id, rental.stage_id,
+                rental.customer_name if rental.renter_type == 'external' else None,
+                label)
+
+    def _create_transfer_rental():
+        """Transfer selected tools from one or more holders into a new rental.
+
+        A site can hold tools under more than one active rental (holder), so the
+        source is one *or several* rentals at once: the operator ticks the
+        holders — all ticked by default — and then the tool lines to move.
+        Unselected lines stay on their source rental; selected lines are
+        recorded as per-tool transfers and receive the destination rate entered
+        on the form. Every contributing rental is settled, and ONE new rental
+        is opened for the destination with all the moved lines.
+        """
+        # ---- the "from" side: a single holder, or every ticked holder ----
+        raw_sources = [raw for raw in
+                       (request.form.getlist('source_rental_id[]')
+                        or request.form.getlist('source_rental_id'))
+                       if (raw or '').strip()]
+        sources = []                       # [(rental, location)] in posted order
+        seen_rental_ids = set()
+        for raw in raw_sources:
+            rental_id, location = _parse_transfer_source_key(raw)
+            if not rental_id or rental_id in seen_rental_ids:
+                continue
+            rental = db.session.get(ToolRental, rental_id)
+            if not rental or rental.is_void:
+                continue
+            seen_rental_ids.add(rental_id)
+            sources.append((rental, location))
+        if not sources:
             flash('Select the rental you are transferring from.', 'danger')
             return redirect(url_for('hdc_tool_rental_new'))
-        if source.status in ('returned', 'closed'):
-            flash(f'{source.rental_code} is already closed — nothing left to transfer.', 'warning')
+        closed = [rental.rental_code for rental, _ in sources
+                  if rental.status in ('returned', 'closed')]
+        if closed:
+            if len(closed) == 1:
+                flash(f'{closed[0]} is already closed — nothing left to transfer.',
+                      'warning')
+            else:
+                flash(f"{', '.join(closed)} are already closed — nothing left "
+                      f'to transfer.', 'warning')
             return redirect(url_for('hdc_tool_rental_new'))
 
-        pending_items = [it for it in ToolRentalItem.query.filter_by(rental_id=source.id).all()
-                         if float(it.qty_pending or 0) > 0.001]
-        if not pending_items:
-            flash(f'{source.rental_code} has no tools still out to transfer.', 'warning')
+        # One ledger pass powers the availability check for every source: a
+        # rental split across sites by an earlier move may only offer what
+        # really sits at the chosen From location.
+        ledger_rows = (tool_ledger()['tools']
+                       if any(location for _, location in sources) else [])
+
+        pending_by_id = {}
+        available_by_item = {}
+        source_by_item = {}
+        for rental, location in sources:
+            pending_items = [item for item in
+                             ToolRentalItem.query.filter_by(rental_id=rental.id).all()
+                             if float(item.qty_pending or 0) > 0.001]
+            availability = {int(item.id): max(0.0, float(item.qty_pending or 0))
+                            for item in pending_items}
+            if location:
+                availability = {}
+                for tool_row in ledger_rows:
+                    for holding in tool_row['holdings']:
+                        if (int(holding['rental'].id) == int(rental.id)
+                                and _holding_is_at_transfer_source(holding, location)):
+                            item_id = int(holding['rental_item'].id)
+                            availability[item_id] = (
+                                availability.get(item_id, 0.0)
+                                + float(holding['qty'] or 0))
+            for item in pending_items:
+                item_id = int(item.id)
+                pending_by_id[item_id] = item
+                source_by_item[item_id] = rental
+                available_by_item[item_id] = availability.get(item_id, 0.0)
+
+        if not pending_by_id:
+            if len(sources) == 1:
+                flash(f'{sources[0][0].rental_code} has no tools still out to '
+                      f'transfer.', 'warning')
+            else:
+                flash('The selected holders have no tools still out to transfer.',
+                      'warning')
             return redirect(url_for('hdc_tool_rental_new'))
 
         # The new form posts an explicit marker, so an empty checkbox selection
         # can never silently move every tool. An unmarked legacy post keeps its
-        # former behaviour and transfers all pending lines.
+        # former behaviour and transfers every pending line of the source(s).
         raw_item_ids = (request.form.getlist('transfer_item_id[]')
                         or request.form.getlist('transfer_item_id'))
         explicit_selection = (request.form.get('transfer_selection_enabled') == '1'
                               or bool(raw_item_ids))
-        pending_by_id = {int(item.id): item for item in pending_items}
-        available_by_item = {
-            int(item.id): max(0.0, float(item.qty_pending or 0)) for item in pending_items
-        }
-        if source_location:
-            # A rental can be split across sites/customers by earlier moves.
-            # Rebuild its live position and allow this transfer to take only the
-            # quantities physically sitting at the selected From location.
-            available_by_item = {}
-            for tool_row in tool_ledger()['tools']:
-                for holding in tool_row['holdings']:
-                    if (int(holding['rental'].id) == int(source.id)
-                            and _holding_is_at_transfer_source(holding, source_location)):
-                        item_id = int(holding['rental_item'].id)
-                        available_by_item[item_id] = (
-                            available_by_item.get(item_id, 0.0) + float(holding['qty'] or 0)
-                        )
-
         if explicit_selection:
             if not raw_item_ids:
                 flash('Select at least one tool to transfer.', 'danger')
@@ -810,9 +883,9 @@ def register(app):
                               for item_id in selected_ids]
         else:
             selected_items = [
-                (item, available_by_item.get(int(item.id), 0.0))
-                for item in pending_items
-                if available_by_item.get(int(item.id), 0.0) > 0.001
+                (item, available_by_item.get(item_id, 0.0))
+                for item_id, item in pending_by_id.items()
+                if available_by_item.get(item_id, 0.0) > 0.001
             ]
 
         # ---- rent type for the new holder ----
@@ -858,8 +931,9 @@ def register(app):
         operator_notes = (request.form.get('notes') or '').strip()
 
         # Snapshot the chosen lines and destination rates before touching the
-        # source rental. Each checked line transfers its full qty at the selected
-        # From location; other locations and unchecked tools remain in place.
+        # source rentals. Each checked line transfers its full qty at the
+        # selected From location; other locations and unchecked tools remain in
+        # place. Every line remembers which holder it leaves.
         moved = []
         for item, available_qty in selected_items:
             qty = min(max(0.0, float(available_qty or 0)),
@@ -881,6 +955,7 @@ def register(app):
                 rate = 0.0
             moved.append({
                 'item': item,
+                'source': source_by_item[int(item.id)],
                 'tool_id': int(item.tool_id),
                 'name': item.tool.name if item.tool else f'Tool#{item.tool_id}',
                 'qty': qty,
@@ -893,6 +968,16 @@ def register(app):
         moved_qty = sum(line['qty'] for line in moved)
         new_amount = sum(line['amount'] for line in moved)
 
+        # Everything leaving one rental travels as that rental's own hand-over,
+        # so each contributing holder keeps its own row in its own history.
+        moved_by_source = {}
+        for line in moved:
+            moved_by_source.setdefault(int(line['source'].id), []).append(line)
+        from_parts = {}
+        for rental, location in sources:
+            if int(rental.id) in moved_by_source:
+                from_parts[int(rental.id)] = _transfer_from_parts(rental, location)
+
         if to_type == 'internal':
             project = db.session.get(Project, to_project_id)
             to_label = project.name
@@ -903,49 +988,42 @@ def register(app):
         else:
             to_label = to_customer_name or 'External Customer'
 
-        if source_location and source_location['loc_type'] == LOC_OWN_PROJECT:
-            from_project = db.session.get(Project, source_location['project_id'])
-            from_stage = (db.session.get(Stage, source_location['stage_id'])
-                          if source_location['stage_id'] else None)
-            from_label = from_project.name if from_project else f"Project #{source_location['project_id']}"
-            if from_stage:
-                from_label += f' > {from_stage.name}'
-        elif source_location and source_location['loc_type'] == LOC_CUSTOMER:
-            from_label = source_location['customer_name'] or 'External Customer'
-        elif source_location and source_location['loc_type'] == LOC_STORE:
-            from_label = WAREHOUSE_LABEL
-        else:
-            from_label = source.current_location_label or 'Unknown'
-
-        # ---- settle the previous holder's outstanding rent ----
+        # ---- settle the previous holder(s)' outstanding rent ----
         settle_choice = (request.form.get('settle_choice') or 'pay_now').strip().lower()
         if settle_choice not in ('pay_now', 'add_credit'):
             settle_choice = 'pay_now'
-        recalc_rental_totals(source.id)
-        outstanding = (0.0 if (source.billing_type or '').lower() == 'no_charge'
-                       else float(source.total_pending_amount or 0))
         finalized_amount = 0.0
         credit_amount = 0.0
-        if outstanding > 0.001 and settle_choice == 'add_credit':
-            # Nothing is collected now: keep the full current balance owed by
-            # the previous holder. This applies even when some tools stay there.
-            credit_amount = outstanding
-            source.payment_status = 'credit'
-        elif outstanding > 0.001:
-            from hdc.services.accounts import _accounts_default_company_cash
-            recv_acc = None
-            acc_id = request.form.get('received_to_account_id', type=int)
-            if acc_id:
-                recv_acc = Account.query.get(int(acc_id))
-            if (not recv_acc) or recv_acc.is_void or str(recv_acc.status or 'active').lower() != 'active' \
-                    or str(recv_acc.type or '').lower() not in ('company', 'cash', 'bank'):
-                recv_acc = _accounts_default_company_cash()
-            if not recv_acc:
-                db.session.rollback()
-                flash('Choose a Cash/Bank account to receive the finalised rent before transferring.', 'danger')
-                return redirect(url_for('hdc_tool_rental_new'))
+        recv_acc = None
+        for rental, _location in sources:
+            if int(rental.id) not in moved_by_source:
+                continue
+            recalc_rental_totals(rental.id)
+            outstanding = (0.0 if (rental.billing_type or '').lower() == 'no_charge'
+                           else float(rental.total_pending_amount or 0))
+            if outstanding <= 0.001:
+                continue
+            if settle_choice == 'add_credit':
+                # Nothing is collected now: the previous holder keeps the full
+                # balance owed, even when some tools stay with them.
+                rental.payment_status = 'credit'
+                credit_amount += outstanding
+                continue
+            if recv_acc is None:
+                from hdc.services.accounts import _accounts_default_company_cash
+                acc_id = request.form.get('received_to_account_id', type=int)
+                candidate = db.session.get(Account, int(acc_id)) if acc_id else None
+                if (not candidate) or candidate.is_void \
+                        or str(candidate.status or 'active').lower() != 'active' \
+                        or str(candidate.type or '').lower() not in ('company', 'cash', 'bank'):
+                    candidate = _accounts_default_company_cash()
+                if not candidate:
+                    db.session.rollback()
+                    flash('Choose a Cash/Bank account to receive the finalised rent before transferring.', 'danger')
+                    return redirect(url_for('hdc_tool_rental_new'))
+                recv_acc = candidate
             payment = ToolRentalPayment(
-                rental_id=source.id, return_id=None, payment_date=txn_date,
+                rental_id=rental.id, return_id=None, payment_date=txn_date,
                 amount=outstanding,
                 payment_mode=(request.form.get('payment_mode') or 'cash').strip().lower(),
                 received_to_account_id=int(recv_acc.id),
@@ -956,84 +1034,65 @@ def register(app):
             db.session.add(payment)
             db.session.flush()
             ok_acc, msg_acc, _ = post_tool_rental_payment_to_accounts(
-                payment, rental=source, commit=False)
+                payment, rental=rental, commit=False)
             if not ok_acc:
                 db.session.rollback()
                 flash(msg_acc or 'Unable to post the finalised rent to the party ledger.', 'danger')
                 return redirect(url_for('hdc_tool_rental_new'))
-            finalized_amount = outstanding
+            finalized_amount += outstanding
 
-        # ---- record the hand-over, including its per-tool split ----
-        if source_location:
-            if source_location['loc_type'] == LOC_OWN_PROJECT:
-                from_type = 'site'
-                from_project_id = source_location['project_id'] or None
-                from_stage_id = source_location['stage_id'] or None
-                from_customer_name = None
-            elif source_location['loc_type'] == LOC_CUSTOMER:
-                from_type = 'customer'
-                from_project_id = None
-                from_stage_id = None
-                from_customer_name = source_location['customer_name'] or None
-            else:
-                from_type = 'warehouse'
-                from_project_id = None
-                from_stage_id = None
-                from_customer_name = None
-        else:
-            last_transfer = (ToolRentalTransfer.query
-                             .filter_by(rental_id=source.id)
-                             .order_by(ToolRentalTransfer.transfer_date.desc(),
-                                       ToolRentalTransfer.id.desc())
-                             .first())
-            if last_transfer:
-                from_type = last_transfer.to_type or 'site'
-                from_project_id = last_transfer.to_project_id
-                from_stage_id = last_transfer.to_stage_id
-                from_customer_name = last_transfer.to_customer_name
-            else:
-                from_type = 'site' if source.renter_type == 'internal' else 'customer'
-                from_project_id = source.project_id
-                from_stage_id = source.stage_id
-                from_customer_name = source.customer_name if source.renter_type == 'external' else None
-        transfer = ToolRentalTransfer(
-            rental_id=source.id,
-            from_type=from_type,
-            from_project_id=from_project_id,
-            from_stage_id=from_stage_id,
-            from_customer_name=from_customer_name,
-            from_location_label=from_label,
-            to_type='site' if to_type == 'internal' else 'customer',
-            to_project_id=to_project_id,
-            to_stage_id=to_stage_id,
-            to_customer_name=to_customer_name,
-            to_location_label=to_label,
-            qty_transferred=moved_qty,
-            transfer_date=txn_date,
-            notes=(operator_notes or 'Selected tools transferred to a new rental cycle'),
-            created_by=current_user.id if hasattr(current_user, 'id') else None,
-        )
-        db.session.add(transfer)
-        db.session.flush()
-        record_transfer_items(transfer, [(line['item'], line['qty']) for line in moved])
+        # ---- record the hand-overs, including their per-tool splits ----
+        handovers = {}
+        for rental, location in sources:
+            source_id = int(rental.id)
+            lines = moved_by_source.get(source_id)
+            if not lines:
+                continue
+            from_type, from_project_id, from_stage_id, from_customer_name, from_label = \
+                from_parts[source_id]
+            transfer = ToolRentalTransfer(
+                rental_id=rental.id,
+                from_type=from_type,
+                from_project_id=from_project_id,
+                from_stage_id=from_stage_id,
+                from_customer_name=from_customer_name,
+                from_location_label=from_label,
+                to_type='site' if to_type == 'internal' else 'customer',
+                to_project_id=to_project_id,
+                to_stage_id=to_stage_id,
+                to_customer_name=to_customer_name,
+                to_location_label=to_label,
+                qty_transferred=sum(line['qty'] for line in lines),
+                transfer_date=txn_date,
+                notes=(operator_notes or 'Selected tools transferred to a new rental cycle'),
+                created_by=current_user.id if hasattr(current_user, 'id') else None,
+            )
+            db.session.add(transfer)
+            db.session.flush()
+            record_transfer_items(transfer, [(line['item'], line['qty']) for line in lines])
+            handovers[source_id] = (transfer, from_label)
 
-        # Selected lines leave the previous holder; unselected lines remain
-        # pending there and can be transferred or returned later.
+        # Selected lines leave their holder; unselected lines remain pending
+        # there and can be transferred or returned later.
         for line in moved:
             item = line['item']
+            rental = line['source']
+            transfer, from_label = handovers[int(rental.id)]
             take = min(line['qty'], max(0.0, float(item.qty_pending or 0)))
             item.qty_returned = float(item.qty_returned or 0) + take
             item.qty_pending = max(0.0, float(item.qty_rented or 0) - item.qty_returned)
             movement_type = 'external_transfer' if to_type == 'external' else 'site_transfer'
             create_movement_log(
-                tool_id=line['tool_id'], rental_id=source.id,
+                tool_id=line['tool_id'], rental_id=rental.id,
                 movement_type=movement_type,
                 from_label=from_label, to_label=to_label, qty=take,
                 transfer_id=transfer.id,
-                notes=f'Transferred out of {source.rental_code} to {to_label}',
+                notes=f'Transferred out of {rental.rental_code} to {to_label}',
             )
 
-        # ---- start the destination's new rental cycle ----
+        # ---- start the destination's new rental cycle with every moved line ----
+        source_codes = ' + '.join(lines[0]['source'].rental_code
+                                  for lines in moved_by_source.values())
         new_code = _next_rental_code()
         new_rental = ToolRental(
             rental_code=new_code, renter_type=to_type,
@@ -1048,56 +1107,68 @@ def register(app):
             total_paid=0.0, total_returned_qty=0.0,
             status='active',
             payment_status='no_charge' if billing_type == 'no_charge' else 'unpaid',
-            notes=(f'{operator_notes} | Transferred from {source.rental_code}'
-                   if operator_notes else f'Transferred from {source.rental_code}'),
+            notes=(f'{operator_notes} | Transferred from {source_codes}'
+                   if operator_notes else f'Transferred from {source_codes}'),
             created_by=current_user.id if hasattr(current_user, 'id') else None,
         )
         db.session.add(new_rental)
         db.session.flush()
         for line in moved:
+            rental = line['source']
+            transfer, from_label = handovers[int(rental.id)]
             db.session.add(ToolRentalItem(
                 rental_id=new_rental.id,
                 tool_id=line['tool_id'],
                 qty_rented=line['qty'], qty_returned=0.0, qty_pending=line['qty'],
                 rate=line['rate'], amount=line['amount'],
-                notes=f'From transfer of {source.rental_code}',
+                notes=f'From transfer of {rental.rental_code}',
             ))
             create_movement_log(
                 tool_id=line['tool_id'], rental_id=new_rental.id,
                 movement_type='rental_out',
                 from_label=from_label, to_label=to_label, qty=line['qty'],
                 transfer_id=transfer.id,
-                notes=f'New rental {new_code} from transfer of {source.rental_code}',
+                notes=f'New rental {new_code} from transfer of {rental.rental_code}',
             )
 
-        transfer.to_rental_id = new_rental.id
-        transfer.notes = (f'{operator_notes} | Transferred selected tools to new rental {new_code}'
-                          if operator_notes else f'Transferred selected tools to new rental {new_code}')
+        for lines in moved_by_source.values():
+            rental = lines[0]['source']
+            transfer = handovers[int(rental.id)][0]
+            transfer.to_rental_id = new_rental.id
+            transfer.notes = (f'{operator_notes} | Transferred selected tools to new rental {new_code}'
+                              if operator_notes else
+                              f'Transferred selected tools to new rental {new_code}')
 
         if to_type == 'external' and to_customer_name:
             ensure_party(to_customer_name, party_type='rental', phone=to_customer_phone)
 
-        recalc_rental_totals(source.id)
-        if credit_amount > 0 and float(source.total_pending_amount or 0) > 0.001:
-            source.payment_status = 'credit'
-        moved_desc = ', '.join(f"{line['name']} x{line['qty']:g}" for line in moved)
-        add = f'Transferred {moved_qty:g} tools to {to_label} (new rental {new_code}).'
-        src_note = (source.notes or '').strip()
-        source.notes = (src_note + ' ' + add).strip() if src_note else add
+        for lines in moved_by_source.values():
+            rental = lines[0]['source']
+            recalc_rental_totals(rental.id)
+            if credit_amount > 0 and float(rental.total_pending_amount or 0) > 0.001:
+                rental.payment_status = 'credit'
+            line_qty = sum(line['qty'] for line in lines)
+            add = f'Transferred {line_qty:g} tools to {to_label} (new rental {new_code}).'
+            src_note = (rental.notes or '').strip()
+            rental.notes = (src_note + ' ' + add).strip() if src_note else add
 
+        marked = [lines[0]['source'] for lines in moved_by_source.values()]
+        moved_desc = ', '.join(f"{line['name']} x{line['qty']:g}" for line in moved)
         db.session.commit()
 
         chain_str = ' > '.join(rental_transfer_chain(new_rental.id))
+        holder_word = 'holder' if len(marked) == 1 else 'holders'
         if credit_amount > 0:
-            settle_txt = f' {credit_amount:,.0f} PKR moved to credit for the previous holder.'
+            settle_txt = f' {credit_amount:,.0f} PKR moved to credit for the previous {holder_word}.'
         elif finalized_amount > 0:
-            settle_txt = f' Finalised {finalized_amount:,.0f} PKR rent from the previous holder.'
+            settle_txt = f' Finalised {finalized_amount:,.0f} PKR rent from the previous {holder_word}.'
         else:
             settle_txt = ''
-        flash(f'Transfer complete: {source.rental_code} → {new_code} for {to_label} '
+        flash(f'Transfer complete: {source_codes} → {new_code} for {to_label} '
               f'({moved_qty:g} tools: {moved_desc}).{settle_txt} '
               f'Chain: {chain_str}. New rental shown below.', 'success')
         return redirect(url_for('hdc_tool_rental_new', created=new_rental.id))
+
 
     # ------------------ CREATE RENTAL ------------------
     @app.route('/hdc/tool-rental/create', methods=['POST'])

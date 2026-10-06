@@ -123,13 +123,21 @@ moved, and the flash message names the tools:
 `Tools transferred: Site A to Site B (2 qty — Angle Grinder x2). Chain: Site A > Site B`.
 
 The **Transfer Rental** flow on `/hdc/tool-rental/new` follows the operator's
-sequence: transaction type → From holder/location → rent type → To holder →
+sequence: transaction type → From holder(s)/location → rent type → To holder →
 available tools → other settings. From choices are grouped by each live rental's
 actual location, so a rental split across sites only offers the quantities at
-the chosen site. Checked tool lines move their displayed quantity and use their
-own destination rate; unchecked lines and quantities at other locations stay
-with the previous rental. Choosing rent already fixed in the contact/contract
-hides the rate inputs but still allows the tools to be selected and moved.
+the chosen site. Choosing a location lists **every rental (holder) that keeps
+tools there** as a checkbox — plus a *Select all holders* toggle — because one
+site often receives tools through more than one rental: tick any combination of
+holders and then any combination of their tools, and they all move in a single
+transfer. Each contributing holder still keeps its own
+`hdc_tool_rental_transfer` row (its own from-location, per-tool split and rent
+settlement), while one new rental is opened for the destination; the
+hand-over chain therefore names every holder it was fed from. Checked tool lines
+move their displayed quantity and use their own destination rate; unchecked
+lines and quantities at other locations stay with the previous rental. Choosing
+rent already fixed in the contact/contract hides the rate inputs but still
+allows the tools to be selected and moved.
 
 ### Rent pending is apportioned, never duplicated
 
