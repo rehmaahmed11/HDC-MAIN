@@ -123,8 +123,8 @@ moved, and the flash message names the tools:
 `Tools transferred: Site A to Site B (2 qty — Angle Grinder x2). Chain: Site A > Site B`.
 
 The **Transfer Rental** flow on `/hdc/tool-rental/new` follows the operator's
-sequence: transaction type → From holder(s)/location → rent type → To holder →
-available tools → other settings. From choices are grouped by each live rental's
+sequence: transaction type → From holder(s)/location → available tools →
+rent type → To holder → other settings. From choices are grouped by each live rental's
 actual location, so a rental split across sites only offers the quantities at
 the chosen site. Choosing a location lists **every rental (holder) that keeps
 tools there** as a checkbox — plus a *Select all holders* toggle — because one
