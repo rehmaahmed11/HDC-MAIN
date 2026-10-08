@@ -1,0 +1,96 @@
+{# One tool on a physical count sheet.
+
+   Included twice from ``tool_audit_sheet.html`` — once for the lines the book
+   expects at this place, once for the "anything else found here?" table — so
+   both halves of the sheet post the same field names and behave identically.
+
+   ``row`` comes from ``hdc.services.tool_audit.audit_sheet``; ``editable`` says
+   whether this user may type into it.  The Diff cell is recomputed live by
+   ``static/hdc/js/pages/tool_audit.js`` while someone counts, but the number
+   that matters is the one the server stored — a saved sheet always renders its
+   own variance, with or without JavaScript. #}
+<tr class="tool-audit-line {% if row.status in ('short', 'extra') %}is-off{% elif row.status == 'adjusted' %}is-fixed{% elif row.status == 'match' %}is-clean{% endif %}"
+    data-tool-id="{{ row.tool_id }}"
+    data-book="{{ row.expected_qty }}"
+    data-unit="{{ row.unit }}"
+    data-unit-cost="{{ row.unit_cost }}">
+    <td>
+        <a href="{{ url_for('hdc_tool_rental_tool_position', tool_id=row.tool_id) }}"
+           class="fw-bold text-decoration-none">{{ row.name }}</a>
+        <small class="d-block text-muted">
+            {{ row.code }} · {{ row.unit }} · owns {{ "%g"|format(row.owned_qty) }}
+            {%- if row.category %} · {{ row.category }}{% endif %}
+        </small>
+        {% if row.condition not in ('good', '', none) %}
+        <small class="d-block text-danger">tool marked {{ row.condition }}</small>
+        {% endif %}
+    </td>
+    <td class="text-center fw-bold audit-book">{{ "%g"|format(row.expected_qty) }}</td>
+    <td class="tool-audit-why">
+        {% if row.rentals %}
+            {% for rental in row.rentals %}
+            <a href="{{ url_for('hdc_tool_rental_detail', rental_id=rental.id) }}"
+               class="badge bg-secondary text-decoration-none">{{ rental.code }}</a>
+            <small class="d-block text-muted">
+                {{ "%g"|format(rental.qty) }} here · {{ rental.days_out }} day(s) out
+                {%- if rental.overdue %} · <span class="text-danger fw-bold">overdue</span>{% endif %}
+                {%- if rental.pending_amount %} · rent due {{ "{:,.0f}".format(rental.pending_amount) }}{% endif %}
+            </small>
+            {% if rental.chain %}
+            <small class="d-block text-muted text-truncate" title="{{ rental.chain }}">
+                {{ rental.chain }}
+            </small>
+            {% endif %}
+            {% endfor %}
+        {% elif row.expected_qty > 0 %}
+            <small class="text-muted">In the store — not out on any rental</small>
+        {% else %}
+            <small class="text-muted">Nothing booked at this place</small>
+        {% endif %}
+    </td>
+    <td class="text-center">
+        <input type="number" step="0.01" min="0" inputmode="decimal"
+               class="form-control form-control-sm text-center audit-count"
+               name="counted[{{ row.tool_id }}]"
+               value="{% if row.counted_qty is not none %}{{ '%g'|format(row.counted_qty) }}{% endif %}"
+               placeholder="{% if editable %}—{% else %}{% if row.counted_qty is none %}not counted{% endif %}{% endif %}"
+               aria-label="Counted quantity for {{ row.name }}"
+               {% if not editable %}readonly{% endif %}>
+    </td>
+    <td class="text-center">
+        <input type="number" step="0.01" min="0" inputmode="decimal"
+               class="form-control form-control-sm text-center audit-damaged"
+               name="damaged[{{ row.tool_id }}]"
+               value="{% if row.damaged_qty %}{{ '%g'|format(row.damaged_qty) }}{% endif %}"
+               placeholder="0" aria-label="Damaged quantity found for {{ row.name }}"
+               {% if not editable %}readonly{% endif %}>
+    </td>
+    <td>
+        <input type="text" class="form-control form-control-sm audit-note"
+               name="notes[{{ row.tool_id }}]" value="{{ row.notes or '' }}"
+               placeholder="e.g. 2 missing since Eid" maxlength="300"
+               aria-label="Counter note for {{ row.name }}"
+               {% if not editable %}readonly{% endif %}>
+    </td>
+    <td class="text-center fw-bold audit-diff {% if row.variance < 0 %}text-danger{% elif row.variance > 0 %}text-info{% endif %}">
+        {% if row.counted_qty is not none %}{{ "%+g"|format(row.variance) }}{% else %}—{% endif %}
+        {% if row.counted_qty is not none and row.variance %}
+        <small class="d-block text-muted">{{ "{:,.0f}".format(row.variance * row.unit_cost) }} PKR</small>
+        {% endif %}
+    </td>
+    <td class="text-center">
+        {% set badge = {'short': 'danger', 'extra': 'info', 'match': 'success',
+                        'adjusted': 'secondary', 'pending': 'light'} %}
+        <span class="badge bg-{{ badge.get(row.status, 'light') }}
+                     {% if row.status in ('pending', 'adjusted') %}text-muted border{% endif %}">
+            {{ {'short': 'Short', 'extra': 'Extra', 'match': 'Matches',
+                'adjusted': 'Adjusted', 'pending': 'Not counted'}
+                   .get(row.status, row.status) }}
+        </span>
+        {% if row.adjusted_qty %}
+        <small class="d-block text-muted" title="Posted from this sheet on {{ row.adjusted_at }}">
+            {{ "%+g"|format(row.adjusted_qty) }} posted{% if row.adjust_reason %} · {{ row.adjust_reason.replace('_', ' ') }}{% endif %}
+        </small>
+        {% endif %}
+    </td>
+</tr>

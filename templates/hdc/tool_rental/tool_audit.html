@@ -1,0 +1,469 @@
+{% extends "shared/base.html" %}
+{% block title %}Tool Audit{% endblock %}
+{% block page_heading %}Tool Audit — total owned vs where it is vs what each site counted{% endblock %}
+
+{# The Audit tab answers three questions on one page:
+
+     1. how many pieces of every tool do we own, and where does the book say
+        they are (the tracker's own position, so this can never disagree with
+        the Dashboard);
+     2. what did each site / customer / the store actually count — typed in by
+        hand on its own sheet (hdc_tool_audit + hdc_tool_audit_line);
+     3. what does not match, and what we may do about it (the Adjust button on
+        the sheet writes the loss off and fixes the rental line).
+
+   Nothing here re-derives stock: everything is read through
+   ``hdc.services.tool_tracking.tool_ledger``. #}
+{% block content %}
+{% set tools_active = 'audit' %}
+{% set tools_is_admin = (current_user.role or '')|trim|lower == 'admin' %}
+{% set tools_is_accountant = (current_user.role or '')|trim|lower == 'accountant' %}
+{% include "tool_rental/_tools_nav.html" %}
+{% set t = summary %}
+
+<!-- ============ HEADLINE NUMBERS ============ -->
+<div class="row g-3 mt-1">
+    <div class="col-6 col-xl">
+        <div class="kpi-card kpi-blue h-100">
+            <div class="kpi-icon"><i class="fas fa-tools"></i></div>
+            <div class="kpi-value">{{ "%g"|format(t.owned_qty) }}</div>
+            <div class="kpi-label">Total Owned (all tools)</div>
+            <div class="kpi-sub">{{ totals.tool_types }} item(s) across {{ t.locations_total }} place(s)</div>
+        </div>
+    </div>
+    <div class="col-6 col-xl">
+        <div class="kpi-card kpi-green h-100">
+            <div class="kpi-icon"><i class="fas fa-location-crosshairs"></i></div>
+            <div class="kpi-value">{{ "%g"|format(t.placed_qty) }}</div>
+            <div class="kpi-label">Where the book says it is</div>
+            <div class="kpi-sub">
+                Store {{ "%g"|format(totals.in_store_qty) }} · Sites {{ "%g"|format(totals.own_project_qty) }} ·
+                Customers {{ "%g"|format(totals.customer_qty) }}
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-xl">
+        <div class="kpi-card kpi-orange h-100">
+            <div class="kpi-icon"><i class="fas fa-clipboard-check"></i></div>
+            <div class="kpi-value">{{ "%g"|format(t.counted_qty) }}</div>
+            <div class="kpi-label">Physically Counted</div>
+            <div class="kpi-sub">{{ t.locations_counted }} of {{ t.locations_total }} place(s) covered
+                · {{ t.audits_total }} sheet(s) on file</div>
+        </div>
+    </div>
+    <div class="col-6 col-xl">
+        <div class="kpi-card {% if t.open_variances %}kpi-purple{% else %}kpi-teal{% endif %} h-100">
+            <div class="kpi-icon"><i class="fas fa-triangle-exclamation"></i></div>
+            <div class="kpi-value">{{ "%g"|format(t.open_variances) }}</div>
+            <div class="kpi-label">Open Discrepancies</div>
+            <div class="kpi-sub">
+                {% if t.open_variances %}
+                Short {{ "%g"|format(t.shortage_qty) }} · Extra {{ "%g"|format(t.overage_qty) }}
+                · {{ t.locations_open }} sheet(s) in progress
+                {% else %}
+                Nothing counted disagrees with the book
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-xl">
+        <div class="kpi-card {% if t.write_off_value %}kpi-purple{% else %}kpi-teal{% endif %} h-100">
+            <div class="kpi-icon"><i class="fas fa-sack-xmark"></i></div>
+            <div class="kpi-value small">{{ "{:,.0f}".format(t.write_off_value) }}</div>
+            <div class="kpi-label">Written Off by Audits (PKR)</div>
+            <div class="kpi-sub">Value of losses a count has already posted</div>
+        </div>
+    </div>
+</div>
+
+<!-- ============ THE ONE IDENTITY, WITH THE AUDIT ON TOP OF IT ============ -->
+<div class="card hdc-card mt-3">
+    <div class="card-body">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+            <div>
+                <span class="tools-recon-total">
+                    {{ "%g"|format(t.owned_qty) }} owned =
+                    {{ "%g"|format(totals.in_store_qty) }} in store +
+                    {{ "%g"|format(totals.own_project_qty) }} on own sites +
+                    {{ "%g"|format(totals.customer_qty) }} with customers
+                </span>
+                <small class="d-block text-muted mt-1">
+                    A count never changes this identity — an adjustment removes a lost piece from
+                    <em>both</em> the owned quantity and the rental line that was holding it, so the
+                    balance stays true.
+                    {% if t.unbalanced_qty > 0 %}
+                    <span class="text-danger fw-bold">{{ "%g"|format(t.unbalanced_qty) }} piece(s) do not add up
+                        before any counting — fix those rows first (Tracking).</span>
+                    {% endif %}
+                </small>
+            </div>
+            <div class="d-flex gap-2 flex-wrap">
+                {% if can_adjust %}
+                <a href="{{ url_for('hdc_tool_rental_audit_new', location=selected_location or 'store') }}"
+                   class="btn btn-sm btn-mint">
+                    <i class="fas fa-plus me-1" aria-hidden="true"></i>New physical count
+                </a>
+                {% endif %}
+                {% if tools_is_admin or tools_is_accountant %}
+                <a href="{{ url_for('hdc_tool_rental_tracking') }}" class="btn btn-sm btn-outline-secondary">Tracking</a>
+                {% endif %}
+                <a href="{{ url_for('hdc_tool_rental_inventory') }}" class="btn btn-sm btn-outline-secondary">Inventory</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============ FILTERS ============ -->
+<div class="card hdc-card mt-3">
+    <div class="card-header hdc-card-header">
+        <span><i class="fas fa-filter me-2"></i>Compare</span>
+        <small class="text-muted">Pick one site/customer/store to audit against, or leave it blank for the whole company</small>
+    </div>
+    <div class="card-body">
+        <form method="GET" class="row g-2 align-items-end">
+            <div class="col-md-4">
+                <label class="form-label" for="auditLocation">Place being checked</label>
+                <select class="form-select" id="auditLocation" name="location">
+                    <option value="">All places ({{ location_options|length }})</option>
+                    {% for key, label in location_options %}
+                    <option value="{{ key }}"{% if selected_location == key %} selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label" for="auditCategory">Category</label>
+                <select class="form-select" id="auditCategory" name="category_id">
+                    <option value="">All categories</option>
+                    {% for category in categories %}
+                    <option value="{{ category.id }}"{% if selected_category == category.id %} selected{% endif %}>
+                        {{ category.name }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label" for="auditSearch">Tool</label>
+                <input type="text" class="form-control" id="auditSearch" name="q" value="{{ q or '' }}"
+                       placeholder="Name, code or description">
+            </div>
+            <div class="col-md-2 d-flex gap-2">
+                <button type="submit" class="btn btn-mint flex-grow-1">
+                    <i class="fas fa-search me-1" aria-hidden="true"></i>Apply
+                </button>
+                <a href="{{ url_for('hdc_tool_rental_audit') }}" class="btn btn-outline-secondary">Reset</a>
+            </div>
+            <div class="col-12">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="auditOnly" name="only" value="variance"
+                           {% if only == 'variance' %}checked{% endif %}>
+                    <label class="form-check-label small" for="auditOnly">
+                        Only tools whose count disagrees with the book
+                    </label>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- ============ PER-PLACE SUMMARY ============ -->
+<div class="card hdc-card mt-3">
+    <div class="card-header hdc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span><i class="fas fa-map-location-dot me-2"></i>Physical check report — place by place</span>
+        <small class="text-muted">Book position from Tracking · counted qty typed on the sheet</small>
+    </div>
+    <div class="card-body">
+        <div class="row g-2">
+            {% for card in cards %}
+            {% set is_selected = selected_location == card['key'] %}
+            <div class="col-12 col-md-6 col-xl-4">
+                <div class="tool-audit-card {% if card.discrepancy_count %}has-loss{% elif card.has_count %}is-clean{% endif %}{% if is_selected %} is-selected{% endif %}">
+                    <div class="d-flex justify-content-between align-items-start gap-2">
+                        <div class="min-w-0">
+                            <span class="tool-audit-place">
+                                {% if card.loc_type == 'store' %}<i class="fas fa-warehouse" aria-hidden="true"></i>
+                                {% elif card.loc_type == 'own_project' %}<i class="fas fa-building" aria-hidden="true"></i>
+                                {% else %}<i class="fas fa-user-tag" aria-hidden="true"></i>{% endif %}
+                                <span class="text-truncate">{{ card.label }}</span>
+                            </span>
+                            <small class="d-block text-muted">{{ card.type_label }} ·
+                                {{ card.expected_types }} tool type(s)
+                                {%- if card.rental_count %} · {{ card.rental_count }} rental(s){% endif %}
+                                {%- if card.overdue_qty > 0 %} · <span class="text-danger">{{ "%g"|format(card.overdue_qty) }} overdue</span>{% endif %}
+                            </small>
+                        </div>
+                        {% if card.audit %}
+                        <span class="badge {% if card.audit.status == 'adjusted' %}bg-success{% elif card.audit.is_open %}bg-warning text-dark{% else %}bg-secondary{% endif %}">
+                            {{ card.audit.status_label }}
+                        </span>
+                        {% else %}
+                        <span class="badge bg-light text-muted border">Not counted</span>
+                        {% endif %}
+                    </div>
+                    <div class="tool-audit-figures">
+                        <div>
+                            <span class="label">Book says</span>
+                            <span class="value">{{ "%g"|format(card.expected_qty) }}</span>
+                        </div>
+                        <div>
+                            <span class="label">Counted</span>
+                            <span class="value {% if card.has_count %}fw-bold{% endif %}">
+                                {% if card.has_count %}{{ "%g"|format(card.counted_qty) }}{% else %}—{% endif %}
+                            </span>
+                        </div>
+                        <div>
+                            <span class="label">Difference</span>
+                            <span class="value {% if card.variance < 0 %}text-danger{% elif card.variance > 0 %}text-info{% endif %}">
+                                {% if card.has_count %}{{ "%+g"|format(card.variance) }}{% else %}—{% endif %}
+                            </span>
+                        </div>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center gap-2 mt-2">
+                        <small class="text-muted text-truncate">
+                            {% if card.audit %}
+                            {{ card.audit.code }} · {{ card.audit.date }}
+                            {%- if card.audit.counter_name %} · {{ card.audit.counter_name }}{% endif %}
+                            {%- if card.audit.discrepancy_lines %}
+                            · <span class="text-danger fw-bold">{{ card.audit.discrepancy_lines }} to fix</span>
+                            {%- elif card.audit.write_off_value %}
+                            · {{ "{:,.0f}".format(card.audit.write_off_value) }} PKR written off
+                            {%- endif %}
+                            {%- if card.audit_count > 1 %} · {{ card.audit_count }} sheet(s){% endif %}
+                            {% else %}
+                            No count sheet for this place yet
+                            {% endif %}
+                        </small>
+                        <div class="d-flex gap-1 flex-shrink-0">
+                            {% if card.audit and card.audit_is_open and can_adjust %}
+                            <a href="{{ url_for('hdc_tool_rental_audit_sheet', audit_id=card.audit_id) }}"
+                               class="btn btn-sm btn-mint">Continue count</a>
+                            {% elif card.audit %}
+                            <a href="{{ url_for('hdc_tool_rental_audit_sheet', audit_id=card.audit_id) }}"
+                               class="btn btn-sm btn-outline-primary">View sheet</a>
+                            {% endif %}
+                            {% if can_adjust %}
+                            <a href="{{ url_for('hdc_tool_rental_audit_new', location=card['key']) }}"
+                               class="btn btn-sm btn-outline-secondary">
+                                <i class="fas fa-pen-to-square" aria-hidden="true"></i>
+                                <span class="visually-hidden">Count {{ card.label }}</span>
+                            </a>
+                            {% elif not card.audit %}
+                            <span class="badge bg-light text-muted border">Read only</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% if card.uncounted_types %}
+                    <small class="d-block text-muted mt-1">
+                        <i class="fas fa-circle-exclamation me-1" aria-hidden="true"></i>
+                        {{ card.uncounted_types }} tool line(s) here still have no counted number
+                    </small>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+<!-- ============ ALL TOOLS: TOTAL QTY VS WHERE THEY ARE VS COUNTED ============ -->
+<div class="card hdc-card mt-3">
+    <div class="card-header hdc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span>
+            <i class="fas fa-table-list me-2"></i>All tools — total qty vs where they are vs counted
+            {% if selected_location %}
+            <span class="badge bg-secondary ms-2">{{ selected_location_label }}</span>
+            <a href="{{ url_for('hdc_tool_rental_audit') }}" class="small ms-2">show all places</a>
+            {% endif %}
+        </span>
+        <small class="text-muted">{{ rows|length }} tool(s) listed · differences first</small>
+    </div>
+    <div class="table-responsive tool-audit-scroll">
+        <table class="table hdc-table table-sm mb-0 tool-audit-table">
+            <thead>
+                <tr>
+                    <th scope="col">Tool</th>
+                    <th scope="col" class="text-center">Total owned</th>
+                    <th scope="col">Where the book says it is</th>
+                    <th scope="col" class="text-center">Store</th>
+                    <th scope="col" class="text-center">Sites</th>
+                    <th scope="col" class="text-center">Customers</th>
+                    <th scope="col" class="text-center">Counted</th>
+                    <th scope="col" class="text-center">Diff</th>
+                    <th scope="col" class="text-center">Status</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for row in rows %}
+                <tr class="tool-audit-row {% if row.status in ('short','extra') %}has-diff{% endif %}">
+                    <td>
+                        <a href="{{ url_for('hdc_tool_rental_tool_position', tool_id=row.tool_id) }}"
+                           class="fw-bold text-decoration-none">{{ row.name }}</a>
+                        <small class="d-block text-muted">{{ row.code }} · {{ row.category }} · {{ row.unit }}</small>
+                        {% if row.condition not in ('good',) %}
+                        <small class="d-block text-danger">condition: {{ row.condition }}</small>
+                        {% endif %}
+                    </td>
+                    <td class="text-center fw-bold">{{ "%g"|format(row.owned_qty) }}</td>
+                    <td>
+                        {% if row.places %}
+                            {% for place in row.places %}
+                            <span class="tools-chip chip-{% if place.loc_type == 'store' %}store{% elif place.loc_type == 'own_project' %}own{% else %}customer{% endif %}"
+                                  title="{% if place.counted_qty is not none %}counted {{ "%g"|format(place.counted_qty) }}{% else %}not counted{% endif %}{% if place.variance %} · diff {{ "%+g"|format(place.variance) }}{% endif %}">
+                                {{ place.label }} ×{{ "%g"|format(place.expected_qty) }}
+                                {% if place.counted_qty is not none and place.variance %}
+                                <b class="{% if place.variance < 0 %}text-danger{% else %}text-info{% endif %}">({{ "%+g"|format(place.variance) }})</b>
+                                {% endif %}
+                            </span>
+                            {% endfor %}
+                        {% elif row.unverified_qty > 0 %}
+                            <span class="tools-chip chip-store">Store only — nothing out</span>
+                        {% else %}
+                            <span class="text-muted">No rental or transfer holds this tool</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-center">{{ "%g"|format(row.in_store_qty) }}</td>
+                    <td class="text-center">{{ "%g"|format(row.own_project_qty) }}</td>
+                    <td class="text-center">{{ "%g"|format(row.customer_qty) }}</td>
+                    <td class="text-center">
+                        {% if row.counted_qty or row.status != 'not_counted' %}
+                        {{ "%g"|format(row.counted_qty) }}
+                        {% if row.damaged_qty %}<small class="d-block text-warning">incl. {{ "%g"|format(row.damaged_qty) }} damaged</small>{% endif %}
+                        {% else %}<span class="text-muted">not counted</span>{% endif %}
+                    </td>
+                    <td class="text-center fw-bold {% if row.variance_qty < 0 %}text-danger{% elif row.variance_qty > 0 %}text-info{% endif %}">
+                        {% if row.status == 'not_counted' %}<span class="text-muted">—</span>{% else %}{{ "%+g"|format(row.variance_qty) }}{% endif %}
+                        {% if row.value_variance and row.variance_qty %}
+                        <small class="d-block text-muted">{{ "{:,.0f}".format(row.value_variance) }} PKR</small>
+                        {% endif %}
+                    </td>
+                    <td class="text-center">
+                        {% set badge = {'short':'danger','extra':'info','match':'success','adjusted':'secondary','not_counted':'light'} %}
+                        {% set labels = {'short':'Short / lost','extra':'Extra found','match':'Matches book','adjusted':'Adjusted','not_counted':'Not counted yet'} %}
+                        <span class="badge bg-{{ badge.get(row.status, 'light') }} {% if row.status == 'not_counted' %}text-muted border{% endif %}">
+                            {{ labels.get(row.status, row.status) }}
+                        </span>
+                        {% if row.unverified_qty > 0 %}
+                        <small class="d-block text-muted" title="Pieces the book has at places nobody has counted yet">
+                            {{ "%g"|format(row.unverified_qty) }} not verified
+                        </small>
+                        {% endif %}
+                        {% if row.unaccounted %}
+                        <small class="d-block text-danger">book itself is off by {{ "%g"|format(row.variance_book) }}</small>
+                        {% endif %}
+                    </td>
+                </tr>
+            {% else %}
+                <tr><td colspan="9" class="text-center text-muted py-4">
+                    No tool matches these filters{% if only == 'variance' %} — tick “only discrepancies” off to see the whole list{% endif %}.
+                </td></tr>
+            {% endfor %}
+            </tbody>
+            {% if rows %}
+            <tfoot>
+                <tr>
+                    <th scope="row" class="text-end">Totals</th>
+                    <th class="text-center">{{ "%g"|format(matrix_totals.owned_qty) }}</th>
+                    <th class="text-end small fw-normal">
+                        expected at counted + uncounted places {{ "%g"|format(matrix_totals.expected_qty) }}
+                    </th>
+                    <th class="text-center">{{ "%g"|format(totals.in_store_qty) }}</th>
+                    <th class="text-center">{{ "%g"|format(totals.own_project_qty) }}</th>
+                    <th class="text-center">{{ "%g"|format(totals.customer_qty) }}</th>
+                    <th class="text-center">{{ "%g"|format(matrix_totals.counted_qty) }}</th>
+                    <th class="text-center {% if matrix_totals.variance_qty < 0 %}text-danger{% elif matrix_totals.variance_qty > 0 %}text-info{% endif %}">
+                        {{ "%+g"|format(matrix_totals.variance_qty) }}
+                    </th>
+                    <th class="text-center small fw-normal">
+                        {{ matrix_totals.shortage_types }} short · {{ matrix_totals.overage_types }} extra
+                    </th>
+                </tr>
+            </tfoot>
+            {% endif %}
+        </table>
+    </div>
+    <div class="card-footer">
+        <small class="text-muted">
+            <i class="fas fa-circle-info me-1" aria-hidden="true"></i>
+            <strong>Counted</strong> adds the sheets that cover this tool's places; <strong>Diff</strong> is
+            counted minus what the book had at those same places — a place nobody has counted is
+            reported as <em>not verified</em>, never as a match.
+            {% if matrix_totals.unaudited_types %}
+            {{ matrix_totals.unaudited_types }} tool(s) have never been counted anywhere.
+            {% endif %}
+        </small>
+    </div>
+</div>
+
+<!-- ============ COUNT SHEETS ON FILE ============ -->
+<div class="card hdc-card mt-3">
+    <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+        <span><i class="fas fa-clipboard-list me-2"></i>Count sheets on file</span>
+        <small class="text-muted">{{ history|length }} most recent{% if selected_location %} for {{ selected_location_label }}{% endif %}</small>
+    </div>
+    <div class="table-responsive">
+        <table class="table hdc-table table-sm mb-0">
+            <thead>
+                <tr>
+                    <th scope="col">Sheet</th>
+                    <th scope="col">Place</th>
+                    <th scope="col" class="text-center">Date</th>
+                    <th scope="col" class="text-center">Lines counted</th>
+                    <th scope="col" class="text-center">Short</th>
+                    <th scope="col" class="text-center">Extra</th>
+                    <th scope="col" class="text-center">Damaged</th>
+                    <th scope="col" class="text-end">Written off</th>
+                    <th scope="col" class="text-center">Status</th>
+                    <th scope="col" class="text-center">Open</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for entry in history %}
+                {% set brief = entry.brief %}
+                <tr>
+                    <td>
+                        <a href="{{ url_for('hdc_tool_rental_audit_sheet', audit_id=entry.audit.id) }}"
+                           class="fw-bold text-decoration-none">{{ brief.code }}</a>
+                        {% if brief.counter_name %}<small class="d-block text-muted">{{ brief.counter_name }}</small>{% endif %}
+                    </td>
+                    <td>{{ entry.label }}</td>
+                    <td class="text-center text-nowrap">{{ brief.date }}</td>
+                    <td class="text-center">{{ brief.counted_lines }} / {{ brief.lines }}</td>
+                    <td class="text-center {% if brief.shortage_qty %}text-danger fw-bold{% endif %}">
+                        {{ "%g"|format(brief.shortage_qty) }}</td>
+                    <td class="text-center {% if brief.overage_qty %}text-info fw-bold{% endif %}">
+                        {{ "%g"|format(brief.overage_qty) }}</td>
+                    <td class="text-center">{{ "%g"|format(brief.damaged_qty) }}</td>
+                    <td class="text-end">{{ "{:,.0f}".format(brief.write_off_value) }}</td>
+                    <td class="text-center">
+                        <span class="badge {% if entry.is_void %}bg-secondary{% elif brief.status == 'adjusted' %}bg-success{% elif brief.status == 'counted' %}bg-warning text-dark{% else %}bg-info text-dark{% endif %}">
+                            {{ brief.status_label }}
+                        </span>
+                        {% if brief.discrepancy_lines %}
+                        <small class="d-block text-danger">{{ brief.discrepancy_lines }} still open</small>
+                        {% endif %}
+                    </td>
+                    <td class="text-center">
+                        <a href="{{ url_for('hdc_tool_rental_audit_sheet', audit_id=entry.audit.id) }}"
+                           class="btn btn-sm btn-outline-primary">
+                            <i class="fas fa-eye" aria-hidden="true"></i>
+                            <span class="visually-hidden">Open {{ brief.code }}</span>
+                        </a>
+                    </td>
+                </tr>
+            {% else %}
+                <tr><td colspan="10" class="text-center text-muted py-4">
+                    No count sheet yet — start one from a place card above.
+                </td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<p class="text-muted small mt-3">
+    <i class="fas fa-scale-balanced me-1" aria-hidden="true"></i>
+    Adjusting a count is the only place the Tools section changes <em>Total Qty Owned</em> in bulk: a loss
+    writes off through the scrap register (reason, value and all) and takes the pieces off the rental line
+    that was holding them; an overage adds them back to owned stock. Rent already billed is never
+    changed — recover money from a customer on the rental's own page.
+</p>
+{% endblock %}

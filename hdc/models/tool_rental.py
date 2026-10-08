@@ -509,3 +509,156 @@ class ToolMovementLog(db.Model):
 
     tool = db.relationship('Tool', foreign_keys=[tool_id])
     rental = db.relationship('ToolRental', foreign_keys=[rental_id])
+
+
+# --------------------------------------------------------------------------- #
+# Physical audit — "what the site actually counted" vs "what the book says"
+# --------------------------------------------------------------------------- #
+#: Movement type used when a physical count changes what we own.  The stock
+#: registers (``hdc_tool_purchase`` / ``hdc_tool_scrap``) carry the money-side
+#: story; this is the movement-log marker that says "an audit did this".
+MOVEMENT_AUDIT_ADJUST = 'adjustment'
+
+#: One count sheet per place (the warehouse, one own site, one outside
+#: customer).  ``draft`` while someone is still typing numbers, ``counted``
+#: once saved with the discrepancies left open, ``adjusted`` once the losses /
+#: overages have been posted to the stock registers.
+TOOL_AUDIT_STATUSES = (
+    ('draft', 'Count in progress'),
+    ('counted', 'Counted — awaiting action'),
+    ('adjusted', 'Closed'),
+    ('void', 'Cancelled'),
+)
+TOOL_AUDIT_STATUS_LABELS = dict(TOOL_AUDIT_STATUSES)
+
+#: Per-line verdict, recomputed every time the sheet is saved.
+TOOL_AUDIT_LINE_STATES = ('pending', 'match', 'short', 'extra', 'adjusted')
+TOOL_AUDIT_LINE_LABELS = {
+    'pending': 'Not counted',
+    'match': 'Matches',
+    'short': 'Short (loss)',
+    'extra': 'Extra found',
+    'adjusted': 'Adjusted',
+}
+
+#: What a site answers when a piece is missing.  Mapped onto the scrap
+#: reasons so a write-off from an audit lands in the same register as a
+#: scrap typed in by hand — one place to explain every missing piece.
+TOOL_AUDIT_LOSS_REASONS = ('lost', 'damaged', 'worn_out', 'sold_as_scrap', 'other')
+
+
+class ToolAudit(db.Model):
+    """One physical verification of one location.
+
+    The book side is never stored as a second truth: expected quantities are
+    read from :func:`hdc.services.tool_tracking.tool_ledger` at save time and
+    snapshotted onto each line, so the sheet can be reopened later and still
+    show what the system believed *on the day of the count*.
+    """
+
+    __tablename__ = 'hdc_tool_audit'
+    id = db.Column(db.Integer, primary_key=True)
+    audit_code = db.Column(db.String(30), unique=True, nullable=False)
+
+    audit_date = db.Column(db.Date, default=_pkt_today)
+
+    # where the count happened — the same three location kinds the tracker uses
+    loc_type = db.Column(db.String(20), default='store')     # store/own_project/customer
+    project_id = db.Column(db.Integer, db.ForeignKey('hdc_project.id'), nullable=True, index=True)
+    stage_id = db.Column(db.Integer, db.ForeignKey('hdc_stage.id'), nullable=True)
+    customer_name = db.Column(db.String(150), nullable=True)
+    location_label = db.Column(db.String(300))
+
+    # who counted / paperwork
+    counter_name = db.Column(db.String(150))
+    reference = db.Column(db.String(120))                     # count sheet / memo no
+    notes = db.Column(db.String(500))
+
+    status = db.Column(db.String(20), default='draft')
+    # cached roll-up so list pages never re-add every line
+    total_lines = db.Column(db.Float, default=0.0)
+    counted_lines = db.Column(db.Float, default=0.0)
+    discrepancy_lines = db.Column(db.Float, default=0.0)
+    shortage_qty = db.Column(db.Float, default=0.0)
+    overage_qty = db.Column(db.Float, default=0.0)
+    damaged_qty = db.Column(db.Float, default=0.0)
+    write_off_value = db.Column(db.Float, default=0.0)
+    adjusted_lines = db.Column(db.Float, default=0.0)
+
+    adjusted_at = db.Column(db.DateTime)
+    void_reason = db.Column(db.String(250))
+    is_void = db.Column(db.Boolean, default=False)
+    created_by = db.Column(db.Integer, db.ForeignKey('hdc_user.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=_pkt_now_naive)
+    updated_at = db.Column(db.DateTime, default=_pkt_now_naive, onupdate=_pkt_now_naive)
+
+    project = db.relationship('Project', foreign_keys=[project_id])
+    stage = db.relationship('Stage', foreign_keys=[stage_id])
+    lines = db.relationship('ToolAuditLine', backref='audit', lazy=True,
+                            cascade='all, delete-orphan', order_by='ToolAuditLine.tool_name')
+
+    @property
+    def status_label(self):
+        return TOOL_AUDIT_STATUS_LABELS.get(self.status, self.status or '-')
+
+    @property
+    def is_open(self):
+        """Still editable: a count nobody has closed yet."""
+        return (self.status or 'draft') in ('draft', 'counted') and not self.is_void
+
+    @property
+    def net_variance(self):
+        """Overage minus shortage — what the count added up to overall."""
+        return round(float(self.overage_qty or 0.0) - float(self.shortage_qty or 0.0), 2)
+
+    @property
+    def has_discrepancy(self):
+        return (self.shortage_qty or 0) > 0.001 or (self.overage_qty or 0) > 0.001
+
+
+class ToolAuditLine(db.Model):
+    """One tool on one count sheet: expected, counted, and what we did about it."""
+
+    __tablename__ = 'hdc_tool_audit_line'
+    id = db.Column(db.Integer, primary_key=True)
+    audit_id = db.Column(db.Integer, db.ForeignKey('hdc_tool_audit.id'), nullable=False, index=True)
+    tool_id = db.Column(db.Integer, db.ForeignKey('hdc_tool.id'), nullable=False, index=True)
+
+    tool_name = db.Column(db.String(150))       # snapshot, so the sheet reads right later
+    tool_code = db.Column(db.String(30))
+    unit = db.Column(db.String(30))
+
+    book_qty = db.Column(db.Float, default=0.0)     # what the system expected here
+    counted_qty = db.Column(db.Float)                # NULL until someone counts it
+    damaged_qty = db.Column(db.Float, default=0.0)   # counted, but broken / unusable
+    variance = db.Column(db.Float, default=0.0)      # counted - book (negative = loss)
+    status = db.Column(db.String(20), default='pending')
+
+    # what the Adjust button did about this line (losses go to the scrap register)
+    adjusted_qty = db.Column(db.Float, default=0.0)
+    adjust_reason = db.Column(db.String(30))
+    scrap_id = db.Column(db.Integer, db.ForeignKey('hdc_tool_scrap.id'), nullable=True)
+
+    notes = db.Column(db.String(300))
+    created_at = db.Column(db.DateTime, default=_pkt_now_naive)
+    updated_at = db.Column(db.DateTime, default=_pkt_now_naive, onupdate=_pkt_now_naive)
+    adjusted_at = db.Column(db.DateTime)
+    adjusted_by = db.Column(db.Integer, db.ForeignKey('hdc_user.id'), nullable=True)
+
+    tool = db.relationship('Tool', foreign_keys=[tool_id])
+    scrap = db.relationship('ToolScrap', foreign_keys=[scrap_id])
+
+    @property
+    def is_counted(self):
+        return self.counted_qty is not None
+
+    @property
+    def status_label(self):
+        return TOOL_AUDIT_LINE_LABELS.get(self.status, self.status or '-')
+
+    @property
+    def open_variance(self):
+        """Variance still to act on — an adjusted line no longer counts."""
+        if self.status == 'adjusted':
+            return 0.0
+        return round(float(self.variance or 0.0), 2)

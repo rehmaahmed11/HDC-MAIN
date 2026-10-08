@@ -1836,6 +1836,62 @@ def _ensure_tool_rental_schema():
             created_at DATETIME
         )
         """,
+        # Physical audit (Tools > Audit): one count sheet per place, one line
+        # per tool.  The book side is snapshotted onto the line so a sheet
+        # reopened months later still shows what the system expected that day.
+        """
+        CREATE TABLE IF NOT EXISTS hdc_tool_audit (
+            id INTEGER PRIMARY KEY,
+            audit_code VARCHAR(30) NOT NULL UNIQUE,
+            audit_date DATE,
+            loc_type VARCHAR(20) DEFAULT 'store',
+            project_id INTEGER REFERENCES hdc_project(id),
+            stage_id INTEGER REFERENCES hdc_stage(id),
+            customer_name VARCHAR(150),
+            location_label VARCHAR(300),
+            counter_name VARCHAR(150),
+            reference VARCHAR(120),
+            notes VARCHAR(500),
+            status VARCHAR(20) DEFAULT 'draft',
+            total_lines FLOAT DEFAULT 0,
+            counted_lines FLOAT DEFAULT 0,
+            discrepancy_lines FLOAT DEFAULT 0,
+            shortage_qty FLOAT DEFAULT 0,
+            overage_qty FLOAT DEFAULT 0,
+            damaged_qty FLOAT DEFAULT 0,
+            write_off_value FLOAT DEFAULT 0,
+            adjusted_lines FLOAT DEFAULT 0,
+            adjusted_at DATETIME,
+            void_reason VARCHAR(250),
+            is_void BOOLEAN DEFAULT 0,
+            created_by INTEGER REFERENCES hdc_user(id),
+            created_at DATETIME,
+            updated_at DATETIME
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS hdc_tool_audit_line (
+            id INTEGER PRIMARY KEY,
+            audit_id INTEGER NOT NULL REFERENCES hdc_tool_audit(id),
+            tool_id INTEGER NOT NULL REFERENCES hdc_tool(id),
+            tool_name VARCHAR(150),
+            tool_code VARCHAR(30),
+            unit VARCHAR(30),
+            book_qty FLOAT DEFAULT 0,
+            counted_qty FLOAT,
+            damaged_qty FLOAT DEFAULT 0,
+            variance FLOAT DEFAULT 0,
+            status VARCHAR(20) DEFAULT 'pending',
+            adjusted_qty FLOAT DEFAULT 0,
+            adjust_reason VARCHAR(30),
+            scrap_id INTEGER REFERENCES hdc_tool_scrap(id),
+            notes VARCHAR(300),
+            created_at DATETIME,
+            updated_at DATETIME,
+            adjusted_at DATETIME,
+            adjusted_by INTEGER REFERENCES hdc_user(id)
+        )
+        """,
     ]
     with db.engine.connect() as conn:
         for ddl in tables:
@@ -1864,6 +1920,10 @@ def _ensure_tool_rental_schema():
             "CREATE INDEX IF NOT EXISTS idx_tool_transfer_item_transfer ON hdc_tool_rental_transfer_item(transfer_id)",
             "CREATE INDEX IF NOT EXISTS idx_tool_transfer_item_rental_item ON hdc_tool_rental_transfer_item(rental_item_id)",
             "CREATE INDEX IF NOT EXISTS idx_tool_transfer_item_tool ON hdc_tool_rental_transfer_item(tool_id)",
+            "CREATE INDEX IF NOT EXISTS idx_tool_audit_date ON hdc_tool_audit(audit_date, id)",
+            "CREATE INDEX IF NOT EXISTS idx_tool_audit_location ON hdc_tool_audit(loc_type, project_id, status)",
+            "CREATE INDEX IF NOT EXISTS idx_tool_audit_line_audit ON hdc_tool_audit_line(audit_id, tool_id)",
+            "CREATE INDEX IF NOT EXISTS idx_tool_audit_line_tool ON hdc_tool_audit_line(tool_id, status)",
         ]
         for sql in idx_sql:
             try:

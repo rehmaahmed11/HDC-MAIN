@@ -67,6 +67,12 @@ def _ensure_tool_category(name):
 # stock life-cycle: buy more of a tool / throw the rest away
 # --------------------------------------------------------------------------- #
 def _parse_date(raw, fallback=None):
+    # A real date/datetime is what the models store, so service callers may
+    # hand one straight over instead of re-serialising it first.
+    if isinstance(raw, datetime):
+        return raw.date()
+    if isinstance(raw, date):
+        return raw
     raw = (raw or '').strip()
     if not raw:
         return fallback or _pkt_today()
