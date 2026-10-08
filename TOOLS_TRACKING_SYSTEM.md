@@ -337,19 +337,25 @@ on that page.
    `Save` is a draft: a blank box means *not counted*, a typed `0` means *none
    found*, and those two are never treated alike.
 3. **Discrepancies** — `Diff = counted − book`, computed live while typing and
-   again on the server. Short (red), extra (blue), damaged, and *not verified*
-   for any place nobody has counted. Filters: search, category, and
-   **Only places with a difference**.
-4. **Adjust** — one button per sheet with a shortage. It opens a summary of
-   exactly what will move (pieces, the rent line they will be lifted from, the
-   PKR that will be written off), and asks for the word `ADJUST` before running.
+   again on the server; shortages in red, findings in blue, damage recorded
+   separately, and *not verified* on the roll-up of any place nobody has
+   counted. Filters: category, search, and **Only tools whose count disagrees
+   with the book**.
+4. **Adjust** — as soon as a counted sheet has anything to post, the sheet
+   grows an *Adjust — what will happen* block above the form: each shortage
+   printed with the pieces, the PKR it writes off, the rental line(s) they will
+   be lifted off, and a warning when the book cannot absorb the whole loss; each
+   overage with where it will be parked. Choose `Only the losses` (default) or
+   `Losses and the overages`, pick the scrap reason and date, and the button
+   stays disabled until `ADJUST` is typed.
    A loss goes through `record_tool_scrap` — reason, value, `AUDIT-00007` as the
    reference — after the pieces are taken off the rental line that was holding
    them, so the customer's line and the store stay consistent; an overage found
    at a site is added back to *Total Owned* and parked where it was found. Rent
    already billed is never touched, so recovering money from a customer still
    happens on that rental's own page. The identity `owned = store + sites +
-   customers` is re-checked after every adjustment.
+   customers` is re-derived after every adjustment, and the sheet only closes
+   once nothing is left to post — pieces still uncounted keep it open.
 
 Access is its own page permission (`tool_audit` in the Access matrix, matching
 `/hdc/tool-rental/audit*` plus its JSON feed): an administrator, manager or
