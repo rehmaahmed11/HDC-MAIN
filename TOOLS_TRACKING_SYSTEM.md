@@ -7,9 +7,9 @@ Total Owned (Inventory)  =  In Store  +  Sent to Own Projects  +  Sent to Other 
 ```
 
 The Tools section is built around that identity. The **dashboard** shows it the
-simple way (item by item), while the **audit** views that prove it — movement
-chains, per-location positions, overdue warnings — live on their own pages, so
-no page repeats the same numbers twice.
+simple way (item by item), while the views that prove it — movement chains,
+per-location positions, overdue warnings, and the physical **Audit** count —
+live on their own pages, so no page repeats the same numbers twice.
 
 - Dashboard (simple stock + unpaid rent, item by item): `/hdc/tool-rental/dashboard` (sidebar → **HDC Tools**)
 - Rentals (summary + search + list; return and pay from a rental's page): `/hdc/tool-rental`
@@ -18,11 +18,18 @@ no page repeats the same numbers twice.
 - Tracking (chains, where each piece is right now, admin): `/hdc/tool-rental/tracking`
 - JSON feed: `/hdc/api/tool-rental/dashboard`
 - Inventory (add tools, buy stock, scrap, categories): `/hdc/tool-rental/inventory`
-- Logic: `hdc/services/tool_tracking.py`, `hdc/services/tool_rental.py`
+- Audit (book position per place, physical count, discrepancies, adjust):
+  `/hdc/tool-rental/audit` — one count sheet per place:
+  `/hdc/tool-rental/audit/<audit_id>`
+- Logic: `hdc/services/tool_tracking.py`, `hdc/services/tool_rental.py`,
+  `hdc/services/tool_audit.py`
 - Pages: `templates/hdc/tool_rental/tool_dashboard.html`, `tool_position.html`,
-  `tool_inventory.html`, `tool_rental.html`, `tool_new_rental.html`, `_stock_forms.html`
+  `tool_inventory.html`, `tool_rental.html`, `tool_new_rental.html`,
+  `_stock_forms.html`, `tool_audit.html`, `tool_audit_sheet.html`,
+  `_audit_line.html`
 - Tests: `tests/test_tool_tracking.py` (20 cases),
   `tests/test_tool_stock_lifecycle.py` (22 cases),
+  `tests/test_tool_audit.py` (35 cases),
   `tests/test_tool_new_rental_smoke.py` (New Rental form → smoke result →
   Tracking + Reports)
 
@@ -184,7 +191,7 @@ disagree about stock.
 
 ## 4. Schema change
 
-One new table, created idempotently by `_ensure_tool_rental_schema()` in
+New tables, each created idempotently by `_ensure_tool_rental_schema()` in
 `hdc/core/schema.py` (`CREATE TABLE IF NOT EXISTS` + indexes), so existing
 deployments heal on boot with no manual migration:
 
@@ -209,6 +216,28 @@ hdc_tool_scrap (
     unit_cost FLOAT, value_written_off FLOAT,
     reference VARCHAR(120), notes VARCHAR(300),
     created_by -> hdc_user(id), created_at DATETIME
+)
+
+-- Tools > Audit: one count sheet per place, one line per tool
+hdc_tool_audit (
+    id, audit_code UNIQUE, audit_date DATE,
+    loc_type VARCHAR(20), project_id -> hdc_project(id), stage_id -> hdc_stage(id),
+    customer_name, location_label, counter_name, reference, notes,
+    status VARCHAR(20),                        -- draft / counted / adjusted / void
+    total_lines, counted_lines, discrepancy_lines, shortage_qty, overage_qty,
+    damaged_qty, write_off_value, adjusted_lines, adjusted_at,
+    void_reason, is_void, created_by -> hdc_user(id), created_at, updated_at
+)
+
+hdc_tool_audit_line (
+    id, audit_id -> hdc_tool_audit(id), tool_id -> hdc_tool(id),
+    tool_name, tool_code, unit,
+    book_qty FLOAT,                            -- what the ledger said that day
+    counted_qty FLOAT,                         -- NULL = not counted, 0 = counted as zero
+    damaged_qty FLOAT, variance FLOAT,
+    status VARCHAR(20),                        -- pending / match / short / extra / adjusted
+    adjusted_qty FLOAT, adjust_reason VARCHAR(30), scrap_id -> hdc_tool_scrap(id),
+    notes, created_at, updated_at, adjusted_at, adjusted_by -> hdc_user(id)
 )
 ```
 
@@ -242,6 +271,29 @@ No existing column changed type or meaning. Nothing is deleted.
 | `tool_stock_aggregates(tool_ids)` | purchased / scrapped totals in two grouped queries |
 | `tool_purchases(...)`, `tool_scraps(...)` | the two registers, filterable by tool / date / text |
 
+`hdc/services/tool_audit.py` is the physical-check side. Every number it shows
+is read out of `tool_ledger()`, so a count can never disagree with the dashboard:
+
+| Function | Returns |
+| --- | --- |
+| `location_key(...)` / `parse_location_key(key)` | a place as one comparable string (`store`, `site:<project_id>[:<stage_id>]`, `customer:<project_id>` / `customer:<name>`) and back |
+| `book_position(ledger, spec)` | what the book has of *every tool* at one place, summed from the ledger holdings |
+| `audit_locations(ledger, term)` | one card per countable place: book qty, pieces already counted, open sheet, variance (counted vs today's book) |
+| `audit_matrix(...)` | the tool × place table — total owned, book / counted / diff per place, per-tool roll-up, `not verified` for places nobody has counted |
+| `audit_summary(...)` | the KPI strip (owned, placed, counted, short, extra, written-off value, unbalanced) |
+| `audit_history(limit, location_key_filter)` | recent sheets |
+| `audit_sheet(audit \| spec)` | one sheet: expected lines first, then tools *not* expected at that place, plus the live movement for that place |
+| `audit_movement(audit)` | the movement-log rows this sheet caused (`AUDIT-00007` in `notes`) |
+| `pending_audit_for(spec)`, `start_audit(spec, ...)` | one open sheet per place — starting a second one resumes the first |
+| `save_counts(audit, counts, ...)` | `{'counted': n, 'damaged': n, 'reason': ..., 'notes': ...}` per tool; blank means *not counted*, `0` means *counted as zero* |
+| `plan_adjustments(audit)` | what the **Adjust** button would do, before doing it (qty writable, rent line to lift, value to write off) |
+| `post_adjustments(audit, mode, reason, ...)` | applies it; `mode='losses'` (default) only removes shortages, `'both'` also adds findings back |
+| `close_audit` / `reopen_audit` / `void_audit` | sign a sheet off, re-open it, or discard it (never reverses a posted adjustment) |
+| `open_audit_count()`, `audit_rows_for_json(ledger)` | the nav badge and the `/hdc/api/tool-rental/audit` feed |
+
+`lines_of(audit)` is the one helper to respect: freshly inserted lines are not
+in the ORM relationship, so every total is recomputed from a query.
+
 Location types: `store` / `own_project` / `customer` (`LOC_STORE`,
 `LOC_OWN_PROJECT`, `LOC_CUSTOMER`). All read-only except the two transfer
 helpers.
@@ -250,18 +302,68 @@ The JSON feed at `/hdc/api/tool-rental/dashboard` returns the audit numbers —
 reconciliation, split, **all** locations (not a truncated top-N) and a per-tool
 array — so external analysis cannot drift from the UI.  The simple dashboard
 itself never repeats that detail; it is the one-page stock summary.
+`/hdc/api/tool-rental/audit` does the same for the count: one row per place with
+its book / counted / variance totals, served from the same functions the
+screens use.
 
 ---
 
 ## 6. Navigation
 
 `templates/hdc/tool_rental/_tools_nav.html` gives the section one sub-nav
-(Dashboard · Rentals · Inventory · Tracking · Reports) included by every tool
+(Dashboard · Rentals · Inventory · Tracking · Reports · Audit) included by every tool
 page. The sidebar entry **HDC Tools** now opens the dashboard; the rentals hub
 stays at `/hdc/tool-rental` and keeps the simple numbers — the reconciliation
 identity itself is on Tracking and the one-tool position page. Creating a
 rental has its own page (`/hdc/tool-rental/new`), opened by the hub's
-**New Rental** action.
+**New Rental** action. The **Audit** tab carries a badge with the number of
+count sheets still open, and is hidden entirely for a user without permission
+on that page.
+
+### Audit: what the book says, what the site says
+
+`/hdc/tool-rental/audit` is the physical check, in four parts:
+
+1. **Total qty vs where it is** — one card per place (warehouse, every own
+   site, every outside customer holding something, plus live sites that hold
+   *nothing*, because "you should have no tools here" is exactly what a count
+   proves), each showing the pieces the book puts there; the tool × place matrix
+   underneath repeats *Total Owned* on every row so nothing goes missing between
+   columns.
+2. **The manual count** — **New physical count** opens a sheet for one place
+   (`/hdc/tool-rental/audit/<id>`). One row per tool the book expects there, in
+   the same order, with the expected figure printed next to the box, plus rows
+   for tools *not* expected at that place so a surprise can be typed in.
+   `Save` is a draft: a blank box means *not counted*, a typed `0` means *none
+   found*, and those two are never treated alike.
+3. **Discrepancies** — `Diff = counted − book`, computed live while typing and
+   again on the server; shortages in red, findings in blue, damage recorded
+   separately, and *not verified* on the roll-up of any place nobody has
+   counted. Filters: category, search, and **Only tools whose count disagrees
+   with the book**.
+4. **Adjust** — as soon as a counted sheet has anything to post, the sheet
+   grows an *Adjust — what will happen* block above the form: each shortage
+   printed with the pieces, the PKR it writes off, the rental line(s) they will
+   be lifted off, and a warning when the book cannot absorb the whole loss; each
+   overage with where it will be parked. Choose `Only the losses` (default) or
+   `Losses and the overages`, pick the scrap reason and date, and the button
+   stays disabled until `ADJUST` is typed.
+   A loss goes through `record_tool_scrap` — reason, value, `AUDIT-00007` as the
+   reference — after the pieces are taken off the rental line that was holding
+   them, so the customer's line and the store stay consistent; an overage found
+   at a site is added back to *Total Owned* and parked where it was found. Rent
+   already billed is never touched, so recovering money from a customer still
+   happens on that rental's own page. The identity `owned = store + sites +
+   customers` is re-derived after every adjustment, and the sheet only closes
+   once nothing is left to post — pieces still uncounted keep it open.
+
+Access is its own page permission (`tool_audit` in the Access matrix, matching
+`/hdc/tool-rental/audit*` plus its JSON feed): an administrator, manager or
+accountant keeps the write side, a staff account can be given **read only**, and
+a read-only user sees the numbers and the `Read only` badge but no form. Every
+write route is additionally behind the Tools money-gate and a serialised SQLite
+write lock, so two people counting the same site cannot interleave.
+
 
 ### Tracking and Reports: compact list, full details on demand
 
@@ -301,6 +403,7 @@ purchased 543 pcs (6,364,000 PKR)   scrapped 1 pcs (55,000 PKR)
 ## 8. Tests
 
 ```bash
+HDC_BOOTSTRAP_ADMIN_PASSWORD='Admin@1234' python -m unittest tests.test_tool_audit -v
 HDC_BOOTSTRAP_ADMIN_PASSWORD='Admin@1234' python -m unittest tests.test_tool_stock_lifecycle -v
 ```
 
@@ -333,6 +436,22 @@ inventory + position + reports render the registers · and the wipe fix:
 - wiping **Accounts** keeps the tool data and only drops the now-dead
   `hdc_tool_rental_account_txn` links and receiving-account references.
 
+`tests/test_tool_audit.py` covers the count side: book position per place ·
+matrix totals and `not verified` places · saving a partial sheet · a typed `0`
+versus a blank box · a shortage adjusting through the scrap register and lifting
+the rent line without touching billed rent · an overage added back to owned
+stock · the default `losses` mode ignoring findings · `mode='both'` taking both ·
+no second adjust on an adjusted sheet · a shortage in the store (no rent line to
+lift) · closing a sheet while a line is uncounted · voiding · a loss the book
+cannot absorb being capped · the routes rendering for an authorized user · the
+UI count + adjust round trip behind the `ADJUST` confirmation · starting a sheet
+from the location preview · JSON feed matching the service · a read-only user
+being refused the write · and the wipe + boot-schema coverage.
+
+`hdc_tool_audit_line` is wiped before `hdc_tool_audit` (it points at it), and
+both sit ahead of `hdc_tool` / `hdc_project`, so a Tools wipe leaves no orphan
+count sheet and no count sheet survives a Project wipe pointing at a deleted site.
+
 ---
 
 ## 9. Settings → Wipe now includes the Tools section
@@ -343,5 +462,6 @@ The Tools section used to survive a granular wipe, because `_WIPE_TARGETS` in
 `hdc_tool_rental`, `hdc_tool_rental_item`, `hdc_tool_rental_return`,
 `hdc_tool_rental_return_item`, `hdc_tool_rental_payment`,
 `hdc_tool_rental_transfer`, `hdc_tool_rental_transfer_item`,
-`hdc_tool_rental_account_txn` and `hdc_tool_movement_log`, in dependency-safe
+`hdc_tool_rental_account_txn`, `hdc_tool_audit`, `hdc_tool_audit_line`
+and `hdc_tool_movement_log`, in dependency-safe
 order.

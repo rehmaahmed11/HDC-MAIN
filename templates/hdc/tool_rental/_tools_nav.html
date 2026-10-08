@@ -2,9 +2,14 @@
    tool page so the user can jump between the main pages without hunting
    through the sidebar.  `tools_active` (string) marks the current tab.
    Kept simple on purpose: everyone sees Dashboard / Rentals / Inventory;
-   the audit-style pages (Tracking, Reports) are shown to admin only. #}
+   the audit-style pages (Tracking, Reports, Audit) are shown to admin only,
+   except that a count sheet is a finance-managed record too, so an accountant
+   (or anyone explicitly granted the Audit page) sees it as well. #}
 {% set tools_active = tools_active|default('') %}
 {% set tools_is_admin = (current_user.role or '')|trim|lower == 'admin' %}
+{% set tools_is_accountant = (current_user.role or '')|trim|lower == 'accountant' %}
+{% set tools_can_audit = tools_is_admin or tools_is_accountant
+                         or (current_user.permissions_json and hdc_page_allowed('tool_audit', 'read')) %}
 <div class="tools-subnav mb-3">
     <a href="{{ url_for('hdc_tool_rental_dashboard') }}"
        class="tools-subnav-link {% if tools_active == 'dashboard' %}active{% endif %}">
@@ -18,6 +23,13 @@
        class="tools-subnav-link {% if tools_active == 'inventory' %}active{% endif %}">
         <i class="fas fa-warehouse me-1"></i>Inventory
     </a>
+    {% if tools_can_audit %}
+    <a href="{{ url_for('hdc_tool_rental_audit') }}"
+       class="tools-subnav-link {% if tools_active == 'audit' %}active{% endif %}">
+        <i class="fas fa-clipboard-check me-1"></i>Audit
+        {% if audit_open_count %}<span class="tools-nav-count">{{ audit_open_count }}</span>{% endif %}
+    </a>
+    {% endif %}
     {% if tools_is_admin %}
     <a href="{{ url_for('hdc_tool_rental_tracking') }}"
        class="tools-subnav-link {% if tools_active == 'tracking' %}active{% endif %}">

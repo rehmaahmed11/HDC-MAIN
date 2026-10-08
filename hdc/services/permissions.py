@@ -69,6 +69,7 @@ PAGE_TREE = [
         {'id': 'tools', 'label': 'HDC tools dashboard & rentals', 'paths': [r'^/hdc/tool-rental(?:/|$)', r'^/hdc/api/tool-rental/']},
         {'id': 'tool_inventory', 'label': 'Tool inventory, purchase & scrap', 'paths': [r'^/hdc/tool-rental/inventory(?:/|$)', r'^/hdc/tool-rental/category/']},
         {'id': 'tool_tracking', 'label': 'Tool tracking & reports', 'paths': [r'^/hdc/tool-rental/(?:tracking|reports)(?:/|$)']},
+        {'id': 'tool_audit', 'label': 'Tool physical audit & adjustments', 'paths': [r'^/hdc/tool-rental/audit(?:/|$)', r'^/hdc/api/tool-rental/audit$']},
     ]},
     {'id': 'parties_section', 'label': 'Parties', 'children': [
         {'id': 'parties', 'label': 'All parties', 'paths': [r'^/hdc/parties(?:/|$)']},

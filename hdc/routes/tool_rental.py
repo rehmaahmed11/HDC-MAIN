@@ -13,8 +13,8 @@ from hdc.extensions import _money_write_required, db
 from hdc.models.accounts import Account
 from hdc.models.projects import Project, Stage
 from hdc.models.tool_rental import (
-    TOOL_SCRAP_REASONS, Tool, ToolCategory, ToolMovementLog, ToolPurchase, ToolRental,
-    ToolRentalDiscount, ToolRentalItem, ToolRentalPayment, ToolRentalReturn,
+    TOOL_SCRAP_REASONS, Tool, ToolAudit, ToolCategory, ToolMovementLog, ToolPurchase,
+    ToolRental, ToolRentalDiscount, ToolRentalItem, ToolRentalPayment, ToolRentalReturn,
     ToolRentalReturnItem, ToolRentalTransfer, ToolRentalTransferItem
 )
 from hdc.services.cashflow_register import ensure_party
@@ -29,6 +29,12 @@ from hdc.services.tool_rental import (
     search_rentals, tool_available_for_integrity, tool_kpis, tool_purchases,
     tool_scraps, tool_stock_aggregates, void_discounts_for_payment,
     void_tool_rental_discount, void_tool_rental_payment_in_accounts
+)
+from hdc.services.tool_audit import (
+    AUDIT_LOSS_REASONS, audit_history, audit_locations, audit_matrix, audit_movement,
+    audit_rows_for_json, audit_sheet, audit_summary, close_audit, open_audit_count,
+    parse_location_key, pending_audit_for, plan_adjustments, post_adjustments,
+    reopen_audit, save_counts, start_audit, void_audit,
 )
 from hdc.services.tool_tracking import (
     LOC_CUSTOMER, LOC_OWN_PROJECT, LOC_STORE, WAREHOUSE_LABEL,
@@ -1973,6 +1979,275 @@ def register(app):
             q=q,
             kpis=kpis
         )
+
+    # ------------------ PHYSICAL AUDIT: what the sites actually counted ------------------
+    def _audit_counts_from_form(form):
+        """Turn ``counted[<tool_id>]`` boxes into the service payload.
+
+        A blank box and a typed ``0`` mean different things: blank is "nobody
+        counted this yet", zero is "we counted the shelf and it is empty".  Only
+        the second one produces a shortage, so the two are kept apart all the way
+        into ``hdc_tool_audit_line.counted_qty``.
+        """
+        counts = {}
+        for name, value in (form.items() if hasattr(form, 'items') else []):
+            name = name or ''
+            if '[' not in name:
+                continue
+            field, _, raw_id = name.partition('[')
+            raw_id = raw_id.rstrip(']')
+            if not raw_id.isdigit():
+                continue
+            text = (value or '').strip()
+            slot = counts.setdefault(int(raw_id), {})
+            if field == 'counted':
+                slot['counted'] = text or None
+            elif field == 'damaged':
+                slot['damaged'] = text or 0
+            elif field == 'notes':
+                slot['notes'] = text
+        return counts
+
+    def _audit_write_allowed():
+        """Who may post an adjustment: finance roles, or an explicit grant."""
+        role = (getattr(current_user, 'role', '') or '').strip().lower()
+        granted = may_access_path(current_user, request.path, 'write')
+        if granted is None:
+            return role in ('admin', 'accountant')
+        return bool(granted)
+
+    @app.route('/hdc/tool-rental/audit')
+    @login_required
+    def hdc_tool_rental_audit():
+        """All tools: total owned vs where they are vs what each site counted.
+
+        One row per tool item.  ``Where the book says it is`` is the tracker's
+        own position (so this page can never disagree with the dashboard);
+        ``Counted`` is what the physical sheets say, and only for the places a
+        sheet actually covers.  Anything that does not match is listed first.
+        """
+        ledger = tool_ledger()
+        cards = audit_locations(ledger)
+        selected = (request.args.get('location') or '').strip() or None
+        if selected and not any(card['key'] == selected for card in cards):
+            selected = None
+        visible = [card for card in cards if card['key'] == selected] if selected else cards
+        matrix = audit_matrix(
+            ledger=ledger, locations=visible,
+            term=(request.args.get('q') or '').strip() or None,
+            category_id=request.args.get('category_id', type=int),
+            only_discrepancies=(request.args.get('only') or '').strip() == 'variance')
+
+        return render_template('tool_rental/tool_audit.html',
+            ledger=ledger, totals=ledger['totals'],
+            cards=cards, selected_location=selected,
+            rows=matrix['rows'], matrix_totals=matrix['totals'],
+            summary=audit_summary(ledger=ledger, locations=cards),
+            history=audit_history(limit=25, location_key_filter=selected),
+            categories=ToolCategory.query.order_by(ToolCategory.name.asc()).all(),
+            location_options=[(card['key'],
+                                f"{card['label']} ({card['expected_qty']:g} "
+                                f"{('expected' if card['expected_qty'] else 'nothing')})")
+                               for card in cards],
+            selected_location_label=(visible[0]['label'] if selected and visible else ''),
+            q=(request.args.get('q') or '').strip(),
+            selected_category=request.args.get('category_id', type=int),
+            only=(request.args.get('only') or '').strip(),
+            can_adjust=_audit_write_allowed(),
+            audit_open_count=open_audit_count(),
+            scrap_reasons=AUDIT_LOSS_REASONS,
+            today=_pkt_today().isoformat(),
+        )
+
+    @app.route('/hdc/tool-rental/audit/count')
+    @login_required
+    def hdc_tool_rental_audit_new():
+        """A count sheet for a place nobody has counted yet.
+
+        Opening it does not create anything: a site that was only *looked at*
+        must not leave a half-empty audit record behind.  The first saved number
+        (or *Start empty*) creates the sheet.
+        """
+        key = (request.args.get('location') or LOC_STORE).strip()
+        spec = parse_location_key(key)
+        existing = pending_audit_for(spec)
+        if existing is not None:
+            return redirect(url_for('hdc_tool_rental_audit_sheet', audit_id=int(existing.id)))
+        sheet = audit_sheet(spec=spec)
+        return render_template('tool_rental/tool_audit_sheet.html',
+            tools_active='audit',
+            sheet=sheet, audit=None, spec=sheet['spec'], plan=[],
+            movements=[], history=audit_history(limit=10, location_key_filter=spec['key']),
+            can_adjust=_audit_write_allowed(),
+            audit_open_count=open_audit_count(),
+            scrap_reasons=AUDIT_LOSS_REASONS,
+            today=_pkt_today().isoformat(),
+        )
+
+    @app.route('/hdc/tool-rental/audit/<int:audit_id>')
+    @login_required
+    def hdc_tool_rental_audit_sheet(audit_id):
+        """One physical count: entry sheet, discrepancy report, adjust action."""
+        audit = db.session.get(ToolAudit, int(audit_id))
+        if audit is None or audit.is_void:
+            flash('Audit not found.', 'danger')
+            return redirect(url_for('hdc_tool_rental_audit'))
+        sheet = audit_sheet(audit=audit)
+        plan = plan_adjustments(audit) if audit.is_open else []
+        return render_template('tool_rental/tool_audit_sheet.html',
+            tools_active='audit',
+            sheet=sheet, audit=audit, spec=sheet['spec'], plan=plan,
+            movements=audit_movement(audit),
+            history=audit_history(limit=10, location_key_filter=sheet['spec']['key']),
+            can_adjust=_audit_write_allowed(),
+            audit_open_count=open_audit_count(),
+            scrap_reasons=AUDIT_LOSS_REASONS,
+            today=_pkt_today().isoformat(),
+        )
+
+    def _audit_redirect(audit_id):
+        return redirect(url_for('hdc_tool_rental_audit_sheet', audit_id=int(audit_id)))
+
+    @app.route('/hdc/tool-rental/audit/start', methods=['POST'])
+    @login_required
+    @_money_write_required()
+    def hdc_tool_rental_audit_start():
+        """Create the sheet and save whatever was typed on the preview."""
+        spec = parse_location_key((request.form.get('location') or LOC_STORE).strip())
+        counts = _audit_counts_from_form(request.form)
+        created, audit = start_audit(
+            spec,
+            counter_name=(request.form.get('counter_name') or '').strip(),
+            audit_date=(request.form.get('audit_date') or '').strip(),
+            reference=(request.form.get('reference') or '').strip(),
+            notes=(request.form.get('notes') or '').strip(),
+            counts=counts or None,
+            user_id=getattr(current_user, 'id', None))
+        if created:
+            flash(f'Count sheet {audit.audit_code} started for {audit.location_label}.',
+                  'success')
+        else:
+            flash(f'{audit.audit_code} is already open for this place — your numbers '
+                  f'were saved onto that sheet instead of starting a second count.',
+                  'info')
+        if counts and (request.form.get('save_and_adjust') or '').strip():
+            ok, message, summary = post_adjustments(
+                audit, mode=(request.form.get('mode') or 'losses'),
+                reason=(request.form.get('reason') or 'lost'),
+                audit_date=(request.form.get('audit_date') or '').strip(),
+                notes=(request.form.get('adjust_notes') or '').strip(),
+                user_id=getattr(current_user, 'id', None))
+            _audit_adjust_flash(ok, message, summary)
+        return _audit_redirect(audit.id)
+
+    def _audit_adjust_flash(ok, message, summary):
+        """One wording for every adjust action, so the flash never undersells a loss."""
+        summary = summary or {}
+        if ok and not summary.get('done'):
+            flash(summary.get('message') or message or
+                  'No discrepancy to adjust — the count is closed as verified.', 'info')
+            return True
+        if not ok:
+            flash(message or 'Nothing could be adjusted on this count.', 'danger')
+            return False
+        parts = []
+        if summary.get('losses'):
+            parts.append(f"{summary.get('lost_qty', 0):g} piece(s) written off "
+                         f"({summary.get('write_off_value', 0):,.0f} PKR)")
+        if summary.get('gains'):
+            parts.append(f"+{summary.get('found_qty', 0):g} pcs added to stock")
+        tail = (f"The sheet stays open — {summary.get('remaining')} finding(s) left unposted."
+                if summary.get('remaining') else 'Owned stock now matches the count.')
+        flash(f"Adjustments posted: {', '.join(parts) or 'stock corrected'}. {tail}", 'success')
+        for remark in summary.get('remarks') or []:
+            flash(remark, 'warning')
+        return True
+
+    @app.route('/hdc/tool-rental/audit/<int:audit_id>/save', methods=['POST'])
+    @login_required
+    @_money_write_required()
+    def hdc_tool_rental_audit_save(audit_id):
+        audit = db.session.get(ToolAudit, int(audit_id))
+        if audit is None or not audit.is_open:
+            flash('This count can no longer be edited.', 'danger')
+            return _audit_redirect(audit_id)
+        ok, message, _ = save_counts(
+            audit, _audit_counts_from_form(request.form),
+            meta={
+                'counter_name': (request.form.get('counter_name') or '').strip()[:150] or None,
+                'reference': (request.form.get('reference') or '').strip()[:120] or None,
+                'notes': (request.form.get('notes') or '').strip()[:500] or None,
+                'audit_date': _parse_date(request.form.get('audit_date')) or _pkt_today(),
+            },
+            user_id=getattr(current_user, 'id', None))
+        if not ok:
+            flash(message, 'danger')
+            return _audit_redirect(audit_id)
+        flash(f'Count saved on {audit.audit_code}: {audit.counted_lines:g} of '
+              f'{audit.total_lines:g} line(s) entered, {audit.discrepancy_lines:g} '
+              f'discrepancie(s).', 'success')
+        return _audit_redirect(audit_id)
+
+    @app.route('/hdc/tool-rental/audit/<int:audit_id>/adjust', methods=['POST'])
+    @login_required
+    @_money_write_required()
+    def hdc_tool_rental_audit_adjust(audit_id):
+        """The button: turn the counted discrepancies into real stock numbers."""
+        audit = db.session.get(ToolAudit, int(audit_id))
+        if audit is None or not audit.is_open:
+            flash('This count is closed, so it cannot be adjusted.', 'danger')
+            return _audit_redirect(audit_id)
+        if (request.form.get('confirm') or '').strip() != 'ADJUST':
+            flash('Type ADJUST in the confirm box to change stock — a write-off '
+                  'cannot be undone from this page.', 'warning')
+            return _audit_redirect(audit_id)
+        ok, message, summary = post_adjustments(
+            audit,
+            mode=(request.form.get('mode') or 'losses'),
+            reason=(request.form.get('reason') or 'lost'),
+            audit_date=(request.form.get('adjust_date') or request.form.get('audit_date') or '').strip(),
+            notes=(request.form.get('adjust_notes') or '').strip(),
+            user_id=getattr(current_user, 'id', None))
+        _audit_adjust_flash(ok, message, summary)
+        return _audit_redirect(audit_id)
+
+    @app.route('/hdc/tool-rental/audit/<int:audit_id>/close', methods=['POST'])
+    @login_required
+    @_money_write_required()
+    def hdc_tool_rental_audit_close(audit_id):
+        """File a clean count (nothing changes in stock)."""
+        audit = db.session.get(ToolAudit, int(audit_id))
+        ok, message = close_audit(audit, note=(request.form.get('close_note') or '').strip(),
+                                  user_id=getattr(current_user, 'id', None))
+        flash(message, 'success' if ok else 'warning')
+        return _audit_redirect(audit_id)
+
+    @app.route('/hdc/tool-rental/audit/<int:audit_id>/reopen', methods=['POST'])
+    @login_required
+    @_money_write_required()
+    def hdc_tool_rental_audit_reopen(audit_id):
+        audit = db.session.get(ToolAudit, int(audit_id))
+        ok, message = reopen_audit(audit)
+        flash(message, 'success' if ok else 'warning')
+        return _audit_redirect(audit_id)
+
+    @app.route('/hdc/tool-rental/audit/<int:audit_id>/void', methods=['POST'])
+    @login_required
+    @_money_write_required()
+    def hdc_tool_rental_audit_void(audit_id):
+        audit = db.session.get(ToolAudit, int(audit_id))
+        if audit is None:
+            flash('Audit not found.', 'danger')
+            return redirect(url_for('hdc_tool_rental_audit'))
+        ok, message = void_audit(audit, reason=(request.form.get('void_reason') or '').strip())
+        flash(message, 'success' if ok else 'warning')
+        return redirect(url_for('hdc_tool_rental_audit'))
+
+    @app.route('/hdc/api/tool-rental/audit')
+    @login_required
+    def hdc_api_tool_audit():
+        """Machine-readable audit: book position, counts and variances per place."""
+        return jsonify(audit_rows_for_json())
 
     # ------------------ REPORTING ------------------
     @app.route('/hdc/tool-rental/reports')

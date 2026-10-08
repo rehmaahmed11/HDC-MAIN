@@ -1,0 +1,505 @@
+{% extends "shared/base.html" %}
+{% block title %}{{ (audit.audit_code if audit else 'New Tool Count') }} — Tool Audit{% endblock %}
+{% block page_heading %}
+{% if audit %}Physical count — {{ sheet.spec.label }} ({{ audit.audit_code }}){% else %}New physical count — {{ sheet.spec.label }}{% endif %}
+{% endblock %}
+
+{# One count sheet for one place.  The numbers in the "counted" boxes are what
+   someone standing at the site typed; the "book" column is the tracker's own
+   position at save time, snapshotted onto the line so this sheet still tells
+   the same story a month later.  Where the two disagree, the Adjust panel turns
+   the finding into a real stock movement (see hdc/services/tool_audit.py). #}
+{% block content %}
+{% set tools_active = 'audit' %}
+{% set tools_is_admin = (current_user.role or '')|trim|lower == 'admin' %}
+{% set tools_is_accountant = (current_user.role or '')|trim|lower == 'accountant' %}
+{% include "tool_rental/_tools_nav.html" %}
+{% set spec = sheet.spec %}
+{% set brief = sheet.brief %}
+{% set s = sheet.summary %}
+{% set editable = can_adjust and sheet.can_edit %}
+
+<!-- ============ SHEET HEADER ============ -->
+<div class="card hdc-card mt-1">
+    <div class="card-header hdc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span>
+            <i class="fas fa-clipboard-check me-2"></i>
+            {{ spec.label }}
+            <span class="badge bg-secondary ms-2">
+                {% if spec.loc_type == 'store' %}Warehouse / Store
+                {% elif spec.loc_type == 'own_project' %}HDC site{% else %}Outside customer{% endif %}
+            </span>
+        </span>
+        <div class="d-flex gap-2 align-items-center flex-wrap">
+            {% if brief %}
+            <span class="badge {% if brief.status == 'adjusted' %}bg-success{% elif brief.status == 'counted' %}bg-warning text-dark{% else %}bg-info text-dark{% endif %}">
+                {{ brief.status_label }}
+            </span>
+            <small class="text-muted">{{ brief.code }} · counted by {{ brief.counter_name or '—' }}</small>
+            {% else %}
+            <span class="badge bg-light text-muted border">No sheet yet — nothing is saved until you type a number</span>
+            {% endif %}
+            <a href="{{ url_for('hdc_tool_rental_audit', location=spec['key']) }}"
+               class="btn btn-sm btn-outline-secondary">
+                <i class="fas fa-arrow-left me-1" aria-hidden="true"></i>Audit overview
+            </a>
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-6 col-md-4 col-xl-2">
+                <div class="tool-audit-figure">
+                    <span class="label">Book says here</span>
+                    <span class="value">{{ "%g"|format(s.expected_qty) }}</span>
+                    <small class="text-muted">{{ s.expected_types }} tool type(s)</small>
+                </div>
+            </div>
+            <div class="col-6 col-md-4 col-xl-2">
+                <div class="tool-audit-figure" data-audit-live="summary">
+                    <span class="label">Physically counted</span>
+                    <span class="value" data-audit-live="counted">{{ "%g"|format(s.counted_qty) }}</span>
+                    <small class="text-muted"><span data-audit-live="entered">{{ s.counted_types }}</span> line(s) entered</small>
+                </div>
+            </div>
+            <div class="col-6 col-md-4 col-xl-2">
+                <div class="tool-audit-figure is-danger">
+                    <span class="label">Short / lost</span>
+                    <span class="value" data-audit-live="shortage">{{ "%g"|format(s.shortage_qty) }}</span>
+                    <small class="text-muted">{{ "{:,.0f}".format(s.write_off_value) }} PKR if written off</small>
+                </div>
+            </div>
+            <div class="col-6 col-md-4 col-xl-2">
+                <div class="tool-audit-figure is-info">
+                    <span class="label">Extra found</span>
+                    <span class="value" data-audit-live="overage">{{ "%g"|format(s.overage_qty) }}</span>
+                    <small class="text-muted">{{ "{:,.0f}".format(s.found_value) }} PKR of stock</small>
+                </div>
+            </div>
+            <div class="col-6 col-md-4 col-xl-2">
+                <div class="tool-audit-figure is-warning">
+                    <span class="label">Counted damaged</span>
+                    <span class="value" data-audit-live="damaged">{{ "%g"|format(s.damaged_qty) }}</span>
+                    <small class="text-muted">reported, never removed by itself</small>
+                </div>
+            </div>
+            <div class="col-6 col-md-4 col-xl-2">
+                <div class="tool-audit-figure {% if s.discrepancies %}is-danger{% else %}is-clean{% endif %}">
+                    <span class="label">Discrepancies</span>
+                    <span class="value" data-audit-live="discrepancies">{{ s.discrepancies }}</span>
+                    <small class="text-muted"><span data-audit-live="blanks">{{ s.uncounted_types }}</span> line(s) still blank</small>
+                </div>
+            </div>
+        </div>
+        {% if brief and brief.adjusted_lines %}
+        <div class="alert alert-success small mt-3 mb-0 py-2">
+            <i class="fas fa-circle-check me-1" aria-hidden="true"></i>
+            {{ brief.adjusted_lines }} adjustment(s) already posted from this sheet —
+            {{ "{:,.0f}".format(brief.write_off_value) }} PKR written off
+            {%- if brief.adjusted_at %} on {{ brief.adjusted_at.strftime('%Y-%m-%d %H:%M') }}{% endif %}.
+            Re-counting cannot undo them; void the write-off from the tool page if one was wrong.
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- ============ THE ENTRY SHEET ============ -->
+<form method="POST"
+      action="{{ url_for('hdc_tool_rental_audit_save', audit_id=audit.id) if audit else url_for('hdc_tool_rental_audit_start') }}"
+      class="mt-3" id="auditSheetForm">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+    {% if not audit %}<input type="hidden" name="location" value="{{ spec['key'] }}">{% endif %}
+
+    <div class="card hdc-card">
+        <div class="card-header hdc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <span><i class="fas fa-pen-ruler me-2"></i>Enter the count by hand</span>
+            <div class="d-flex gap-2 align-items-center">
+                {% if editable %}
+                <button type="submit" class="btn btn-sm btn-mint">
+                    <i class="fas fa-floppy-disk me-1" aria-hidden="true"></i>Save count
+                </button>
+                {% if s.discrepancies %}
+                <button type="submit" class="btn btn-sm btn-outline-danger" name="save_and_adjust" value="1"
+                        onclick="return confirm('Save this count and post the adjustments now?\\nLosses will be written off and removed from the rental lines holding them.');">
+                    <i class="fas fa-scale-balanced me-1" aria-hidden="true"></i>Save &amp; adjust now
+                </button>
+                {% endif %}
+                {% else %}
+                <small class="text-muted">
+                    {% if not sheet.can_edit %}This sheet is closed — re-open it to change the numbers.{% else %}You have read access to audits; an Admin or Accountant records them.{% endif %}
+                </small>
+                {% endif %}
+            </div>
+        </div>
+
+        {% if editable or not audit %}
+        <div class="card-body border-bottom">
+            <div class="row g-2">
+                <div class="col-6 col-md-3">
+                    <label class="form-label" for="auditDate">Count date</label>
+                    <input type="date" class="form-control" id="auditDate" name="audit_date"
+                           value="{{ (audit.audit_date if audit and audit.audit_date else today)|string }}"
+                           {% if not editable %}readonly{% endif %}>
+                </div>
+                <div class="col-6 col-md-3">
+                    <label class="form-label" for="auditCounter">Counted by (site in-charge)</label>
+                    <input type="text" class="form-control" id="auditCounter" name="counter_name"
+                           value="{{ audit.counter_name if audit else '' }}" placeholder="e.g. Farooq — site storekeeper"
+                           {% if not editable %}readonly{% endif %}>
+                </div>
+                <div class="col-6 col-md-3">
+                    <label class="form-label" for="auditReference">Count sheet / memo no</label>
+                    <input type="text" class="form-control" id="auditReference" name="reference"
+                           value="{{ audit.reference if audit else '' }}" placeholder="e.g. CS-2025-14"
+                           {% if not editable %}readonly{% endif %}>
+                </div>
+                <div class="col-6 col-md-3">
+                    <label class="form-label" for="auditNotes">Sheet note</label>
+                    <input type="text" class="form-control" id="auditNotes" name="notes"
+                           value="{{ audit.notes if audit else '' }}" placeholder="Anything the count should remember"
+                           {% if not editable %}readonly{% endif %}
+                           title="Shown on the sheet itself; the adjustment reason is typed in the Adjust panel">
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="table-responsive tool-audit-scroll">
+            <table class="table hdc-table table-sm mb-0 tool-audit-table tool-audit-sheet">
+                <colgroup>
+                    <col class="audit-tool-col">
+                    <col class="audit-num-col">
+                    <col class="audit-source-col">
+                    <col class="audit-num-col">
+                    <col class="audit-num-col">
+                    <col class="audit-note-col">
+                    <col class="audit-num-col">
+                    <col class="audit-status-col">
+                </colgroup>
+                <thead>
+                    <tr>
+                        <th scope="col">Tool</th>
+                        <th scope="col" class="text-center">Book says</th>
+                        <th scope="col">Why it should be here</th>
+                        <th scope="col" class="text-center">Counted</th>
+                        <th scope="col" class="text-center">Damaged</th>
+                        <th scope="col">Note from the counter</th>
+                        <th scope="col" class="text-center">Diff</th>
+                        <th scope="col" class="text-center">Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for row in sheet.expected_rows %}
+                    {% include "tool_rental/_audit_line.html" %}
+                {% else %}
+                    <tr><td colspan="8" class="text-center text-muted py-3">
+                        The book expects <strong>nothing</strong> at {{ spec.label }}.
+                        Count anyway — anything found below is an overage we own but never recorded here.
+                    </td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        {% if sheet.other_rows %}
+        <details class="tool-audit-extra" {% if sheet.other_rows|length <= 6 %}open{% endif %}>
+            <summary>
+                <i class="fas fa-magnifying-glass me-1" aria-hidden="true"></i>
+                Anything else found at {{ spec.label }}?
+                <small class="text-muted">— {{ sheet.other_rows|length }} tool type(s) the book does not expect here.
+                    Type a number only for what is physically present: each one becomes an overage.</small>
+            </summary>
+            <div class="table-responsive tool-audit-scroll">
+                <table class="table hdc-table table-sm mb-0 tool-audit-table tool-audit-sheet">
+                    <thead>
+                        <tr>
+                            <th scope="col">Tool</th>
+                            <th scope="col" class="text-center">Book says</th>
+                            <th scope="col">Where the book has it instead</th>
+                            <th scope="col" class="text-center">Counted</th>
+                            <th scope="col" class="text-center">Damaged</th>
+                            <th scope="col">Note from the counter</th>
+                            <th scope="col" class="text-center">Diff</th>
+                            <th scope="col" class="text-center">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    {% for row in sheet.other_rows %}
+                        {% include "tool_rental/_audit_line.html" %}
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </details>
+        {% endif %}
+    </div>
+</form>
+
+<!-- ============ DISCREPANCY REPORT + ADJUST ============ -->
+{% if s.discrepancy_rows %}
+<div class="card hdc-card mt-3 border-danger-subtle">
+    <div class="card-header hdc-card-header">
+        <span><i class="fas fa-triangle-exclamation me-2 text-danger"></i>
+            What does not match at {{ spec.label }}
+            <span class="badge bg-danger ms-2">{{ s.discrepancy_rows|length }}</span>
+        </span>
+        <small class="text-muted">
+            {{ "%g"|format(s.shortage_qty) }} piece(s) missing
+            {%- if s.overage_qty %} · {{ "%g"|format(s.overage_qty) }} found extra{% endif %}
+            {%- if s.damaged_qty %} · {{ "%g"|format(s.damaged_qty) }} counted damaged{% endif %}
+        </small>
+    </div>
+    <div class="table-responsive">
+        <table class="table hdc-table table-sm mb-0">
+            <thead>
+                <tr>
+                    <th scope="col">Tool</th>
+                    <th scope="col" class="text-center">Book says</th>
+                    <th scope="col" class="text-center">Counted</th>
+                    <th scope="col" class="text-center">Difference</th>
+                    <th scope="col" class="text-end">Value at cost</th>
+                    <th scope="col">Counter's note</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for row in s.discrepancy_rows %}
+                <tr class="{% if row.variance < 0 %}table-danger{% else %}table-info{% endif %}">
+                    <td>
+                        <a href="{{ url_for('hdc_tool_rental_tool_position', tool_id=row.tool_id) }}"
+                           class="fw-bold text-decoration-none">{{ row.name }}</a>
+                        <small class="d-block text-muted">{{ row.code }} · owns {{ "%g"|format(row.owned_qty) }} {{ row.unit }}</small>
+                    </td>
+                    <td class="text-center">{{ "%g"|format(row.expected_qty) }}</td>
+                    <td class="text-center fw-bold">{{ "%g"|format(row.counted_qty) }}</td>
+                    <td class="text-center fw-bold {% if row.variance < 0 %}text-danger{% else %}text-info{% endif %}">
+                        {{ "%+g"|format(row.variance) }} {{ row.unit }}
+                        <small class="d-block text-muted">
+                            {% if row.variance < 0 %}loss to write off{% else %}found extra{% endif %}
+                        </small>
+                    </td>
+                    <td class="text-end">{{ "{:,.0f}".format(row.variance * row.unit_cost) }}</td>
+                    <td>
+                        {{ row.notes or '—' }}
+                        {% if row.rental_codes %}
+                        <small class="d-block text-muted">on {{ row.rental_codes }}</small>
+                        {% endif %}
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+            <tfoot>
+                <tr>
+                    <th scope="row" class="text-end">Net effect on owned stock</th>
+                    <td colspan="2"></td>
+                    <th class="text-center {% if (s.counted_qty - s.expected_qty) < 0 %}text-danger{% endif %}"
+                        data-audit-live="net">{{ "%+g"|format(s.counted_qty - s.expected_qty) }}</th>
+                    <th class="text-end">{{ "{:,.0f}".format(s.found_value - s.write_off_value) }}</th>
+                    <td></td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+
+    {% if plan %}
+    <div class="card-body border-top">
+        <h6 class="small text-uppercase text-muted fw-bold mb-2">
+            <i class="fas fa-screwdriver-wrench me-1" aria-hidden="true"></i>Adjust — what will happen
+        </h6>
+        <ol class="tool-audit-plan mb-3">
+            {% for entry in plan %}
+            <li class="{% if entry.kind == 'loss' %}is-loss{% elif entry.kind == 'gain' %}is-gain{% else %}is-blocked{% endif %}">
+                {% if entry.kind == 'loss' %}
+                    <strong>{{ entry.name }}</strong> — write off
+                    {{ "%g"|format(entry.writable_qty) }} {{ entry.unit }}
+                    ({{ "{:,.0f}".format(entry.value) }} PKR at {{ "{:,.0f}".format(entry.unit_cost) }} each)
+                    {% if entry.liftable_qty > 0 %}
+                    <small class="d-block text-muted">
+                        also taken off the rental line(s) holding them{% for h in entry.holders %} {{ h.rental.rental_code or '' }}{% endfor %},
+                        so the site stops carrying them as "still out"
+                    </small>
+                    {% endif %}
+                    {% if entry.partial %}
+                    <small class="d-block text-danger">{{ entry.message }}</small>
+                    {% endif %}
+                {% elif entry.kind == 'gain' %}
+                    <strong>{{ entry.name }}</strong> — add {{ "%g"|format(entry.qty) }} {{ entry.unit }}
+                    to owned stock
+                    <small class="d-block text-muted">
+                        {% if entry.target %}parked on {{ entry.target.rental.rental_code }} so it keeps showing at this place
+                        {% else %}it will show in the store until someone transfers it{% endif %}
+                    </small>
+                    {% if entry.message %}<small class="d-block text-warning">{{ entry.message }}</small>{% endif %}
+                {% else %}
+                    <span class="text-danger">{{ entry.message }}</span>
+                {% endif %}
+            </li>
+            {% endfor %}
+        </ol>
+
+        {% if editable %}
+        <form method="POST" action="{{ url_for('hdc_tool_rental_audit_adjust', audit_id=audit.id) }}"
+              class="row g-2 align-items-end" id="auditAdjustForm">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+            <div class="col-12 col-md-3">
+                <label class="form-label" for="auditMode">Adjust what</label>
+                <select class="form-select" id="auditMode" name="mode">
+                    <option value="losses">Only the losses (write off)</option>
+                    <option value="both">Losses and the overages</option>
+                </select>
+            </div>
+            <div class="col-6 col-md-3">
+                <label class="form-label" for="auditReason">Reason for the write-off</label>
+                <select class="form-select" id="auditReason" name="reason">
+                    {% for key, label in scrap_reasons %}
+                    <option value="{{ key }}" {% if key == 'lost' %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+                <small class="text-muted">Lands in the scrap register, searchable per reason</small>
+            </div>
+            <div class="col-6 col-md-2">
+                <label class="form-label" for="adjustDate">Effective date</label>
+                <input type="date" class="form-control" id="adjustDate" name="adjust_date" value="{{ today }}">
+            </div>
+            <div class="col-12 col-md-4">
+                <label class="form-label" for="adjustNotes">Note on the write-off</label>
+                <input type="text" class="form-control" id="adjustNotes" name="adjust_notes"
+                       placeholder="e.g. claimed from site in-charge / owner approved on memo 12">
+            </div>
+            <div class="col-12 col-md-5">
+                <label class="form-label" for="adjustConfirm">
+                    Type <code>ADJUST</code> to confirm
+                    <small class="text-muted d-block">A posted write-off changes stock and is not undone by re-counting</small>
+                </label>
+                <input type="text" class="form-control" id="adjustConfirm" name="confirm"
+                       autocomplete="off" placeholder="ADJUST" pattern="ADJUST">
+            </div>
+            <div class="col-12 col-md-7 d-flex justify-content-md-end align-items-end gap-2">
+                <button type="submit" class="btn btn-danger" id="auditAdjustButton">
+                    <i class="fas fa-scale-balanced me-1" aria-hidden="true"></i>
+                    Adjust stock to the count
+                </button>
+                <a href="{{ url_for('hdc_tool_rental_audit_sheet', audit_id=audit.id) }}"
+                   class="btn btn-outline-secondary">Re-check first</a>
+            </div>
+        </form>
+        {% else %}
+        <div class="alert alert-secondary small mb-0 py-2">
+            <i class="fas fa-lock me-1" aria-hidden="true"></i>
+            {% if audit %}Adjusting stock is done by an Admin or Accountant{% else %}only from the saved sheet{% endif %}.
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+{% elif audit %}
+<div class="alert alert-success mt-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <span>
+        <i class="fas fa-circle-check me-1" aria-hidden="true"></i>
+        {% if s.counted_types %}
+        Nothing disagrees at {{ spec.label }} — {{ "%g"|format(s.counted_qty) }} piece(s) counted across
+        {{ s.counted_types }} line(s), exactly what the book expects.
+        {% else %}No numbers entered yet on this sheet.{% endif %}
+    </span>
+    {% if editable and s.counted_types and audit.status != 'adjusted' %}
+    <form method="POST" action="{{ url_for('hdc_tool_rental_audit_close', audit_id=audit.id) }}"
+          class="d-flex gap-2 align-items-center">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+        <input type="text" name="close_note" class="form-control form-control-sm" placeholder="note (optional)">
+        <button type="submit" class="btn btn-sm btn-mint">Close this count as verified</button>
+    </form>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- ============ WHAT THIS SHEET ALREADY CHANGED ============ -->
+{% if movements %}
+<div class="card hdc-card mt-3">
+    <div class="card-header hdc-card-header">
+        <span><i class="fas fa-clock-rotate-left me-2"></i>Stock movements this count caused</span>
+        <small class="text-muted">visible on Tracking and on each tool's position page</small>
+    </div>
+    <div class="table-responsive">
+        <table class="table hdc-table table-sm mb-0">
+            <thead><tr><th>When</th><th>Tool</th><th>Type</th><th>From</th><th>To</th><th class="text-center">Qty</th><th>Note</th></tr></thead>
+            <tbody>
+            {% for movement in movements %}
+                <tr>
+                    <td class="text-nowrap">{{ movement.timestamp.strftime('%Y-%m-%d %H:%M') if movement.timestamp else '' }}</td>
+                    <td>{{ movement.tool.name if movement.tool else '—' }}</td>
+                    <td><span class="badge bg-secondary">{{ movement.movement_type }}</span></td>
+                    <td>{{ movement.from_location_label or '—' }}</td>
+                    <td>{{ movement.to_location_label or '—' }}</td>
+                    <td class="text-center">{{ "%g"|format(movement.qty or 0) }}</td>
+                    <td><small class="text-muted">{{ movement.notes or '' }}</small></td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+<!-- ============ OTHER SHEETS FOR THIS PLACE ============ -->
+{% if history|length > (1 if audit else 0) %}
+<div class="card hdc-card mt-3">
+    <div class="card-header hdc-card-header">
+        <span><i class="fas fa-folder-open me-2"></i>Count history for {{ spec.label }}</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table hdc-table table-sm mb-0">
+            <thead>
+                <tr><th>Sheet</th><th class="text-center">Date</th><th class="text-center">Counted</th>
+                    <th class="text-center">Short</th><th class="text-center">Extra</th>
+                    <th class="text-end">Written off</th><th class="text-center">Status</th></tr>
+            </thead>
+            <tbody>
+            {% for entry in history %}
+                {% set ebrief = entry.brief %}
+                <tr {% if audit and entry.audit.id == audit.id %}class="table-light"{% endif %}>
+                    <td>
+                        <a href="{{ url_for('hdc_tool_rental_audit_sheet', audit_id=entry.audit.id) }}"
+                           class="text-decoration-none fw-bold">{{ ebrief.code }}</a>
+                        <small class="d-block text-muted">{{ ebrief.counter_name or '—' }}</small>
+                    </td>
+                    <td class="text-center">{{ ebrief.date }}</td>
+                    <td class="text-center">{{ ebrief.counted_lines }} / {{ ebrief.lines }}</td>
+                    <td class="text-center {% if ebrief.shortage_qty %}text-danger fw-bold{% endif %}">{{ "%g"|format(ebrief.shortage_qty) }}</td>
+                    <td class="text-center {% if ebrief.overage_qty %}text-info fw-bold{% endif %}">{{ "%g"|format(ebrief.overage_qty) }}</td>
+                    <td class="text-end">{{ "{:,.0f}".format(ebrief.write_off_value) }}</td>
+                    <td class="text-center">{{ ebrief.status_label }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+{% if audit and can_adjust and audit.is_open %}
+<div class="d-flex justify-content-between flex-wrap gap-2 mt-3">
+    <small class="text-muted">
+        <i class="fas fa-circle-info me-1" aria-hidden="true"></i>
+        Rent already billed is never changed by an adjustment — recover money for a lost tool on the
+        rental's own page, where payments and discounts live.
+    </small>
+    <form method="POST" action="{{ url_for('hdc_tool_rental_audit_void', audit_id=audit.id) }}"
+          class="d-flex gap-2 align-items-center"
+          onsubmit="return confirm('Cancel this count sheet? Stock already adjusted is not reversed.');">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+        <input type="text" name="void_reason" class="form-control form-control-sm" placeholder="why cancelled">
+        <button type="submit" class="btn btn-sm btn-outline-danger">Cancel this count</button>
+    </form>
+</div>
+{% endif %}
+{% if audit and not audit.is_open and can_adjust %}
+<form method="POST" action="{{ url_for('hdc_tool_rental_audit_reopen', audit_id=audit.id) }}" class="mt-2">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+    <button type="submit" class="btn btn-sm btn-outline-secondary">
+        <i class="fas fa-rotate-left me-1" aria-hidden="true"></i>Re-open this sheet for correcting the count
+    </button>
+</form>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script src="/hdc_static/js/pages/tool_audit.js"></script>
+{% endblock %}
