@@ -34,6 +34,8 @@ DOMAIN_OF = {
                        "subcontractor_attendance.html",
                        "subcontractor_worker_ledger.html"],
     "workers": ["workers.html", "trades.html", "worker_ledger.html",
+                # Worker statement — the printable month sheet
+                "worker_statement.html",
                 "worker_advance.html", "worker_payment.html",
                 "worker_ledger_entry_edit.html", "worker_rate.html"],
     "timekeeping": ["timekeeping.html", "timekeeping_edit.html",
@@ -61,7 +63,8 @@ DOMAIN_OF = {
     "estimation": ["estimation.html", "project_estimation.html",
                    "formulas.html"],
     # Parties — the counterparty directory (sidebar → Parties).
-    "parties": ["parties_directory.html"],
+    "parties": ["parties_directory.html",
+                "party_ledger.html"],
     # Shared Expenses — ledgers, the party directory, settlements and report.
     # (``expenses.html`` lives in both this folder and the expenses domain;
     # the basename is already mapped there, so it is not listed twice.)
@@ -95,9 +98,14 @@ DOMAIN_OF = {
     # site-to-site tracking, reports and the shared section sub-nav.
     "tool_rental": ["tool_dashboard.html", "tool_position.html",
                     "tool_rental.html", "tool_rental_detail.html",
+                    "tool_new_rental.html",
                     "tool_inventory.html", "tool_tracking.html",
                     "tool_reports.html", "_tools_nav.html",
-                    "_stock_forms.html"],
+                    "_stock_forms.html",
+                    # Tools > Audit — the count overview, one sheet, and the
+                    # line partial shared by the sheet and the zero-count preview
+                    "tool_audit.html", "tool_audit_sheet.html",
+                    "_audit_line.html"],
 }
 
 FILE_TO_DOMAIN = {f: d for d, fs in DOMAIN_OF.items() for f in fs}
