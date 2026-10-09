@@ -11,17 +11,32 @@
     <span class="badge bg-secondary">{{ pg_total_items }} rows</span>
     <span class="badge bg-success">Rs {{ "{:,.0f}".format(total or 0) }} total</span>
     <span class="badge bg-info text-dark">Qty Delivered = Delivered to Projects (All)</span>
-    <div class="ms-auto d-flex gap-2 flex-wrap">
-        <select name="supplier_id" class="form-select form-select-sm" style="min-width:220px"
-                onchange="window.location.href='{{ url_for('hdc_purchase_v2_purchases') }}?supplier_id='+this.value">
-            <option value="">All Suppliers</option>
-            {% for s in suppliers %}
-            <option value="{{ s.id }}" {% if selected_supplier_id == s.id %}selected{% endif %}>{{ s.name }}</option>
-            {% endfor %}
-        </select>
-        {% if selected_supplier_id %}
-        <a href="{{ url_for('hdc_purchase_v2_purchases') }}" class="btn btn-sm btn-outline-secondary">Clear</a>
-        {% endif %}
+    <div class="ms-auto">
+        <form method="get" class="d-flex flex-wrap gap-2 align-items-center">
+            <select name="supplier_id" class="form-select form-select-sm" style="min-width:170px" title="Supplier">
+                <option value="">All Suppliers</option>
+                {% for s in suppliers %}
+                <option value="{{ s.id }}" {% if selected_supplier_id == s.id %}selected{% endif %}>{{ s.name }}</option>
+                {% endfor %}
+            </select>
+            <input type="number" name="po_number" class="form-control form-control-sm" style="width:110px"
+                   placeholder="PO #" title="PO number" min="1" value="{{ filter_po_number or '' }}">
+            <select name="material_id" class="form-select form-select-sm" style="min-width:160px" title="Material">
+                <option value="">All Materials</option>
+                {% for m in materials %}
+                <option value="{{ m.id }}" {% if selected_material_id == m.id %}selected{% endif %}>{{ m.name }} ({{ m.unit or '' }})</option>
+                {% endfor %}
+            </select>
+            <div class="input-group input-group-sm" style="width:auto">
+                <input type="date" name="date_from" class="form-control" value="{{ filter_date_from }}" title="From date">
+                <span class="input-group-text">to</span>
+                <input type="date" name="date_to" class="form-control" value="{{ filter_date_to }}" title="To date">
+            </div>
+            <button type="submit" class="btn btn-sm btn-mint"><i class="fas fa-filter me-1"></i>Filter</button>
+            {% if selected_supplier_id or filter_po_number or selected_material_id or filter_date_from or filter_date_to %}
+            <a href="{{ url_for('hdc_purchase_v2_purchases') }}" class="btn btn-sm btn-outline-secondary">Clear</a>
+            {% endif %}
+        </form>
     </div>
 </div>
 
@@ -97,6 +112,7 @@
                 <tr>
                     <th>ID</th>
                     <th>Date</th>
+                    <th>Recorded</th>
                     <th>Supplier</th>
                     <th>Material</th>
                     <th class="text-end">Qty Ordered</th>
@@ -117,6 +133,7 @@
                 <tr {{ r|hdc_row_attrs }}>
                     <td class="text-muted small">#{{ r.id }}</td>
                     <td class="small">{{ r.date or (r.created_at.strftime('%Y-%m-%d') if r.created_at else '-') }}</td>
+                    <td class="small text-muted" title="Entry created at">{{ r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at else '-' }}</td>
                     <td><span class="fw-semibold">{{ r.supplier.name if r.supplier else '-' }}</span></td>
                     <td>{{ r.material.name if r.material else '-' }} <small class="text-muted">({{ r.material.unit if r.material else '' }})</small></td>
                     <td class="text-end fw-semibold">{{ "{:,.2f}".format(r.quantity or 0) }}</td>
@@ -151,7 +168,7 @@
                     </td>
                 </tr>
                 {% else %}
-                <tr><td colspan="13" class="text-center text-muted py-4">
+                <tr><td colspan="14" class="text-center text-muted py-4">
                     <i class="fas fa-inbox fa-2x mb-2 d-block opacity-30"></i>No purchase orders found.
                 </td></tr>
                 {% endfor %}
