@@ -19,7 +19,7 @@ from hdc.services.record_permissions import integrity_message, integrity_query
 from hdc.services.purchase import validate_delivery_reduction, _MATERIAL_V2_UNITS, _ensure_material_v2, _ensure_supplier_quick, _material_v2_available, _material_v2_delivered, _material_v2_used, _material_v2_weighted_cost, _purchase_v2_available_in_scope_qty, _purchase_v2_delivered_qty, _purchase_v2_integrity_report, _repair_supplier_purchase_v2_ledger, _sync_purchase_v2_ledger, _sync_supplier_po_payment_status, _transfer_v2_material_between_scopes
 from hdc.services.timekeeping import _has_recent_duplicate
 from hdc.utils.dates import _pkt_now_naive, _pkt_today
-from hdc.utils.format import _flt
+from hdc.utils.format import _flt, _parse_date
 from hdc.utils.normalize import _normalize_name_ci
 
 def register(app):
@@ -247,15 +247,34 @@ def register(app):
             flash(f'{len(created)} purchase item(s) recorded successfully.', 'success')
             return redirect(url_for('hdc_purchase_v2_purchases'))
         supplier_id = request.args.get('supplier_id', type=int)
+        material_id = request.args.get('material_id', type=int)
+        po_raw = (request.args.get('po_number') or '').strip()
+        po_number = None
+        if po_raw:
+            try:
+                po_number = int(po_raw)
+            except (TypeError, ValueError):
+                flash('PO number must be numeric.', 'warning')
+        date_from = _parse_date((request.args.get('date_from') or '').strip(), fallback=None)
+        date_to = _parse_date((request.args.get('date_to') or '').strip(), fallback=None)
         page = max(1, request.args.get('page', type=int) or 1)
         per_page = 25
         q = PurchaseV2.query.filter(PurchaseV2.is_void == False)
         if supplier_id:
             q = q.filter(PurchaseV2.supplier_id == supplier_id)
+        if po_number:
+            q = q.filter(PurchaseV2.id == po_number)
+        if material_id:
+            q = q.filter(PurchaseV2.material_id == material_id)
+        if date_from:
+            q = q.filter(PurchaseV2.date >= date_from)
+        if date_to:
+            q = q.filter(PurchaseV2.date <= date_to)
         pg_total_items = q.count()
         pg_total_pages = max(1, (pg_total_items + per_page - 1) // per_page)
         page = min(page, pg_total_pages)
-        rows = (q.order_by(PurchaseV2.created_at.asc(), PurchaseV2.id.asc())
+        # Newest entries first; id breaks ties for rows created in the same second.
+        rows = (q.order_by(PurchaseV2.created_at.desc(), PurchaseV2.id.desc())
                  .offset((page - 1) * per_page).limit(per_page).all())
         suppliers = Supplier.query.filter(Supplier.is_void == False).order_by(Supplier.name.asc()).all()
         materials = MaterialV2.query.filter(MaterialV2.is_void == False).order_by(MaterialV2.name.asc()).all()
@@ -273,6 +292,17 @@ def register(app):
             )
         # Grand total spans every row matching the filters, not just this page.
         total = float(q.with_entities(func.coalesce(func.sum(PurchaseV2.total_amount), 0.0)).scalar() or 0.0)
+        pg_query = {}
+        if supplier_id:
+            pg_query['supplier_id'] = supplier_id
+        if po_number:
+            pg_query['po_number'] = po_number
+        if material_id:
+            pg_query['material_id'] = material_id
+        if date_from:
+            pg_query['date_from'] = date_from.isoformat()
+        if date_to:
+            pg_query['date_to'] = date_to.isoformat()
         return render_template('purchase/purchase_v2_purchases.html',
             rows=rows,
             suppliers=suppliers,
@@ -280,6 +310,10 @@ def register(app):
             delivered_map=delivered_map,
             total=total,
             selected_supplier_id=supplier_id,
+            selected_material_id=material_id,
+            filter_po_number=po_raw,
+            filter_date_from=(date_from.isoformat() if date_from else ''),
+            filter_date_to=(date_to.isoformat() if date_to else ''),
             today=_pkt_today().isoformat(),
             pg_page=page,
             pg_total_pages=pg_total_pages,
@@ -287,7 +321,7 @@ def register(app):
             pg_per_page=per_page,
             pg_endpoint='hdc_purchase_v2_purchases',
             pg_url_kwargs={},
-            pg_query=({'supplier_id': supplier_id} if supplier_id else {}),
+            pg_query=pg_query,
             pg_label='purchase rows'
         )
 
@@ -1020,10 +1054,27 @@ def register(app):
             db.session.commit()
             flash(f'Usage #{row.id} recorded.', 'success')
             return redirect(url_for('hdc_purchase_v2_usage_page'))
-        rows = (UsageLogV2.query
-                .filter(UsageLogV2.is_void == False)
-                .order_by(UsageLogV2.created_at.asc(), UsageLogV2.id.asc())
-                .all())
+        po_raw = (request.args.get('po_number') or '').strip()
+        po_number = None
+        if po_raw:
+            try:
+                po_number = int(po_raw)
+            except (TypeError, ValueError):
+                flash('PO number must be numeric.', 'warning')
+        material_id = request.args.get('material_id', type=int)
+        date_from = _parse_date((request.args.get('date_from') or '').strip(), fallback=None)
+        date_to = _parse_date((request.args.get('date_to') or '').strip(), fallback=None)
+        q = UsageLogV2.query.filter(UsageLogV2.is_void == False)
+        if po_number:
+            q = q.filter(UsageLogV2.purchase_id == po_number)
+        if material_id:
+            q = q.filter(UsageLogV2.material_id == material_id)
+        if date_from:
+            q = q.filter(UsageLogV2.date >= date_from)
+        if date_to:
+            q = q.filter(UsageLogV2.date <= date_to)
+        # Newest entries first; id breaks ties for rows created in the same second.
+        rows = q.order_by(UsageLogV2.created_at.desc(), UsageLogV2.id.desc()).all()
         total_qty = float(sum(float(r.quantity or 0.0) for r in rows))
         total_cost = float(sum(float(r.cost or 0.0) for r in rows))
         projects = Project.query.order_by(Project.name.asc()).all()
@@ -1053,6 +1104,10 @@ def register(app):
             materials=materials,
             stock_rows=stock_rows,
             material_available_map=material_available_map,
+            selected_material_id=material_id,
+            filter_po_number=po_raw,
+            filter_date_from=(date_from.isoformat() if date_from else ''),
+            filter_date_to=(date_to.isoformat() if date_to else ''),
             today=_pkt_today().isoformat()
         )
 
