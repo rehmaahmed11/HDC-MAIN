@@ -39,7 +39,8 @@ from hdc.extensions import db
 from hdc.models.projects import Project, Stage
 from hdc.models.tool_rental import (
     Tool, ToolMovementLog, ToolRental, ToolRentalItem, ToolRentalReturn,
-    ToolRentalReturnItem, ToolRentalTransfer, ToolRentalTransferItem
+    ToolRentalReturnItem, ToolRentalTransfer, ToolRentalTransferItem,
+    ToolSerial
 )
 from hdc.utils.dates import _pkt_now_naive, _pkt_today
 from hdc.utils.format import _flt
@@ -590,6 +591,10 @@ def tool_ledger():
             'holdings': sorted(holdings, key=lambda h: (h['loc_type'], h['label'], -h['qty'])),
             'current_label': _primary_location_label(holdings, in_store),
             'rental_ids': sorted(rental_ids_for_tool),
+            # Serial data for the new serial tracking feature
+            'serial_count': ToolSerial.query.filter_by(tool_id=tool.id).count(),
+            'serials_in_store': ToolSerial.query.filter_by(tool_id=tool.id, is_in_store=True).count(),
+            'serials_rented': ToolSerial.query.filter_by(tool_id=tool.id, is_in_store=False).count(),
         })
 
     # Rent pending is a rental-level number; a rental can now hold pieces at

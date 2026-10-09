@@ -15,7 +15,8 @@ from hdc.models.projects import Project, Stage
 from hdc.models.tool_rental import (
     TOOL_SCRAP_REASONS, Tool, ToolAudit, ToolCategory, ToolMovementLog, ToolPurchase,
     ToolRental, ToolRentalDiscount, ToolRentalItem, ToolRentalPayment, ToolRentalReturn,
-    ToolRentalReturnItem, ToolRentalTransfer, ToolRentalTransferItem
+    ToolRentalReturnItem, ToolRentalTransfer, ToolRentalTransferItem,
+    ToolSerial, ToolSerialMovement
 )
 from hdc.services.cashflow_register import ensure_party
 from hdc.services.tool_rental import (
@@ -28,7 +29,12 @@ from hdc.services.tool_rental import (
     record_tool_rental_discount, rental_discount_rows, rental_transfer_chain,
     search_rentals, tool_available_for_integrity, tool_kpis, tool_purchases,
     tool_scraps, tool_stock_aggregates, void_discounts_for_payment,
-    void_tool_rental_discount, void_tool_rental_payment_in_accounts
+    void_tool_rental_discount, void_tool_rental_payment_in_accounts,
+    # Serial management functions
+    assign_serials_to_rental, create_tool_serials, create_serial_movement,
+    get_all_tool_serials_summary, get_available_serials, get_serial_status,
+    get_serials_by_tool_for_rental, get_serials_for_rental, get_serials_in_store_summary,
+    return_serials_from_rental, transfer_serials, update_serial_status
 )
 from hdc.services.tool_audit import (
     AUDIT_LOSS_REASONS, audit_history, audit_locations, audit_matrix, audit_movement,
@@ -355,6 +361,11 @@ def register(app):
                 Tool.category_id, func.count(Tool.id)).group_by(Tool.category_id).all()
             if cid is not None)
         kpis = tool_kpis()
+
+        # Get serial summary for inventory
+        serial_summary = get_all_tool_serials_summary()
+        serial_lookup = {s['tool_id']: s for s in serial_summary}
+
         return render_template('tool_rental/tool_inventory.html',
             tools=tools,
             stock_stats=stock_stats,
@@ -369,6 +380,7 @@ def register(app):
             known_suppliers=known_tool_suppliers(),
             today=_pkt_today().isoformat(),
             focus=(request.args.get('focus') or '').strip(),
+            serial_lookup=serial_lookup,
         )
 
     # ------------------ EDIT / ARCHIVE A TOOL ------------------
@@ -2493,3 +2505,328 @@ def register(app):
                 'scrapped_qty': r['scrapped_qty'], 'scrapped_value': r['scrapped_value'],
             } for r in ledger['tools']],
         })
+
+    # ------------------ SERIAL NUMBER API ROUTES ------------------
+
+    @app.route('/hdc/api/tool-rental/serials/in-store')
+    @login_required
+    def hdc_api_serials_in_store():
+        """Get all serials currently in store for the rental creation picker.
+
+        Returns a flat list of serials grouped by tool, suitable for the
+        multi-select tool picker in the new rental form.
+        """
+        serials = get_serials_in_store_summary()
+        # Group by tool for the picker UI
+        by_tool = {}
+        for s in serials:
+            tid = s['tool_id']
+            if tid not in by_tool:
+                by_tool[tid] = {
+                    'tool_id': tid,
+                    'tool_name': s['tool_name'],
+                    'tool_code': s['tool_code'],
+                    'serials': [],
+                    'in_store_count': 0,
+                }
+            by_tool[tid]['serials'].append({
+                'serial_id': s['serial_id'],
+                'serial_number': s['serial_number'],
+                'label': s['label'],
+                'condition': s['condition'],
+            })
+            by_tool[tid]['in_store_count'] += 1
+
+        return jsonify({
+            'tools': sorted(by_tool.values(), key=lambda t: (t['tool_name'].lower(), t['tool_code'])),
+            'total_serials': len(serials),
+        })
+
+    @app.route('/hdc/api/tool-rental/serials/<int:serial_id>/status')
+    @login_required
+    def hdc_api_serial_status(serial_id):
+        """Get detailed status of a single serial-numbered piece.
+
+        Used by the tool-status dialog when clicking on a serial in the picker.
+        """
+        status = get_serial_status(serial_id)
+        if not status:
+            return jsonify({'error': 'Serial not found'}), 404
+
+        return jsonify({
+            'serial_id': status['serial'].id,
+            'serial_number': status['serial'].serial_number,
+            'tool_id': status['serial'].tool_id,
+            'tool_name': status['tool'].name if status['tool'] else '-',
+            'tool_code': status['serial'].serial_number,
+            'status': status['status'],
+            'status_label': status['status_label'],
+            'is_in_store': status['is_in_store'],
+            'condition': status['condition'],
+            'notes': status['notes'],
+            'current_location': status['serial'].current_location_label,
+            'current_rental_code': status['current_rental'].rental_code if status['current_rental'] else None,
+            'current_rental_id': status['current_rental'].id if status['current_rental'] else None,
+            'movements': [{
+                'id': m.id,
+                'type': m.movement_type,
+                'from_label': m.from_location_label,
+                'to_label': m.to_location_label,
+                'notes': m.notes,
+                'timestamp': m.timestamp.isoformat() if m.timestamp else None,
+            } for m in status['movements']],
+        })
+
+    @app.route('/hdc/api/tool-rental/serials/tool/<int:tool_id>/available')
+    @login_required
+    def hdc_api_serials_for_tool(tool_id):
+        """Get available (in-store) serials for a specific tool.
+
+        Used when a user selects a tool in the rental form to show its available serials.
+        """
+        tool = Tool.query.get_or_404(tool_id)
+        serials = get_serials_by_tool_for_rental(tool_id)
+
+        return jsonify({
+            'tool_id': tool.id,
+            'tool_name': tool.name,
+            'tool_code': tool.tool_code,
+            'total_qty': float(tool.total_quantity or 0),
+            'available_serials': len(serials),
+            'serials': [{
+                'serial_id': s.id,
+                'serial_number': s.serial_number,
+                'label': s.serial_label,
+                'condition': s.condition,
+                'status': s.status,
+                'status_label': s.status_label,
+            } for s in serials],
+        })
+
+    @app.route('/hdc/api/tool-rental/serials/assign', methods=['POST'])
+    @login_required
+    @_money_write_required()
+    def hdc_api_serials_assign():
+        """Assign serials to a rental.
+
+        POST data:
+            rental_id: The rental ID.
+            serial_ids: Comma-separated list of serial IDs.
+            notes: Optional notes.
+        """
+        rental_id = request.form.get('rental_id', type=int)
+        serial_ids_raw = request.form.get('serial_ids', '').strip()
+        notes = (request.form.get('notes') or '').strip()
+        created_by = getattr(current_user, 'id', None)
+
+        if not rental_id:
+            return jsonify({'success': False, 'message': 'Rental ID required'}), 400
+
+        if not serial_ids_raw:
+            return jsonify({'success': False, 'message': 'No serials selected'}), 400
+
+        try:
+            serial_ids = [int(x.strip()) for x in serial_ids_raw.split(',') if x.strip()]
+        except ValueError:
+            return jsonify({'success': False, 'message': 'Invalid serial IDs'}), 400
+
+        success, message, assigned = assign_serials_to_rental(
+            rental_id, serial_ids, notes=notes, created_by=created_by
+        )
+
+        if not success:
+            return jsonify({'success': False, 'message': message}), 400
+
+        return jsonify({
+            'success': True,
+            'message': message,
+            'assigned': assigned,
+            'rental_id': rental_id,
+        })
+
+    @app.route('/hdc/api/tool-rental/serials/return', methods=['POST'])
+    @login_required
+    @_money_write_required()
+    def hdc_api_serials_return():
+        """Return serials from a rental.
+
+        POST data:
+            rental_id: The rental ID.
+            serial_ids: Comma-separated list of serial IDs.
+            return_id: Optional return transaction ID.
+            notes: Optional notes.
+        """
+        rental_id = request.form.get('rental_id', type=int)
+        serial_ids_raw = request.form.get('serial_ids', '').strip()
+        return_id = request.form.get('return_id', type=int)
+        notes = (request.form.get('notes') or '').strip()
+        created_by = getattr(current_user, 'id', None)
+
+        if not rental_id:
+            return jsonify({'success': False, 'message': 'Rental ID required'}), 400
+
+        if not serial_ids_raw:
+            return jsonify({'success': False, 'message': 'No serials selected'}), 400
+
+        try:
+            serial_ids = [int(x.strip()) for x in serial_ids_raw.split(',') if x.strip()]
+        except ValueError:
+            return jsonify({'success': False, 'message': 'Invalid serial IDs'}), 400
+
+        success, message, returned = return_serials_from_rental(
+            rental_id, serial_ids, return_id=return_id, created_by=created_by
+        )
+
+        if not success:
+            return jsonify({'success': False, 'message': message}), 400
+
+        return jsonify({
+            'success': True,
+            'message': message,
+            'returned': returned,
+            'rental_id': rental_id,
+        })
+
+    @app.route('/hdc/api/tool-rental/serials/create', methods=['POST'])
+    @login_required
+    @_money_write_required()
+    def hdc_api_serials_create():
+        """Create serial-numbered pieces for a tool.
+
+        POST data:
+            tool_id: The tool ID.
+            qty: Number of serials to create.
+            serial_numbers: Optional comma-separated list of serial numbers.
+        """
+        tool_id = request.form.get('tool_id', type=int)
+        qty = request.form.get('qty', type=float)
+        serial_numbers_raw = request.form.get('serial_numbers', '').strip()
+        created_by = getattr(current_user, 'id', None)
+
+        if not tool_id:
+            return jsonify({'success': False, 'message': 'Tool ID required'}), 400
+
+        if qty is None or qty <= 0:
+            return jsonify({'success': False, 'message': 'Quantity must be > 0'}), 400
+
+        serial_numbers = None
+        if serial_numbers_raw:
+            try:
+                serial_numbers = [x.strip() for x in serial_numbers_raw.split(',') if x.strip()]
+            except Exception:
+                return jsonify({'success': False, 'message': 'Invalid serial numbers format'}), 400
+
+        success, message, serial_ids = create_tool_serials(
+            tool_id, qty, serial_numbers=serial_numbers, created_by=created_by
+        )
+
+        if not success:
+            return jsonify({'success': False, 'message': message}), 400
+
+        return jsonify({
+            'success': True,
+            'message': message,
+            'serial_ids': serial_ids,
+            'tool_id': tool_id,
+        })
+
+    @app.route('/hdc/api/tool-rental/tools/<int:tool_id>/summary')
+    @login_required
+    def hdc_api_tool_summary(tool_id):
+        """Get summary of a tool including serial breakdown.
+
+        Returns tool info with serial status for the tool-status dialog.
+        """
+        tool = Tool.query.get_or_404(tool_id)
+        serials = ToolSerial.query.filter_by(tool_id=tool.id).all()
+
+        serial_data = []
+        for s in serials:
+            serial_data.append({
+                'serial_id': s.id,
+                'serial_number': s.serial_number,
+                'status': s.status,
+                'status_label': s.status_label,
+                'is_in_store': s.is_in_store,
+                'condition': s.condition,
+                'current_location': s.current_location_label,
+                'current_rental_id': s.current_rental_id,
+            })
+
+        return jsonify({
+            'tool_id': tool.id,
+            'tool_name': tool.name,
+            'tool_code': tool.tool_code,
+            'owned': float(tool.total_quantity or 0),
+            'in_store': float(tool.available_qty),
+            'rented': float(tool.rented_out_qty),
+            'utilization': round(float(tool.utilization_pct), 1),
+            'serials': serial_data,
+            'serial_count': len(serials),
+        })
+
+    @app.route('/hdc/api/tool-rental/serials/inventory-summary')
+    @login_required
+    def hdc_api_serials_inventory_summary():
+        """Get serial summary for all tools (for inventory page).
+
+        Returns tool serial breakdown for the inventory table.
+        """
+        summary = get_all_tool_serials_summary()
+        return jsonify([
+            {
+                'tool_id': s['tool_id'],
+                'total_serials': s['total_serials'],
+                'in_store': s['in_store'],
+                'rented': s['rented'],
+                'maintenance': s['maintenance'],
+                'damaged': s['damaged'],
+                'lost': s['lost'],
+            }
+            for s in summary
+        ])
+
+    @app.route('/hdc/tool-rental/inventory/<int:tool_id>/serials/create', methods=['GET', 'POST'])
+    @login_required
+    @_money_write_required()
+    def hdc_tool_rental_serials_create(tool_id):
+        """Create serial-numbered pieces for a tool.
+
+        GET shows a form to create serials. POST processes the creation.
+        """
+        tool = Tool.query.get_or_404(tool_id)
+
+        if request.method == 'POST':
+            qty = max(0, _flt(request.form.get('qty'), 0))
+            if qty <= 0:
+                flash('Quantity must be greater than 0.', 'danger')
+                return redirect(url_for('hdc_tool_rental_serials_create', tool_id=tool_id))
+
+            serial_numbers_raw = (request.form.get('serial_numbers') or '').strip()
+            serial_numbers = None
+            if serial_numbers_raw:
+                serial_numbers = [s.strip() for s in serial_numbers_raw.split(',') if s.strip()]
+                if len(serial_numbers) != int(qty):
+                    flash(f'Serial number count ({len(serial_numbers)}) does not match quantity ({qty}).', 'danger')
+                    return redirect(url_for('hdc_tool_rental_serials_create', tool_id=tool_id))
+
+            success, message, serial_ids = create_tool_serials(
+                tool_id=tool_id,
+                qty=qty,
+                serial_numbers=serial_numbers,
+                created_by=getattr(current_user, 'id', None),
+            )
+
+            if success:
+                flash(message, 'success')
+            else:
+                flash(message or 'Could not create serials.', 'danger')
+            return redirect(url_for('hdc_tool_rental_inventory', q=tool.tool_code))
+
+        # GET: show form
+        existing_serials = ToolSerial.query.filter_by(tool_id=tool_id).count()
+        return render_template('tool_rental/tool_serials_create.html',
+            tool=tool,
+            existing_serials=existing_serials,
+            today=_pkt_today().isoformat(),
+        )

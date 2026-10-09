@@ -13,7 +13,7 @@ from hdc.models.loans import Loan, LoanMovement
 from hdc.models.tool_rental import (Tool, ToolAudit, ToolAuditLine, ToolCategory, ToolMovementLog,
                            ToolRental, ToolRentalAccountTxn, ToolRentalDiscount, ToolRentalItem,
                            ToolRentalPayment, ToolRentalReturn, ToolRentalReturnItem, ToolRentalTransfer,
-                           ToolRentalTransferItem)
+                           ToolRentalTransferItem, ToolSerial, ToolSerialMovement)
 
 __all__ = [
     "Account",
@@ -95,6 +95,8 @@ __all__ = [
     "ToolRentalReturnItem",
     "ToolRentalTransfer",
     "ToolRentalTransferItem",
+    "ToolSerial",
+    "ToolSerialMovement",
     "UsageLogV2",
     "UserActivity",
     "Worker",

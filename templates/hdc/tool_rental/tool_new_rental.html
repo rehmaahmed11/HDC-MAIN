@@ -207,39 +207,95 @@
 
                 <div class="col-12" id="newRentalTools">
                     <label class="form-label fw-semibold">Tools to rent</label>
-                    {% if tools %}
-                    <div id="toolItemsContainer">
-                        <div class="row g-2 mb-2 tool-item-row align-items-end">
-                            <div class="col-md-6">
-                                <label class="form-label small" for="rentalToolSelect0Input">Tool</label>
-                                <input type="text" id="rentalToolSelect0Input" class="form-control tool-select-search"
-                                       placeholder="Search tool name or code…" autocomplete="off"
-                                       role="combobox" aria-expanded="false" aria-autocomplete="list" aria-label="Tool"
-                                       data-hdc-combo="rentalToolSelect0" data-hdc-combo-strict="true" data-hdc-combo-manual="true">
-                                <select name="tool_id[]" id="rentalToolSelect0" class="form-select tool-select d-none" required
-                                        data-hdc-combo-source>
-                                    <option value=""></option>
-                                    {% for t in tools %}
-                                    <option value="{{ t.id }}" data-rate="{{ t.rental_rate_per_day }}" data-avail="{{ t.available_qty }}">{{ t.name }} ({{ t.tool_code }}) — {{ "%.0f"|format(t.available_qty) }} available</option>
-                                    {% endfor %}
-                                </select>
-                            </div>
-                            <div class="col-4 col-md-2">
-                                <label class="form-label small">Quantity</label>
-                                <input type="number" name="qty[]" class="form-control" placeholder="Qty" min="0.1" step="0.1" required>
-                            </div>
-                            <div class="col-6 col-md-3 rental-rate-cell">
-                                <label class="form-label small rental-rate-label">Rent rate</label>
-                                <input type="number" name="rate[]" class="form-control rental-rate-input" placeholder="Use saved rate" min="0" step="0.01">
-                            </div>
-                            <div class="col-2 col-md-1">
-                                <button type="button" class="btn btn-outline-danger w-100" aria-label="Remove tool line" title="Remove tool line" onclick="this.closest('.tool-item-row').remove()"><i class="fas fa-times" aria-hidden="true"></i></button>
-                            </div>
+
+                    <!-- Mode toggle: quantity-based or serial-based -->
+                    <div class="d-flex flex-wrap gap-3 mb-3">
+                        <label class="form-label small mb-0 fw-semibold" style="margin-bottom:0">Select by:</label>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="toolSelectMode" id="selectModeQty" value="quantity" checked onchange="toggleToolSelectMode()">
+                            <label class="form-check-label" for="selectModeQty">Quantity (enter how many)</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="toolSelectMode" id="selectModeSerial" value="serial" onchange="toggleToolSelectMode()">
+                            <label class="form-check-label" for="selectModeSerial">Individual Serials (pick specific pieces)</label>
                         </div>
                     </div>
-                    <div class="d-flex flex-wrap align-items-center gap-2 mt-1">
-                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="addToolRow()"><i class="fas fa-plus me-1" aria-hidden="true"></i>Add another tool</button>
-                        <small id="billingHint" class="text-muted"></small>
+
+                    <!-- Legend for serial selection -->
+                    <div id="serialSelectInfo" class="alert alert-info py-2 small mb-3 d-none">
+                        <i class="fas fa-info-circle me-1"></i>
+                        <strong>Serial selection:</strong> When you select a tool, you'll see all its available serial numbers.
+                        Click on a serial to see its status, or tick multiple serials to add them to the rental.
+                        You can also search/filter serials within a tool.
+                    </div>
+
+                    {% if tools %}
+                    <!-- Quantity-based tool rows -->
+                    <div id="quantityToolRows">
+                        <div id="toolItemsContainer">
+                            <div class="row g-2 mb-2 tool-item-row align-items-end">
+                                <div class="col-md-6">
+                                    <label class="form-label small" for="rentalToolSelect0Input">Tool</label>
+                                    <input type="text" id="rentalToolSelect0Input" class="form-control tool-select-search"
+                                           placeholder="Search tool name or code…" autocomplete="off"
+                                           role="combobox" aria-expanded="false" aria-autocomplete="list" aria-label="Tool"
+                                           data-hdc-combo="rentalToolSelect0" data-hdc-combo-strict="true" data-hdc-combo-manual="true">
+                                    <select name="tool_id[]" id="rentalToolSelect0" class="form-select tool-select d-none" required
+                                            data-hdc-combo-source>
+                                        <option value=""></option>
+                                        {% for t in tools %}
+                                        <option value="{{ t.id }}" data-rate="{{ t.rental_rate_per_day }}" data-avail="{{ t.available_qty }}">{{ t.name }} ({{ t.tool_code }}) — {{ "%.0f"|format(t.available_qty) }} available</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="col-4 col-md-2">
+                                    <label class="form-label small">Quantity</label>
+                                    <input type="number" name="qty[]" class="form-control" placeholder="Qty" min="0.1" step="0.1" required>
+                                </div>
+                                <div class="col-6 col-md-3 rental-rate-cell">
+                                    <label class="form-label small rental-rate-label">Rent rate</label>
+                                    <input type="number" name="rate[]" class="form-control rental-rate-input" placeholder="Use saved rate" min="0" step="0.01">
+                                </div>
+                                <div class="col-2 col-md-1">
+                                    <button type="button" class="btn btn-outline-danger w-100" aria-label="Remove tool line" title="Remove tool line" onclick="this.closest('.tool-item-row').remove()"><i class="fas fa-times" aria-hidden="true"></i></button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="d-flex flex-wrap align-items-center gap-2 mt-1">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="addToolRow()"><i class="fas fa-plus me-1" aria-hidden="true"></i>Add another tool</button>
+                            <small id="billingHint" class="text-muted"></small>
+                        </div>
+                    </div>
+
+                    <!-- Serial-based tool picker -->
+                    <div id="serialToolPicker" class="d-none">
+                        <div class="card hdc-card border-mint">
+                            <div class="card-header hdc-card-header bg-mint-subtle">
+                                <span><i class="fas fa-qrcode me-2"></i>Available Tools & Serials</span>
+                                <span class="badge bg-secondary" id="serialPickerCount">0 serials available</span>
+                            </div>
+                            <div class="card-body p-0">
+                                <div class="tool-picker-search mb-3 px-3 pt-3">
+                                    <input type="text" id="serialPickerSearch" class="form-control"
+                                           placeholder="Search tools by name, code, or serial number…"
+                                           autocomplete="off">
+                                    <small class="text-muted d-block mt-1">Type to filter tools and serials. Click a tool to expand and see its serials.</small>
+                                </div>
+                                <div class="serial-picker-list overflow-auto" style="max-height: 400px;" id="serialPickerList">
+                                    <div class="text-center py-4 text-muted">Loading available serials...</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Selected serials for rental -->
+                        <div class="mt-3">
+                            <label class="form-label fw-semibold">Selected Serials for Rental</label>
+                            <div class="d-flex flex-wrap gap-2 mb-2" id="selectedSerialsContainer">
+                                <span class="text-muted small">Select serials above to add them to this rental.</span>
+                            </div>
+                            <input type="hidden" name="selected_serials" id="selectedSerialsInput" value="">
+                            <input type="hidden" name="serial_rental_data" id="serialRentalDataInput" value="">
+                        </div>
                     </div>
                     {% else %}
                     <div class="alert alert-info mb-2">There are no tools in stock yet. Add tools in Inventory before creating a rental.</div>
@@ -1114,5 +1170,370 @@ function addToolRow(){
     wireToolRow(row);
     syncBilling();
 }
+
+// ── Serial-based tool selection ──────────────────────────────────────────────
+
+let serialPickerData = [];
+let selectedSerials = new Set();
+let expandedToolGroups = new Set();
+
+function toggleToolSelectMode(){
+    const qtyMode = document.getElementById('selectModeQty').checked;
+    const serialMode = document.getElementById('selectModeSerial').checked;
+    document.getElementById('quantityToolRows').classList.toggle('d-none', serialMode);
+    document.getElementById('serialToolPicker').classList.toggle('d-none', !serialMode);
+    document.getElementById('serialSelectInfo').classList.toggle('d-none', !serialMode);
+    if(serialMode){
+        loadSerialPickerData();
+    }
+}
+
+function loadSerialPickerData(){
+    const list = document.getElementById('serialPickerList');
+    list.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-mint"></div><p class="text-muted mt-2">Loading serials...</p></div>';
+
+    fetch('/hdc/api/tool-rental/serials/in-store')
+        .then(r => r.json())
+        .then(data => {
+            serialPickerData = data.tools || [];
+            renderSerialPicker();
+            document.getElementById('serialPickerCount').textContent =
+                data.total_serials + ' serials available';
+        })
+        .catch(err => {
+            list.innerHTML = '<div class="alert alert-danger py-3">Error loading serials: ' + err.message + '</div>';
+        });
+}
+
+function renderSerialPicker(filterText){
+    const list = document.getElementById('serialPickerList');
+    const searchText = (filterText || document.getElementById('serialPickerSearch').value || '').toLowerCase();
+    let html = '';
+
+    if(serialPickerData.length === 0){
+        html = '<div class="text-center py-4 text-muted">No serials available in store. Add tools and create serials first.</div>';
+    } else {
+        serialPickerData.forEach(tool => {
+            const toolName = tool.tool_name.toLowerCase();
+            const toolCode = tool.tool_code.toLowerCase();
+            if(searchText && !toolName.includes(searchText) && !toolCode.includes(searchText)){
+                return; // Filter out
+            }
+
+            const isExpanded = expandedToolGroups.has(tool.tool_id);
+            const serials = tool.serials || [];
+            let filteredSerials = serials;
+            if(searchText){
+                filteredSerials = serials.filter(s =>
+                    s.serial_number.toLowerCase().includes(searchText) ||
+                    s.label.toLowerCase().includes(searchText)
+                );
+            }
+
+            html += `<div class="tool-group" data-tool-id="${tool.tool_id}">`;
+            html += `<div class="tool-group-header d-flex align-items-center justify-content-between p-3 bg-light-subtle cursor-pointer" onclick="toggleToolGroup(${tool.tool_id})">`;
+            html += `<div class="d-flex align-items-center gap-3">`;
+            html += `<i class="fas fa-tools text-mint fs-5"></i>`;
+            html += `<div><strong>${tool.tool_name}</strong>`;
+            html += `<span class="badge bg-secondary ms-2">${tool.tool_code}</span>`;
+            html += `<small class="text-muted d-block">${filteredSerials.length} serials available</small>`;
+            html += `</div></div>`;
+            html += `<i class="fas fa-${isExpanded ? 'chevron-down' : 'chevron-right'} text-muted"></i>`;
+            html += `</div>`;
+
+            if(isExpanded){
+                html += `<div class="serial-list p-2 border-top">`;
+                if(filteredSerials.length === 0){
+                    html += `<div class="text-muted small py-2">No serials match the search.</div>`;
+                } else {
+                    filteredSerials.forEach(serial => {
+                        const isSelected = selectedSerials.has(serial.serial_id);
+                        html += `<div class="serial-item d-flex align-items-center gap-2 p-2 border rounded mb-1 ${isSelected ? 'bg-mint-subtle' : ''}">`;
+                        html += `<input type="checkbox" class="form-check-input serial-checkbox" data-serial-id="${serial.serial_id}" ${isSelected ? 'checked' : ''} onchange="toggleSerialSelection(${serial.serial_id}, this.checked)">`;
+                        html += `<span class="serial-number-badge badge ${isSelected ? 'bg-success' : 'bg-secondary'}">${serial.serial_number}</span>`;
+                        html += `<span class="serial-label small text-muted">${serial.label}</span>`;
+                        html += `<button type="button" class="btn btn-sm btn-outline-secondary ms-auto serial-status-btn" data-serial-id="${serial.serial_id}" title="View serial status" onclick="event.stopPropagation(); showSerialStatus(${serial.serial_id})">`;
+                        html += `<i class="fas fa-info-circle"></i></button>`;
+                        html += `</div>`;
+                    });
+                }
+                html += `</div>`;
+            }
+
+            html += `</div>`;
+        });
+
+        if(!html){
+            html = '<div class="text-center py-4 text-muted">No tools match the search.</div>';
+        }
+    }
+
+    list.innerHTML = html;
+}
+
+function toggleToolGroup(toolId){
+    if(expandedToolGroups.has(toolId)){
+        expandedToolGroups.delete(toolId);
+    } else {
+        expandedToolGroups.add(toolId);
+    }
+    renderSerialPicker();
+}
+
+function toggleSerialSelection(serialId, checked){
+    if(checked){
+        selectedSerials.add(serialId);
+    } else {
+        selectedSerials.delete(serialId);
+    }
+    updateSelectedSerialsDisplay();
+}
+
+function updateSelectedSerialsDisplay(){
+    const container = document.getElementById('selectedSerialsContainer');
+    const input = document.getElementById('selectedSerialsInput');
+
+    if(selectedSerials.size === 0){
+        container.innerHTML = '<span class="text-muted small">Select serials above to add them to this rental.</span>';
+        input.value = '';
+        return;
+    }
+
+    const serials = [];
+    selectedSerials.forEach(sid => {
+        serialPickerData.forEach(tool => {
+            tool.serials.forEach(s => {
+                if(s.serial_id === sid){
+                    serials.push(s);
+                }
+            });
+        });
+    });
+
+    let html = '';
+    serials.forEach(s => {
+        html += `<span class="badge bg-success border me-1 serial-chip" data-serial-id="${s.serial_id}">`;
+        html += `${s.serial_number} <button type="button" class="btn btn-sm btn-close" onclick="removeSerialSelection(${s.serial_id})"></button></span>`;
+    });
+    container.innerHTML = html + `<span class="text-muted small ms-2">(${serials.length} selected)</span>`;
+    input.value = Array.from(selectedSerials).join(',');
+}
+
+function removeSerialSelection(serialId){
+    selectedSerials.delete(serialId);
+    updateSelectedSerialsDisplay();
+    renderSerialPicker();
+}
+
+// Search filter for serial picker
+document.addEventListener('DOMContentLoaded', function(){
+    const searchInput = document.getElementById('serialPickerSearch');
+    if(searchInput){
+        let debounceTimer;
+        searchInput.addEventListener('input', function(){
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => renderSerialPicker(this.value), 200);
+        });
+    }
+});
+
+// ── Tool Status Modal (for serial picker) ────────────────────────────────────
+
+function showSerialStatus(serialId){
+    const body = document.getElementById('serialStatusModalBody');
+    const title = document.getElementById('serialStatusModalTitle');
+
+    title.textContent = 'Serial Status';
+    body.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-mint"></div><p class="text-muted mt-2">Loading serial status...</p></div>';
+
+    fetch('/hdc/api/tool-rental/serials/' + serialId + '/status')
+        .then(r => r.json())
+        .then(data => {
+            if(data.error){
+                body.innerHTML = '<div class="alert alert-danger">' + data.error + '</div>';
+                return;
+            }
+            renderSerialStatusModal(data);
+        })
+        .catch(err => {
+            body.innerHTML = '<div class="alert alert-danger">Error loading status: ' + err.message + '</div>';
+        });
+}
+
+function renderSerialStatusModal(data){
+    const body = document.getElementById('serialStatusModalBody');
+    const title = document.getElementById('serialStatusModalTitle');
+
+    title.textContent = 'Serial: ' + data.serial_number;
+
+    let html = '';
+
+    // Status cards
+    html += '<div class="row g-3 mb-4">';
+    html += '<div class="col-6"><div class="card hdc-card border-success border-0"><div class="card-body text-center py-2">';
+    html += `<small class="text-muted d-block">Tool</small><strong>${data.tool_name}</strong>`;
+    html += `<span class="badge bg-secondary ms-2">${data.tool_code}</span>`;
+    html += '</div></div></div>';
+    html += '<div class="col-6"><div class="card hdc-card border-' + (data.is_in_store ? 'success' : 'warning') + ' border-0"><div class="card-body text-center py-2">';
+    html += `<small class="text-muted d-block">Status</small><span class="badge bg-${data.is_in_store ? 'success' : 'warning'}">${data.status_label}</span>`;
+    html += '</div></div></div>';
+    html += '</div>';
+
+    // Condition
+    if(data.condition && data.condition !== 'good'){
+        html += '<div class="alert alert-' + (data.condition === 'damaged' ? 'danger' : 'warning') + ' py-2 small mb-3">';
+        html += `<strong>Condition:</strong> ${data.condition.charAt(0).toUpperCase() + data.condition.slice(1)}`;
+        if(data.notes) html += `<br><em>${data.notes}</em>`;
+        html += '</div>';
+    }
+
+    // Current location
+    if(data.current_location){
+        html += '<div class="card hdc-card mb-3"><div class="card-header hdc-card-header"><i class="fas fa-map-pin me-2"></i>Current Location</div><div class="card-body">';
+        html += `<p><strong>${data.current_location}</strong></p>`;
+        if(data.current_rental_code){
+            html += `<small class="text-muted">Rental: <strong>${data.current_rental_code}</strong></small>`;
+        }
+        html += '</div></div>';
+    }
+
+    // If in store, show rental history is empty
+    if(data.is_in_store){
+        html += '<div class="alert alert-info py-2 small mb-3">';
+        html += '<i class="fas fa-warehouse me-1"></i>This serial is currently in the warehouse and available for rental.';
+        html += '</div>';
+    }
+
+    // Movement history
+    if(data.movements && data.movements.length > 0){
+        html += '<div class="card hdc-card"><div class="card-header hdc-card-header"><i class="fas fa-history me-2"></i>Movement History</div><div class="card-body p-0"><div class="table-responsive"><table class="table table-sm mb-0"><thead><tr><th>Date</th><th>Type</th><th>From</th><th>To</th></tr></thead><tbody>';
+
+        data.movements.forEach(m => {
+            const typeIcon = m.type.includes('rental_out') ? 'fa-arrow-right' :
+                            m.type.includes('return_in') ? 'fa-arrow-left' :
+                            m.type.includes('transfer') ? 'fa-exchange-alt' :
+                            m.type.includes('purchase') ? 'fa-cart-plus' : 'fa-circle';
+            const typeColor = m.type.includes('rental_out') ? 'text-success' :
+                             m.type.includes('return_in') ? 'text-info' :
+                             m.type.includes('transfer') ? 'text-warning' : 'text-muted';
+
+            html += '<tr>';
+            html += `<td>${new Date(m.timestamp).toLocaleDateString()}</td>`;
+            html += `<td><i class="fas ${typeIcon} ${typeColor}"></i> ${m.type.replace(/_/g, ' ')}</td>`;
+            html += `<td>${m.from_label || '-'}</td>`;
+            html += `<td>${m.to_label || '-'}</td>`;
+            html += '</tr>';
+        });
+
+        html += '</tbody></table></div></div></div>';
+    } else {
+        html += '<div class="text-muted small py-2 text-center">No movement history recorded.</div>';
+    }
+
+    // Legend
+    html += '<div class="mt-3 small text-muted">';
+    html += '<i class="fas fa-circle text-success me-1"></i> In Store &nbsp;';
+    html += '<i class="fas fa-circle text-warning me-1"></i> Rented Out &nbsp;';
+    html += '<i class="fas fa-circle text-orange me-1"></i> Transferred &nbsp;';
+    html += '<i class="fas fa-circle text-danger me-1"></i> Damaged/Lost';
+    html += '</div>';
+
+    body.innerHTML = html;
+}
+
+// ── Tool Status Modal (for quick view) ──────────────────────────────────────
+
+function showToolStatusDialog(toolId, toolName){
+    const body = document.getElementById('toolStatusDialogBody');
+    const title = document.getElementById('toolStatusDialogTitle');
+
+    title.textContent = 'Tool Status: ' + toolName;
+    body.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-mint"></div><p class="text-muted mt-2">Loading tool status...</p></div>';
+
+    fetch('/hdc/api/tool-rental/tools/' + toolId + '/summary')
+        .then(r => r.json())
+        .then(data => {
+            if(data.error){
+                body.innerHTML = '<div class="alert alert-danger">' + data.error + '</div>';
+                return;
+            }
+            renderToolStatusDialog(data);
+        })
+        .catch(err => {
+            body.innerHTML = '<div class="alert alert-danger">Error loading status: ' + err.message + '</div>';
+        });
+}
+
+function renderToolStatusDialog(data){
+    const body = document.getElementById('toolStatusDialogBody');
+    let html = '';
+
+    html += '<div class="row g-3 mb-4">';
+    html += '<div class="col-6 col-md-3"><div class="card hdc-card border-0"><div class="card-body text-center py-2"><small class="text-muted d-block">Total Owned</small><strong>' + data.owned + '</strong></div></div></div>';
+    html += '<div class="col-6 col-md-3"><div class="card hdc-card border-success border-0"><div class="card-body text-center py-2"><small class="text-success d-block">In Store</small><strong>' + data.in_store + '</strong></div></div></div>';
+    html += '<div class="col-6 col-md-3"><div class="card hdc-card border-warning border-0"><div class="card-body text-center py-2"><small class="text-warning d-block">Rented Out</small><strong>' + data.rented + '</strong></div></div></div>';
+    html += '<div class="col-6 col-md-3"><div class="card hdc-card border-orange border-0"><div class="card-body text-center py-2"><small class="text-orange d-block">Utilization</small><strong>' + data.utilization + '%</strong></div></div></div>';
+    html += '</div>';
+
+    if(data.serials && data.serials.length > 0){
+        html += '<div class="card hdc-card"><div class="card-header hdc-card-header"><i class="fas fa-qrcode me-2"></i>Serial Numbers (' + data.serials.length + ')</div><div class="card-body p-0"><div class="table-responsive"><table class="table table-sm mb-0"><thead><tr><th>Serial No</th><th>Status</th><th>Location</th></tr></thead><tbody>';
+
+        data.serials.slice(0, 50).forEach(s => {
+            const statusClass = s.is_in_store ? 'text-success' : 'text-warning';
+            html += '<tr>';
+            html += `<td><span class="badge bg-secondary">${s.serial_number}</span></td>`;
+            html += `<td class="${statusClass}">${s.status_label}</td>`;
+            html += `<td>${s.current_location || '-'}</td>`;
+            html += '</tr>';
+        });
+
+        if(data.serials.length > 50){
+            html += '<tr><td colspan="3" class="text-center text-muted">...and ' + (data.serials.length - 50) + ' more</td></tr>';
+        }
+
+        html += '</tbody></table></div></div></div>';
+    }
+
+    body.innerHTML = html;
+}
+
+// Wire up the serial picker search after DOM load
+document.getElementById('serialPickerSearch')?.addEventListener('input', function(){
+    renderSerialPicker(this.value);
+});
+
+// Tool status modal
+const toolStatusModalEl = document.getElementById('toolStatusModal');
+if(toolStatusModalEl){
+    document.querySelectorAll('.tool-status-btn').forEach(btn => {
+        btn.addEventListener('click', function(){
+            showToolStatusDialog(
+                parseInt(this.dataset.toolId),
+                this.dataset.toolName
+            );
+        });
+    });
+}
 </script>
+
+<!-- Tool Status Modal -->
+<div class="modal fade" id="toolStatusModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content hdc-modal">
+      <div class="modal-header">
+        <h6 class="modal-title" id="toolStatusModalTitle">Tool Status</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="toolStatusModalBody">
+        <div class="text-center py-4">
+            <div class="spinner-border text-mint" role="status"></div>
+            <p class="text-muted mt-2">Loading tool status...</p>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
 {% endblock %}
