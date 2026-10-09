@@ -489,6 +489,91 @@ class ToolRentalTransferItem(db.Model):
     rental_item = db.relationship('ToolRentalItem', foreign_keys=[rental_item_id])
 
 
+class ToolSerial(db.Model):
+    """Individual serial-numbered piece of a tool type.
+
+    Every physical piece of a multi-quantity tool (e.g. wheelbarrow #1, #2, #3)
+    gets one row here so the system can track *which exact piece* is where —
+    rented out, returned, transferred between sites, or still in the store.
+
+    ``serial_number`` is the human-readable tag on the piece (sticker, painted
+    number, barcode — whatever the warehouse uses).  It is unique per tool type
+    so two different tool types can both have a "WB-001" without collision.
+    """
+    __tablename__ = 'hdc_tool_serial'
+    id = db.Column(db.Integer, primary_key=True)
+    serial_number = db.Column(db.String(50), nullable=False)
+    tool_id = db.Column(db.Integer, db.ForeignKey('hdc_tool.id'), nullable=False, index=True)
+
+    # current location of this exact piece
+    is_in_store = db.Column(db.Boolean, default=True)     # True = still in warehouse
+    current_rental_id = db.Column(db.Integer, db.ForeignKey('hdc_tool_rental.id'), nullable=True)
+    current_location_label = db.Column(db.String(300))    # human-readable "where is it now"
+
+    # status for the tool-status dialog
+    status = db.Column(db.String(30), default='in_store')  # in_store / rented / returned / transferred / maintenance / damaged / lost
+
+    # notes / condition of this specific piece
+    condition = db.Column(db.String(30), default='good')  # good / maintenance / damaged / lost
+    notes = db.Column(db.String(300))
+
+    created_at = db.Column(db.DateTime, default=_pkt_now_naive)
+    updated_at = db.Column(db.DateTime, default=_pkt_now_naive, onupdate=_pkt_now_naive)
+
+    tool = db.relationship('Tool', backref='serials', foreign_keys=[tool_id])
+    current_rental = db.relationship('ToolRental', foreign_keys=[current_rental_id])
+
+    __table_args__ = (
+        db.UniqueConstraint('tool_id', 'serial_number', name='uq_tool_serial'),
+    )
+
+    @property
+    def serial_label(self):
+        """Combined label like 'WB-001' or 'Jack Hammer SN-042'."""
+        tool = self.tool
+        if tool and tool.tool_code:
+            return f"{tool.tool_code} / {self.serial_number}"
+        return self.serial_number
+
+    @property
+    def status_label(self):
+        labels = {
+            'in_store': 'In Store',
+            'rented': 'Rented Out',
+            'returned': 'Returned',
+            'transferred': 'Transferred',
+            'maintenance': 'In Maintenance',
+            'damaged': 'Damaged',
+            'lost': 'Lost',
+        }
+        return labels.get(self.status, self.status or '-')
+
+
+class ToolSerialMovement(db.Model):
+    """Movement history for an individual serial-numbered piece.
+
+    Every time a serial moves (rental out, return in, site transfer, store
+    return, status change) a row is logged here so the piece's full history
+    can be shown in the tool-status dialog.
+    """
+    __tablename__ = 'hdc_tool_serial_movement'
+    id = db.Column(db.Integer, primary_key=True)
+    serial_id = db.Column(db.Integer, db.ForeignKey('hdc_tool_serial.id'), nullable=False, index=True)
+    rental_id = db.Column(db.Integer, db.ForeignKey('hdc_tool_rental.id'), nullable=True)
+    transfer_id = db.Column(db.Integer, db.ForeignKey('hdc_tool_rental_transfer.id'), nullable=True)
+    return_id = db.Column(db.Integer, db.ForeignKey('hdc_tool_rental_return.id'), nullable=True)
+
+    movement_type = db.Column(db.String(30), default='rental_out')
+    from_location_label = db.Column(db.String(300))
+    to_location_label = db.Column(db.String(300))
+    notes = db.Column(db.String(500))
+
+    timestamp = db.Column(db.DateTime, default=_pkt_now_naive)
+    created_by = db.Column(db.Integer, db.ForeignKey('hdc_user.id'), nullable=True)
+
+    serial = db.relationship('ToolSerial', backref='movements', foreign_keys=[serial_id])
+
+
 class ToolMovementLog(db.Model):
     """Global tool tracking: every rental, return, transfer, purchase and scrap
     logs here for the 'where are all tools' view."""

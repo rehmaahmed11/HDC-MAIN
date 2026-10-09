@@ -10,7 +10,7 @@ from hdc.models.tool_rental import (
     TOOL_SCRAP_REASONS, Tool, ToolCategory,
     ToolMovementLog, ToolPurchase, ToolRental, ToolRentalAccountTxn, ToolRentalDiscount,
     ToolRentalItem, ToolRentalPayment, ToolRentalReturn, ToolRentalReturnItem,
-    ToolRentalTransfer, ToolScrap
+    ToolRentalTransfer, ToolScrap, ToolSerial, ToolSerialMovement
 )
 from hdc.services.record_permissions import integrity_message, integrity_query, record_code_query
 from hdc.utils.dates import _pkt_now_naive, _pkt_today
@@ -1043,3 +1043,434 @@ def void_discounts_for_payment(payment_id, reason=''):
         row.voided_at = _pkt_now_naive()
         void_tool_rental_discount_in_accounts(row.id)
     return len(rows)
+
+
+# --------------------------------------------------------------------------- #
+# Tool Serial Number Management — individual piece tracking
+# --------------------------------------------------------------------------- #
+
+def _next_serial_number(tool):
+    """Generate the next serial number for a tool based on existing serials."""
+    existing = ToolSerial.query.filter_by(tool_id=tool.id).order_by(ToolSerial.id.desc()).first()
+    if existing:
+        # Try to parse the numeric part of the last serial
+        last_serial = existing.serial_number
+        # If it looks like "WB-001" or "SN-042", increment the number
+        parts = last_serial.rsplit('-', 1)
+        if len(parts) == 2 and parts[1].isdigit():
+            prefix = parts[0]
+            num = int(parts[1]) + 1
+            return f"{prefix}-{num:03d}"
+    # Default: tool_code + sequential number
+    if tool.tool_code:
+        count = ToolSerial.query.filter_by(tool_id=tool.id).count()
+        return f"{tool.tool_code}-{count + 1:03d}"
+    count = ToolSerial.query.filter_by(tool_id=tool.id).count()
+    return f"SN-{count + 1:03d}"
+
+
+def create_tool_serials(tool_id, qty, serial_numbers=None, created_by=None):
+    """Create individual serial-numbered pieces for a tool.
+
+    Args:
+        tool_id: The tool ID.
+        qty: Number of serials to create.
+        serial_numbers: Optional list of pre-defined serial numbers. If None,
+            auto-generates serial numbers.
+        created_by: User ID who created the serials.
+
+    Returns:
+        (success, message, [serial_ids])
+    """
+    tool = db.session.get(Tool, int(tool_id or 0))
+    if not tool:
+        return False, 'Tool not found.', []
+
+    if serial_numbers is None:
+        serial_numbers = []
+        for _ in range(int(qty)):
+            serial_numbers.append(_next_serial_number(tool))
+
+    if len(serial_numbers) != int(qty):
+        return False, f'Serial number count ({len(serial_numbers)}) does not match quantity ({qty}).', []
+
+    created_ids = []
+    for sn in serial_numbers:
+        existing = ToolSerial.query.filter_by(tool_id=tool.id, serial_number=sn).first()
+        if existing:
+            continue  # Skip duplicates silently
+        serial = ToolSerial(
+            serial_number=sn,
+            tool_id=tool.id,
+            is_in_store=True,
+            status='in_store',
+            condition='good',
+            created_by=created_by,
+        )
+        db.session.add(serial)
+        db.session.flush()
+        created_ids.append(serial.id)
+
+        # Log the initial stock-in movement
+        create_serial_movement(
+            serial_id=serial.id,
+            movement_type='purchase_in',
+            from_label='Supplier / Purchase',
+            to_label='Warehouse / Store',
+            notes=f'Serial {sn} added to inventory',
+            created_by=created_by,
+        )
+
+    return True, f'Created {len(created_ids)} serial(s) for {tool.name}.', created_ids
+
+
+def get_available_serials(tool_id, rental_id=None):
+    """Get serials that are currently in store (available for rental).
+
+    Args:
+        tool_id: The tool ID.
+        rental_id: Optional rental ID to filter (for transfer scenarios).
+
+    Returns:
+        List of ToolSerial objects that are in store.
+    """
+    query = ToolSerial.query.filter_by(tool_id=int(tool_id or 0), is_in_store=True)
+    if rental_id:
+        # For transfer scenarios, exclude serials already in the target rental
+        query = query.filter(ToolSerial.current_rental_id != rental_id)
+    return query.order_by(ToolSerial.serial_number).all()
+
+
+def get_serial_status(serial_id):
+    """Get detailed status of a single serial-numbered piece.
+
+    Returns a dict with full status info including movement history.
+    """
+    serial = db.session.get(ToolSerial, int(serial_id or 0))
+    if not serial:
+        return None
+
+    movements = (ToolSerialMovement.query
+                 .filter_by(serial_id=serial.id)
+                 .order_by(ToolSerialMovement.timestamp.desc(), ToolSerialMovement.id.desc())
+                 .limit(50)
+                 .all())
+
+    current_rental = None
+    if serial.current_rental_id:
+        current_rental = db.session.get(ToolRental, serial.current_rental_id)
+
+    return {
+        'serial': serial,
+        'movements': movements,
+        'current_rental': current_rental,
+        'status': serial.status,
+        'status_label': serial.status_label,
+        'is_in_store': serial.is_in_store,
+        'condition': serial.condition,
+        'notes': serial.notes,
+        'tool': serial.tool,
+    }
+
+
+def get_all_tool_serials_summary():
+    """Get a summary of all serials across all tools for the inventory view.
+
+    Returns list of dicts with tool info and serial breakdown.
+    """
+    tools = Tool.query.filter(Tool.is_void == False).order_by(Tool.name.asc()).all()
+    result = []
+
+    for tool in tools:
+        serials = ToolSerial.query.filter_by(tool_id=tool.id).all()
+        in_store = [s for s in serials if s.is_in_store]
+        rented = [s for s in serials if not s.is_in_store and s.status == 'rented']
+        maintenance = [s for s in serials if s.condition == 'maintenance']
+        damaged = [s for s in serials if s.condition == 'damaged']
+        lost = [s for s in serials if s.condition == 'lost']
+
+        result.append({
+            'tool': tool,
+            'tool_id': tool.id,
+            'total_serials': len(serials),
+            'in_store': len(in_store),
+            'rented': len(rented),
+            'maintenance': len(maintenance),
+            'damaged': len(damaged),
+            'lost': len(lost),
+            'serials': serials,
+            'in_store_serials': in_store,
+            'rented_serials': rented,
+        })
+
+    return result
+
+
+def update_serial_status(serial_id, status, location_label=None, rental_id=None, created_by=None):
+    """Update the status of a serial-numbered piece.
+
+    Args:
+        serial_id: The serial ID.
+        status: New status ('in_store', 'rented', 'returned', 'transferred',
+                'maintenance', 'damaged', 'lost').
+        location_label: Human-readable location.
+        rental_id: Current rental ID if rented.
+        created_by: User ID.
+
+    Returns:
+        (success, message)
+    """
+    serial = db.session.get(ToolSerial, int(serial_id or 0))
+    if not serial:
+        return False, 'Serial not found.'
+
+    old_status = serial.status
+    serial.status = status
+    if location_label:
+        serial.current_location_label = location_label
+    if rental_id:
+        serial.current_rental_id = rental_id
+        serial.is_in_store = False
+    else:
+        serial.is_in_store = (status == 'in_store')
+        serial.current_rental_id = None
+
+    serial.updated_at = _pkt_now_naive()
+    serial.updated_by = created_by
+
+    # Log the movement
+    from_label = serial.current_location_label or 'Unknown'
+    to_label = location_label or 'Unknown'
+    if old_status != status:
+        create_serial_movement(
+            serial_id=serial.id,
+            movement_type=f'status_change_{status}',
+            from_label=from_label,
+            to_label=to_label,
+            notes=f'Status changed from {old_status} to {status}',
+            created_by=created_by,
+        )
+
+    db.session.commit()
+    return True, f'Serial status updated to {status}.'
+
+
+def create_serial_movement(serial_id, movement_type, from_label, to_label, notes='', rental_id=None, transfer_id=None, return_id=None, created_by=None):
+    """Log a movement for a serial-numbered piece."""
+    serial = db.session.get(ToolSerial, int(serial_id or 0))
+    if not serial:
+        return None
+
+    movement = ToolSerialMovement(
+        serial_id=serial.id,
+        rental_id=rental_id,
+        transfer_id=transfer_id,
+        return_id=return_id,
+        movement_type=movement_type,
+        from_location_label=from_label,
+        to_location_label=to_label,
+        notes=notes,
+        created_by=created_by,
+    )
+    db.session.add(movement)
+    db.session.flush()
+    return movement
+
+
+def get_serials_for_rental(rental_id):
+    """Get all serials currently assigned to a rental.
+
+    Returns list of dicts with serial info for the rental detail view.
+    """
+    rental = db.session.get(ToolRental, int(rental_id or 0))
+    if not rental:
+        return []
+
+    serials = ToolSerial.query.filter_by(current_rental_id=rental.id).all()
+    result = []
+    for serial in serials:
+        result.append({
+            'serial': serial,
+            'serial_id': serial.id,
+            'serial_number': serial.serial_number,
+            'tool_name': serial.tool.name if serial.tool else '-',
+            'tool_code': serial.tool.tool_code if serial.tool else '-',
+            'status': serial.status,
+            'status_label': serial.status_label,
+            'condition': serial.condition,
+            'notes': serial.notes,
+            'location': serial.current_location_label or rental.current_location_label,
+        })
+    return result
+
+
+def get_serials_in_store_summary():
+    """Get a summary of all serials currently in store for the rental creation picker.
+
+    Returns list of dicts suitable for the multi-select tool picker.
+    """
+    in_store_serials = ToolSerial.query.filter_by(is_in_store=True).all()
+    result = []
+    for serial in in_store_serials:
+        result.append({
+            'serial_id': serial.id,
+            'tool_id': serial.tool_id,
+            'tool_name': serial.tool.name if serial.tool else '-',
+            'tool_code': serial.tool.tool_code if serial.tool else '-',
+            'serial_number': serial.serial_number,
+            'label': f"{serial.tool.name if serial.tool else 'Unknown'} ({serial.serial_number})",
+            'status': serial.status,
+            'condition': serial.condition,
+            'serial': serial,
+        })
+    return result
+
+
+def get_serials_by_tool_for_rental(tool_id):
+    """Get all in-store serials for a specific tool.
+
+    Used when creating a rental to show available serials for a tool.
+    """
+    return ToolSerial.query.filter_by(tool_id=int(tool_id or 0), is_in_store=True).order_by(ToolSerial.serial_number).all()
+
+
+def assign_serials_to_rental(rental_id, serial_ids, notes='', created_by=None):
+    """Assign serial-numbered pieces to a rental.
+
+    Args:
+        rental_id: The rental ID.
+        serial_ids: List of serial IDs to assign.
+        notes: Notes for the assignment.
+        created_by: User ID.
+
+    Returns:
+        (success, message, assigned_count)
+    """
+    rental = db.session.get(ToolRental, int(rental_id or 0))
+    if not rental:
+        return False, 'Rental not found.', 0
+
+    assigned = 0
+    for serial_id in serial_ids:
+        serial = db.session.get(ToolSerial, int(serial_id or 0))
+        if not serial:
+            continue
+        if not serial.is_in_store:
+            continue  # Already rented out
+
+        # Update serial status
+        serial.is_in_store = False
+        serial.current_rental_id = rental.id
+        serial.status = 'rented'
+        serial.current_location_label = rental.current_location_label or 'Rented Out'
+        serial.updated_at = _pkt_now_naive()
+        serial.updated_by = created_by
+
+        # Log the movement
+        create_serial_movement(
+            serial_id=serial.id,
+            movement_type='rental_out',
+            from_label='Warehouse / Store',
+            to_label=rental.current_location_label or 'Rented Out',
+            notes=notes or f'Assigned to rental {rental.rental_code}',
+            rental_id=rental.id,
+            created_by=created_by,
+        )
+        assigned += 1
+
+    db.session.commit()
+    return True, f'Assigned {assigned} serial(s) to rental {rental.rental_code}.', assigned
+
+
+def return_serials_from_rental(rental_id, serial_ids, return_id=None, created_by=None):
+    """Return serial-numbered pieces from a rental.
+
+    Args:
+        rental_id: The rental ID.
+        serial_ids: List of serial IDs to return.
+        return_id: Optional return transaction ID.
+        created_by: User ID.
+
+    Returns:
+        (success, message, returned_count)
+    """
+    rental = db.session.get(ToolRental, int(rental_id or 0))
+    if not rental:
+        return False, 'Rental not found.', 0
+
+    returned = 0
+    for serial_id in serial_ids:
+        serial = db.session.get(ToolSerial, int(serial_id or 0))
+        if not serial:
+            continue
+        if serial.is_in_store:
+            continue  # Already in store
+
+        # Update serial status
+        old_location = serial.current_location_label or 'Unknown'
+        serial.is_in_store = True
+        serial.current_rental_id = None
+        serial.status = 'returned'
+        serial.current_location_label = 'Warehouse / Store'
+        serial.updated_at = _pkt_now_naive()
+        serial.updated_by = created_by
+
+        # Log the movement
+        create_serial_movement(
+            serial_id=serial.id,
+            movement_type='return_in',
+            from_label=old_location,
+            to_label='Warehouse / Store',
+            notes=f'Returned from rental {rental.rental_code}' + (f', return #{return_id}' if return_id else ''),
+            rental_id=rental.id,
+            return_id=return_id,
+            created_by=created_by,
+        )
+        returned += 1
+
+    db.session.commit()
+    return True, f'Returned {returned} serial(s) to store.', returned
+
+
+def transfer_serials(serial_ids, from_label, to_label, transfer_id=None, rental_id=None, created_by=None):
+    """Transfer serial-numbered pieces between locations.
+
+    Args:
+        serial_ids: List of serial IDs to transfer.
+        from_label: Source location label.
+        to_label: Destination location label.
+        transfer_id: Optional transfer transaction ID.
+        rental_id: Current rental ID.
+        created_by: User ID.
+
+    Returns:
+        (success, message, transferred_count)
+    """
+    transferred = 0
+    for serial_id in serial_ids:
+        serial = db.session.get(ToolSerial, int(serial_id or 0))
+        if not serial:
+            continue
+
+        # Update serial status
+        old_location = serial.current_location_label or from_label
+        serial.current_location_label = to_label
+        serial.status = 'transferred'
+        serial.updated_at = _pkt_now_naive()
+        serial.updated_by = created_by
+
+        # Log the movement
+        create_serial_movement(
+            serial_id=serial.id,
+            movement_type='site_transfer',
+            from_label=old_location,
+            to_label=to_label,
+            notes=f'Transferred from {from_label} to {to_label}',
+            transfer_id=transfer_id,
+            rental_id=rental_id,
+            created_by=created_by,
+        )
+        transferred += 1
+
+    db.session.commit()
+    return True, f'Transferred {transferred} serial(s) to {to_label}.', transferred
