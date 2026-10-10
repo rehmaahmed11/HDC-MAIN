@@ -16,7 +16,7 @@ from hdc.models.projects import Project, Stage
 from hdc.services.accounts import _accounts_post_supplier_credit_row, _accounts_set_void_by_source, _accounts_upsert_purchase_paid_txn
 from hdc.services.audit import log_action
 from hdc.services.record_permissions import integrity_message, integrity_query
-from hdc.services.purchase import validate_delivery_reduction, _MATERIAL_V2_UNITS, _ensure_material_v2, _ensure_supplier_quick, _material_v2_available, _material_v2_delivered, _material_v2_used, _material_v2_weighted_cost, _purchase_v2_available_in_scope_qty, _purchase_v2_delivered_qty, _purchase_v2_integrity_report, _repair_supplier_purchase_v2_ledger, _sync_purchase_v2_ledger, _sync_supplier_po_payment_status, _transfer_v2_material_between_scopes
+from hdc.services.purchase import REGISTER_SORT_MODES, validate_delivery_reduction, _MATERIAL_V2_UNITS, _ensure_material_v2, _ensure_supplier_quick, _material_v2_available, _material_v2_delivered, _material_v2_used, _material_v2_weighted_cost, _purchase_v2_available_in_scope_qty, _purchase_v2_delivered_qty, _purchase_v2_integrity_report, _purchase_v2_pending_rows, _repair_supplier_purchase_v2_ledger, _sync_purchase_v2_ledger, _sync_supplier_po_payment_status, _transfer_v2_material_between_scopes
 from hdc.services.timekeeping import _has_recent_duplicate
 from hdc.utils.dates import _pkt_now_naive, _pkt_today
 from hdc.utils.format import _flt, _parse_date
@@ -527,10 +527,16 @@ def register(app):
         _repair_supplier_purchase_v2_ledger(supplier.id)
         if db.session.new or db.session.dirty:
             db.session.commit()
+        # Newest purchase first — the row the operator just recorded is the one
+        # they are looking for when they land back on this page.
         purchases = (PurchaseV2.query
                      .filter(PurchaseV2.supplier_id == supplier.id, PurchaseV2.is_void == False)
-                     .order_by(PurchaseV2.created_at.asc(), PurchaseV2.id.asc())
+                     .order_by(PurchaseV2.created_at.desc(), PurchaseV2.id.desc())
                      .all())
+        # The ledger stays chronological here: the running balance below is
+        # accumulated row by row, so it must be read oldest → newest.  Only the
+        # display order is reversed afterwards, and every row keeps the balance
+        # it had at its own point in time.
         ledger_rows = (SupplierLedger.query
                        .filter(SupplierLedger.supplier_id == supplier.id, SupplierLedger.is_void == False)
                        .order_by(SupplierLedger.created_at.asc(), SupplierLedger.id.asc())
@@ -582,6 +588,8 @@ def register(app):
             else:
                 entry_label = (ref_type.title() if ref_type else 'Payment')
             ledger_items.append({
+                '_hdc_entity': 'hdc_supplier_ledger',
+                '_hdc_id': r.id,
                 'id': r.id,
                 'date': r.created_at,
                 'supplier': supplier.name,
@@ -599,6 +607,9 @@ def register(app):
                 'reference_type': r.reference_type or '',
                 'reference_id': r.reference_id
             })
+        # Newest entry on top, exactly as the accounts and delivery registers
+        # now read.  The balances were already computed in chronological order.
+        ledger_items.reverse()
         return render_template('purchase/purchase_v2_supplier_detail.html',
             supplier=supplier,
             purchases=purchases,
@@ -837,10 +848,52 @@ def register(app):
             db.session.commit()
             flash(f'Delivery #{row.id} recorded.', 'success')
             return redirect(url_for('hdc_purchase_v2_delivered'))
-        rows = (Delivery.query
-                .filter(Delivery.is_void == False)
-                .order_by(Delivery.created_at.asc(), Delivery.id.asc())
-                .all())
+        # ── register filters: every one optional, all combinable ───────────
+        # The operator standing at a site wants this register narrowed to what
+        # they just did, so the same fields the form fills in (site, stage,
+        # material, PO) are the fields the list can be filtered by.
+        filter_po_raw = (request.args.get('po_number') or '').strip()
+        filter_po_number = None
+        if filter_po_raw:
+            try:
+                filter_po_number = int(filter_po_raw)
+            except (TypeError, ValueError):
+                flash('PO number must be numeric.', 'warning')
+        filter_material_id = request.args.get('material_id', type=int)
+        filter_supplier_id = request.args.get('supplier_id', type=int)
+        filter_project_id = request.args.get('project_id', type=int)
+        filter_stage_id = request.args.get('stage_id', type=int)
+        filter_date_from = _parse_date((request.args.get('date_from') or '').strip(), fallback=None)
+        filter_date_to = _parse_date((request.args.get('date_to') or '').strip(), fallback=None)
+        sort_mode = (request.args.get('sort') or 'newest').strip().lower()
+        if sort_mode not in REGISTER_SORT_MODES:
+            sort_mode = 'newest'
+
+        dq = Delivery.query.filter(Delivery.is_void == False)
+        if filter_po_number:
+            dq = dq.filter(Delivery.purchase_id == filter_po_number)
+        if filter_material_id:
+            dq = dq.filter(Delivery.material_id == filter_material_id)
+        if filter_supplier_id:
+            dq = (dq.join(PurchaseV2, Delivery.purchase_id == PurchaseV2.id)
+                    .filter(PurchaseV2.supplier_id == filter_supplier_id))
+        if filter_project_id:
+            dq = dq.filter(Delivery.project_id == filter_project_id)
+        if filter_stage_id:
+            dq = dq.filter(Delivery.stage_id == filter_stage_id)
+        if filter_date_from:
+            dq = dq.filter(Delivery.date >= filter_date_from)
+        if filter_date_to:
+            dq = dq.filter(Delivery.date <= filter_date_to)
+        # Newest entry first unless the operator asks for another arrangement;
+        # id breaks ties for rows entered in the same second.
+        delivery_sort = {
+            'newest': (Delivery.created_at.desc(), Delivery.id.desc()),
+            'oldest': (Delivery.created_at.asc(), Delivery.id.asc()),
+            'po_asc': (Delivery.purchase_id.asc(), Delivery.created_at.desc(), Delivery.id.desc()),
+            'po_desc': (Delivery.purchase_id.desc(), Delivery.created_at.desc(), Delivery.id.desc()),
+        }[sort_mode]
+        rows = dq.order_by(*delivery_sort).all()
         prefill_shift_material_id = request.args.get('shift_material_id', type=int)
         prefill_from_project_id = request.args.get('from_project_id', type=int)
         prefill_from_stage_id = request.args.get('from_stage_id', type=int)
@@ -854,50 +907,49 @@ def register(app):
                 Delivery.is_void == False
             ).first()
         total_qty = float(sum(float(r.quantity or 0.0) for r in rows))
+        delivery_total_count = int(db.session.query(func.count(Delivery.id))
+                                   .filter(Delivery.is_void == False).scalar() or 0)
         projects = Project.query.order_by(Project.name.asc()).all()
         stages = Stage.query.order_by(Stage.name.asc()).all()
-        purchases = (PurchaseV2.query
-                     .filter(PurchaseV2.is_void == False)
-                     .order_by(PurchaseV2.created_at.asc(), PurchaseV2.id.asc())
-                     .all())
-        purchase_ids = [int(p.id) for p in purchases]
-        delivered_map = {}
-        if purchase_ids:
-            delivered_map = dict(
-                db.session.query(
-                    Delivery.purchase_id,
-                    func.coalesce(func.sum(Delivery.quantity), 0.0)
-                ).filter(
-                    Delivery.is_void == False,
-                    Delivery.purchase_id.in_(purchase_ids)
-                ).group_by(Delivery.purchase_id).all()
-            )
-        purchase_rows = []
-        for p in purchases:
-            delivered_qty = float(delivered_map.get(p.id, 0.0) or 0.0)
-            remaining_qty = max(0.0, float(p.quantity or 0.0) - delivered_qty)
-            if remaining_qty <= 1e-9:
-                continue
-            purchase_rows.append({
-                'id': p.id,
-                'supplier_name': (p.supplier.name if p.supplier else '-'),
-                'material_name': (p.material.name if p.material else '-'),
-                'material_id': int(p.material_id or 0),
-                'unit': (p.material.unit if p.material else ''),
-                'total_qty': float(p.quantity or 0.0),
-                'delivered_qty': delivered_qty,
-                'remaining_qty': remaining_qty
-            })
+        suppliers = Supplier.query.filter(Supplier.is_void == False).order_by(Supplier.name.asc()).all()
+        # One read serves three things on this page: the PO dropdown, the
+        # Pending Purchases pop-up and the "materials that have stock" hint.
+        pending_rows = _purchase_v2_pending_rows()
+        purchase_rows = [{
+            'id': pr['id'],
+            'supplier_name': pr['supplier_name'],
+            'material_name': pr['material_name'],
+            'material_id': pr['material_id'],
+            'unit': pr['unit'],
+            'total_qty': pr['ordered_qty'],
+            'delivered_qty': pr['delivered_qty'],
+            'remaining_qty': pr['pending_qty']
+        } for pr in pending_rows]
+        pending_total_qty = float(sum(float(pr['pending_qty'] or 0.0) for pr in pending_rows))
+        pending_total_value = float(sum(float(pr['pending_value'] or 0.0) for pr in pending_rows))
         all_materials = MaterialV2.query.filter_by(is_void=False).order_by(MaterialV2.name.asc()).all()
         material_ids_with_stock = {int(pr['material_id']) for pr in purchase_rows}
         return render_template('purchase/purchase_v2_delivered.html',
             rows=rows,
             total_qty=total_qty,
+            delivery_total_count=delivery_total_count,
             projects=projects,
             stages=stages,
+            suppliers=suppliers,
             purchase_rows=purchase_rows,
             all_materials=all_materials,
             material_ids_with_stock=material_ids_with_stock,
+            pending_rows=pending_rows,
+            pending_total_qty=pending_total_qty,
+            pending_total_value=pending_total_value,
+            filter_po_number=filter_po_raw,
+            selected_material_id=filter_material_id,
+            selected_supplier_id=filter_supplier_id,
+            selected_project_id=filter_project_id,
+            selected_stage_id=filter_stage_id,
+            filter_date_from=(filter_date_from.isoformat() if filter_date_from else ''),
+            filter_date_to=(filter_date_to.isoformat() if filter_date_to else ''),
+            sort_mode=sort_mode,
             today=_pkt_today().isoformat(),
             prefill_shift_material_id=prefill_shift_material_id,
             prefill_from_project_id=prefill_from_project_id,
@@ -1062,19 +1114,36 @@ def register(app):
             except (TypeError, ValueError):
                 flash('PO number must be numeric.', 'warning')
         material_id = request.args.get('material_id', type=int)
+        # Site + stage: usage is always booked against a scope, so the log has
+        # to be readable one site at a time.
+        filter_project_id = request.args.get('project_id', type=int)
+        filter_stage_id = request.args.get('stage_id', type=int)
         date_from = _parse_date((request.args.get('date_from') or '').strip(), fallback=None)
         date_to = _parse_date((request.args.get('date_to') or '').strip(), fallback=None)
+        sort_mode = (request.args.get('sort') or 'newest').strip().lower()
+        if sort_mode not in REGISTER_SORT_MODES:
+            sort_mode = 'newest'
         q = UsageLogV2.query.filter(UsageLogV2.is_void == False)
         if po_number:
             q = q.filter(UsageLogV2.purchase_id == po_number)
         if material_id:
             q = q.filter(UsageLogV2.material_id == material_id)
+        if filter_project_id:
+            q = q.filter(UsageLogV2.project_id == filter_project_id)
+        if filter_stage_id:
+            q = q.filter(UsageLogV2.stage_id == filter_stage_id)
         if date_from:
             q = q.filter(UsageLogV2.date >= date_from)
         if date_to:
             q = q.filter(UsageLogV2.date <= date_to)
         # Newest entries first; id breaks ties for rows created in the same second.
-        rows = q.order_by(UsageLogV2.created_at.desc(), UsageLogV2.id.desc()).all()
+        usage_sort = {
+            'newest': (UsageLogV2.created_at.desc(), UsageLogV2.id.desc()),
+            'oldest': (UsageLogV2.created_at.asc(), UsageLogV2.id.asc()),
+            'po_asc': (UsageLogV2.purchase_id.asc(), UsageLogV2.created_at.desc(), UsageLogV2.id.desc()),
+            'po_desc': (UsageLogV2.purchase_id.desc(), UsageLogV2.created_at.desc(), UsageLogV2.id.desc()),
+        }[sort_mode]
+        rows = q.order_by(*usage_sort).all()
         total_qty = float(sum(float(r.quantity or 0.0) for r in rows))
         total_cost = float(sum(float(r.cost or 0.0) for r in rows))
         projects = Project.query.order_by(Project.name.asc()).all()
@@ -1105,9 +1174,12 @@ def register(app):
             stock_rows=stock_rows,
             material_available_map=material_available_map,
             selected_material_id=material_id,
+            selected_project_id=filter_project_id,
+            selected_stage_id=filter_stage_id,
             filter_po_number=po_raw,
             filter_date_from=(date_from.isoformat() if date_from else ''),
             filter_date_to=(date_to.isoformat() if date_to else ''),
+            sort_mode=sort_mode,
             today=_pkt_today().isoformat()
         )
 
@@ -1163,7 +1235,8 @@ def register(app):
             dq = dq.filter(Delivery.stage_id == stage.id)
         if material_id:
             dq = dq.filter(Delivery.material_id == material_id)
-        delivery_rows = dq.order_by(Delivery.created_at.asc(), Delivery.id.asc()).all()
+        # Newest delivery first, same as the Delivery register.
+        delivery_rows = dq.order_by(Delivery.created_at.desc(), Delivery.id.desc()).all()
 
         total_sent = float(sum(float(r.get('sent_qty') or 0.0) for r in summary_rows))
         total_used = float(sum(float(r.get('used_qty') or 0.0) for r in summary_rows))

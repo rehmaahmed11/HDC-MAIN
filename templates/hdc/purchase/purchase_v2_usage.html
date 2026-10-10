@@ -113,7 +113,7 @@
         <div class="card hdc-card mb-3">
             <div class="card-header hdc-card-header"><i class="fas fa-filter me-2"></i>Filter Usage Log</div>
             <div class="card-body">
-                <form method="get" class="row g-2 align-items-end">
+                <form method="get" class="row g-2 align-items-end" id="usageFilterForm">
                     <div class="col-md-3">
                         <label class="form-label small fw-semibold">PO #</label>
                         <input type="number" name="po_number" class="form-control form-control-sm"
@@ -136,17 +136,59 @@
                             <input type="date" name="date_to" class="form-control" value="{{ filter_date_to }}" title="To date">
                         </div>
                     </div>
-                    <div class="col-12 d-flex gap-2">
+                    <div class="col-md-4">
+                        <label class="form-label small fw-semibold">Site (Project)</label>
+                        <select name="project_id" id="usageFilterProject" class="form-select form-select-sm">
+                            <option value="">All Sites</option>
+                            {% for p in projects %}
+                            <option value="{{ p.id }}" {% if selected_project_id == p.id %}selected{% endif %}>{{ p.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label small fw-semibold">Stage</label>
+                        <select name="stage_id" id="usageFilterStage" class="form-select form-select-sm">
+                            <option value="">All Stages</option>
+                            {% for s in stages %}
+                            <option value="{{ s.id }}" data-project="{{ s.project_id }}" {% if selected_stage_id == s.id %}selected{% endif %}>
+                                {{ s.project.name if s.project else '' }} &rarr; {{ s.name }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label small fw-semibold">Arrange by</label>
+                        <select name="sort" class="form-select form-select-sm">
+                            <option value="newest" {% if sort_mode == 'newest' %}selected{% endif %}>Newest entry first</option>
+                            <option value="oldest" {% if sort_mode == 'oldest' %}selected{% endif %}>Oldest entry first</option>
+                            <option value="po_asc" {% if sort_mode == 'po_asc' %}selected{% endif %}>PO # (low &rarr; high)</option>
+                            <option value="po_desc" {% if sort_mode == 'po_desc' %}selected{% endif %}>PO # (high &rarr; low)</option>
+                        </select>
+                    </div>
+                    <div class="col-12 d-flex flex-wrap gap-2">
                         <button type="submit" class="btn btn-sm btn-mint"><i class="fas fa-filter me-1"></i>Filter</button>
-                        {% if filter_po_number or selected_material_id or filter_date_from or filter_date_to %}
-                        <a href="{{ url_for('hdc_purchase_v2_usage_page') }}" class="btn btn-sm btn-outline-secondary">Clear</a>
+                        {# Same two one-tap buttons the Delivery register has:
+                           jump straight back to the whole log. #}
+                        <button type="button" class="btn btn-sm btn-outline-primary" id="usageFilterAllSitesBtn"
+                                title="Show every site">
+                            <i class="fas fa-building me-1"></i>All Sites
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-primary" id="usageFilterAllStagesBtn"
+                                title="Show every stage">
+                            <i class="fas fa-layer-group me-1"></i>All Stages
+                        </button>
+                        {% if filter_po_number or selected_material_id or selected_project_id or selected_stage_id or filter_date_from or filter_date_to %}
+                        <a href="{{ url_for('hdc_purchase_v2_usage_page', sort=sort_mode) }}" class="btn btn-sm btn-outline-secondary">Clear</a>
                         {% endif %}
                     </div>
                 </form>
             </div>
         </div>
         <div class="card hdc-card">
-            <div class="card-header hdc-card-header"><i class="fas fa-list me-2"></i>Usage Log</div>
+            <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-list me-2"></i>Usage Log</span>
+                <small class="text-muted">Newest entry first</small>
+            </div>
             <div class="table-responsive">
                 <table class="table hdc-table table-sm align-middle mb-0">
                     <thead>
@@ -427,6 +469,23 @@
             return problems;
         });
     }
+})();
+
+// ── shared register behaviour (static/hdc/js/pages/purchase_delivery.js) ───
+// The All Sites / All Stages buttons are the same control the Delivery
+// register has, so both pages bind the one shared implementation.
+</script>
+<script src="/hdc_static/js/pages/purchase_delivery.js"></script>
+<script>
+(function () {
+    if (!window.hdcPurchaseDelivery) return;
+    window.hdcPurchaseDelivery.bindAllScopeButtons(document, {
+        form: 'usageFilterForm',
+        project: 'usageFilterProject',
+        stage: 'usageFilterStage',
+        allSites: 'usageFilterAllSitesBtn',
+        allStages: 'usageFilterAllStagesBtn'
+    });
 })();
 
 function openUsageEditModal(id, date, qty, projId, stageId, notes) {

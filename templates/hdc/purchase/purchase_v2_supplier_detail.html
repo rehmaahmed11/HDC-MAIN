@@ -185,7 +185,10 @@
 
 <!-- Purchases -->
 <div class="card hdc-card mb-4">
-    <div class="card-header hdc-card-header"><i class="fas fa-cart-shopping me-2"></i>Purchase History</div>
+    <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+        <span><i class="fas fa-cart-shopping me-2"></i>Purchase History</span>
+        <small class="text-muted">Newest entry first</small>
+    </div>
     <div class="table-responsive">
         <table class="table hdc-table table-sm align-middle mb-0">
             <thead>
@@ -226,7 +229,12 @@
 
 <!-- Ledger -->
 <div class="card hdc-card">
-    <div class="card-header hdc-card-header"><i class="fas fa-book me-2"></i>Supplier Ledger</div>
+    <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+        <span><i class="fas fa-book me-2"></i>Supplier Ledger</span>
+        {# The running balance on each row is still the balance at that point in
+           time — only the reading order is newest first. #}
+        <small class="text-muted">Newest entry first &bull; balance shown as at that entry</small>
+    </div>
     <div class="table-responsive">
         <table class="table hdc-table table-sm align-middle mb-0">
             <thead>
@@ -246,7 +254,9 @@
             <tbody>
                 {% for r in ledger_items %}
                 <tr {{ r|hdc_row_attrs }}>
-                    <td class="text-muted small">{{ loop.index }}</td>
+                    {# Row id, not a sequence: the ledger now reads newest
+                       first, so a 1..N counter would run backwards. #}
+                    <td class="text-muted small">#{{ r.id }}</td>
                     <td class="small">{{ r.date.strftime('%Y-%m-%d') if r.date else '-' }}</td>
                     <td>
                         <span class="badge {% if (r.entry_type or '') == 'debit' %}bg-danger{% else %}bg-success{% endif %}">
