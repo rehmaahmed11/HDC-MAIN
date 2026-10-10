@@ -6,7 +6,6 @@
 
 .hdc-txn-form [hidden] { display: none !important; }
 .hdc-txn-body[hidden] { display: none !important; }
-.hdc-txn-fieldset[hidden] { display: none !important; }
 
 .hdc-txn-direction { margin-bottom: 14px; }
 .hdc-txn-direction > .form-label { font-weight: 700; margin-bottom: 7px; }
@@ -178,7 +177,6 @@
     line-height: 1;
 }
 .hdc-txn-more[open] > summary::after { content: '−'; }
-.hdc-txn-more-summary-note { color: var(--text-muted); font-size: .75rem; font-weight: 400; }
 .hdc-txn-extra-grid { padding: 0 12px 12px; }
 
 .hdc-txn-alert {

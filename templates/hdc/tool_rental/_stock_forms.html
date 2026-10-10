@@ -8,7 +8,7 @@
 
 {% macro purchase_modal(modal_id, tools, tool=None, today='', known_suppliers=[]) %}
 <div class="modal fade" id="{{ modal_id }}" tabindex="-1">
-  <div class="modal-dialog">
+  <div class="modal-dialog modal-lg">
     <div class="modal-content hdc-modal">
       <form method="POST" action="{% if tool %}{{ url_for('hdc_tool_rental_tool_purchase', tool_id=tool.id) }}{% else %}{{ url_for('hdc_tool_rental_purchase_create') }}{% endif %}"
             id="{{ modal_id }}Form">

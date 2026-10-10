@@ -370,7 +370,7 @@
 {% for r in tools %}
                         <!-- Edit Modal -->
                         <div class="modal fade" id="editModal{{ r.tool_id }}" tabindex="-1">
-                          <div class="modal-dialog">
+                          <div class="modal-dialog modal-lg">
                             <div class="modal-content hdc-modal">
                               <form method="POST" action="{{ url_for('hdc_tool_rental_tool_edit', tool_id=r.tool_id) }}">
                                 <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
