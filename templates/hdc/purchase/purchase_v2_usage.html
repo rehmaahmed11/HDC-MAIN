@@ -18,7 +18,7 @@
         <div class="card hdc-card mb-4">
             <div class="card-header hdc-card-header"><i class="fas fa-tools me-2"></i>Record Usage</div>
             <div class="card-body">
-                <form method="POST" id="usageV2Form">
+                <form method="POST" id="usageV2Form" data-hdc-dialog>
                     <div class="mb-3">
                         <label class="form-label fw-semibold">Material <span class="text-danger">*</span></label>
                         <select name="material_id" class="form-select" id="usageV2MaterialSelect" required>
@@ -210,7 +210,7 @@
                 <h5 class="modal-title"><i class="fas fa-edit me-2"></i>Edit Usage Record</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
-            <form method="POST" id="usageEditForm">
+            <form method="POST" id="usageEditForm" data-hdc-dialog>
                 <div class="modal-body">
                     <div class="mb-3">
                         <label class="form-label fw-semibold">Date</label>
@@ -276,6 +276,7 @@
 {% endblock %}
 
 {% block extra_js %}
+{% include 'shared/_result_dialog.html' %}
 <script>
 (function () {
     var matSel  = document.getElementById('usageV2MaterialSelect');
@@ -394,6 +395,38 @@
     if (poSel)    poSel.addEventListener('change',    function(){ renderPOHint(); renderAvail(selectedPORemaining()); });
     if (qtyIn)    qtyIn.addEventListener('input',     function(){ renderAvail(selectedPORemaining()); });
     filterStages(); refreshPOs();
+
+    // ── what the dialogue box refuses before the form posts ────────────────
+    // Usage is drawn from a specific purchase order, so the two ways an entry
+    // can fail here (no PO behind it, or more taken than that PO has left on
+    // site) are both known before the form is sent.
+    if (window.hdcDialog) {
+        hdcDialog.beforeSave('usageV2Form', function () {
+            var problems = [];
+            if (!poSel || !poSel.value) {
+                problems.push({
+                    message: poRows.length
+                        ? 'Pick the purchase order this material is being taken from.'
+                        : 'That project and stage hold no stock of this material yet. Record the delivery first, then log the usage against it.',
+                    focus: poRows.length ? poSel : matSel
+                });
+                return problems;
+            }
+            var avail = selectedPORemaining();
+            var pickedOpt = poSel.options[poSel.selectedIndex];
+            var unit = (pickedOpt && pickedOpt.getAttribute) ? (pickedOpt.getAttribute('data-unit') || '') : '';
+            var q = parseFloat((qtyIn && qtyIn.value) || '0') || 0;
+            if (q > avail + 0.001) {
+                problems.push({
+                    message: 'Only ' + avail.toLocaleString('en-PK', { maximumFractionDigits: 2 })
+                        + (unit ? ' ' + unit : '') + ' of this material is still available from PO #' + poSel.value
+                        + '; ' + q.toLocaleString('en-PK', { maximumFractionDigits: 2 }) + ' was entered.',
+                    focus: qtyIn
+                });
+            }
+            return problems;
+        });
+    }
 })();
 
 function openUsageEditModal(id, date, qty, projId, stageId, notes) {

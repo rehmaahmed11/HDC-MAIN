@@ -282,18 +282,22 @@ body[data-hdc-custom-access="true"][data-hdc-page-write="false"] form[method="PO
             </div>
         </nav>
 
-        <!-- FLASH MESSAGES -->
-        <div class="px-4 pt-3">
-        {% with messages = get_flashed_messages(with_categories=true) %}
-          {% if messages %}
-            {% for cat, msg in messages %}
-              <div class="alert alert-{{ cat }} alert-dismissible fade show py-2" role="alert">
-                {{ msg }}
-                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-              </div>
-            {% endfor %}
-          {% endif %}
-        {% endwith %}
+        <!-- FLASH MESSAGES
+             The queue is popped exactly once, here, because a second
+             get_flashed_messages() call would find it empty.  Pages that show
+             the entry-result dialogue box read the same list back out of
+             `hdc_flashes` (shared/_result_dialog.html), so the banner and the
+             dialog can never disagree about what happened.  The banner stays in
+             the markup as the no-JavaScript path: core/dialog.js only folds it
+             away on the pages that mount the dialog. -->
+        {% set hdc_flashes = get_flashed_messages(with_categories=true) %}
+        <div class="px-4 pt-3" id="flashMessages">
+          {% for cat, msg in hdc_flashes %}
+            <div class="alert alert-{{ cat }} alert-dismissible fade show py-2" role="alert">
+              {{ msg }}
+              <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+          {% endfor %}
         </div>
 
         <!-- MAIN CONTENT -->
@@ -309,6 +313,9 @@ body[data-hdc-custom-access="true"][data-hdc-page-write="false"] form[method="PO
 <script src="/hdc_static/js/core/layout.js"></script>
 <script src="/hdc_static/js/core/sidebar_groups.js"></script>
 <script src="/hdc_static/js/core/theme.js"></script>
+<!-- The entry-result dialogue box runs before core/forms.js so a submit that
+     the dialog blocks is the one whose double-click lock gets released. -->
+<script src="/hdc_static/js/core/dialog.js"></script>
 <script src="/hdc_static/js/core/forms.js"></script>
 <script src="/hdc_static/js/core/combo.js"></script>
 <script src="/hdc_static/js/core/audit.js"></script>

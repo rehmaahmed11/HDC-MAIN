@@ -161,6 +161,7 @@ Not every item happens every day. The sections below explain the normal sequence
 4. Record each physical delivery against the correct PO, quantity, project, and—where known—stage, date, driver/delivery person, and delivery note. The displayed PO remainder is the maximum you can deliver.
 5. Record material usage against the same material, PO, project, and required stage, with actual quantity/date/reference. Usage is stage-scoped and cannot exceed available stock for that PO in that project/stage.
 6. Verify purchase, delivery, usage, remaining stock, supplier balance, and stage cost. Purchase/payment and material consumption are different events: do not enter delivery as usage or usage as another purchase.
+7. On the **Purchases**, **Delivery**, and **Usage** entry forms, read the dialogue box that opens after each save before carrying on: it states *Entry Saved*, *Entry Not Saved*, or *Saved With a Warning*. An entry that is incomplete or over the delivered/available quantity is refused by the same box *before* it is sent, so nothing is half-saved and a retry keeps what was typed. Never treat a filled-in form as a saved record; if the box was dismissed unread, the banner at the top of the page repeats the same message.
 
 ### D. Project expenses
 
