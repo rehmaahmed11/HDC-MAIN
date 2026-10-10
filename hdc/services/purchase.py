@@ -7,9 +7,16 @@ from sqlalchemy import and_, func
 
 from hdc.extensions import db
 from hdc.models.materials import Delivery, Material, MaterialUsage, MaterialV2, Purchase, PurchaseV2, Supplier, SupplierLedger, UsageLogV2
+from hdc.models.projects import Project
 from hdc.services.record_permissions import integrity_query
 from hdc.utils.dates import _pkt_now_naive, _pkt_today
 from hdc.utils.normalize import _normalize_name_ci
+
+
+#: How the Delivery / Material Usage registers may be arranged.  Each entry is
+#: the ``order_by`` pair for that mode; an unknown mode falls back to 'newest'.
+REGISTER_SORT_MODES = ('newest', 'oldest', 'po_asc', 'po_desc')
+
 
 def _material_stock_map(project_id=None, stage_id=None):
     """
@@ -533,3 +540,94 @@ def validate_delivery_reduction(delivery, new_quantity):
         delivery.purchase_id, delivery.project_id, delivery.stage_id, integrity=True)
     if reduction > available + 1e-9:
         raise ValueError('Cannot reduce or void delivery: stock has already been used. Void the usage first.')
+
+
+def _purchase_v2_pending_rows(material_id=None, supplier_id=None, project_id=None):
+    """Purchase orders that still owe stock, highest PO # first.
+
+    A purchase order is *pending* while its ordered quantity is larger than
+    everything that has been delivered against it.  Every row also carries the
+    sites that already took stock from that PO, because that is what lets the
+    Delivery pop-up filter the list by site — a PO is bought at store level and
+    only becomes site-specific once it is delivered.
+
+    ``project_id`` narrows the list to the POs that have already delivered to
+    that site; leaving it out returns every pending PO (all sites).
+    """
+    pq = PurchaseV2.query.filter(PurchaseV2.is_void == False)
+    if material_id:
+        pq = pq.filter(PurchaseV2.material_id == int(material_id))
+    if supplier_id:
+        pq = pq.filter(PurchaseV2.supplier_id == int(supplier_id))
+    purchases = pq.order_by(PurchaseV2.id.desc()).all()
+    if not purchases:
+        return []
+    purchase_ids = [int(p.id) for p in purchases]
+
+    delivered_map = dict(
+        db.session.query(
+            Delivery.purchase_id,
+            func.coalesce(func.sum(Delivery.quantity), 0.0)
+        ).filter(
+            Delivery.is_void == False,
+            Delivery.purchase_id.in_(purchase_ids)
+        ).group_by(Delivery.purchase_id).all()
+    )
+    # One grouped read for the site split, then one read for the site names —
+    # the pop-up must not turn into a query per row.
+    site_rows = (db.session.query(
+        Delivery.purchase_id,
+        Delivery.project_id,
+        func.coalesce(func.sum(Delivery.quantity), 0.0)
+    ).filter(
+        Delivery.is_void == False,
+        Delivery.purchase_id.in_(purchase_ids)
+    ).group_by(Delivery.purchase_id, Delivery.project_id).all())
+    site_ids = sorted({int(pid) for _, pid, _ in site_rows if pid})
+    site_names = (dict(db.session.query(Project.id, Project.name)
+                       .filter(Project.id.in_(site_ids)).all())
+                  if site_ids else {})
+    sites_by_purchase = {}
+    for purchase_id, project_id_row, qty in site_rows:
+        qty = float(qty or 0.0)
+        if abs(qty) <= 1e-9:
+            continue
+        pid = int(project_id_row or 0)
+        sites_by_purchase.setdefault(int(purchase_id), []).append({
+            'id': pid,
+            'name': site_names.get(pid, f'Site #{pid}'),
+            'qty': qty
+        })
+
+    out = []
+    for p in purchases:
+        ordered = float(p.quantity or 0.0)
+        delivered = float(delivered_map.get(p.id, 0.0) or 0.0)
+        pending = max(0.0, ordered - delivered)
+        if pending <= 1e-9:
+            continue
+        sites = sorted(sites_by_purchase.get(int(p.id), []),
+                       key=lambda s: (-s['qty'], s['name']))
+        if project_id and not any(int(s['id']) == int(project_id) for s in sites):
+            continue
+        out.append({
+            '_hdc_entity': 'hdc_purchase_v2',
+            '_hdc_id': int(p.id),
+            'id': int(p.id),
+            'date': p.date,
+            'supplier_id': int(p.supplier_id or 0),
+            'supplier_name': (p.supplier.name if p.supplier else '-'),
+            'material_id': int(p.material_id or 0),
+            'material_name': (p.material.name if p.material else '-'),
+            'unit': (p.material.unit if p.material else ''),
+            'ordered_qty': ordered,
+            'delivered_qty': delivered,
+            'pending_qty': pending,
+            'unit_price': float(p.unit_price or 0.0),
+            'pending_value': float(p.unit_price or 0.0) * pending,
+            'payment_status': (p.payment_status or 'unpaid'),
+            'challan_no': (p.challan_no or ''),
+            'sites': sites,
+            'site_ids': ','.join(str(int(s['id'])) for s in sites if s['id'])
+        })
+    return out
