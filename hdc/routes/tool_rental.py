@@ -38,7 +38,8 @@ from hdc.services.tool_rental import (
     get_serials_in_store_summary, get_serials_out_of_store_summary,
     parse_custom_serial_list, rename_tool_serial,
     return_serials_from_rental, transfer_serials, update_serial_status,
-    all_tool_serials_tracking, get_tool_serials_tracking_kpis, SERIAL_STATUSES
+    all_tool_serials_tracking, get_tool_serials_tracking_kpis, SERIAL_STATUSES,
+    tool_glance_rows,
 )
 from hdc.services.tool_audit import (
     AUDIT_LOSS_REASONS, audit_history, audit_locations, audit_matrix, audit_movement,
@@ -2543,6 +2544,30 @@ def register(app):
             only=(request.args.get('only') or '').strip(),
             tools=tools, tool_options=_tool_picker_options(tools),
             status_options=status_options,
+        )
+
+    # ------------------ GLANCE: one page, every piece, every site and customer ------------------
+    @app.route('/hdc/tool-rental/glance')
+    @login_required
+    def hdc_tool_rental_glance():
+        """Named Glance view: tool + serial, in store or out, the site and
+        customer it is with, the date it was sent, and every site and customer
+        any piece was ever sent to (summarised below the piece table)."""
+        q = (request.args.get('q') or '').strip() or None
+        only = (request.args.get('only') or '').strip()
+        data = tool_glance_rows(search=q)
+        rows = data['rows']
+        if only == 'in_store':
+            rows = [r for r in rows if r['current_kind'] == 'store']
+        elif only == 'out':
+            rows = [r for r in rows if r['current_kind'] in ('site', 'customer')]
+        elif only == 'site':
+            rows = [r for r in rows if r['current_kind'] == 'site']
+        elif only == 'customer':
+            rows = [r for r in rows if r['current_kind'] == 'customer']
+        return render_template('tool_rental/tool_glance.html',
+            rows=rows, destinations=data['destinations'], kpis=data['kpis'],
+            search=q, only=only,
         )
 
     # ------------------ PHYSICAL AUDIT: what the sites actually counted ------------------

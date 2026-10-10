@@ -1623,6 +1623,177 @@ def get_tool_serials_tracking_kpis(rows):
     }
 
 
+def _glance_destination_kind(movement, transfer_cache, rental_cache):
+    """Classify where one serial movement sent the piece.
+
+    Returns ``'store'`` (back to the warehouse), ``'site'`` (a project/stage),
+    ``'customer'`` (an outside customer) or ``None`` when the movement has no
+    destination recorded.  A linked site-to-site transfer is authoritative;
+    otherwise the rental's own renter type decides.
+    """
+    label = (movement.to_location_label or '').strip()
+    if not label:
+        return None
+    if label == STORE_LABEL:
+        return 'store'
+    if movement.transfer_id:
+        if movement.transfer_id not in transfer_cache:
+            transfer_cache[movement.transfer_id] = db.session.get(
+                ToolRentalTransfer, movement.transfer_id)
+        transfer = transfer_cache[movement.transfer_id]
+        if transfer:
+            to_type = (transfer.to_type or 'site').strip().lower()
+            if to_type == 'warehouse':
+                return 'store'
+            if to_type == 'customer':
+                return 'customer'
+            return 'site'
+    if movement.rental_id:
+        if movement.rental_id not in rental_cache:
+            rental_cache[movement.rental_id] = db.session.get(
+                ToolRental, movement.rental_id)
+        rental = rental_cache[movement.rental_id]
+        if rental and (rental.renter_type or 'internal') == 'external':
+            return 'customer'
+    return 'site'
+
+
+def tool_glance_rows(search=None):
+    """Glance view: one row per serial piece plus a site / customer summary.
+
+    Every row carries the tool name and serial, whether the piece is in the
+    store or out, the site and customer it is with now, the date it was last
+    sent out, and every site and customer it has ever been sent to.  The
+    ``destinations`` list covers every site and customer any piece went to.
+    """
+    pieces = all_tool_serials_tracking(search=search)
+    transfer_cache, rental_cache = {}, {}
+    destinations = {}
+    rows = []
+
+    for p in pieces:
+        movements = p['movements']  # oldest first
+        sent_keys = []              # ordered unique (kind, label) the piece went to
+        sent_info = {}              # (kind, label) -> {'first': date, 'last': date}
+        last_sent_date = None
+        last_sent_key = None
+        last_move_date = None
+
+        for m in movements:
+            move_date = m.timestamp.date() if m.timestamp else None
+            if move_date:
+                last_move_date = move_date
+            kind = _glance_destination_kind(m, transfer_cache, rental_cache)
+            if kind in (None, 'store'):
+                continue
+            label = m.to_location_label.strip()
+            key = (kind, label)
+            if key not in sent_info:
+                sent_info[key] = {'first': move_date, 'last': move_date}
+                sent_keys.append(key)
+            else:
+                sent_info[key]['last'] = move_date or sent_info[key]['last']
+            if move_date:
+                last_sent_date = move_date
+            last_sent_key = key
+
+        current_label = (p['current_location_label'] or '').strip() or STORE_LABEL
+        rental = p['rental']
+        if p['is_in_store'] or p['is_scrapped']:
+            current_kind = 'store' if p['is_in_store'] else 'scrapped'
+        elif last_sent_key and last_sent_key[1] == current_label:
+            current_kind = last_sent_key[0]
+        elif rental and (rental.renter_type or 'internal') == 'external':
+            current_kind = 'customer'
+        else:
+            current_kind = 'site'
+
+        if current_kind == 'store':
+            in_store_on_site = 'In Store'
+        elif current_kind == 'scrapped':
+            in_store_on_site = 'Scrapped'
+        else:
+            in_store_on_site = current_label
+        site_name = current_label if current_kind == 'site' else '—'
+        if current_kind == 'customer':
+            customer_name = current_label
+        elif rental and (rental.renter_type or 'internal') == 'external' and rental.customer_name:
+            customer_name = rental.customer_name
+        else:
+            customer_name = '—'
+
+        tool_name = p['tool_name']
+        serial_no = p['serial_number']
+        rows.append({
+            'serial_id': p['serial_id'],
+            'tool_id': p['tool'].id if p['tool'] else None,
+            'tool_code': p['tool_code'],
+            'tool_name': tool_name,
+            'serial_number': serial_no,
+            'tool_and_serial': f"{tool_name} — {serial_no}",
+            'status_label': p['status_label'],
+            'condition': p['condition'] or 'good',
+            'notes': (p['serial'].notes or '') if p['serial'] else '',
+            'is_in_store': bool(p['is_in_store']),
+            'is_scrapped': bool(p['is_scrapped']),
+            'in_store_on_site': in_store_on_site,
+            'current_kind': current_kind,
+            'site_name': site_name,
+            'customer_name': customer_name,
+            'rental_code': p['rental_code'] or '',
+            'rental_id': p['current_rental_id'],
+            'date_sent': last_sent_date,
+            'last_movement': last_move_date,
+            'sent_to': [{'kind': k, 'label': lbl} for (k, lbl) in sent_keys],
+            'sent_to_text': ', '.join(lbl for (_k, lbl) in sent_keys),
+            'sent_count': len(sent_keys),
+        })
+
+        for key in sent_keys:
+            kind, label = key
+            dest = destinations.setdefault(key, {
+                'kind': kind, 'label': label, 'serial_ids': set(),
+                'now_serial_ids': set(), 'tools': set(),
+                'first': None, 'last': None,
+            })
+            dest['serial_ids'].add(p['serial_id'])
+            dest['tools'].add(tool_name)
+            info = sent_info[key]
+            if info['first'] and (dest['first'] is None or info['first'] < dest['first']):
+                dest['first'] = info['first']
+            if info['last'] and (dest['last'] is None or info['last'] > dest['last']):
+                dest['last'] = info['last']
+        if current_kind in ('site', 'customer'):
+            dest = destinations.get((current_kind, current_label))
+            if dest is not None:
+                dest['now_serial_ids'].add(p['serial_id'])
+
+    dest_rows = []
+    for dest in destinations.values():
+        dest_rows.append({
+            'kind': dest['kind'],
+            'kind_label': 'Site' if dest['kind'] == 'site' else 'Customer',
+            'label': dest['label'],
+            'pieces_now': len(dest['now_serial_ids']),
+            'pieces_sent': len(dest['serial_ids']),
+            'tools': sorted(dest['tools'], key=str.lower),
+            'first': dest['first'],
+            'last': dest['last'],
+        })
+    dest_rows.sort(key=lambda d: (d['kind_label'], d['label'].lower()))
+
+    kpis = {
+        'pieces': len(rows),
+        'in_store': sum(1 for r in rows if r['current_kind'] == 'store'),
+        'out_site': sum(1 for r in rows if r['current_kind'] == 'site'),
+        'out_customer': sum(1 for r in rows if r['current_kind'] == 'customer'),
+        'scrapped': sum(1 for r in rows if r['current_kind'] == 'scrapped'),
+        'sites': sum(1 for d in dest_rows if d['kind'] == 'site'),
+        'customers': sum(1 for d in dest_rows if d['kind'] == 'customer'),
+    }
+    return {'rows': rows, 'destinations': dest_rows, 'kpis': kpis}
+
+
 def get_all_tool_serials_summary(tool_id=None):
     """Get a summary of all serials across tools for the inventory view."""
     q = Tool.query.filter(Tool.is_void == False)  # noqa: E712
