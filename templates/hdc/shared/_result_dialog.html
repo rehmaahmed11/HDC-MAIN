@@ -1,0 +1,33 @@
+{# Entry-result dialogue box: the server's verdict on the entry just saved.
+
+   The flash queue is read once, in base.html, into `hdc_flashes`, so the
+   inline banner and this dialog describe the same save. Here the messages are
+   handed to core/dialog.js as JSON and shown as a centred modal the operator
+   has to acknowledge — the banner sits at the top of a long page and is easy
+   to miss with your eyes still on the form you just filled in.
+
+   `tojson` escapes the payload for a <script> block, and the banner is left
+   in place for browsers with JavaScript turned off.
+
+   Mount it from a page's extra_js block:
+       {% include 'shared/_result_dialog.html' %}
+   …and mark that page's entry form <form data-hdc-dialog> so incomplete
+   entries are reported by the same box before the POST is sent. #}
+{% set _hdc_result_allowed = {'success': 1, 'danger': 1, 'warning': 1, 'info': 1} %}
+{% set _hdc_result_items = [] %}
+{% for _cat, _msg in (hdc_flashes | default([], true)) %}
+    {# No striptags: flash text is plain everywhere in this app, and stripping
+       would quietly delete a message that IS markup (a name that reached the
+       flash un-sanitised) instead of showing it. `tojson` below escapes the
+       payload and core/dialog.js writes it with textContent, so it can never
+       become a tag. #}
+    {% set _text = (_msg or '') | trim %}
+    {% if _text %}
+        {% set _ = _hdc_result_items.append({
+            'kind': _cat if _cat in _hdc_result_allowed else 'info',
+            'text': _text}) %}
+    {% endif %}
+{% endfor %}
+{% if _hdc_result_items %}
+<script id="hdcResultDialogData" type="application/json">{{ {'items': _hdc_result_items} | tojson }}</script>
+{% endif %}

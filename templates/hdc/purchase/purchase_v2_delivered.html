@@ -17,7 +17,9 @@
         <i class="fas fa-truck-fast me-2"></i>Record Delivery
     </div>
     <div class="card-body">
-        <form method="POST" id="deliveryForm">
+        {# data-hdc-dialog: the save is validated and then confirmed by
+           core/dialog.js (see the rules at the bottom of this block). #}
+        <form method="POST" id="deliveryForm" data-hdc-dialog>
 
             <!-- Step 1: Material + PO -->
             <div class="row g-3 mb-3">
@@ -143,7 +145,7 @@
         <i class="fas fa-right-left me-2"></i>Shift Stock Between Projects / Stages
     </div>
     <div class="card-body">
-        <form method="POST" action="{{ url_for('hdc_purchase_v2_delivery_transfer') }}" id="stockShiftForm" class="row g-3">
+        <form method="POST" action="{{ url_for('hdc_purchase_v2_delivery_transfer') }}" id="stockShiftForm" data-hdc-dialog class="row g-3">
             <div class="col-md-3">
                 <label class="form-label fw-semibold">Material <span class="text-danger">*</span></label>
                 <select name="material_id" id="shiftMaterial" class="form-select" required disabled>
@@ -298,7 +300,7 @@
                 <h5 class="modal-title"><i class="fas fa-edit me-2"></i>Edit Delivery</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
-            <form method="POST" id="delEditForm">
+            <form method="POST" id="delEditForm" data-hdc-dialog>
                 <div class="modal-body">
                     <div class="mb-3">
                         <label class="form-label fw-semibold">Date</label>
@@ -358,6 +360,7 @@
 {% endblock %}
 
 {% block extra_js %}
+{% include 'shared/_result_dialog.html' %}
 <script>
 (function () {
     // ── data ───────────────────────────────────────────────────────────────
@@ -613,6 +616,55 @@
     filterStages();
     refreshRemaining();
     loadShiftMaterialsForScope();
+
+    // ── what the dialogue box refuses before either form posts ─────────────
+    // The two checks the server makes on delivery (a PO must be picked, and
+    // the quantity cannot exceed what that PO still owes) are already computed
+    // here for the live hints, so refusing the submit costs nothing and saves
+    // the operator a page reload that would wipe the entry.
+    if (window.hdcDialog) {
+        hdcDialog.beforeSave('deliveryForm', function () {
+            var problems = [];
+            if (!poSelect || !poSelect.value) {
+                var waitingForMaterial = matFilter && !matFilter.value;
+                problems.push({
+                    message: waitingForMaterial
+                        ? 'Choose the material first — the purchase orders that still have stock are listed once you do.'
+                        : 'Select the purchase order this material was delivered against.',
+                    focus: waitingForMaterial ? matFilter : poSelect
+                });
+                return problems;
+            }
+            var opt = poSelect.options[poSelect.selectedIndex];
+            var rem = parseFloat((opt && opt.getAttribute('data-remaining')) || '0') || 0;
+            var unit = (opt && opt.getAttribute('data-unit')) || '';
+            var q = parseFloat((qtyInput && qtyInput.value) || '0') || 0;
+            if (q > rem + 0.001) {
+                problems.push({
+                    message: 'Only ' + rem.toLocaleString('en-PK', { maximumFractionDigits: 2 })
+                        + (unit ? ' ' + unit : '') + ' is still pending on PO #' + opt.value
+                        + '; ' + q.toLocaleString('en-PK', { maximumFractionDigits: 2 }) + ' was entered.',
+                    focus: qtyInput
+                });
+            }
+            return problems;
+        });
+
+        hdcDialog.beforeSave('stockShiftForm', function () {
+            if (!shiftQty || !shiftAvail) return [];
+            var av = parseFloat((shiftAvail.value || '').replace(/,/g, '') || '0') || 0;
+            var q = parseFloat(shiftQty.value || '0') || 0;
+            if (shiftAvail.value === '-') return [];      // scope not resolved yet — the server decides
+            if (q > av + 0.001) {
+                return [{
+                    message: 'The source scope holds ' + av.toLocaleString('en-PK', { maximumFractionDigits: 2 })
+                        + '; a shift of ' + q.toLocaleString('en-PK', { maximumFractionDigits: 2 }) + ' would leave it short.',
+                    focus: shiftQty
+                }];
+            }
+            return [];
+        });
+    }
 })();
 
 // ── edit / void modal helpers ──────────────────────────────────────────────
@@ -633,6 +685,10 @@ function openDelVoidModal(id) {
 
 {% if prefill_edit_row %}
 window.addEventListener('load', function () {
+    // A failed edit comes back to this page with the row pre-filled *and* a
+    // verdict to read. Opening both dialogs would stack them, so the verdict
+    // goes first and the editor is left waiting behind it.
+    if (window.hdcDialog && hdcDialog.hasPendingResult()) return;
     openDelEditModal(
         {{ prefill_edit_row.id }},
         '{{ prefill_edit_row.date.strftime('%Y-%m-%d') if prefill_edit_row.date else (prefill_edit_row.created_at.strftime('%Y-%m-%d') if prefill_edit_row.created_at else '') }}',

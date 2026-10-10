@@ -47,7 +47,11 @@
         <span class="small text-muted">Add one or several materials in a single purchase</span>
     </div>
     <div class="card-body">
-        <form method="POST" id="purchaseV2Form">
+        {# data-hdc-dialog: core/dialog.js validates this form before it posts and
+           reports the outcome afterwards. The item-row fields carry
+           data-hdc-dialog-skip because a row left blank on purpose is not an
+           error — the page rule below decides what a complete item is. #}
+        <form method="POST" id="purchaseV2Form" data-hdc-dialog>
             <div class="row g-2 mb-3">
                 <div class="col-md-4">
                     <label class="form-label fw-semibold">Supplier <span class="text-danger">*</span></label>
@@ -81,13 +85,13 @@
                 <div class="purchase-item row g-2 align-items-end border rounded p-2 bg-light">
                     <div class="col-md-4">
                         <label class="form-label small fw-semibold">Material <span class="text-danger">*</span></label>
-                        <select name="material_id[]" class="form-select" required>
+                        <select name="material_id[]" class="form-select" required data-hdc-dialog-skip="true">
                             <option value="">Select material</option>
                             {% for m in materials %}<option value="{{ m.id }}">{{ m.name }} ({{ m.unit or '' }})</option>{% endfor %}
                         </select>
                     </div>
-                    <div class="col-5 col-md-2"><label class="form-label small fw-semibold">Qty *</label><input type="number" step="0.01" min="0.01" name="quantity[]" class="form-control item-qty" required></div>
-                    <div class="col-5 col-md-2"><label class="form-label small fw-semibold">Rate / Unit *</label><input type="number" step="0.01" min="0.01" name="unit_price[]" class="form-control item-rate" required></div>
+                    <div class="col-5 col-md-2"><label class="form-label small fw-semibold">Qty *</label><input type="number" step="0.01" min="0.01" name="quantity[]" class="form-control item-qty" required data-hdc-dialog-skip="true"></div>
+                    <div class="col-5 col-md-2"><label class="form-label small fw-semibold">Rate / Unit *</label><input type="number" step="0.01" min="0.01" name="unit_price[]" class="form-control item-rate" required data-hdc-dialog-skip="true"></div>
                     <div class="col-8 col-md-2"><label class="form-label small fw-semibold">Line total</label><input type="text" class="form-control item-total bg-white" readonly tabindex="-1"></div>
                     <div class="col-4 col-md-2"><button type="button" class="btn btn-outline-danger remove-purchase-item w-100" disabled><i class="fas fa-trash me-1"></i>Remove</button></div>
                     <div class="col-12"><input type="text" name="notes[]" class="form-control form-control-sm" placeholder="Item notes (optional)"></div>
@@ -186,7 +190,7 @@
                 <h5 class="modal-title"><i class="fas fa-edit me-2"></i>Edit Purchase Order</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
-            <form method="POST" id="editPurchaseForm">
+            <form method="POST" id="editPurchaseForm" data-hdc-dialog>
                 <div class="modal-body">
                     <div class="row g-3">
                         <div class="col-md-6">
@@ -249,6 +253,7 @@
 {% endblock %}
 
 {% block extra_js %}
+{% include 'shared/_result_dialog.html' %}
 <script>
 (function () {
     var items = document.getElementById('purchaseItems');
@@ -286,6 +291,54 @@
         row.querySelector('select').focus();
     });
     update();
+
+    // ── what the dialogue box refuses before the form posts ────────────────
+    // One line per material is the rule the server enforces too
+    // (_has_recent_duplicate), so saying it here saves the round-trip and the
+    // rollback that comes with it.
+    if (window.hdcDialog) {
+        hdcDialog.beforeSave('purchaseV2Form', function (form) {
+            var problems = [];
+            var rows = items.querySelectorAll('.purchase-item');
+            var complete = 0;
+            var picked = {};
+            rows.forEach(function (row, index) {
+                var sel = row.querySelector('select');
+                var qty = row.querySelector('.item-qty');
+                var rate = row.querySelector('.item-rate');
+                var hasMaterial = !!sel.value;
+                var hasQty = qty.value.trim() !== '';
+                var hasRate = rate.value.trim() !== '';
+                // A blank row is an abandoned "Add item", not a mistake.
+                if (!hasMaterial && !hasQty && !hasRate) return;
+                if (!hasMaterial || !hasQty || !hasRate) {
+                    var missing = [];
+                    if (!hasMaterial) missing.push('material');
+                    if (!hasQty) missing.push('quantity');
+                    if (!hasRate) missing.push('rate');
+                    problems.push({
+                        message: 'Item ' + (index + 1) + ' is missing its ' + missing.join(' and ') + '.',
+                        focus: !hasMaterial ? sel : (!hasQty ? qty : rate)
+                    });
+                    return;
+                }
+                if (parseFloat(qty.value) <= 0 || parseFloat(rate.value) <= 0) {
+                    problems.push({ message: 'Item ' + (index + 1) + ': quantity and rate must both be greater than 0.', focus: qty });
+                    return;
+                }
+                if (picked[sel.value]) {
+                    problems.push({ message: 'Item ' + (index + 1) + ' repeats the material chosen on item ' + picked[sel.value] + '. Put both quantities on one line.', focus: sel });
+                    return;
+                }
+                picked[sel.value] = index + 1;
+                complete += 1;
+            });
+            if (!complete && !problems.length) {
+                problems.push({ message: 'Add at least one item with a material, a quantity and a rate.', focus: items.querySelector('.purchase-item select') });
+            }
+            return problems;
+        });
+    }
 })();
 
 // Keep editing available for existing purchase rows.
