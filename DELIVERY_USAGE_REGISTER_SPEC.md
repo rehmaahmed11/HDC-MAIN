@@ -113,3 +113,17 @@ the same "PO number must be numeric." warning the Purchases page already uses.
   material / supplier / text filtering, the summary line, the "nothing matches"
   row, Reset filters, and the All Sites / All Stages buttons clearing only their
   own filter. The same harness approach `test_sidebar_groups_js.py` uses.
+
+## Newest entry on top, by time and date stamp (Purchase section)
+
+Rule applied to every Purchase-section list that shows delivery, PO or usage
+entries: rows are ordered by the **entry's recorded time stamp**
+(`created_at`, newest first, `id` breaks ties) and every such row shows the
+date **and** the time it was recorded.
+
+* Pending Purchases pop-up (`_purchase_v2_pending_rows`) — now newest first by
+  time stamp (was PO # descending), with the recorded time under the date.
+* Stock page delivery list — recorded time shown under the date.
+* Supplier page purchase rows and ledger rows — recorded time shown under the date.
+* Purchases, Delivery and Material Usage registers were already newest first
+  and already show a *Recorded* date-time column.
