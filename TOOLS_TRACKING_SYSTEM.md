@@ -16,6 +16,8 @@ live on their own pages, so no page repeats the same numbers twice.
 - New Rental (the create form, opened by the hub's **New Rental** action): `/hdc/tool-rental/new`
 - One tool (position + movement history): `/hdc/tool-rental/tool/<tool_id>`
 - Tracking (chains, where each piece is right now, admin): `/hdc/tool-rental/tracking`
+- **Track by Serial** (every individual serial-numbered piece, its current
+  location and full movement chain, admin): `/hdc/tool-rental/serials`
 - JSON feed: `/hdc/api/tool-rental/dashboard`
 - Inventory (add tools, buy stock, scrap, categories): `/hdc/tool-rental/inventory`
 - Audit (book position per place, physical count, discrepancies, adjust):
@@ -25,13 +27,17 @@ live on their own pages, so no page repeats the same numbers twice.
   `hdc/services/tool_audit.py`
 - Pages: `templates/hdc/tool_rental/tool_dashboard.html`, `tool_position.html`,
   `tool_inventory.html`, `tool_rental.html`, `tool_new_rental.html`,
+  `tool_tracking.html`, `tool_serial_tracking.html`, `tool_reports.html`,
   `_stock_forms.html`, `tool_audit.html`, `tool_audit_sheet.html`,
   `_audit_line.html`
 - Tests: `tests/test_tool_tracking.py` (20 cases),
   `tests/test_tool_stock_lifecycle.py` (22 cases),
   `tests/test_tool_audit.py` (35 cases),
   `tests/test_tool_new_rental_smoke.py` (New Rental form → smoke result →
-  Tracking + Reports)
+  Tracking + Reports),
+  `tests/test_tool_serial_tracking.py` (Track-by-Serial page + full-section
+  smoke: inventory add, purchase, rental, transfer, return, scrap, payment,
+  audit all asserted at the individual-serial level)
 
 ---
 
@@ -311,14 +317,40 @@ screens use.
 ## 6. Navigation
 
 `templates/hdc/tool_rental/_tools_nav.html` gives the section one sub-nav
-(Dashboard · Rentals · Inventory · Tracking · Reports · Audit) included by every tool
-page. The sidebar entry **HDC Tools** now opens the dashboard; the rentals hub
-stays at `/hdc/tool-rental` and keeps the simple numbers — the reconciliation
-identity itself is on Tracking and the one-tool position page. Creating a
-rental has its own page (`/hdc/tool-rental/new`), opened by the hub's
-**New Rental** action. The **Audit** tab carries a badge with the number of
-count sheets still open, and is hidden entirely for a user without permission
-on that page.
+(Dashboard · Rentals · Inventory · Tracking · **Track by Serial** · Reports ·
+Audit) included by every tool page. The sidebar entry **HDC Tools** now opens
+the dashboard; the rentals hub stays at `/hdc/tool-rental` and keeps the simple
+numbers — the reconciliation identity itself is on Tracking and the one-tool
+position page. Creating a rental has its own page (`/hdc/tool-rental/new`),
+opened by the hub's **New Rental** action. The **Audit** tab carries a badge
+with the number of count sheets still open, and is hidden entirely for a user
+without permission on that page.
+
+### Track by Serial — the individual-piece view
+
+Tracking and Reports group by *tool type and quantity* (one compact row per
+location or site). **Track by Serial** (`/hdc/tool-rental/serials`) is the
+complement: it lists *every serial-numbered piece* — e.g. `Vibrator No 3` — with
+its current location, status, the rental currently holding it, and the **full
+movement chain** that got it there. It reads the same `hdc_tool_serial` /
+`hdc_tool_serial_movement` markings the Inventory, Position and Rental-detail
+pages maintain, so nothing is duplicated and the two views can never disagree.
+
+- KPI strip: Pieces Tracked · In Warehouse · Out on Sites/Customers · Scrapped.
+- Filters: tool (combo), status (in_store / rented / transferred / returned /
+  maintenance / damaged / lost / scrapped), free-text search across serial,
+  tool code, rental code and location, plus quick *Out only* / *In store only*
+  toggles.
+- Rows: serial piece, tool (link to its Position page), current location badge,
+  status badge, holder rental (link to the rental), and the movement chain
+  (`Warehouse / Store › Site A › Site B`).
+- **View** opens a modal with the piece's full movement log (date, type, from,
+  to, notes) — the same data the serial status dialog shows, centred on one
+  piece.
+- Service: `all_tool_serials_tracking(search, status, tool_id)` (re-syncs serial
+  markings to live holdings first via `ensure_all_tools_serials`, then orders
+  naturally and builds each row's chain with `_serial_chain_from_movements`);
+  KPIs via `get_tool_serials_tracking_kpis`.
 
 ### Audit: what the book says, what the site says
 

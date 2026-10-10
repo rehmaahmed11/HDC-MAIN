@@ -37,7 +37,8 @@ from hdc.services.tool_rental import (
     get_serial_status, get_serials_by_tool_for_rental, get_serials_for_rental,
     get_serials_in_store_summary, get_serials_out_of_store_summary,
     parse_custom_serial_list, rename_tool_serial,
-    return_serials_from_rental, transfer_serials, update_serial_status
+    return_serials_from_rental, transfer_serials, update_serial_status,
+    all_tool_serials_tracking, get_tool_serials_tracking_kpis, SERIAL_STATUSES
 )
 from hdc.services.tool_audit import (
     AUDIT_LOSS_REASONS, audit_history, audit_locations, audit_matrix, audit_movement,
@@ -2504,6 +2505,44 @@ def register(app):
             selected_project=project_id,
             q=q,
             kpis=kpis
+        )
+
+    # ------------------ TRACK BY SERIAL: every piece, its place and its chain ------------------
+    @app.route('/hdc/tool-rental/serials')
+    @login_required
+    def hdc_tool_rental_serials():
+        """Dedicated serial-level tracking: one row per serial-numbered piece.
+
+        This is the complement to the type-level Tracking and Reports pages:
+        those group by tool type and quantity, this lists *which exact piece*
+        (e.g. ``Vibrator No 3``) is where and the full movement chain that got
+        it there.  It leaves the existing rows untouched and simply reads the
+        same serial markings the inventory and rental pages maintain.
+        """
+        tool_id = request.args.get('tool_id', type=int)
+        q = (request.args.get('q') or '').strip() or None
+        status = (request.args.get('status') or '').strip() or None
+        only_out = (request.args.get('only') or '').strip() == 'out'
+        only_in_store = (request.args.get('only') or '').strip() == 'in_store'
+
+        rows = all_tool_serials_tracking(search=q, status=status, tool_id=tool_id)
+        if only_out:
+            rows = [r for r in rows if (not r['is_in_store']) and (not r['is_scrapped'])]
+        elif only_in_store:
+            rows = [r for r in rows if r['is_in_store'] and (not r['is_scrapped'])]
+
+        kpis = get_tool_serials_tracking_kpis(rows)
+        tools = Tool.query.filter(Tool.is_void == False).order_by(Tool.name.asc()).all()  # noqa: E712
+        status_options = [(st, dict(
+            in_store='In Store', rented='Rented Out', transferred='Transferred',
+            returned='Returned', maintenance='In Maintenance', damaged='Damaged',
+            lost='Lost', scrapped='Scrapped').get(st, st)) for st in SERIAL_STATUSES]
+        return render_template('tool_rental/tool_serial_tracking.html',
+            serials=rows, kpis=kpis,
+            search=q, status=status, selected_tool=tool_id,
+            only=(request.args.get('only') or '').strip(),
+            tools=tools, tool_options=_tool_picker_options(tools),
+            status_options=status_options,
         )
 
     # ------------------ PHYSICAL AUDIT: what the sites actually counted ------------------

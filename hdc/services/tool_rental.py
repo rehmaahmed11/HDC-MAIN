@@ -1498,6 +1498,131 @@ def get_serial_status(serial_id):
     }
 
 
+# Statuses a serial piece can carry, in the order they read best on a filter.
+SERIAL_STATUSES = (
+    'in_store', 'rented', 'transferred', 'returned',
+    'maintenance', 'damaged', 'lost', 'scrapped',
+)
+
+
+def _serial_chain_from_movements(movements):
+    """Build a printable movement chain from a serial's movement history.
+
+    Returns an ordered list of location labels showing where the piece has
+    travelled, e.g. ``['Warehouse / Store', 'Site A', 'Site B']``.  Consecutive
+    duplicates are collapsed so a transfer that bounces back shows cleanly.
+    """
+    steps = []
+    for m in movements:
+        if m.from_location_label and m.from_location_label not in steps:
+            steps.append(m.from_location_label)
+        if m.to_location_label and m.to_location_label not in steps:
+            steps.append(m.to_location_label)
+    # Make sure the latest destination is always the final step.
+    if movements:
+        last_to = (movements[-1].to_location_label or '').strip()
+        if last_to and steps and steps[-1] != last_to:
+            steps.append(last_to)
+    deduped = []
+    for st in steps:
+        if not deduped or deduped[-1] != st:
+            deduped.append(st)
+    return deduped
+
+
+def all_tool_serials_tracking(search=None, status=None, tool_id=None,
+                              include_scrapped=True, commit_sync=False):
+    """List every serial-numbered piece with its current location and full
+    movement chain, for the dedicated *Track by Serial* page.
+
+    The serial markings are kept in sync with the live rental holdings first
+    (so a piece that the books say is out really shows as out here), and each
+    row carries the human-readable current location, status, the rental that
+    currently holds it (if any), and the ordered movement chain plus the raw
+    movement log so the page can show both a compact path and the full history.
+    """
+    ensure_all_tools_serials(tools=None, commit=commit_sync)
+
+    q = (ToolSerial.query
+         .join(Tool, ToolSerial.tool_id == Tool.id)
+         .filter(Tool.is_void == False))  # noqa: E712
+    if status:
+        q = q.filter(ToolSerial.status == str(status))
+    if tool_id:
+        q = q.filter(ToolSerial.tool_id == int(tool_id))
+    if not include_scrapped:
+        q = q.filter(ToolSerial.is_scrapped == False)  # noqa: E712
+    # ``sort_key`` is a Python property (natural serial order), not a SQL column,
+    # so we sort the final rows in Python; the DB order just groups by tool.
+    serials = q.order_by(Tool.name.asc(), ToolSerial.id.asc()).all()
+
+    result = []
+    for s in serials:
+        movements = (ToolSerialMovement.query
+                     .filter_by(serial_id=s.id)
+                     .order_by(ToolSerialMovement.timestamp.asc(),
+                               ToolSerialMovement.id.asc())
+                     .all())
+        rental = s.current_rental
+        result.append({
+            'serial': s,
+            'serial_id': s.id,
+            'serial_number': s.serial_number,
+            'tool': s.tool,
+            'tool_name': s.tool.name if s.tool else '-',
+            'tool_code': s.tool.tool_code if s.tool else '-',
+            'category_name': (s.tool.category.name
+                              if (s.tool and s.tool.category)
+                              else (s.tool.name if s.tool else '-')),
+            'is_in_store': bool(s.is_in_store),
+            'is_scrapped': bool(s.is_scrapped),
+            'status': s.status,
+            'status_label': s.status_label,
+            'condition': s.condition,
+            'current_location_label': s.current_location_label or STORE_LABEL,
+            'current_rental_id': s.current_rental_id,
+            'rental_code': rental.rental_code if rental else '',
+            'rental': rental,
+            'movements': movements,
+            'chain': _serial_chain_from_movements(movements),
+        })
+
+    if search:
+        needle = (search or '').strip().lower()
+        if needle:
+            result = [r for r in result if (
+                needle in (r['serial_number'] or '').lower()
+                or needle in (r['tool_name'] or '').lower()
+                or needle in (r['tool_code'] or '').lower()
+                or needle in (r['rental_code'] or '').lower()
+                or needle in (r['current_location_label'] or '').lower()
+                or needle in (r['status_label'] or '').lower()
+            )]
+    # Natural order: by tool name, then the human-readable serial (Shovel No 2
+    # before Shovel No 10).  ``sort_key`` is a property, so this is done in
+    # Python after the rows are built.
+    result.sort(key=lambda r: (r['tool_name'], r['serial'].sort_key))
+    return result
+
+
+def get_tool_serials_tracking_kpis(rows):
+    """Counts used by the Track by Serial KPI strip."""
+    in_store = out = scrapped = 0
+    for r in rows:
+        if r['is_scrapped']:
+            scrapped += 1
+        elif r['is_in_store']:
+            in_store += 1
+        else:
+            out += 1
+    return {
+        'total': len(rows),
+        'in_store': in_store,
+        'out': out,
+        'scrapped': scrapped,
+    }
+
+
 def get_all_tool_serials_summary(tool_id=None):
     """Get a summary of all serials across tools for the inventory view."""
     q = Tool.query.filter(Tool.is_void == False)  # noqa: E712
