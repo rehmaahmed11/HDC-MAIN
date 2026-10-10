@@ -476,7 +476,7 @@
                                     <span class="fw-semibold text-body">#{{ p.id }}</span>
                                     {% if p.challan_no %}<div>Bill: {{ p.challan_no }}</div>{% endif %}
                                 </td>
-                                <td class="small">{{ p.date or '-' }}</td>
+                                <td class="small">{{ p.date or '-' }}{% if p.recorded %}<div class="text-muted" style="font-size:.75rem">{{ p.recorded.strftime('%H:%M') }}</div>{% endif %}</td>
                                 <td class="small">{{ p.supplier_name }}</td>
                                 <td class="fw-semibold">{{ p.material_name }}
                                     <small class="text-muted">({{ p.unit or '' }})</small>

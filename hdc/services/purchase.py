@@ -559,7 +559,8 @@ def _purchase_v2_pending_rows(material_id=None, supplier_id=None, project_id=Non
         pq = pq.filter(PurchaseV2.material_id == int(material_id))
     if supplier_id:
         pq = pq.filter(PurchaseV2.supplier_id == int(supplier_id))
-    purchases = pq.order_by(PurchaseV2.id.desc()).all()
+    # Newest entry on top (time stamp first, id breaks ties).
+    purchases = pq.order_by(PurchaseV2.created_at.desc(), PurchaseV2.id.desc()).all()
     if not purchases:
         return []
     purchase_ids = [int(p.id) for p in purchases]
@@ -615,6 +616,7 @@ def _purchase_v2_pending_rows(material_id=None, supplier_id=None, project_id=Non
             '_hdc_id': int(p.id),
             'id': int(p.id),
             'date': p.date,
+            'recorded': p.created_at,
             'supplier_id': int(p.supplier_id or 0),
             'supplier_name': (p.supplier.name if p.supplier else '-'),
             'material_id': int(p.material_id or 0),

@@ -113,7 +113,7 @@
             <tbody>
                 {% for d in delivery_rows %}
                 <tr {{ d|hdc_row_attrs }}>
-                    <td class="small">{{ d.date.strftime('%Y-%m-%d') if d.date else (d.created_at.strftime('%Y-%m-%d') if d.created_at else '-') }}</td>
+                    <td class="small">{{ d.date.strftime('%Y-%m-%d') if d.date else (d.created_at.strftime('%Y-%m-%d') if d.created_at else '-') }}{% if d.created_at %}<div class="text-muted" style="font-size:.75rem">{{ d.created_at.strftime('%H:%M') }}</div>{% endif %}</td>
                     <td>{{ d.material.name if d.material else '-' }}</td>
                     <td>{{ d.project.name if d.project else '-' }}</td>
                     <td>{{ d.stage.name if d.stage else '-' }}</td>

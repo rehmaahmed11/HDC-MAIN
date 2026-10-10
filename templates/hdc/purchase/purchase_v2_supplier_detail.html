@@ -204,7 +204,7 @@
                 {% set dq = (delivered_map.get(p.id) if delivered_map else 0) or 0 %}
                 <tr {{ p|hdc_row_attrs }}>
                     <td class="text-muted small">#{{ p.id }}</td>
-                    <td class="small">{{ p.date or (p.created_at.strftime('%Y-%m-%d') if p.created_at else '-') }}</td>
+                    <td class="small">{{ p.date or (p.created_at.strftime('%Y-%m-%d') if p.created_at else '-') }}{% if p.created_at %}<div class="text-muted" style="font-size:.75rem">{{ p.created_at.strftime('%H:%M') }}</div>{% endif %}</td>
                     <td>{{ p.material.name if p.material else '-' }} <small class="text-muted">({{ p.material.unit if p.material else '' }})</small></td>
                     <td class="text-end">{{ "{:,.2f}".format(p.quantity or 0) }}</td>
                     <td class="text-end">{{ "{:,.2f}".format(dq) }}</td>
@@ -257,7 +257,7 @@
                     {# Row id, not a sequence: the ledger now reads newest
                        first, so a 1..N counter would run backwards. #}
                     <td class="text-muted small">#{{ r.id }}</td>
-                    <td class="small">{{ r.date.strftime('%Y-%m-%d') if r.date else '-' }}</td>
+                    <td class="small">{{ r.date.strftime('%Y-%m-%d') if r.date else '-' }}{% if r.date and r.date.hour is defined %}<div class="text-muted" style="font-size:.75rem">{{ r.date.strftime('%H:%M') }}</div>{% endif %}</td>
                     <td>
                         <span class="badge {% if (r.entry_type or '') == 'debit' %}bg-danger{% else %}bg-success{% endif %}">
                             {{ r.entry_label }}
