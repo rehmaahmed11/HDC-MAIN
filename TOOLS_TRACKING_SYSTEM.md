@@ -13,7 +13,9 @@ live on their own pages, so no page repeats the same numbers twice.
 
 - Dashboard (simple stock + unpaid rent, item by item): `/hdc/tool-rental/dashboard` (sidebar → **HDC Tools**)
 - Rentals (summary + search + list; return and pay from a rental's page): `/hdc/tool-rental`
-- New Rental (the create form, opened by the hub's **New Rental** action): `/hdc/tool-rental/new`
+- New Rental (the one transaction form, opened by the hub's **New Rental** action): `/hdc/tool-rental/new`
+  — the transaction dropdown offers **New Rental, Transfer Rental, Return Tools and Rent Payment**
+  (see *One transaction form* below)
 - One tool (position + movement history): `/hdc/tool-rental/tool/<tool_id>`
 - Tracking (chains, where each piece is right now, admin): `/hdc/tool-rental/tracking`
 - **Track by Serial** (every individual serial-numbered piece, its current
@@ -42,6 +44,35 @@ live on their own pages, so no page repeats the same numbers twice.
   audit all asserted at the individual-serial level)
 
 ---
+
+## 0. One transaction form (`/hdc/tool-rental/new`)
+
+Every rental-life-cycle transaction is entered on the same page. The operator
+picks the **Transaction type** first and only that type's fields appear:
+
+| Type | Posts to | Picks |
+| --- | --- | --- |
+| New Rental | `POST /hdc/tool-rental/create` | tools from store, site or customer |
+| Transfer Rental | `POST /hdc/tool-rental/create` (`txn_type=transfer`) | tools at a holder/site, destination, settlement |
+| Return Tools | `POST /hdc/tool-rental/<id>/return` | a rental with tools still out; quantities back; optional rent collection |
+| Rent Payment | `POST /hdc/tool-rental/<id>/payment` | a rental that still owes rent; amount, account, mode, waive-off |
+
+It is data-driven: the table lives in `hdc/services/tool_txn_types.py`
+(`TOOL_TXN_TYPES`: key, label, endpoint, whether it needs a rental, which
+rentals qualify, submit label and help text). The route hands that table to the
+page, which builds the dropdown, headings, submit button and the form's
+`action` from it. Each panel is tagged with `data-txn-modes="…"`; the page shows
+the panels of the chosen type, and disables the rest so hidden fields never
+block or leak into a submit.
+
+Return and payment reuse the existing endpoints, so their rules (quantities,
+serials, discount limits, account posting, duplicate guard) are unchanged. The
+rental pickers only list rentals that qualify: return = tools still out, payment
+= rent still due (no-charge rentals are never payment targets). The return panel
+returns quantities per tool; for serial-by-serial returns use the rental's page.
+
+Tests: `tests/test_tool_txn_form.py` (registry, rendered form, pickers, and the
+endpoints the form posts to).
 
 ## 1. What the dashboard shows (and what it deliberately does not)
 
