@@ -139,6 +139,49 @@
             </div>
         </div>
     </div>
+
+    <!-- serial markings breakdown -->
+    <div class="col-lg-5">
+        <div class="card hdc-card h-100">
+            <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-hashtag me-2"></i>Serial Markings / Tool Numbers</span>
+                <a href="{{ url_for('hdc_tool_rental_serials_create', tool_id=row.tool_id) }}" class="btn btn-sm btn-outline-primary">
+                    <i class="fas fa-sliders me-1"></i>Manage Markings
+                </a>
+            </div>
+            <div class="card-body">
+                {% if in_store_serials is defined or out_serials is defined %}
+                <div class="mb-3">
+                    <div class="small fw-semibold text-success mb-1">
+                        <i class="fas fa-warehouse me-1"></i>In Store — Available for New Rental ({{ in_store_serials|length if in_store_serials is defined else 0 }})
+                    </div>
+                    <div class="d-flex flex-wrap gap-1">
+                        {% for s in in_store_serials %}
+                        <span class="badge bg-success-subtle text-success border border-success-subtle">{{ s.serial_number }}</span>
+                        {% else %}
+                        <span class="text-muted small">None in store</span>
+                        {% endfor %}
+                    </div>
+                </div>
+                <div>
+                    <div class="small fw-semibold text-warning-emphasis mb-1">
+                        <i class="fas fa-truck-ramp-box me-1"></i>Out of Store — Available for Transfer ({{ out_serials|length if out_serials is defined else 0 }})
+                    </div>
+                    <div class="d-flex flex-wrap gap-1">
+                        {% for s in out_serials %}
+                        <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle" title="{{ s.current_location_label or 'Out on rent' }}">
+                            {{ s.serial_number }}
+                            {% if s.current_location_label %}<small class="opacity-75">({{ s.current_location_label }})</small>{% endif %}
+                        </span>
+                        {% else %}
+                        <span class="text-muted small">None out of store</span>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- purchase + scrap history -->

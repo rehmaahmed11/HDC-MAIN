@@ -1,80 +1,67 @@
 {% extends "shared/base.html" %}
-{% block title %}Create Serials - {{ tool.name }}{% endblock %}
-{% block page_heading %}Create Serial Numbers - {{ tool.name }} ({{ tool.tool_code }}){% endblock %}
+{% block title %}Serial Markings - {{ tool.name }}{% endblock %}
+{% block page_heading %}Manage Serial Markings - {{ tool.name }} ({{ tool.tool_code }}){% endblock %}
 
 {% block content %}
 {% set tools_active = 'inventory' %}
 {% include "tool_rental/_tools_nav.html" %}
 
 <div class="row g-3 mt-3">
-    <div class="col-xl-6">
+    <div class="col-xl-5">
         <div class="card hdc-card">
-            <div class="card-header hdc-card-header">
-                <span><i class="fas fa-qrcode me-2"></i>Create Serial Numbers</span>
+            <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-hashtag me-2"></i>Add / Generate Serial Markings</span>
                 <a href="{{ url_for('hdc_tool_rental_inventory') }}" class="btn btn-sm btn-outline-secondary">
                     <i class="fas fa-arrow-left me-1"></i>Back to Inventory
                 </a>
             </div>
             <div class="card-body">
-                <div class="alert alert-info">
+                <div class="alert alert-info py-2 small">
                     <i class="fas fa-info-circle me-2"></i>
-                    <strong>Why serial numbers?</strong>
-                    Serial numbers let you track each individual piece of a tool.
-                    For example, if you have 10 wheelbarrows, each gets a unique serial
-                    (WB-001, WB-002, ... WB-010) so you know exactly which one is where.
+                    <strong>Serial Markings</strong> let you identify and track each physical piece of a tool by its exact number — e.g. <strong>{{ tool.name }} No 5</strong>, <strong>{{ tool.name }} No 6</strong> — whether it is in store or out at a site.
                 </div>
 
                 <form method="POST" id="createSerialsForm">
                     <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
                     <div class="row g-3">
                         <div class="col-12">
-                            <label class="form-label">Tool</label>
+                            <label class="form-label">Main Tool / Category</label>
                             <div class="bg-light-subtle rounded p-3 d-flex align-items-center gap-3">
                                 <i class="fas fa-tools text-mint fs-5"></i>
                                 <div>
                                     <strong>{{ tool.name }}</strong>
                                     <span class="badge bg-secondary ms-2">{{ tool.tool_code }}</span>
-                                    <small class="text-muted d-block">{{ tool.category.name if tool.category else 'No Category' }} · {{ tool.unit }}</small>
+                                    <small class="text-muted d-block">{{ tool.category.name if tool.category else 'No Category' }} · {{ tool.unit }} · Owned: {{ "%g"|format(tool.total_quantity or 0) }}</small>
                                 </div>
                             </div>
                         </div>
 
                         <div class="col-6">
-                            <label class="form-label">Quantity to Create *</label>
-                            <input type="number" name="qty" class="form-control" min="1" step="1" value="{{ existing_serials }}" required
+                            <label class="form-label">Quantity to Add *</label>
+                            <input type="number" name="qty" class="form-control" min="1" step="1" value="{{ [1, (tool.total_quantity|int - existing_serials)]|max }}" required
                                    placeholder="Number of serials to create">
-                            <small class="text-muted">How many individual pieces to register?</small>
+                            <small class="text-muted">Pieces to register</small>
                         </div>
 
                         <div class="col-6">
-                            <label class="form-label">Existing Serials</label>
-                            <div class="bg-light-subtle rounded p-3">
-                                <span class="badge bg-success-subtle text-success">{{ existing_serials }} serials already registered</span>
-                            </div>
+                            <label class="form-label">Start Number (optional)</label>
+                            <input type="number" name="start_no" class="form-control" min="1" step="1" placeholder="e.g. 5 → {{ tool.name }} No 5">
+                            <small class="text-muted">Blank = continue from last No</small>
                         </div>
 
                         <div class="col-12">
-                            <label class="form-label">Custom Serial Numbers (optional)</label>
+                            <label class="form-label">Or Custom Serial Markings (optional)</label>
                             <textarea name="serial_numbers" class="form-control" rows="3"
-                                      placeholder="WB-001, WB-002, WB-003, ..."></textarea>
+                                      placeholder="{{ tool.name }} No 5, {{ tool.name }} No 6, ..."></textarea>
                             <small class="text-muted">
-                                Leave empty to auto-generate serial numbers.
-                                Separate multiple numbers with commas.
-                                If left blank, serials will be auto-named like "{{ tool.tool_code }}-001", "{{ tool.tool_code }}-002", etc.
+                                Leave empty to auto-generate <strong>{{ tool.name }} No 1</strong>, <strong>{{ tool.name }} No 2</strong>, etc.
+                                Separate custom markings with commas or new lines.
                             </small>
                         </div>
 
                         <div class="col-12">
-                            <div class="alert alert-secondary py-2 small">
-                                <i class="fas fa-lightbulb me-2"></i>
-                                <strong>Example:</strong> To create 5 wheelbarrow serials, enter "5" in quantity.
-                                Serials will be: WB-001, WB-002, WB-003, WB-004, WB-005
-                            </div>
-                        </div>
-
-                        <div class="col-12">
                             <button type="submit" class="btn btn-mint w-100">
-                                <i class="fas fa-plus me-1"></i>Create {{ existing_serials }} Serial Numbers
+                                <i class="fas fa-plus me-1"></i>Generate Serial Markings
                             </button>
                         </div>
                     </div>
@@ -83,26 +70,45 @@
         </div>
     </div>
 
-    <div class="col-xl-6">
+    <div class="col-xl-7">
         <div class="card hdc-card">
-            <div class="card-header hdc-card-header">
-                <span><i class="fas fa-list me-2"></i>Quick Actions</span>
+            <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-list me-2"></i>Registered Serial Markings ({{ serials|length if serials is defined else existing_serials }})</span>
+                <a href="{{ url_for('hdc_tool_rental_tool_position', tool_id=tool.id) }}" class="btn btn-sm btn-outline-primary">
+                    <i class="fas fa-location-dot me-1"></i>Tool Position
+                </a>
             </div>
-            <div class="card-body">
-                <div class="list-group list-group-flush">
-                    <a href="{{ url_for('hdc_tool_rental_inventory') }}" class="list-group-item list-group-item-action">
-                        <i class="fas fa-arrow-left fa-fw me-2 text-muted"></i>
-                        Back to Inventory
-                    </a>
-                    <a href="{{ url_for('hdc_tool_rental_tool_position', tool_id=tool.id) }}" class="list-group-item list-group-item-action">
-                        <i class="fas fa-eye fa-fw me-2 text-muted"></i>
-                        View Tool Position
-                    </a>
-                    <a href="{{ url_for('hdc_tool_rental_tracking') }}" class="list-group-item list-group-item-action">
-                        <i class="fas fa-map fa-fw me-2 text-muted"></i>
-                        Tracking Dashboard
-                    </a>
-                </div>
+            <div class="table-responsive">
+                <table class="table hdc-table table-sm mb-0 align-middle">
+                    <thead>
+                        <tr>
+                            <th>Tool No / Serial Marking</th>
+                            <th>Availability</th>
+                            <th>Current Location</th>
+                            <th>Condition</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    {% if serials is defined and serials %}
+                        {% for s in serials %}
+                        <tr>
+                            <td><span class="badge bg-dark">{{ s.serial_number }}</span></td>
+                            <td>
+                                {% if s.is_in_store %}
+                                <span class="badge bg-success-subtle text-success border border-success-subtle">In Store</span>
+                                {% else %}
+                                <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle">Out of Store</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ s.current_location_label or 'Warehouse / Store' }}</td>
+                            <td><span class="badge bg-light text-dark border">{{ s.condition or 'good' }}</span></td>
+                        </tr>
+                        {% endfor %}
+                    {% else %}
+                        <tr><td colspan="4" class="text-center text-muted py-4">No serial markings registered yet.</td></tr>
+                    {% endif %}
+                    </tbody>
+                </table>
             </div>
         </div>
     </div>

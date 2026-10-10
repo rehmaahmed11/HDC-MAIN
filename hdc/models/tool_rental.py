@@ -137,6 +137,22 @@ class Tool(db.Model):
         ).scalar() or 0.0
         return float(val)
 
+    @property
+    def active_serials(self):
+        """All non-scrapped serial-marked units of this tool, sorted naturally."""
+        rows = [s for s in (self.serials or []) if not getattr(s, 'is_scrapped', False) and s.status != 'scrapped']
+        return sorted(rows, key=lambda s: s.sort_key)
+
+    @property
+    def in_store_serials(self):
+        """Serial-marked units currently in the warehouse/store."""
+        return [s for s in self.active_serials if s.is_in_store]
+
+    @property
+    def out_serials(self):
+        """Serial-marked units currently out at a site or customer."""
+        return [s for s in self.active_serials if not s.is_in_store]
+
 
 class ToolPurchase(db.Model):
     """Stock coming *in*: buying more of a tool we already own.
@@ -492,44 +508,60 @@ class ToolRentalTransferItem(db.Model):
 class ToolSerial(db.Model):
     """Individual serial-numbered piece of a tool type.
 
-    Every physical piece of a multi-quantity tool (e.g. wheelbarrow #1, #2, #3)
-    gets one row here so the system can track *which exact piece* is where —
-    rented out, returned, transferred between sites, or still in the store.
+    Every physical piece of a multi-quantity tool (e.g. Shovel No 1, Shovel No 5,
+    Shovel No 6) gets one row here so the system can track *which exact piece*
+    is where — rented out, returned, transferred between sites, or still in the
+    store.
 
     ``serial_number`` is the human-readable tag on the piece (sticker, painted
-    number, barcode — whatever the warehouse uses).  It is unique per tool type
-    so two different tool types can both have a "WB-001" without collision.
+    number, barcode — whatever the warehouse uses, such as 'Shovel No 5'). It
+    is unique per tool type so two different tool types can each have their own
+    numbered markings without collision.
     """
     __tablename__ = 'hdc_tool_serial'
     id = db.Column(db.Integer, primary_key=True)
-    serial_number = db.Column(db.String(50), nullable=False)
+    serial_number = db.Column(db.String(80), nullable=False)
     tool_id = db.Column(db.Integer, db.ForeignKey('hdc_tool.id'), nullable=False, index=True)
 
     # current location of this exact piece
     is_in_store = db.Column(db.Boolean, default=True)     # True = still in warehouse
-    current_rental_id = db.Column(db.Integer, db.ForeignKey('hdc_tool_rental.id'), nullable=True)
-    current_location_label = db.Column(db.String(300))    # human-readable "where is it now"
+    is_scrapped = db.Column(db.Boolean, default=False)    # True = written off / scrapped
+    current_rental_id = db.Column(db.Integer, db.ForeignKey('hdc_tool_rental.id'), nullable=True, index=True)
+    current_rental_item_id = db.Column(db.Integer, db.ForeignKey('hdc_tool_rental_item.id'), nullable=True)
+    current_location_label = db.Column(db.String(300), default='Warehouse / Store')
 
     # status for the tool-status dialog
-    status = db.Column(db.String(30), default='in_store')  # in_store / rented / returned / transferred / maintenance / damaged / lost
+    status = db.Column(db.String(30), default='in_store')  # in_store / rented / returned / transferred / maintenance / damaged / lost / scrapped
 
     # notes / condition of this specific piece
     condition = db.Column(db.String(30), default='good')  # good / maintenance / damaged / lost
     notes = db.Column(db.String(300))
 
+    created_by = db.Column(db.Integer, db.ForeignKey('hdc_user.id'), nullable=True)
+    updated_by = db.Column(db.Integer, db.ForeignKey('hdc_user.id'), nullable=True)
     created_at = db.Column(db.DateTime, default=_pkt_now_naive)
     updated_at = db.Column(db.DateTime, default=_pkt_now_naive, onupdate=_pkt_now_naive)
 
-    tool = db.relationship('Tool', backref='serials', foreign_keys=[tool_id])
+    tool = db.relationship('Tool', backref=db.backref('serials', cascade='all, delete-orphan'), foreign_keys=[tool_id])
     current_rental = db.relationship('ToolRental', foreign_keys=[current_rental_id])
+    current_rental_item = db.relationship('ToolRentalItem', foreign_keys=[current_rental_item_id])
 
     __table_args__ = (
         db.UniqueConstraint('tool_id', 'serial_number', name='uq_tool_serial'),
     )
 
     @property
+    def sort_key(self):
+        """Natural sort key so 'Shovel No 2' sorts before 'Shovel No 10'."""
+        import re
+        s = str(self.serial_number or '')
+        m = re.search(r'(\d+)\s*$', s)
+        num = int(m.group(1)) if m else 999999
+        return (num, s.lower(), self.id or 0)
+
+    @property
     def serial_label(self):
-        """Combined label like 'WB-001' or 'Jack Hammer SN-042'."""
+        """Combined label like 'Shovel No 5' or 'TOOL-0001 / Shovel No 5'."""
         tool = self.tool
         if tool and tool.tool_code:
             return f"{tool.tool_code} / {self.serial_number}"
@@ -545,6 +577,7 @@ class ToolSerial(db.Model):
             'maintenance': 'In Maintenance',
             'damaged': 'Damaged',
             'lost': 'Lost',
+            'scrapped': 'Scrapped',
         }
         return labels.get(self.status, self.status or '-')
 
@@ -571,7 +604,7 @@ class ToolSerialMovement(db.Model):
     timestamp = db.Column(db.DateTime, default=_pkt_now_naive)
     created_by = db.Column(db.Integer, db.ForeignKey('hdc_user.id'), nullable=True)
 
-    serial = db.relationship('ToolSerial', backref='movements', foreign_keys=[serial_id])
+    serial = db.relationship('ToolSerial', backref=db.backref('movements', cascade='all, delete-orphan'), foreign_keys=[serial_id])
 
 
 class ToolMovementLog(db.Model):

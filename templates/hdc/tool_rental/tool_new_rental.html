@@ -230,12 +230,32 @@
                     </div>
 
                     {% if tools %}
-                    <!-- Quantity-based tool rows -->
+                    <!-- Quantity & Cascading Category -> Tool No rows -->
                     <div id="quantityToolRows">
+                        {% if categories %}
+                        <div class="row g-2 mb-2 align-items-center">
+                            <div class="col-md-4">
+                                <label class="form-label small text-muted mb-1" for="newRentalCategoryFilter">
+                                    <i class="fas fa-filter me-1"></i>Filter by Category (optional)
+                                </label>
+                                <select id="newRentalCategoryFilter" class="form-select form-select-sm" onchange="filterNewRentalToolsByCategory(this.value)">
+                                    <option value="">All Categories ({{ tools|length }} in-store tool types)</option>
+                                    {% for cat in categories %}
+                                    <option value="{{ cat.id }}">{{ cat.name }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-md-8">
+                                <small class="text-muted d-block mt-3">
+                                    <i class="fas fa-warehouse text-success me-1"></i>Showing <strong>only tools currently in store</strong>. Select a tool category/type (e.g. Shovel, Wooden Plank, Wheel Barrow) and then pick its available <strong>Tool No / Serial Marking(s)</strong>.
+                                </small>
+                            </div>
+                        </div>
+                        {% endif %}
                         <div id="toolItemsContainer">
-                            <div class="row g-2 mb-2 tool-item-row align-items-end">
+                            <div class="row g-2 mb-2 tool-item-row align-items-end border rounded p-2 bg-light-subtle">
                                 <div class="col-md-6">
-                                    <label class="form-label small" for="rentalToolSelect0Input">Tool</label>
+                                    <label class="form-label small fw-semibold" for="rentalToolSelect0Input">Tool Category / Main Tool (In Store)</label>
                                     <input type="text" id="rentalToolSelect0Input" class="form-control tool-select-search"
                                            placeholder="Search tool name or code…" autocomplete="off"
                                            role="combobox" aria-expanded="false" aria-autocomplete="list" aria-label="Tool"
@@ -244,20 +264,40 @@
                                             data-hdc-combo-source>
                                         <option value=""></option>
                                         {% for t in tools %}
-                                        <option value="{{ t.id }}" data-rate="{{ t.rental_rate_per_day }}" data-avail="{{ t.available_qty }}">{{ t.name }} ({{ t.tool_code }}) — {{ "%.0f"|format(t.available_qty) }} available</option>
+                                        <option value="{{ t.id }}" data-category-id="{{ t.category_id or '' }}" data-rate="{{ t.rental_rate_per_day }}" data-avail="{{ t.available_qty }}">{{ t.name }} ({{ t.tool_code }}) — {{ "%.0f"|format(t.available_qty) }} available</option>
                                         {% endfor %}
                                     </select>
                                 </div>
                                 <div class="col-4 col-md-2">
-                                    <label class="form-label small">Quantity</label>
-                                    <input type="number" name="qty[]" class="form-control" placeholder="Qty" min="0.1" step="0.1" required>
+                                    <label class="form-label small fw-semibold">Quantity</label>
+                                    <input type="number" name="qty[]" class="form-control row-qty-input" placeholder="Qty" min="0.1" step="0.1" required>
                                 </div>
                                 <div class="col-6 col-md-3 rental-rate-cell">
-                                    <label class="form-label small rental-rate-label">Rent rate</label>
+                                    <label class="form-label small rental-rate-label fw-semibold">Rent rate</label>
                                     <input type="number" name="rate[]" class="form-control rental-rate-input" placeholder="Use saved rate" min="0" step="0.01">
                                 </div>
                                 <div class="col-2 col-md-1">
-                                    <button type="button" class="btn btn-outline-danger w-100" aria-label="Remove tool line" title="Remove tool line" onclick="this.closest('.tool-item-row').remove()"><i class="fas fa-times" aria-hidden="true"></i></button>
+                                    <button type="button" class="btn btn-outline-danger w-100" aria-label="Remove tool line" title="Remove tool line" onclick="removeToolRow(this)"><i class="fas fa-times" aria-hidden="true"></i></button>
+                                </div>
+                                <!-- Data-driven Tool No / Serial Marking selector for the chosen tool -->
+                                <div class="col-12 mt-2 row-serial-picker-wrap d-none">
+                                    <input type="hidden" name="row_serial_ids[]" class="row-serial-ids-input" value="">
+                                    <div class="p-2 border rounded bg-white">
+                                        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-1">
+                                            <label class="form-label small fw-semibold mb-0 text-success">
+                                                <i class="fas fa-hashtag me-1"></i>Select Tool No / Serial Marking (In Store Available Only):
+                                            </label>
+                                            <div class="d-flex align-items-center gap-2">
+                                                <select class="form-select form-select-sm row-serial-quick-select" style="width:auto; min-width:190px;" onchange="quickSelectRowSerial(this)">
+                                                    <option value="">+ Quick pick Tool No…</option>
+                                                </select>
+                                                <button type="button" class="btn btn-xs btn-outline-success py-0 px-2 small" onclick="selectAllRowSerials(this, true)">Select All</button>
+                                                <button type="button" class="btn btn-xs btn-outline-secondary py-0 px-2 small" onclick="selectAllRowSerials(this, false)">Clear</button>
+                                            </div>
+                                        </div>
+                                        <div class="row-serial-badges d-flex flex-wrap gap-1 mt-1"></div>
+                                        <small class="text-muted d-block mt-1 row-serial-hint">Click specific Tool No markings (e.g. Shovel No 5, Shovel No 6) to rent those exact pieces, or type a Quantity to auto-pick.</small>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -271,15 +311,29 @@
                     <div id="serialToolPicker" class="d-none">
                         <div class="card hdc-card border-mint">
                             <div class="card-header hdc-card-header bg-mint-subtle">
-                                <span><i class="fas fa-qrcode me-2"></i>Available Tools & Serials</span>
+                                <span><i class="fas fa-qrcode me-2"></i>Available Tools &amp; Serials (In Store Only)</span>
                                 <span class="badge bg-secondary" id="serialPickerCount">0 serials available</span>
                             </div>
                             <div class="card-body p-0">
                                 <div class="tool-picker-search mb-3 px-3 pt-3">
-                                    <input type="text" id="serialPickerSearch" class="form-control"
-                                           placeholder="Search tools by name, code, or serial number…"
-                                           autocomplete="off">
-                                    <small class="text-muted d-block mt-1">Type to filter tools and serials. Click a tool to expand and see its serials.</small>
+                                    <div class="row g-2">
+                                        <div class="col-md-5">
+                                            <label class="form-label small fw-semibold mb-1" for="serialToolCategorySelect">1. Select Tool Category / Main Tool</label>
+                                            <select id="serialToolCategorySelect" class="form-select" onchange="onSerialCategorySelectChange(this.value)">
+                                                <option value="">All In-Store Tool Categories</option>
+                                                {% for t in tools %}
+                                                <option value="{{ t.id }}">{{ t.name }} ({{ t.tool_code }}) — {{ "%.0f"|format(t.available_qty) }} in store</option>
+                                                {% endfor %}
+                                            </select>
+                                        </div>
+                                        <div class="col-md-7">
+                                            <label class="form-label small fw-semibold mb-1" for="serialPickerSearch">2. Search / Filter Tool No (Serial Marking)</label>
+                                            <input type="text" id="serialPickerSearch" class="form-control"
+                                                   placeholder="Search e.g. Shovel No 5, Wooden Plank No 2, Wheel Barrow…"
+                                                   autocomplete="off">
+                                        </div>
+                                    </div>
+                                    <small class="text-muted d-block mt-1">Select a main tool category on the left or search to pick specific in-store Tool Nos.</small>
                                 </div>
                                 <div class="serial-picker-list overflow-auto" style="max-height: 400px;" id="serialPickerList">
                                     <div class="text-center py-4 text-muted">Loading available serials...</div>
@@ -520,6 +574,8 @@ function toggleRenter(){
 
 const TRANSFER_SOURCES = {{ transfer_sources | tojson }};
 const TRANSFER_LOCATIONS = {{ transfer_locations | tojson }};
+const IN_STORE_TOOLS = {{ (in_store_tools_json or []) | tojson }};
+const IN_STORE_TOOLS_BY_ID = new Map((IN_STORE_TOOLS || []).map(function(t){ return [String(t.id), t]; }));
 
 function transferMode(){
     return document.getElementById('txnType')?.value === 'transfer';
@@ -830,10 +886,7 @@ function createTransferToolRow(line, initiallySelected, source){
     checkbox.className = 'form-check-input mt-1 transfer-item-checkbox';
     checkbox.disabled = !transferMode();
     checkbox.checked = !!initiallySelected;
-    checkbox.addEventListener('change', function(){
-        document.getElementById('transferToolsError')?.classList.add('d-none');
-        updateSelectAllTransferTools();
-    });
+
     const detail = document.createElement('span');
     const title = document.createElement('span');
     title.className = 'fw-semibold';
@@ -860,6 +913,79 @@ function createTransferToolRow(line, initiallySelected, source){
     label.appendChild(checkbox);
     label.appendChild(detail);
     toolCell.appendChild(label);
+
+    // Out-of-store Tool No / Serial Marking selector for this transfer line
+    const lineSerials = line.serials || [];
+    const qtyHidden = document.createElement('input');
+    qtyHidden.type = 'hidden';
+    qtyHidden.name = 'transfer_qty_' + String(line.item_id);
+    qtyHidden.value = String(line.qty || 0);
+    qtyHidden.disabled = !transferMode();
+    toolCell.appendChild(qtyHidden);
+
+    let serialBoxes = [];
+    if(lineSerials.length > 0){
+        const serialWrap = document.createElement('div');
+        serialWrap.className = 'ms-4 mt-2 p-2 border rounded bg-light-subtle';
+        const serialHeader = document.createElement('div');
+        serialHeader.className = 'small fw-semibold text-warning-emphasis mb-1';
+        serialHeader.innerHTML = '<i class="fas fa-hashtag me-1"></i>Select Out-of-Store Tool No / Serial Marking(s) to transfer:';
+        serialWrap.appendChild(serialHeader);
+
+        const badgesDiv = document.createElement('div');
+        badgesDiv.className = 'd-flex flex-wrap gap-1';
+        lineSerials.forEach(function(sObj){
+            const sLabel = document.createElement('label');
+            sLabel.className = 'badge border d-inline-flex align-items-center gap-1 py-1 px-2 cursor-pointer ' +
+                (checkbox.checked ? 'bg-warning text-dark border-warning' : 'bg-white text-dark');
+            sLabel.style.cursor = 'pointer';
+            const sBox = document.createElement('input');
+            sBox.type = 'checkbox';
+            sBox.name = 'transfer_serial_ids_' + String(line.item_id) + '[]';
+            sBox.value = String(sObj.id);
+            sBox.className = 'form-check-input mt-0 transfer-serial-checkbox';
+            sBox.disabled = !transferMode();
+            sBox.checked = !!checkbox.checked;
+            sBox.addEventListener('change', function(){
+                const checkedCount = serialBoxes.filter(function(b){ return b.checked; }).length;
+                sLabel.className = 'badge border d-inline-flex align-items-center gap-1 py-1 px-2 cursor-pointer ' +
+                    (sBox.checked ? 'bg-warning text-dark border-warning' : 'bg-white text-dark');
+                if(checkedCount > 0){
+                    checkbox.checked = true;
+                    qtyHidden.value = String(checkedCount);
+                } else {
+                    checkbox.checked = false;
+                    qtyHidden.value = String(line.qty || 0);
+                }
+                document.getElementById('transferToolsError')?.classList.add('d-none');
+                updateSelectAllTransferTools();
+            });
+            const sText = document.createElement('span');
+            sText.textContent = sObj.serial_number;
+            sLabel.appendChild(sBox);
+            sLabel.appendChild(sText);
+            badgesDiv.appendChild(sLabel);
+            serialBoxes.push(sBox);
+        });
+        serialWrap.appendChild(badgesDiv);
+        toolCell.appendChild(serialWrap);
+    }
+
+    checkbox.addEventListener('change', function(){
+        serialBoxes.forEach(function(sBox){
+            sBox.checked = checkbox.checked;
+            const sLabel = sBox.closest('label');
+            if(sLabel){
+                sLabel.className = 'badge border d-inline-flex align-items-center gap-1 py-1 px-2 cursor-pointer ' +
+                    (sBox.checked ? 'bg-warning text-dark border-warning' : 'bg-white text-dark');
+            }
+        });
+        if(serialBoxes.length > 0){
+            qtyHidden.value = checkbox.checked ? String(serialBoxes.length) : String(line.qty || 0);
+        }
+        document.getElementById('transferToolsError')?.classList.add('d-none');
+        updateSelectAllTransferTools();
+    });
 
     const rateCell = document.createElement('div');
     rateCell.className = 'col-md-4 transfer-rate-cell';
@@ -1074,17 +1200,175 @@ function toggleTxnType(){
     toggleSettle();
 }
 
-// ── Picking a tool fills its saved rate (until the operator overrides it) ──
+// ── Data-driven Category -> Tool No (Serial Marking) selection in each row ──
+function filterNewRentalToolsByCategory(categoryId){
+    document.querySelectorAll('#toolItemsContainer select.tool-select').forEach(function(sel){
+        Array.from(sel.options).forEach(function(opt){
+            if(!opt.value) return;
+            const visible = !categoryId || String(opt.dataset.categoryId || '') === String(categoryId);
+            opt.hidden = !visible;
+        });
+    });
+}
+
+function getRowSelectedSerialIds(row){
+    const input = row.querySelector('.row-serial-ids-input');
+    if(!input || !input.value) return [];
+    return input.value.split(',').map(function(s){ return s.trim(); }).filter(Boolean);
+}
+
+function setRowSelectedSerialIds(row, idsArray){
+    const unique = Array.from(new Set((idsArray || []).map(function(x){ return String(x); })));
+    const input = row.querySelector('.row-serial-ids-input');
+    if(input) input.value = unique.join(',');
+    const qtyInput = row.querySelector('.row-qty-input') || row.querySelector('input[name="qty[]"]');
+    if(qtyInput && unique.length > 0){
+        qtyInput.value = String(unique.length);
+    }
+    syncRowSerialBadgesUI(row, unique);
+}
+
+function syncRowSerialBadgesUI(row, selectedIds){
+    const set = new Set((selectedIds || getRowSelectedSerialIds(row)).map(String));
+    row.querySelectorAll('.row-serial-chip-btn').forEach(function(btn){
+        const sid = String(btn.dataset.serialId || '');
+        const active = set.has(sid);
+        btn.className = 'btn btn-sm py-0 px-2 row-serial-chip-btn ' +
+            (active ? 'btn-success text-white fw-semibold' : 'btn-outline-secondary');
+        const icon = btn.querySelector('i.serial-check-icon');
+        if(icon){
+            icon.className = 'fas ' + (active ? 'fa-check-square' : 'fa-square') + ' me-1 serial-check-icon';
+        }
+    });
+    const hint = row.querySelector('.row-serial-hint');
+    if(hint){
+        if(set.size > 0){
+            hint.innerHTML = '<strong class="text-success">' + set.size + ' Tool No(s) selected</strong> — Quantity synced to ' + set.size + '.';
+        } else {
+            hint.textContent = 'Click specific Tool No markings (e.g. Shovel No 5, Shovel No 6) to rent those exact pieces, or type a Quantity to auto-pick.';
+        }
+    }
+}
+
+function renderRowSerialPicker(row){
+    const sel = row.querySelector('select.tool-select');
+    const wrap = row.querySelector('.row-serial-picker-wrap');
+    const badgesContainer = row.querySelector('.row-serial-badges');
+    const quickSelect = row.querySelector('.row-serial-quick-select');
+    const hiddenInput = row.querySelector('.row-serial-ids-input');
+    if(!sel || !wrap || !badgesContainer) return;
+
+    const toolId = String(sel.value || '');
+    const toolInfo = IN_STORE_TOOLS_BY_ID.get(toolId);
+    if(!toolId || !toolInfo || !Array.isArray(toolInfo.serials) || toolInfo.serials.length === 0){
+        wrap.classList.add('d-none');
+        badgesContainer.replaceChildren();
+        if(hiddenInput) hiddenInput.value = '';
+        return;
+    }
+
+    wrap.classList.remove('d-none');
+    badgesContainer.replaceChildren();
+    if(quickSelect){
+        quickSelect.innerHTML = '<option value="">+ Quick pick Tool No (' + toolInfo.serials.length + ' in store)…</option>';
+    }
+
+    toolInfo.serials.forEach(function(sObj){
+        if(quickSelect){
+            const opt = document.createElement('option');
+            opt.value = String(sObj.id);
+            opt.textContent = sObj.serial_number + ' (In Store)';
+            quickSelect.appendChild(opt);
+        }
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.dataset.serialId = String(sObj.id);
+        btn.dataset.serialNumber = sObj.serial_number;
+        btn.className = 'btn btn-sm py-0 px-2 btn-outline-secondary row-serial-chip-btn';
+        btn.innerHTML = '<i class="fas fa-square me-1 serial-check-icon"></i>' + sObj.serial_number;
+        btn.addEventListener('click', function(){
+            const current = new Set(getRowSelectedSerialIds(row));
+            const sid = String(sObj.id);
+            if(current.has(sid)){
+                current.delete(sid);
+            } else {
+                current.add(sid);
+            }
+            setRowSelectedSerialIds(row, Array.from(current));
+        });
+        badgesContainer.appendChild(btn);
+    });
+
+    // If user already typed a quantity, pre-select that many in-store serials
+    const qtyInput = row.querySelector('.row-qty-input') || row.querySelector('input[name="qty[]"]');
+    const typedQty = qtyInput ? Math.floor(parseFloat(qtyInput.value || '0') || 0) : 0;
+    if(typedQty > 0){
+        const autoIds = toolInfo.serials.slice(0, typedQty).map(function(s){ return String(s.id); });
+        setRowSelectedSerialIds(row, autoIds);
+    } else if(hiddenInput){
+        hiddenInput.value = '';
+        syncRowSerialBadgesUI(row, []);
+    }
+}
+
+function quickSelectRowSerial(selectEl){
+    const sid = String(selectEl.value || '');
+    if(!sid) return;
+    const row = selectEl.closest('.tool-item-row');
+    if(!row) return;
+    const current = new Set(getRowSelectedSerialIds(row));
+    current.add(sid);
+    setRowSelectedSerialIds(row, Array.from(current));
+    selectEl.value = '';
+}
+
+function selectAllRowSerials(btnEl, selectAll){
+    const row = btnEl.closest('.tool-item-row');
+    if(!row) return;
+    if(!selectAll){
+        setRowSelectedSerialIds(row, []);
+        const qtyInput = row.querySelector('.row-qty-input') || row.querySelector('input[name="qty[]"]');
+        if(qtyInput) qtyInput.value = '';
+        return;
+    }
+    const allIds = Array.from(row.querySelectorAll('.row-serial-chip-btn')).map(function(b){
+        return String(b.dataset.serialId);
+    });
+    setRowSelectedSerialIds(row, allIds);
+}
+
+function removeToolRow(btnEl){
+    const rows = document.querySelectorAll('#toolItemsContainer .tool-item-row');
+    const row = btnEl.closest('.tool-item-row');
+    if(!row) return;
+    if(rows.length <= 1){
+        // Clear the single remaining row instead of leaving zero rows
+        const sel = row.querySelector('select.tool-select');
+        const search = row.querySelector('input.tool-select-search');
+        const qty = row.querySelector('input[name="qty[]"]');
+        const rate = row.querySelector('input.rental-rate-input');
+        if(sel) sel.value = '';
+        if(search) search.value = '';
+        if(qty) qty.value = '';
+        if(rate) rate.value = '';
+        renderRowSerialPicker(row);
+        return;
+    }
+    row.remove();
+}
+
+// ── Picking a tool fills its saved rate & loads its in-store Tool Nos ──
 function wireToolRow(row){
     const sel = row.querySelector('select.tool-select');
     const search = row.querySelector('input.tool-select-search');
     const rate = row.querySelector('input.rental-rate-input');
+    const qty = row.querySelector('input[name="qty[]"]');
     if(!sel || !rate) return;
     if(search && window.HDCComboList && !search.__hdcCombo){
         search.__hdcCombo = window.HDCComboList.attach(search, sel, {
             strict: true,
             maxItems: 80,
-            emptyText: 'No matching tools. Choose a listed tool.'
+            emptyText: 'No matching in-store tools. Choose a listed tool.'
         });
     }
     sel.addEventListener('change', function(){
@@ -1093,7 +1377,27 @@ function wireToolRow(row){
         if(rate.value === '' && saved !== null && saved !== ''){
             rate.value = saved;
         }
+        renderRowSerialPicker(row);
     });
+    if(qty){
+        qty.addEventListener('input', function(){
+            const toolId = String(sel.value || '');
+            const toolInfo = IN_STORE_TOOLS_BY_ID.get(toolId);
+            if(!toolInfo || !Array.isArray(toolInfo.serials)) return;
+            const n = Math.max(0, Math.floor(parseFloat(qty.value || '0') || 0));
+            const current = getRowSelectedSerialIds(row);
+            if(n === 0){
+                const input = row.querySelector('.row-serial-ids-input');
+                if(input) input.value = '';
+                syncRowSerialBadgesUI(row, []);
+            } else if(current.length !== n){
+                const nextIds = toolInfo.serials.slice(0, n).map(function(s){ return String(s.id); });
+                const input = row.querySelector('.row-serial-ids-input');
+                if(input) input.value = nextIds.join(',');
+                syncRowSerialBadgesUI(row, nextIds);
+            }
+        });
+    }
 }
 
 document.getElementById('rentalProjectSelect')?.addEventListener('change', syncRentalStages);
@@ -1138,10 +1442,10 @@ function addToolRow(){
     const selectId = 'rentalToolSelect' + nextToolComboIndex++;
     const inputId = selectId + 'Input';
     const row = document.createElement('div');
-    row.className = 'row g-2 mb-2 tool-item-row align-items-end';
+    row.className = 'row g-2 mb-2 tool-item-row align-items-end border rounded p-2 bg-light-subtle';
     row.innerHTML = `
         <div class="col-md-6">
-            <label class="form-label small" for="${inputId}">Tool</label>
+            <label class="form-label small fw-semibold" for="${inputId}">Tool Category / Main Tool (In Store)</label>
             <input type="text" id="${inputId}" class="form-control tool-select-search"
                    placeholder="Search tool name or code…" autocomplete="off"
                    role="combobox" aria-expanded="false" aria-autocomplete="list" aria-label="Tool"
@@ -1150,23 +1454,44 @@ function addToolRow(){
                     data-hdc-combo-source>
                 <option value=""></option>
                 {% for t in tools %}
-                <option value="{{ t.id }}" data-rate="{{ t.rental_rate_per_day }}" data-avail="{{ t.available_qty }}">{{ t.name }} ({{ t.tool_code }}) — {{ "%.0f"|format(t.available_qty) }} available</option>
+                <option value="{{ t.id }}" data-category-id="{{ t.category_id or '' }}" data-rate="{{ t.rental_rate_per_day }}" data-avail="{{ t.available_qty }}">{{ t.name }} ({{ t.tool_code }}) — {{ "%.0f"|format(t.available_qty) }} available</option>
                 {% endfor %}
             </select>
         </div>
         <div class="col-4 col-md-2">
-            <label class="form-label small">Quantity</label>
-            <input type="number" name="qty[]" class="form-control" placeholder="Qty" min="0.1" step="0.1" required>
+            <label class="form-label small fw-semibold">Quantity</label>
+            <input type="number" name="qty[]" class="form-control row-qty-input" placeholder="Qty" min="0.1" step="0.1" required>
         </div>
         <div class="col-6 col-md-3 rental-rate-cell">
-            <label class="form-label small rental-rate-label">Rent rate</label>
+            <label class="form-label small rental-rate-label fw-semibold">Rent rate</label>
             <input type="number" name="rate[]" class="form-control rental-rate-input" placeholder="Use saved rate" min="0" step="0.01">
         </div>
         <div class="col-2 col-md-1">
-            <button type="button" class="btn btn-outline-danger w-100" aria-label="Remove tool line" title="Remove tool line" onclick="this.closest('.tool-item-row').remove()"><i class="fas fa-times" aria-hidden="true"></i></button>
+            <button type="button" class="btn btn-outline-danger w-100" aria-label="Remove tool line" title="Remove tool line" onclick="removeToolRow(this)"><i class="fas fa-times" aria-hidden="true"></i></button>
+        </div>
+        <div class="col-12 mt-2 row-serial-picker-wrap d-none">
+            <input type="hidden" name="row_serial_ids[]" class="row-serial-ids-input" value="">
+            <div class="p-2 border rounded bg-white">
+                <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-1">
+                    <label class="form-label small fw-semibold mb-0 text-success">
+                        <i class="fas fa-hashtag me-1"></i>Select Tool No / Serial Marking (In Store Available Only):
+                    </label>
+                    <div class="d-flex align-items-center gap-2">
+                        <select class="form-select form-select-sm row-serial-quick-select" style="width:auto; min-width:190px;" onchange="quickSelectRowSerial(this)">
+                            <option value="">+ Quick pick Tool No…</option>
+                        </select>
+                        <button type="button" class="btn btn-xs btn-outline-success py-0 px-2 small" onclick="selectAllRowSerials(this, true)">Select All</button>
+                        <button type="button" class="btn btn-xs btn-outline-secondary py-0 px-2 small" onclick="selectAllRowSerials(this, false)">Clear</button>
+                    </div>
+                </div>
+                <div class="row-serial-badges d-flex flex-wrap gap-1 mt-1"></div>
+                <small class="text-muted d-block mt-1 row-serial-hint">Click specific Tool No markings (e.g. Shovel No 5, Shovel No 6) to rent those exact pieces, or type a Quantity to auto-pick.</small>
+            </div>
         </div>
     `;
     container.appendChild(row);
+    const catFilterVal = document.getElementById('newRentalCategoryFilter')?.value || '';
+    if(catFilterVal) filterNewRentalToolsByCategory(catFilterVal);
     wireToolRow(row);
     syncBilling();
 }
@@ -1178,14 +1503,32 @@ let selectedSerials = new Set();
 let expandedToolGroups = new Set();
 
 function toggleToolSelectMode(){
-    const qtyMode = document.getElementById('selectModeQty').checked;
-    const serialMode = document.getElementById('selectModeSerial').checked;
-    document.getElementById('quantityToolRows').classList.toggle('d-none', serialMode);
-    document.getElementById('serialToolPicker').classList.toggle('d-none', !serialMode);
-    document.getElementById('serialSelectInfo').classList.toggle('d-none', !serialMode);
+    const serialMode = !!document.getElementById('selectModeSerial')?.checked;
+    const qtyPanel = document.getElementById('quantityToolRows');
+    const serialPanel = document.getElementById('serialToolPicker');
+    const infoBanner = document.getElementById('serialSelectInfo');
+
+    qtyPanel?.classList.toggle('d-none', serialMode);
+    serialPanel?.classList.toggle('d-none', !serialMode);
+    infoBanner?.classList.toggle('d-none', !serialMode);
+
+    // Ensure hidden required fields in quantityToolRows do not block form submit
+    if(qtyPanel){
+        qtyPanel.querySelectorAll('select[name="tool_id[]"], input[name="qty[]"]').forEach(function(el){
+            el.required = !serialMode;
+            el.disabled = serialMode;
+        });
+    }
     if(serialMode){
         loadSerialPickerData();
     }
+}
+
+function onSerialCategorySelectChange(toolId){
+    if(toolId){
+        expandedToolGroups.add(parseInt(toolId, 10));
+    }
+    renderSerialPicker();
 }
 
 function loadSerialPickerData(){
@@ -1196,9 +1539,12 @@ function loadSerialPickerData(){
         .then(r => r.json())
         .then(data => {
             serialPickerData = data.tools || [];
+            if(serialPickerData.length === 1){
+                expandedToolGroups.add(serialPickerData[0].tool_id);
+            }
             renderSerialPicker();
             document.getElementById('serialPickerCount').textContent =
-                data.total_serials + ' serials available';
+                data.total_serials + ' serials available in store';
         })
         .catch(err => {
             list.innerHTML = '<div class="alert alert-danger py-3">Error loading serials: ' + err.message + '</div>';
@@ -1207,28 +1553,34 @@ function loadSerialPickerData(){
 
 function renderSerialPicker(filterText){
     const list = document.getElementById('serialPickerList');
-    const searchText = (filterText || document.getElementById('serialPickerSearch').value || '').toLowerCase();
+    const searchText = (filterText !== undefined ? filterText : (document.getElementById('serialPickerSearch')?.value || '')).toLowerCase().trim();
+    const selectedToolFilter = String(document.getElementById('serialToolCategorySelect')?.value || '');
     let html = '';
 
     if(serialPickerData.length === 0){
-        html = '<div class="text-center py-4 text-muted">No serials available in store. Add tools and create serials first.</div>';
+        html = '<div class="text-center py-4 text-muted">No serials available in store.</div>';
     } else {
         serialPickerData.forEach(tool => {
-            const toolName = tool.tool_name.toLowerCase();
-            const toolCode = tool.tool_code.toLowerCase();
-            if(searchText && !toolName.includes(searchText) && !toolCode.includes(searchText)){
-                return; // Filter out
+            if(selectedToolFilter && String(tool.tool_id) !== selectedToolFilter){
+                return;
             }
-
-            const isExpanded = expandedToolGroups.has(tool.tool_id);
+            const toolName = (tool.tool_name || '').toLowerCase();
+            const toolCode = (tool.tool_code || '').toLowerCase();
             const serials = tool.serials || [];
             let filteredSerials = serials;
             if(searchText){
+                const toolMatches = toolName.includes(searchText) || toolCode.includes(searchText);
                 filteredSerials = serials.filter(s =>
+                    toolMatches ||
                     s.serial_number.toLowerCase().includes(searchText) ||
-                    s.label.toLowerCase().includes(searchText)
+                    (s.label || '').toLowerCase().includes(searchText)
                 );
+                if(!toolMatches && filteredSerials.length === 0){
+                    return;
+                }
             }
+
+            const isExpanded = expandedToolGroups.has(tool.tool_id) || !!selectedToolFilter || !!searchText;
 
             html += `<div class="tool-group" data-tool-id="${tool.tool_id}">`;
             html += `<div class="tool-group-header d-flex align-items-center justify-content-between p-3 bg-light-subtle cursor-pointer" onclick="toggleToolGroup(${tool.tool_id})">`;
@@ -1236,7 +1588,7 @@ function renderSerialPicker(filterText){
             html += `<i class="fas fa-tools text-mint fs-5"></i>`;
             html += `<div><strong>${tool.tool_name}</strong>`;
             html += `<span class="badge bg-secondary ms-2">${tool.tool_code}</span>`;
-            html += `<small class="text-muted d-block">${filteredSerials.length} serials available</small>`;
+            html += `<small class="text-muted d-block">${filteredSerials.length} in-store Tool No(s) available</small>`;
             html += `</div></div>`;
             html += `<i class="fas fa-${isExpanded ? 'chevron-down' : 'chevron-right'} text-muted"></i>`;
             html += `</div>`;
@@ -1337,14 +1689,23 @@ document.addEventListener('DOMContentLoaded', function(){
     }
 });
 
-// ── Tool Status Modal (for serial picker) ────────────────────────────────────
+// ── Tool Status Modal (for serial picker & quick view) ──────────────────────
+
+function openToolStatusModal(){
+    const modalEl = document.getElementById('toolStatusModal');
+    if(modalEl && window.bootstrap && bootstrap.Modal){
+        bootstrap.Modal.getOrCreateInstance(modalEl).show();
+    }
+}
 
 function showSerialStatus(serialId){
-    const body = document.getElementById('serialStatusModalBody');
-    const title = document.getElementById('serialStatusModalTitle');
+    const body = document.getElementById('toolStatusModalBody');
+    const title = document.getElementById('toolStatusModalTitle');
+    if(!body || !title) return;
 
     title.textContent = 'Serial Status';
     body.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-mint"></div><p class="text-muted mt-2">Loading serial status...</p></div>';
+    openToolStatusModal();
 
     fetch('/hdc/api/tool-rental/serials/' + serialId + '/status')
         .then(r => r.json())
@@ -1361,8 +1722,9 @@ function showSerialStatus(serialId){
 }
 
 function renderSerialStatusModal(data){
-    const body = document.getElementById('serialStatusModalBody');
-    const title = document.getElementById('serialStatusModalTitle');
+    const body = document.getElementById('toolStatusModalBody');
+    const title = document.getElementById('toolStatusModalTitle');
+    if(!body || !title) return;
 
     title.textContent = 'Serial: ' + data.serial_number;
 
@@ -1397,7 +1759,6 @@ function renderSerialStatusModal(data){
         html += '</div></div>';
     }
 
-    // If in store, show rental history is empty
     if(data.is_in_store){
         html += '<div class="alert alert-info py-2 small mb-3">';
         html += '<i class="fas fa-warehouse me-1"></i>This serial is currently in the warehouse and available for rental.';
@@ -1418,7 +1779,7 @@ function renderSerialStatusModal(data){
                              m.type.includes('transfer') ? 'text-warning' : 'text-muted';
 
             html += '<tr>';
-            html += `<td>${new Date(m.timestamp).toLocaleDateString()}</td>`;
+            html += `<td>${m.timestamp ? new Date(m.timestamp).toLocaleDateString() : '-'}</td>`;
             html += `<td><i class="fas ${typeIcon} ${typeColor}"></i> ${m.type.replace(/_/g, ' ')}</td>`;
             html += `<td>${m.from_label || '-'}</td>`;
             html += `<td>${m.to_label || '-'}</td>`;
@@ -1430,25 +1791,17 @@ function renderSerialStatusModal(data){
         html += '<div class="text-muted small py-2 text-center">No movement history recorded.</div>';
     }
 
-    // Legend
-    html += '<div class="mt-3 small text-muted">';
-    html += '<i class="fas fa-circle text-success me-1"></i> In Store &nbsp;';
-    html += '<i class="fas fa-circle text-warning me-1"></i> Rented Out &nbsp;';
-    html += '<i class="fas fa-circle text-orange me-1"></i> Transferred &nbsp;';
-    html += '<i class="fas fa-circle text-danger me-1"></i> Damaged/Lost';
-    html += '</div>';
-
     body.innerHTML = html;
 }
 
-// ── Tool Status Modal (for quick view) ──────────────────────────────────────
-
 function showToolStatusDialog(toolId, toolName){
-    const body = document.getElementById('toolStatusDialogBody');
-    const title = document.getElementById('toolStatusDialogTitle');
+    const body = document.getElementById('toolStatusModalBody');
+    const title = document.getElementById('toolStatusModalTitle');
+    if(!body || !title) return;
 
     title.textContent = 'Tool Status: ' + toolName;
     body.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-mint"></div><p class="text-muted mt-2">Loading tool status...</p></div>';
+    openToolStatusModal();
 
     fetch('/hdc/api/tool-rental/tools/' + toolId + '/summary')
         .then(r => r.json())
@@ -1465,7 +1818,8 @@ function showToolStatusDialog(toolId, toolName){
 }
 
 function renderToolStatusDialog(data){
-    const body = document.getElementById('toolStatusDialogBody');
+    const body = document.getElementById('toolStatusModalBody');
+    if(!body) return;
     let html = '';
 
     html += '<div class="row g-3 mb-4">';
@@ -1476,7 +1830,7 @@ function renderToolStatusDialog(data){
     html += '</div>';
 
     if(data.serials && data.serials.length > 0){
-        html += '<div class="card hdc-card"><div class="card-header hdc-card-header"><i class="fas fa-qrcode me-2"></i>Serial Numbers (' + data.serials.length + ')</div><div class="card-body p-0"><div class="table-responsive"><table class="table table-sm mb-0"><thead><tr><th>Serial No</th><th>Status</th><th>Location</th></tr></thead><tbody>';
+        html += '<div class="card hdc-card"><div class="card-header hdc-card-header"><i class="fas fa-qrcode me-2"></i>Serial Markings (' + data.serials.length + ')</div><div class="card-body p-0"><div class="table-responsive"><table class="table table-sm mb-0"><thead><tr><th>Tool No / Serial</th><th>Status</th><th>Location</th></tr></thead><tbody>';
 
         data.serials.slice(0, 50).forEach(s => {
             const statusClass = s.is_in_store ? 'text-success' : 'text-warning';

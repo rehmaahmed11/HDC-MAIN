@@ -136,7 +136,7 @@ def stock_stats_for(stats, tool_id):
 
 def record_tool_purchase(tool_id, qty, unit_cost=None, supplier='', purchase_date=None,
                          reference='', notes='', update_cost=True, is_opening_stock=False,
-                         created_by=None, commit=True):
+                         created_by=None, commit=True, serial_numbers=None, start_no=None):
     """Buy more of a tool we already own: +qty on total_quantity + audit row.
 
     ``unit_cost`` falls back to the tool's current cost and only overwrites it
@@ -152,6 +152,12 @@ def record_tool_purchase(tool_id, qty, unit_cost=None, supplier='', purchase_dat
     qty = _round2(qty)
     if qty <= EPS:
         return False, 'Purchase quantity must be greater than 0.', None
+
+    # Ensure any pre-existing owned quantity already has serial markings before
+    # we add the newly purchased pieces.
+    old_qty = _round2(tool.total_quantity)
+    if old_qty > EPS:
+        ensure_tool_serials(tool=tool, created_by=created_by, commit=False)
 
     cost = _round2(tool.purchase_cost if unit_cost is None else unit_cost)
     if cost < 0:
@@ -175,7 +181,6 @@ def record_tool_purchase(tool_id, qty, unit_cost=None, supplier='', purchase_dat
     db.session.add(purchase)
     db.session.flush()
 
-    old_qty = _round2(tool.total_quantity)
     tool.total_quantity = _round2(old_qty + qty)
     if update_cost and cost > 0:
         tool.purchase_cost = cost
@@ -188,6 +193,21 @@ def record_tool_purchase(tool_id, qty, unit_cost=None, supplier='', purchase_dat
         notes=(f'Purchase {purchase.purchase_code}: +{qty:g} {tool.unit} '
                f'@ {cost:,.0f} = {total_cost:,.0f}'),
     )
+
+    # Auto-create individual serial markings (e.g. "Shovel No 1", "Shovel No 2")
+    int_qty = int(round(qty))
+    if int_qty > 0:
+        create_tool_serials(
+            tool_id=tool.id,
+            qty=int_qty,
+            serial_numbers=serial_numbers,
+            start_no=start_no,
+            created_by=created_by,
+            from_label=(purchase.supplier or SUPPLIER_LABEL),
+            notes_prefix=f'Purchase {purchase.purchase_code}',
+            commit=False,
+        )
+
     if commit:
         db.session.commit()
     return True, '', purchase
@@ -200,7 +220,7 @@ def tool_available_for_integrity(tool):
 
 
 def record_tool_scrap(tool_id, qty, reason='damaged', scrap_date=None, reference='',
-                      notes='', created_by=None, commit=True):
+                      notes='', created_by=None, commit=True, serial_ids=None):
     """Throw away / lose / sell as scrap: -qty on total_quantity + audit row.
 
     Only what is sitting in the store can be scrapped - rented-out pieces have
@@ -212,6 +232,23 @@ def record_tool_scrap(tool_id, qty, reason='damaged', scrap_date=None, reference
     if tool.is_void:
         return False, f'{tool.name} is archived. Un-archive it before recording scrap.', None
 
+    ensure_tool_serials(tool=tool, created_by=created_by, commit=False)
+
+    parsed_serial_ids = []
+    if serial_ids:
+        if isinstance(serial_ids, str):
+            parsed_serial_ids = [int(x.strip()) for x in serial_ids.split(',') if x.strip().isdigit()]
+        else:
+            for x in serial_ids:
+                if str(x).strip().isdigit():
+                    parsed_serial_ids.append(int(str(x).strip()))
+        # Deduplicate preserving order
+        seen_sids = set()
+        parsed_serial_ids = [sid for sid in parsed_serial_ids if not (sid in seen_sids or seen_sids.add(sid))]
+
+    if parsed_serial_ids and (qty is None or float(qty or 0) <= 0):
+        qty = float(len(parsed_serial_ids))
+
     qty = _round2(qty)
     if qty <= EPS:
         return False, 'Scrap quantity must be greater than 0.', None
@@ -222,6 +259,23 @@ def record_tool_scrap(tool_id, qty, reason='damaged', scrap_date=None, reference
                        f'Only {available:g} {tool.unit} of {tool.name} is in the store '
                        f'({tool.rented_out_qty:g} is rented out) - return it first.'), None
 
+    # Validate explicit serial_ids if supplied
+    serials_to_scrap = []
+    if parsed_serial_ids:
+        for sid in parsed_serial_ids:
+            s_obj = db.session.get(ToolSerial, sid)
+            if not s_obj or s_obj.tool_id != tool.id or getattr(s_obj, 'is_scrapped', False):
+                return False, f'Invalid serial selection for {tool.name}.', None
+            if not s_obj.is_in_store:
+                return False, f'{s_obj.serial_number} is currently out ({s_obj.current_location_label}) — return it to store before scrapping.', None
+            serials_to_scrap.append(s_obj)
+        qty = _round2(float(len(serials_to_scrap)))
+    else:
+        int_scrap = int(round(qty))
+        in_store_list = tool.in_store_serials
+        if int_scrap > 0 and in_store_list:
+            serials_to_scrap = in_store_list[:int_scrap]
+
     reason_key = (reason or 'damaged').strip().lower()
     if reason_key not in {k for k, _ in TOOL_SCRAP_REASONS}:
         reason_key = 'other'
@@ -229,6 +283,8 @@ def record_tool_scrap(tool_id, qty, reason='damaged', scrap_date=None, reference
     unit_cost = _round2(tool.purchase_cost)
     value = _round2(qty * unit_cost)
     when = _parse_date(scrap_date)
+
+    scrap_notes = (notes or '').strip()
 
     scrap = ToolScrap(
         scrap_code=_next_scrap_code(),
@@ -239,7 +295,7 @@ def record_tool_scrap(tool_id, qty, reason='damaged', scrap_date=None, reference
         unit_cost=unit_cost,
         value_written_off=value,
         reference=(reference or '').strip()[:120],
-        notes=(notes or '').strip()[:300],
+        notes=scrap_notes[:300],
         created_by=created_by,
     )
     db.session.add(scrap)
@@ -248,6 +304,26 @@ def record_tool_scrap(tool_id, qty, reason='damaged', scrap_date=None, reference
     old_qty = _round2(tool.total_quantity)
     tool.total_quantity = max(0.0, _round2(old_qty - qty))
     tool.updated_at = _pkt_now_naive()
+
+    for s_obj in serials_to_scrap:
+        prev_loc = s_obj.current_location_label or STORE_LABEL
+        s_obj.is_in_store = False
+        s_obj.is_scrapped = True
+        s_obj.current_rental_id = None
+        s_obj.current_rental_item_id = None
+        s_obj.status = 'scrapped'
+        s_obj.condition = 'lost' if reason_key == 'lost' else 'damaged'
+        s_obj.current_location_label = SCRAP_LABEL
+        s_obj.updated_at = _pkt_now_naive()
+        s_obj.updated_by = created_by
+        create_serial_movement(
+            serial_id=s_obj.id,
+            movement_type=MOVEMENT_SCRAP_OUT,
+            from_label=prev_loc,
+            to_label=SCRAP_LABEL,
+            notes=f'Scrap {scrap.scrap_code} ({scrap.reason_label}): {s_obj.serial_number}',
+            created_by=created_by,
+        )
 
     create_movement_log(
         tool_id=tool.id, rental_id=None, movement_type=MOVEMENT_SCRAP_OUT,
@@ -1049,35 +1125,114 @@ def void_discounts_for_payment(payment_id, reason=''):
 # Tool Serial Number Management — individual piece tracking
 # --------------------------------------------------------------------------- #
 
-def _next_serial_number(tool):
-    """Generate the next serial number for a tool based on existing serials."""
-    existing = ToolSerial.query.filter_by(tool_id=tool.id).order_by(ToolSerial.id.desc()).first()
-    if existing:
-        # Try to parse the numeric part of the last serial
-        last_serial = existing.serial_number
-        # If it looks like "WB-001" or "SN-042", increment the number
-        parts = last_serial.rsplit('-', 1)
-        if len(parts) == 2 and parts[1].isdigit():
-            prefix = parts[0]
-            num = int(parts[1]) + 1
-            return f"{prefix}-{num:03d}"
-    # Default: tool_code + sequential number
-    if tool.tool_code:
-        count = ToolSerial.query.filter_by(tool_id=tool.id).count()
-        return f"{tool.tool_code}-{count + 1:03d}"
-    count = ToolSerial.query.filter_by(tool_id=tool.id).count()
-    return f"SN-{count + 1:03d}"
+def _serial_base_name(tool, prefix=None):
+    """Human-readable prefix for serial markings, e.g. 'Shovel' -> 'Shovel No 1'."""
+    if prefix and str(prefix).strip():
+        return str(prefix).strip()
+    name = (tool.name if tool else '') or ''
+    name = name.strip()
+    if name:
+        return name
+    code = (tool.tool_code if tool else '') or ''
+    return code.strip() or 'Tool'
 
 
-def create_tool_serials(tool_id, qty, serial_numbers=None, created_by=None):
-    """Create individual serial-numbered pieces for a tool.
+def _extract_serial_seq_number(serial_number, base_name=''):
+    """Extract the trailing sequence integer from a serial marking like
+    'Shovel No 5', 'Shovel No. 6', 'TOOL-0001-005', etc."""
+    import re
+    s = str(serial_number or '').strip()
+    if not s:
+        return 0
+    if base_name:
+        m = re.match(rf'^{re.escape(base_name)}\s*(?:No\.?|#|-)?\s*(\d+)\s*$', s, flags=re.IGNORECASE)
+        if m:
+            return int(m.group(1))
+    m = re.search(r'(?:No\.?\s*|#\s*|-\s*0*)(\d+)\s*$', s, flags=re.IGNORECASE)
+    if m:
+        return int(m.group(1))
+    m = re.search(r'(\d+)\s*$', s)
+    if m:
+        return int(m.group(1))
+    return 0
+
+
+def _generate_serial_numbers(tool, count, start_no=None, prefix=None):
+    """Generate ``count`` unique human-readable serial markings for ``tool``
+    such as 'Shovel No 1', 'Shovel No 2', ..., 'Shovel No 5', 'Shovel No 6'."""
+    import re
+    count = max(0, int(count or 0))
+    if count <= 0:
+        return []
+    base = _serial_base_name(tool, prefix=prefix)
+    existing_rows = ToolSerial.query.filter_by(tool_id=tool.id).all()
+    existing_names_ci = {str(r.serial_number or '').strip().lower() for r in existing_rows}
+
+    # Special case: if the tool name itself is already a single numbered marking
+    # like "Shovel No 5" with count == 1 and no serials yet, use "Shovel No 5".
+    if (count == 1 and not existing_rows and not start_no and not prefix
+            and re.search(r'\bNo\.?\s*\d+\s*$', base, flags=re.IGNORECASE)):
+        return [base]
+
+    if start_no is not None and str(start_no).strip().isdigit() and int(start_no) > 0:
+        next_num = int(start_no)
+    else:
+        max_num = 0
+        for r in existing_rows:
+            n = _extract_serial_seq_number(r.serial_number, base_name=base)
+            if n > max_num:
+                max_num = n
+        next_num = max(max_num + 1, len(existing_rows) + 1)
+
+    generated = []
+    while len(generated) < count:
+        candidate = f"{base} No {next_num}"
+        if candidate.lower() not in existing_names_ci:
+            generated.append(candidate)
+            existing_names_ci.add(candidate.lower())
+        next_num += 1
+    return generated
+
+
+def _next_serial_number(tool, start_no=None, prefix=None):
+    """Generate the next single serial number for a tool (e.g. 'Shovel No 5')."""
+    nums = _generate_serial_numbers(tool, 1, start_no=start_no, prefix=prefix)
+    return nums[0] if nums else f"{_serial_base_name(tool, prefix=prefix)} No 1"
+
+
+def parse_custom_serial_list(raw):
+    """Parse comma- or newline-separated serial markings into a clean list."""
+    if not raw:
+        return []
+    if isinstance(raw, (list, tuple)):
+        items = [str(x).strip() for x in raw if str(x).strip()]
+    else:
+        import re
+        items = [x.strip() for x in re.split(r'[\n,;]+', str(raw)) if x.strip()]
+    seen = set()
+    out = []
+    for item in items:
+        key = item.lower()
+        if key not in seen:
+            seen.add(key)
+            out.append(item[:80])
+    return out
+
+
+def create_tool_serials(tool_id, qty=None, serial_numbers=None, created_by=None,
+                        start_no=None, prefix=None, from_label=None,
+                        notes_prefix=None, commit=False):
+    """Create individual serial-numbered pieces for a tool (e.g. 'Shovel No 5').
 
     Args:
         tool_id: The tool ID.
         qty: Number of serials to create.
-        serial_numbers: Optional list of pre-defined serial numbers. If None,
-            auto-generates serial numbers.
+        serial_numbers: Optional list (or comma/newline string) of pre-defined
+            serial markings. If None, auto-generates markings like
+            'Shovel No 1', 'Shovel No 2', etc.
         created_by: User ID who created the serials.
+        start_no: Optional starting number (e.g. 5 -> 'Shovel No 5', 'Shovel No 6').
+        prefix: Optional custom prefix instead of tool.name.
 
     Returns:
         (success, message, [serial_ids])
@@ -1086,59 +1241,229 @@ def create_tool_serials(tool_id, qty, serial_numbers=None, created_by=None):
     if not tool:
         return False, 'Tool not found.', []
 
-    if serial_numbers is None:
-        serial_numbers = []
-        for _ in range(int(qty)):
-            serial_numbers.append(_next_serial_number(tool))
-
-    if len(serial_numbers) != int(qty):
-        return False, f'Serial number count ({len(serial_numbers)}) does not match quantity ({qty}).', []
+    custom_list = parse_custom_serial_list(serial_numbers)
+    if custom_list:
+        if qty is not None and int(round(float(qty or 0))) > 0 and len(custom_list) < int(round(float(qty))):
+            # Fill any remaining count using auto-generated markings
+            extra_needed = int(round(float(qty))) - len(custom_list)
+            auto_extra = _generate_serial_numbers(tool, extra_needed, start_no=start_no, prefix=prefix)
+            for cand in auto_extra:
+                if cand.lower() not in {c.lower() for c in custom_list}:
+                    custom_list.append(cand)
+        target_numbers = custom_list
+    else:
+        count = max(0, int(round(float(qty or 0))))
+        if count <= 0:
+            return False, 'Quantity must be at least 1.', []
+        target_numbers = _generate_serial_numbers(tool, count, start_no=start_no, prefix=prefix)
 
     created_ids = []
-    for sn in serial_numbers:
-        existing = ToolSerial.query.filter_by(tool_id=tool.id, serial_number=sn).first()
+    for sn in target_numbers:
+        existing = ToolSerial.query.filter(
+            ToolSerial.tool_id == tool.id,
+            func.lower(ToolSerial.serial_number) == sn.lower()
+        ).first()
         if existing:
+            if getattr(existing, 'is_scrapped', False):
+                continue
             continue  # Skip duplicates silently
         serial = ToolSerial(
             serial_number=sn,
             tool_id=tool.id,
             is_in_store=True,
+            is_scrapped=False,
+            current_location_label=STORE_LABEL,
             status='in_store',
-            condition='good',
+            condition=tool.condition if tool.condition in ('good', 'maintenance', 'damaged') else 'good',
             created_by=created_by,
         )
         db.session.add(serial)
         db.session.flush()
         created_ids.append(serial.id)
 
-        # Log the initial stock-in movement
+        note_text = f'Serial {sn} added to inventory'
+        if notes_prefix:
+            note_text = f'{notes_prefix}: {sn}'
         create_serial_movement(
             serial_id=serial.id,
             movement_type='purchase_in',
-            from_label='Supplier / Purchase',
-            to_label='Warehouse / Store',
-            notes=f'Serial {sn} added to inventory',
+            from_label=from_label or SUPPLIER_LABEL,
+            to_label=STORE_LABEL,
+            notes=note_text,
             created_by=created_by,
         )
 
+    if commit:
+        db.session.commit()
     return True, f'Created {len(created_ids)} serial(s) for {tool.name}.', created_ids
 
 
-def get_available_serials(tool_id, rental_id=None):
-    """Get serials that are currently in store (available for rental).
+def ensure_tool_serials(tool=None, tool_id=None, created_by=None, commit=False):
+    """Ensure a tool's active ToolSerial markings match its owned quantity and
+    live rental holdings.
 
-    Args:
-        tool_id: The tool ID.
-        rental_id: Optional rental ID to filter (for transfer scenarios).
-
-    Returns:
-        List of ToolSerial objects that are in store.
+    This guarantees that even tools created before serial tracking (or directly
+    via ORM in tests/imports) always have complete serial markings (e.g.
+    'Shovel No 1' .. 'Shovel No N') with accurate in-store vs out-of-store
+    status.
     """
-    query = ToolSerial.query.filter_by(tool_id=int(tool_id or 0), is_in_store=True)
+    if tool is None and tool_id:
+        tool = db.session.get(Tool, int(tool_id or 0))
+    if not tool or tool.is_void:
+        return []
+
+    owned_int = max(0, min(500, int(round(float(tool.total_quantity or 0.0)))))
+    all_serials = ToolSerial.query.filter_by(tool_id=tool.id).all()
+    active_serials = [s for s in all_serials if not getattr(s, 'is_scrapped', False) and s.status != 'scrapped']
+
+    # 1. Backfill missing serial rows up to owned_int
+    if len(active_serials) < owned_int:
+        missing = owned_int - len(active_serials)
+        create_tool_serials(
+            tool_id=tool.id,
+            qty=missing,
+            created_by=created_by,
+            notes_prefix='Auto-synced inventory serial',
+            commit=False,
+        )
+        all_serials = ToolSerial.query.filter_by(tool_id=tool.id).all()
+        active_serials = [s for s in all_serials if not getattr(s, 'is_scrapped', False) and s.status != 'scrapped']
+
+    active_serials.sort(key=lambda s: s.sort_key)
+
+    # 2. Reconcile serials against active (non-void) rental items for this tool
+    open_items = (
+        ToolRentalItem.query
+        .join(ToolRental, ToolRental.id == ToolRentalItem.rental_id)
+        .filter(
+            ToolRentalItem.tool_id == tool.id,
+            ToolRental.is_void == False,  # noqa: E712
+            ToolRentalItem.qty_pending > EPS,
+        )
+        .order_by(ToolRental.rental_date.asc(), ToolRental.id.asc(), ToolRentalItem.id.asc())
+        .all()
+    )
+    open_rental_ids = {item.rental_id for item in open_items}
+
+    # Any serial marked out on a rental that is now closed/voided or has 0 pending
+    # returns to store automatically.
+    for s in active_serials:
+        if not s.is_in_store and s.current_rental_id and s.current_rental_id not in open_rental_ids:
+            s.is_in_store = True
+            s.current_rental_id = None
+            s.current_rental_item_id = None
+            s.status = 'in_store'
+            s.current_location_label = STORE_LABEL
+
+    # For each open rental item, make sure the number of serials attached to
+    # that rental matches qty_pending.
+    in_store_pool = [s for s in active_serials if s.is_in_store]
+    for item in open_items:
+        rental = item.rental
+        needed = max(0, int(round(float(item.qty_pending or 0.0))))
+        attached = [
+            s for s in active_serials
+            if not s.is_in_store and s.current_rental_id == rental.id
+            and (s.current_rental_item_id in (None, item.id))
+        ]
+        # Attach item_id if unset
+        for s in attached[:needed]:
+            if s.current_rental_item_id is None:
+                s.current_rental_item_id = item.id
+            if not s.current_location_label or s.current_location_label == STORE_LABEL:
+                s.current_location_label = rental.current_location_label or 'Rented Out'
+
+        if len(attached) > needed:
+            # Return excess serials to store
+            for s in attached[needed:]:
+                s.is_in_store = True
+                s.current_rental_id = None
+                s.current_rental_item_id = None
+                s.status = 'in_store'
+                s.current_location_label = STORE_LABEL
+                in_store_pool.append(s)
+        elif len(attached) < needed:
+            short = needed - len(attached)
+            while short > 0 and in_store_pool:
+                s = in_store_pool.pop(0)
+                s.is_in_store = False
+                s.current_rental_id = rental.id
+                s.current_rental_item_id = item.id
+                s.status = 'rented'
+                s.current_location_label = rental.current_location_label or 'Rented Out'
+                short -= 1
+
+    db.session.flush()
+    if commit:
+        db.session.commit()
+    return sorted(active_serials, key=lambda s: s.sort_key)
+
+
+def ensure_all_tools_serials(tools=None, created_by=None, commit=False):
+    """Ensure serial markings are synced for all active tools."""
+    if tools is None:
+        tools = Tool.query.filter(Tool.is_void == False).all()  # noqa: E712
+    for t in tools:
+        ensure_tool_serials(tool=t, created_by=created_by, commit=False)
+    if commit:
+        db.session.commit()
+    return tools
+
+
+def get_available_serials(tool_id, rental_id=None):
+    """Get serials that are currently in store (available for new rental)."""
+    tool = db.session.get(Tool, int(tool_id or 0))
+    if tool:
+        ensure_tool_serials(tool=tool, commit=False)
+    query = ToolSerial.query.filter(
+        ToolSerial.tool_id == int(tool_id or 0),
+        ToolSerial.is_in_store == True,  # noqa: E712
+        or_(ToolSerial.is_scrapped == False, ToolSerial.is_scrapped.is_(None)),  # noqa: E712
+        ToolSerial.status != 'scrapped',
+    )
     if rental_id:
-        # For transfer scenarios, exclude serials already in the target rental
-        query = query.filter(ToolSerial.current_rental_id != rental_id)
-    return query.order_by(ToolSerial.serial_number).all()
+        query = query.filter(or_(ToolSerial.current_rental_id != int(rental_id),
+                                 ToolSerial.current_rental_id.is_(None)))
+    rows = query.all()
+    return sorted(rows, key=lambda s: s.sort_key)
+
+
+def get_out_of_store_serials(tool_id=None, rental_id=None, rental_item_id=None, location_label=None):
+    """Get serials that are currently OUT of store (at a site or customer),
+    suitable for Transfer Tools or Return Tools."""
+    if tool_id:
+        tool = db.session.get(Tool, int(tool_id or 0))
+        if tool:
+            ensure_tool_serials(tool=tool, commit=False)
+    else:
+        ensure_all_tools_serials(commit=False)
+
+    query = (
+        ToolSerial.query
+        .join(Tool, Tool.id == ToolSerial.tool_id)
+        .filter(
+            Tool.is_void == False,  # noqa: E712
+            ToolSerial.is_in_store == False,  # noqa: E712
+            or_(ToolSerial.is_scrapped == False, ToolSerial.is_scrapped.is_(None)),  # noqa: E712
+            ToolSerial.status != 'scrapped',
+        )
+    )
+    if tool_id:
+        query = query.filter(ToolSerial.tool_id == int(tool_id))
+    if rental_id:
+        query = query.filter(ToolSerial.current_rental_id == int(rental_id))
+    if rental_item_id:
+        query = query.filter(or_(
+            ToolSerial.current_rental_item_id == int(rental_item_id),
+            ToolSerial.current_rental_item_id.is_(None),
+        ))
+    rows = query.all()
+    if location_label:
+        loc_norm = location_label.strip().lower()
+        filtered = [r for r in rows if (r.current_location_label or '').strip().lower() == loc_norm]
+        if filtered:
+            rows = filtered
+    return sorted(rows, key=lambda s: (s.tool_id, s.sort_key))
 
 
 def get_serial_status(serial_id):
@@ -1173,18 +1498,19 @@ def get_serial_status(serial_id):
     }
 
 
-def get_all_tool_serials_summary():
-    """Get a summary of all serials across all tools for the inventory view.
-
-    Returns list of dicts with tool info and serial breakdown.
-    """
-    tools = Tool.query.filter(Tool.is_void == False).order_by(Tool.name.asc()).all()
+def get_all_tool_serials_summary(tool_id=None):
+    """Get a summary of all serials across tools for the inventory view."""
+    q = Tool.query.filter(Tool.is_void == False)  # noqa: E712
+    if tool_id:
+        q = q.filter(Tool.id == int(tool_id))
+    tools = q.order_by(Tool.name.asc()).all()
+    ensure_all_tools_serials(tools=tools, commit=False)
     result = []
 
     for tool in tools:
-        serials = ToolSerial.query.filter_by(tool_id=tool.id).all()
+        serials = tool.active_serials
         in_store = [s for s in serials if s.is_in_store]
-        rented = [s for s in serials if not s.is_in_store and s.status == 'rented']
+        rented = [s for s in serials if not s.is_in_store]
         maintenance = [s for s in serials if s.condition == 'maintenance']
         damaged = [s for s in serials if s.condition == 'damaged']
         lost = [s for s in serials if s.condition == 'lost']
@@ -1192,6 +1518,10 @@ def get_all_tool_serials_summary():
         result.append({
             'tool': tool,
             'tool_id': tool.id,
+            'tool_name': tool.name,
+            'tool_code': tool.tool_code,
+            'category_id': tool.category_id,
+            'category_name': tool.category.name if tool.category else tool.name,
             'total_serials': len(serials),
             'in_store': len(in_store),
             'rented': len(rented),
@@ -1206,25 +1536,52 @@ def get_all_tool_serials_summary():
     return result
 
 
+def rename_tool_serial(serial_id, new_serial_number, condition=None, notes=None, updated_by=None, commit=True):
+    """Rename or update an individual serial marking (e.g. 'Shovel No 5')."""
+    serial = db.session.get(ToolSerial, int(serial_id or 0))
+    if not serial:
+        return False, 'Serial not found.', None
+    new_sn = (new_serial_number or '').strip()[:80]
+    if not new_sn:
+        return False, 'Serial marking cannot be empty.', None
+    dup = ToolSerial.query.filter(
+        ToolSerial.tool_id == serial.tool_id,
+        ToolSerial.id != serial.id,
+        func.lower(ToolSerial.serial_number) == new_sn.lower(),
+    ).first()
+    if dup:
+        return False, f'Serial marking "{new_sn}" already exists for this tool.', None
+
+    old_sn = serial.serial_number
+    serial.serial_number = new_sn
+    if condition and condition in ('good', 'maintenance', 'damaged', 'lost'):
+        serial.condition = condition
+    if notes is not None:
+        serial.notes = (notes or '').strip()[:300]
+    serial.updated_at = _pkt_now_naive()
+    serial.updated_by = updated_by
+    if old_sn != new_sn:
+        create_serial_movement(
+            serial_id=serial.id,
+            movement_type='status_change',
+            from_label=serial.current_location_label or STORE_LABEL,
+            to_label=serial.current_location_label or STORE_LABEL,
+            notes=f'Serial marking renamed from "{old_sn}" to "{new_sn}"',
+            created_by=updated_by,
+        )
+    if commit:
+        db.session.commit()
+    return True, f'Updated serial marking to "{new_sn}".', serial
+
+
 def update_serial_status(serial_id, status, location_label=None, rental_id=None, created_by=None):
-    """Update the status of a serial-numbered piece.
-
-    Args:
-        serial_id: The serial ID.
-        status: New status ('in_store', 'rented', 'returned', 'transferred',
-                'maintenance', 'damaged', 'lost').
-        location_label: Human-readable location.
-        rental_id: Current rental ID if rented.
-        created_by: User ID.
-
-    Returns:
-        (success, message)
-    """
+    """Update the status of a serial-numbered piece."""
     serial = db.session.get(ToolSerial, int(serial_id or 0))
     if not serial:
         return False, 'Serial not found.'
 
     old_status = serial.status
+    old_location = serial.current_location_label or STORE_LABEL
     serial.status = status
     if location_label:
         serial.current_location_label = location_label
@@ -1234,18 +1591,19 @@ def update_serial_status(serial_id, status, location_label=None, rental_id=None,
     else:
         serial.is_in_store = (status == 'in_store')
         serial.current_rental_id = None
+        serial.current_rental_item_id = None
+        if status == 'in_store':
+            serial.current_location_label = STORE_LABEL
 
     serial.updated_at = _pkt_now_naive()
     serial.updated_by = created_by
 
-    # Log the movement
-    from_label = serial.current_location_label or 'Unknown'
-    to_label = location_label or 'Unknown'
-    if old_status != status:
+    to_label = serial.current_location_label or STORE_LABEL
+    if old_status != status or old_location != to_label:
         create_serial_movement(
             serial_id=serial.id,
             movement_type=f'status_change_{status}',
-            from_label=from_label,
+            from_label=old_location,
             to_label=to_label,
             notes=f'Status changed from {old_status} to {status}',
             created_by=created_by,
@@ -1278,23 +1636,36 @@ def create_serial_movement(serial_id, movement_type, from_label, to_label, notes
 
 
 def get_serials_for_rental(rental_id):
-    """Get all serials currently assigned to a rental.
-
-    Returns list of dicts with serial info for the rental detail view.
-    """
+    """Get all serials currently assigned to a rental."""
     rental = db.session.get(ToolRental, int(rental_id or 0))
     if not rental:
         return []
 
-    serials = ToolSerial.query.filter_by(current_rental_id=rental.id).all()
+    for item in rental.items:
+        if item.tool:
+            ensure_tool_serials(tool=item.tool, commit=False)
+
+    serials = (
+        ToolSerial.query
+        .filter(
+            ToolSerial.current_rental_id == rental.id,
+            ToolSerial.is_in_store == False,  # noqa: E712
+            or_(ToolSerial.is_scrapped == False, ToolSerial.is_scrapped.is_(None)),  # noqa: E712
+        )
+        .all()
+    )
+    serials.sort(key=lambda s: (s.tool_id, s.sort_key))
     result = []
     for serial in serials:
         result.append({
             'serial': serial,
             'serial_id': serial.id,
+            'tool_id': serial.tool_id,
+            'rental_item_id': serial.current_rental_item_id,
             'serial_number': serial.serial_number,
             'tool_name': serial.tool.name if serial.tool else '-',
             'tool_code': serial.tool.tool_code if serial.tool else '-',
+            'category_name': (serial.tool.category.name if serial.tool and serial.tool.category else (serial.tool.name if serial.tool else '-')),
             'status': serial.status,
             'status_label': serial.status_label,
             'condition': serial.condition,
@@ -1304,96 +1675,129 @@ def get_serials_for_rental(rental_id):
     return result
 
 
-def get_serials_in_store_summary():
-    """Get a summary of all serials currently in store for the rental creation picker.
+def get_serials_in_store_summary(category_id=None, tool_id=None):
+    """Get all serials currently IN STORE for the New Rental data-driven picker."""
+    q = Tool.query.filter(Tool.is_void == False)  # noqa: E712
+    if category_id:
+        q = q.filter(Tool.category_id == int(category_id))
+    if tool_id:
+        q = q.filter(Tool.id == int(tool_id))
+    tools = q.order_by(Tool.name.asc()).all()
+    ensure_all_tools_serials(tools=tools, commit=False)
 
-    Returns list of dicts suitable for the multi-select tool picker.
-    """
-    in_store_serials = ToolSerial.query.filter_by(is_in_store=True).all()
     result = []
-    for serial in in_store_serials:
-        result.append({
-            'serial_id': serial.id,
-            'tool_id': serial.tool_id,
-            'tool_name': serial.tool.name if serial.tool else '-',
-            'tool_code': serial.tool.tool_code if serial.tool else '-',
-            'serial_number': serial.serial_number,
-            'label': f"{serial.tool.name if serial.tool else 'Unknown'} ({serial.serial_number})",
-            'status': serial.status,
-            'condition': serial.condition,
-            'serial': serial,
-        })
+    for tool in tools:
+        cat_name = tool.category.name if tool.category else tool.name
+        for serial in tool.in_store_serials:
+            result.append({
+                'serial_id': serial.id,
+                'tool_id': serial.tool_id,
+                'tool_name': tool.name,
+                'tool_code': tool.tool_code,
+                'category_id': tool.category_id,
+                'category_name': cat_name,
+                'rate': float(tool.rental_rate_per_day or 0.0),
+                'serial_number': serial.serial_number,
+                'label': f"{serial.serial_number} ({tool.tool_code})",
+                'status': serial.status,
+                'condition': serial.condition,
+                'serial': serial,
+            })
+    return result
+
+
+def get_serials_out_of_store_summary(category_id=None, tool_id=None, rental_id=None, holder=None):
+    """Get all serials currently OUT OF STORE (at a site/customer) for Transfer Tools."""
+    q = Tool.query.filter(Tool.is_void == False)  # noqa: E712
+    if category_id:
+        q = q.filter(Tool.category_id == int(category_id))
+    if tool_id:
+        q = q.filter(Tool.id == int(tool_id))
+    tools = q.order_by(Tool.name.asc()).all()
+    ensure_all_tools_serials(tools=tools, commit=False)
+
+    result = []
+    for tool in tools:
+        cat_name = tool.category.name if tool.category else tool.name
+        for serial in tool.out_serials:
+            if rental_id and serial.current_rental_id != int(rental_id):
+                continue
+            rental = serial.current_rental
+            holder_label = (
+                serial.current_location_label
+                or (rental.current_location_label if rental else '')
+                or 'Out of Store'
+            )
+            if holder and holder.strip().lower() not in holder_label.lower():
+                continue
+            result.append({
+                'serial_id': serial.id,
+                'tool_id': serial.tool_id,
+                'tool_name': tool.name,
+                'tool_code': tool.tool_code,
+                'category_id': tool.category_id,
+                'category_name': cat_name,
+                'serial_number': serial.serial_number,
+                'rental_id': serial.current_rental_id,
+                'rental_item_id': serial.current_rental_item_id,
+                'rental_code': rental.rental_code if rental else '',
+                'holder': holder_label,
+                'renter_type': rental.renter_type if rental else 'internal',
+                'rate': float(tool.rental_rate_per_day or 0.0),
+                'status': serial.status,
+                'condition': serial.condition,
+                'serial': serial,
+            })
     return result
 
 
 def get_serials_by_tool_for_rental(tool_id):
-    """Get all in-store serials for a specific tool.
-
-    Used when creating a rental to show available serials for a tool.
-    """
-    return ToolSerial.query.filter_by(tool_id=int(tool_id or 0), is_in_store=True).order_by(ToolSerial.serial_number).all()
+    """Get all in-store serials for a specific tool (for New Rental)."""
+    return get_available_serials(tool_id)
 
 
-def assign_serials_to_rental(rental_id, serial_ids, notes='', created_by=None):
-    """Assign serial-numbered pieces to a rental.
-
-    Args:
-        rental_id: The rental ID.
-        serial_ids: List of serial IDs to assign.
-        notes: Notes for the assignment.
-        created_by: User ID.
-
-    Returns:
-        (success, message, assigned_count)
-    """
+def assign_serials_to_rental(rental_id, serial_ids, rental_item_id=None, location_label=None, notes='', created_by=None, commit=True):
+    """Assign serial-numbered pieces from the store to a rental."""
     rental = db.session.get(ToolRental, int(rental_id or 0))
     if not rental:
         return False, 'Rental not found.', 0
 
+    dest_label = location_label or rental.current_location_label or 'Rented Out'
     assigned = 0
     for serial_id in serial_ids:
         serial = db.session.get(ToolSerial, int(serial_id or 0))
-        if not serial:
+        if not serial or getattr(serial, 'is_scrapped', False):
             continue
-        if not serial.is_in_store:
-            continue  # Already rented out
+        if not serial.is_in_store and serial.current_rental_id != rental.id:
+            continue
 
-        # Update serial status
         serial.is_in_store = False
         serial.current_rental_id = rental.id
+        if rental_item_id:
+            serial.current_rental_item_id = int(rental_item_id)
         serial.status = 'rented'
-        serial.current_location_label = rental.current_location_label or 'Rented Out'
+        serial.current_location_label = dest_label
         serial.updated_at = _pkt_now_naive()
         serial.updated_by = created_by
 
-        # Log the movement
         create_serial_movement(
             serial_id=serial.id,
             movement_type='rental_out',
-            from_label='Warehouse / Store',
-            to_label=rental.current_location_label or 'Rented Out',
-            notes=notes or f'Assigned to rental {rental.rental_code}',
+            from_label=STORE_LABEL,
+            to_label=dest_label,
+            notes=notes or f'Rented out on {rental.rental_code} ({serial.serial_number})',
             rental_id=rental.id,
             created_by=created_by,
         )
         assigned += 1
 
-    db.session.commit()
+    if commit:
+        db.session.commit()
     return True, f'Assigned {assigned} serial(s) to rental {rental.rental_code}.', assigned
 
 
-def return_serials_from_rental(rental_id, serial_ids, return_id=None, created_by=None):
-    """Return serial-numbered pieces from a rental.
-
-    Args:
-        rental_id: The rental ID.
-        serial_ids: List of serial IDs to return.
-        return_id: Optional return transaction ID.
-        created_by: User ID.
-
-    Returns:
-        (success, message, returned_count)
-    """
+def return_serials_from_rental(rental_id, serial_ids, return_id=None, condition=None, notes='', created_by=None, commit=True):
+    """Return serial-numbered pieces from a rental back to the store."""
     rental = db.session.get(ToolRental, int(rental_id or 0))
     if not rental:
         return False, 'Rental not found.', 0
@@ -1404,73 +1808,70 @@ def return_serials_from_rental(rental_id, serial_ids, return_id=None, created_by
         if not serial:
             continue
         if serial.is_in_store:
-            continue  # Already in store
+            continue
 
-        # Update serial status
-        old_location = serial.current_location_label or 'Unknown'
+        old_location = serial.current_location_label or rental.current_location_label or 'Site / Customer'
         serial.is_in_store = True
         serial.current_rental_id = None
-        serial.status = 'returned'
-        serial.current_location_label = 'Warehouse / Store'
+        serial.current_rental_item_id = None
+        if condition and condition in ('good', 'maintenance', 'damaged', 'lost'):
+            serial.condition = condition
+        serial.status = 'in_store' if serial.condition == 'good' else serial.condition
+        serial.current_location_label = STORE_LABEL
         serial.updated_at = _pkt_now_naive()
         serial.updated_by = created_by
 
-        # Log the movement
         create_serial_movement(
             serial_id=serial.id,
             movement_type='return_in',
             from_label=old_location,
-            to_label='Warehouse / Store',
-            notes=f'Returned from rental {rental.rental_code}' + (f', return #{return_id}' if return_id else ''),
+            to_label=STORE_LABEL,
+            notes=notes or (f'Returned from rental {rental.rental_code} ({serial.serial_number})'
+                            + (f', return #{return_id}' if return_id else '')),
             rental_id=rental.id,
             return_id=return_id,
             created_by=created_by,
         )
         returned += 1
 
-    db.session.commit()
+    if commit:
+        db.session.commit()
     return True, f'Returned {returned} serial(s) to store.', returned
 
 
-def transfer_serials(serial_ids, from_label, to_label, transfer_id=None, rental_id=None, created_by=None):
-    """Transfer serial-numbered pieces between locations.
-
-    Args:
-        serial_ids: List of serial IDs to transfer.
-        from_label: Source location label.
-        to_label: Destination location label.
-        transfer_id: Optional transfer transaction ID.
-        rental_id: Current rental ID.
-        created_by: User ID.
-
-    Returns:
-        (success, message, transferred_count)
-    """
+def transfer_serials(serial_ids, from_label, to_label, transfer_id=None, rental_id=None,
+                     rental_item_id=None, movement_type='site_transfer', notes='',
+                     created_by=None, commit=True):
+    """Transfer out-of-store serial-numbered pieces between sites/customers."""
     transferred = 0
     for serial_id in serial_ids:
         serial = db.session.get(ToolSerial, int(serial_id or 0))
-        if not serial:
+        if not serial or getattr(serial, 'is_scrapped', False):
             continue
 
-        # Update serial status
-        old_location = serial.current_location_label or from_label
+        old_location = serial.current_location_label or from_label or 'Site / Customer'
+        serial.is_in_store = False
         serial.current_location_label = to_label
-        serial.status = 'transferred'
+        if rental_id is not None:
+            serial.current_rental_id = int(rental_id)
+        if rental_item_id is not None:
+            serial.current_rental_item_id = int(rental_item_id)
+        serial.status = 'rented'
         serial.updated_at = _pkt_now_naive()
         serial.updated_by = created_by
 
-        # Log the movement
         create_serial_movement(
             serial_id=serial.id,
-            movement_type='site_transfer',
+            movement_type=movement_type or 'site_transfer',
             from_label=old_location,
             to_label=to_label,
-            notes=f'Transferred from {from_label} to {to_label}',
+            notes=notes or f'Transferred {serial.serial_number} from {old_location} to {to_label}',
             transfer_id=transfer_id,
-            rental_id=rental_id,
+            rental_id=rental_id or serial.current_rental_id,
             created_by=created_by,
         )
         transferred += 1
 
-    db.session.commit()
+    if commit:
+        db.session.commit()
     return True, f'Transferred {transferred} serial(s) to {to_label}.', transferred
