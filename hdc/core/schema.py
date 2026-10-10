@@ -1892,6 +1892,41 @@ def _ensure_tool_rental_schema():
             adjusted_by INTEGER REFERENCES hdc_user(id)
         )
         """,
+        """
+        CREATE TABLE IF NOT EXISTS hdc_tool_serial (
+            id INTEGER PRIMARY KEY,
+            serial_number VARCHAR(80) NOT NULL,
+            tool_id INTEGER NOT NULL REFERENCES hdc_tool(id),
+            is_in_store BOOLEAN DEFAULT 1,
+            is_scrapped BOOLEAN DEFAULT 0,
+            current_rental_id INTEGER REFERENCES hdc_tool_rental(id),
+            current_rental_item_id INTEGER REFERENCES hdc_tool_rental_item(id),
+            current_location_label VARCHAR(300) DEFAULT 'Warehouse / Store',
+            status VARCHAR(30) DEFAULT 'in_store',
+            condition VARCHAR(30) DEFAULT 'good',
+            notes VARCHAR(300),
+            created_by INTEGER REFERENCES hdc_user(id),
+            updated_by INTEGER REFERENCES hdc_user(id),
+            created_at DATETIME,
+            updated_at DATETIME,
+            CONSTRAINT uq_tool_serial UNIQUE (tool_id, serial_number)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS hdc_tool_serial_movement (
+            id INTEGER PRIMARY KEY,
+            serial_id INTEGER NOT NULL REFERENCES hdc_tool_serial(id),
+            rental_id INTEGER REFERENCES hdc_tool_rental(id),
+            transfer_id INTEGER REFERENCES hdc_tool_rental_transfer(id),
+            return_id INTEGER REFERENCES hdc_tool_rental_return(id),
+            movement_type VARCHAR(30) DEFAULT 'rental_out',
+            from_location_label VARCHAR(300),
+            to_location_label VARCHAR(300),
+            notes VARCHAR(500),
+            timestamp DATETIME,
+            created_by INTEGER REFERENCES hdc_user(id)
+        )
+        """,
     ]
     with db.engine.connect() as conn:
         for ddl in tables:
@@ -1924,6 +1959,9 @@ def _ensure_tool_rental_schema():
             "CREATE INDEX IF NOT EXISTS idx_tool_audit_location ON hdc_tool_audit(loc_type, project_id, status)",
             "CREATE INDEX IF NOT EXISTS idx_tool_audit_line_audit ON hdc_tool_audit_line(audit_id, tool_id)",
             "CREATE INDEX IF NOT EXISTS idx_tool_audit_line_tool ON hdc_tool_audit_line(tool_id, status)",
+            "CREATE INDEX IF NOT EXISTS idx_tool_serial_tool_store ON hdc_tool_serial(tool_id, is_in_store)",
+            "CREATE INDEX IF NOT EXISTS idx_tool_serial_rental ON hdc_tool_serial(current_rental_id)",
+            "CREATE INDEX IF NOT EXISTS idx_tool_serial_movement_serial ON hdc_tool_serial_movement(serial_id, timestamp)",
         ]
         for sql in idx_sql:
             try:
@@ -1980,6 +2018,12 @@ def _ensure_tool_rental_schema():
     # a > b > c across rentals (see hdc.services.tool_rental.rental_transfer_chain).
     _ensure_table_columns_sqlite('hdc_tool_rental_transfer', {
         'to_rental_id': "to_rental_id INTEGER REFERENCES hdc_tool_rental(id)",
+    })
+    _ensure_table_columns_sqlite('hdc_tool_serial', {
+        'is_scrapped': "is_scrapped BOOLEAN DEFAULT 0",
+        'current_rental_item_id': "current_rental_item_id INTEGER REFERENCES hdc_tool_rental_item(id)",
+        'created_by': "created_by INTEGER REFERENCES hdc_user(id)",
+        'updated_by': "updated_by INTEGER REFERENCES hdc_user(id)",
     })
     # Backfill is_void for legacy rows and ensure link table indexes - auto on reload
     with db.engine.connect() as conn:

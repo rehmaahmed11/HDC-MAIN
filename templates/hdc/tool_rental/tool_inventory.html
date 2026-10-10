@@ -107,6 +107,23 @@
 
                         <div class="col-12">
                             <div class="border rounded-3 p-2 bg-light-subtle">
+                                <div class="small fw-bold text-muted mb-1"><i class="fas fa-hashtag me-1"></i>Serial Markings / Tool Numbers (auto-generated)</div>
+                                <small class="text-muted d-block mb-2">Every piece gets a serial marking like <strong>Shovel No 1</strong>, <strong>Shovel No 2</strong>. Customize start number or exact markings below (optional):</small>
+                                <div class="row g-2">
+                                    <div class="col-4">
+                                        <label class="form-label small mb-1">Start No</label>
+                                        <input type="number" name="serial_start_no" class="form-control form-control-sm" min="1" step="1" placeholder="1 (e.g. 5 → No 5)">
+                                    </div>
+                                    <div class="col-8">
+                                        <label class="form-label small mb-1">Custom Markings (comma-separated)</label>
+                                        <input type="text" name="custom_serials" class="form-control form-control-sm" placeholder="e.g. Shovel No 5, Shovel No 6">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="col-12">
+                            <div class="border rounded-3 p-2 bg-light-subtle">
                                 <div class="small fw-bold text-muted mb-2"><i class="fas fa-receipt me-1"></i>Opening purchase (optional)</div>
                                 <div class="row g-2">
                                     <div class="col-6">
@@ -498,19 +515,18 @@ document.addEventListener('DOMContentLoaded', function () {
     var serialStatusTitle = document.getElementById('serialStatusModalTitle');
 
     function showSerialStatus(toolId, toolName, serialCount) {
-        serialStatusTitle.textContent = 'Serial Status: ' + toolName;
-        serialStatusBody.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-mint" role="status"></div><p class="text-muted mt-2">Loading serial information...</p></div>';
+        serialStatusTitle.textContent = 'Serial Markings: ' + toolName;
+        serialStatusBody.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-mint" role="status"></div><p class="text-muted mt-2">Loading serial markings...</p></div>';
         serialStatusModal.querySelector('.modal-dialog').classList.add('modal-lg');
-        var bsModal = new bootstrap.Modal(serialStatusModal);
+        var bsModal = bootstrap.Modal.getOrCreateInstance(serialStatusModal);
         bsModal.show();
 
-        // Fetch serial data from API
-        fetch('/hdc/api/tool-rental/serials/inventory-summary')
+        // Fetch full serial list & summary from API
+        fetch('/hdc/api/tool-rental/tools/' + toolId + '/summary')
             .then(response => response.json())
             .then(data => {
-                const toolSerials = data.find(s => s.tool_id === parseInt(toolId));
-                if (toolSerials) {
-                    renderSerialStatus(toolId, toolName, toolSerials);
+                if (data && !data.error) {
+                    renderSerialStatus(toolId, toolName, data);
                 } else {
                     serialStatusBody.innerHTML = '<div class="alert alert-info">No serial information available for this tool.</div>';
                 }
@@ -520,46 +536,42 @@ document.addEventListener('DOMContentLoaded', function () {
             });
     }
 
-    function renderSerialStatus(toolId, toolName, serialData) {
+    function renderSerialStatus(toolId, toolName, data) {
         let html = '';
-        const total = serialData.total_serials || 0;
-        const inStore = serialData.in_store || 0;
-        const rented = serialData.rented || 0;
-        const maintenance = serialData.maintenance || 0;
-        const damaged = serialData.damaged || 0;
-        const lost = serialData.lost || 0;
+        const serials = data.serials || [];
+        const total = serials.length;
+        const inStore = data.in_store || 0;
+        const rented = data.rented || 0;
 
-        html += '<div class="row g-3 mb-4">';
-        html += '<div class="col-6 col-md-3"><div class="card hdc-card border-0"><div class="card-body text-center py-2"><small class="text-muted d-block">Total Serials</small><h5 class="mb-0">' + total + '</h5></div></div></div>';
-        html += '<div class="col-6 col-md-3"><div class="card hdc-card border-success border-0"><div class="card-body text-center py-2"><small class="text-success d-block">In Store</small><h5 class="mb-0">' + inStore + '</h5></div></div></div>';
-        html += '<div class="col-6 col-md-3"><div class="card hdc-card border-warning border-0"><div class="card-body text-center py-2"><small class="text-warning d-block">Rented Out</small><h5 class="mb-0">' + rented + '</h5></div></div></div>';
-        html += '<div class="col-6 col-md-3"><div class="card hdc-card border-orange border-0"><div class="card-body text-center py-2"><small class="text-orange d-block">Maintenance</small><h5 class="mb-0">' + maintenance + '</h5></div></div></div>';
-        html += '<div class="col-6 col-md-3"><div class="card hdc-card border-danger border-0"><div class="card-body text-center py-2"><small class="text-danger d-block">Damaged/Lost</small><h5 class="mb-0">' + (damaged + lost) + '</h5></div></div></div>';
+        html += '<div class="row g-3 mb-3">';
+        html += '<div class="col-6 col-md-4"><div class="card hdc-card border-0"><div class="card-body text-center py-2"><small class="text-muted d-block">Total Markings</small><h5 class="mb-0">' + total + '</h5></div></div></div>';
+        html += '<div class="col-6 col-md-4"><div class="card hdc-card border-success border-0"><div class="card-body text-center py-2"><small class="text-success d-block">In Store (Available)</small><h5 class="mb-0">' + inStore + '</h5></div></div></div>';
+        html += '<div class="col-6 col-md-4"><div class="card hdc-card border-warning border-0"><div class="card-body text-center py-2"><small class="text-warning d-block">Out of Store (At Site)</small><h5 class="mb-0">' + rented + '</h5></div></div></div>';
         html += '</div>';
 
-        html += '<div class="card hdc-card mb-3"><div class="card-header hdc-card-header"><i class="fas fa-list me-2"></i>Serial Breakdown</div><div class="card-body p-0"><div class="table-responsive"><table class="table table-sm mb-0"><thead><tr><th>Serial No</th><th>Status</th><th>Location</th></tr></thead><tbody>';
+        html += '<div class="d-flex justify-content-between align-items-center mb-2">';
+        html += '<span class="fw-semibold small"><i class="fas fa-hashtag me-1"></i>Individual Tool No / Serial Markings</span>';
+        html += '<a href="/hdc/tool-rental/inventory/' + toolId + '/serials/create" class="btn btn-sm btn-outline-primary"><i class="fas fa-sliders me-1"></i>Manage / Add Serial Markings</a>';
+        html += '</div>';
+
+        html += '<div class="card hdc-card mb-3"><div class="card-body p-0"><div class="table-responsive" style="max-height:360px; overflow-y:auto;"><table class="table table-sm mb-0 align-middle"><thead><tr><th>Tool No / Serial Marking</th><th>Availability</th><th>Current Location</th><th>Condition</th></tr></thead><tbody>';
 
         if (total === 0) {
-            html += '<tr><td colspan="3" class="text-center text-muted py-3">No serials created yet. Use "Create Serials" to add individual tracking.</td></tr>';
+            html += '<tr><td colspan="4" class="text-center text-muted py-3">No serial markings yet.</td></tr>';
         } else {
-            // Show summary rows (detailed view would require another API call)
-            html += '<tr><td><strong>In Store</strong></td><td class="text-success">' + inStore + ' pieces available</td><td>Warehouse / Store</td></tr>';
-            html += '<tr><td><strong>Rented Out</strong></td><td class="text-warning">' + rented + ' pieces on rent</td><td>Various locations</td></tr>';
-            if (maintenance > 0) html += '<tr><td><strong>Maintenance</strong></td><td class="text-orange">' + maintenance + ' pieces</td><td>Maintenance Bay</td></tr>';
-            if (damaged > 0) html += '<tr><td><strong>Damaged</strong></td><td class="text-danger">' + damaged + ' pieces</td><td>Quarantine</td></tr>';
-            if (lost > 0) html += '<tr><td><strong>Lost</strong></td><td class="text-danger">' + lost + ' pieces</td><td>Missing</td></tr>';
+            serials.forEach(function(s) {
+                const badgeCls = s.is_in_store ? 'bg-success-subtle text-success border border-success-subtle' : 'bg-warning-subtle text-warning-emphasis border border-warning-subtle';
+                const availLabel = s.is_in_store ? 'In Store' : 'Out of Store';
+                html += '<tr>';
+                html += '<td><span class="badge bg-dark">' + s.serial_number + '</span></td>';
+                html += '<td><span class="badge ' + badgeCls + '">' + availLabel + '</span></td>';
+                html += '<td>' + (s.current_location || 'Warehouse / Store') + '</td>';
+                html += '<td><span class="badge bg-light text-dark border">' + (s.condition || 'good') + '</span></td>';
+                html += '</tr>';
+            });
         }
 
         html += '</tbody></table></div></div></div>';
-
-        // Add action button
-        if (total === 0) {
-            html += '<div class="text-center mt-3">';
-            html += '<button class="btn btn-mint btn-sm" onclick="createSerials(' + toolId + ', \'' + toolName.replace(/'/g, "\\'") + '\')"><i class="fas fa-plus me-1"></i>Create Serials</button>';
-            html += '<small class="text-muted">Click to create serial-numbered pieces for this tool</small>';
-            html += '</div>';
-        }
-
         serialStatusBody.innerHTML = html;
     }
 

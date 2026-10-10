@@ -230,6 +230,8 @@ _WIPE_TARGETS = {
     'tools': {
         'label': 'Tools & Tool Rentals (Inventory, Purchases, Scrap, Rentals, Returns, Payments, Transfers, Tracking, Audit)',
         'tables': [
+            'hdc_tool_serial_movement',
+            'hdc_tool_serial',
             'hdc_tool_audit_line',
             'hdc_tool_audit',
             'hdc_tool_movement_log',

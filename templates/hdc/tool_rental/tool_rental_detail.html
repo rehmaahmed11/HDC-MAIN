@@ -88,11 +88,24 @@
                 <h6><i class="fas fa-tools me-2"></i>Tools in this Rental</h6>
                 <div class="table-responsive">
                     <table class="table hdc-table table-sm">
-                        <thead><tr><th>Tool</th><th>Qty Rented</th><th>Returned</th><th>Pending</th><th>Rate</th><th>Amount</th></tr></thead>
+                        <thead><tr><th>Tool &amp; Out-of-Store Serial Markings</th><th>Qty Rented</th><th>Returned</th><th>Pending</th><th>Rate</th><th>Amount</th></tr></thead>
                         <tbody>
                         {% for it in items %}
+                            {% set item_serials = item_serials_map.get(it.id, []) if item_serials_map is defined else [] %}
                             <tr>
-                                <td>{{ it.tool.name if it.tool else '-' }}<br><small class="text-muted">{{ it.tool.tool_code if it.tool else '' }}</small></td>
+                                <td>
+                                    <strong>{{ it.tool.name if it.tool else '-' }}</strong>
+                                    <small class="text-muted ms-1">{{ it.tool.tool_code if it.tool else '' }}</small>
+                                    {% if item_serials %}
+                                    <div class="mt-1 d-flex flex-wrap gap-1">
+                                        {% for s in item_serials %}
+                                        <span class="badge bg-warning text-dark border" title="Currently out at {{ s.current_location_label or rental.current_location_label }}">
+                                            <i class="fas fa-hashtag me-1"></i>{{ s.serial_number }}
+                                        </span>
+                                        {% endfor %}
+                                    </div>
+                                    {% endif %}
+                                </td>
                                 <td>{{ "%.0f"|format(it.qty_rented or 0) }}</td>
                                 <td><span class="badge bg-success">{{ "%.0f"|format(it.qty_returned or 0) }}</span></td>
                                 <td>{% if it.qty_pending>0 %}<span class="badge bg-warning text-dark">{{ "%.0f"|format(it.qty_pending) }}</span>{% else %}<span class="badge bg-success">0</span>{% endif %}</td>
@@ -257,16 +270,37 @@
                         </div>
 
                         <div class="col-12" id="partialToolsSection">
-                            <label class="form-label fw-bold">Tools to Return — Qty per Tool</label>
+                            <label class="form-label fw-bold">Tools to Return — Select Tool No / Serial Marking or Qty</label>
                             <div id="returnItems">
                                 {% for it in items %}
                                     {% if it.qty_pending>0.001 %}
-                                    <div class="row g-1 mb-1">
-                                        <div class="col-5"><small>{{ it.tool.name if it.tool else '' }}<br>Pending: {{ "%.0f"|format(it.qty_pending) }}</small>
-                                            <input type="hidden" name="rental_item_id[]" value="{{ it.id }}">
+                                    {% set item_serials = item_serials_map.get(it.id, []) if item_serials_map is defined else [] %}
+                                    <div class="border rounded p-2 mb-2 return-item-block" data-item-id="{{ it.id }}">
+                                        <div class="row g-1 align-items-center">
+                                            <div class="col-5">
+                                                <small class="fw-semibold">{{ it.tool.name if it.tool else '' }}<br>Pending: {{ "%.0f"|format(it.qty_pending) }}</small>
+                                                <input type="hidden" name="rental_item_id[]" value="{{ it.id }}">
+                                            </div>
+                                            <div class="col-3">
+                                                <input type="number" name="qty_returned[]" class="form-control form-control-sm return-qty-input" min="0" max="{{ it.qty_pending }}" step="0.1" placeholder="Qty">
+                                            </div>
+                                            <div class="col-4">
+                                                <input type="text" name="condition_notes[]" class="form-control form-control-sm" placeholder="Condition">
+                                            </div>
                                         </div>
-                                        <div class="col-3"><input type="number" name="qty_returned[]" class="form-control form-control-sm" min="0" max="{{ it.qty_pending }}" step="0.1" placeholder="Qty"></div>
-                                        <div class="col-4"><input type="text" name="condition_notes[]" class="form-control form-control-sm" placeholder="Condition"></div>
+                                        {% if item_serials %}
+                                        <div class="mt-2 pt-1 border-top">
+                                            <small class="text-muted d-block mb-1"><i class="fas fa-hashtag me-1"></i>Tick returned Tool No / Serial Markings (Out of Store):</small>
+                                            <div class="d-flex flex-wrap gap-1">
+                                                {% for s in item_serials %}
+                                                <label class="badge bg-light text-dark border d-inline-flex align-items-center gap-1 px-2 py-1" style="cursor:pointer;">
+                                                    <input type="checkbox" name="return_serial_ids_{{ it.id }}[]" value="{{ s.id }}" class="form-check-input m-0 return-serial-cb" onchange="syncReturnItemFromSerials(this)">
+                                                    <span>{{ s.serial_number }}</span>
+                                                </label>
+                                                {% endfor %}
+                                            </div>
+                                        </div>
+                                        {% endif %}
                                     </div>
                                     {% endif %}
                                 {% endfor %}
@@ -538,29 +572,45 @@
                                max_items=60) }}
                         </div>
                         <div class="col-12">
-                            <label class="form-label fw-bold">Which tools move? — qty per tool</label>
+                            <label class="form-label fw-bold">Which tools move? — Select Tool No / Serial Marking or qty per tool</label>
                             <small class="text-muted d-block mb-1">
-                                Leave blank to move everything pending. Enter a qty to split the load, so
+                                Leave blank to move everything pending. Tick specific out-of-store Tool No markings (e.g. Shovel No 5) or enter a qty to split the load, so
                                 <a href="{{ url_for('hdc_tool_rental_tracking') }}">Tool Tracking</a> knows exactly which tool is on which site.
                             </small>
                             <div id="transferItems">
                                 {% for it in items %}
                                     {% if it.qty_pending > 0.001 %}
-                                    <div class="row g-1 mb-1 align-items-center">
-                                        <div class="col-6">
-                                            <small>{{ it.tool.name if it.tool else '' }} <span class="badge bg-secondary">{{ it.tool.tool_code if it.tool else '' }}</span></small>
-                                            <input type="hidden" name="rental_item_id[]" value="{{ it.id }}">
-                                            <div><small class="text-muted">pending here: {{ "%g"|format(it.qty_pending) }}</small></div>
+                                    {% set item_serials = item_serials_map.get(it.id, []) if item_serials_map is defined else [] %}
+                                    <div class="border rounded p-2 mb-2 transfer-item-block" data-item-id="{{ it.id }}">
+                                        <div class="row g-1 align-items-center">
+                                            <div class="col-6">
+                                                <small class="fw-semibold">{{ it.tool.name if it.tool else '' }} <span class="badge bg-secondary">{{ it.tool.tool_code if it.tool else '' }}</span></small>
+                                                <input type="hidden" name="rental_item_id[]" value="{{ it.id }}">
+                                                <div><small class="text-muted">pending here: {{ "%g"|format(it.qty_pending) }}</small></div>
+                                            </div>
+                                            <div class="col-4">
+                                                <input type="number" name="qty_transfer[]" class="form-control form-control-sm transfer-qty"
+                                                       min="0" max="{{ it.qty_pending }}" step="0.1"
+                                                       data-pending="{{ it.qty_pending }}" placeholder="all {{ "%g"|format(it.qty_pending) }}">
+                                            </div>
+                                            <div class="col-2">
+                                                <button type="button" class="btn btn-sm btn-outline-secondary w-100"
+                                                        onclick="fillMaxTransfer(this)" title="Move all pending">All</button>
+                                            </div>
                                         </div>
-                                        <div class="col-4">
-                                            <input type="number" name="qty_transfer[]" class="form-control form-control-sm transfer-qty"
-                                                   min="0" max="{{ it.qty_pending }}" step="0.1"
-                                                   data-pending="{{ it.qty_pending }}" placeholder="all {{ "%g"|format(it.qty_pending) }}">
+                                        {% if item_serials %}
+                                        <div class="mt-2 pt-1 border-top">
+                                            <small class="text-muted d-block mb-1"><i class="fas fa-hashtag me-1"></i>Select Out-of-Store Tool No / Serial Markings to Transfer:</small>
+                                            <div class="d-flex flex-wrap gap-1">
+                                                {% for s in item_serials %}
+                                                <label class="badge bg-warning-subtle text-dark border d-inline-flex align-items-center gap-1 px-2 py-1" style="cursor:pointer;">
+                                                    <input type="checkbox" name="transfer_serial_ids_{{ it.id }}[]" value="{{ s.id }}" class="form-check-input m-0 transfer-serial-cb" onchange="syncTransferItemFromSerials(this)">
+                                                    <span>{{ s.serial_number }}</span>
+                                                </label>
+                                                {% endfor %}
+                                            </div>
                                         </div>
-                                        <div class="col-2">
-                                            <button type="button" class="btn btn-sm btn-outline-secondary w-100"
-                                                    onclick="fillMaxTransfer(this)" title="Move all pending">All</button>
-                                        </div>
+                                        {% endif %}
                                     </div>
                                     {% endif %}
                                 {% endfor %}
@@ -605,6 +655,25 @@
 
 {% block extra_js %}
 <script>
+function syncReturnItemFromSerials(cbEl){
+    const block = cbEl.closest('.return-item-block');
+    if(!block) return;
+    const checked = block.querySelectorAll('.return-serial-cb:checked');
+    const qtyInput = block.querySelector('.return-qty-input');
+    if(qtyInput){
+        qtyInput.value = checked.length > 0 ? String(checked.length) : '';
+    }
+}
+function syncTransferItemFromSerials(cbEl){
+    const block = cbEl.closest('.transfer-item-block');
+    if(!block) return;
+    const checked = block.querySelectorAll('.transfer-serial-cb:checked');
+    const qtyInput = block.querySelector('input.transfer-qty');
+    if(qtyInput){
+        qtyInput.value = checked.length > 0 ? String(checked.length) : '';
+    }
+    syncTransferTotal();
+}
 function toggleReturnMode(){
     const mode = document.getElementById('returnCondition').value;
     const card = document.getElementById('returnCard');
@@ -616,6 +685,7 @@ function toggleReturnMode(){
             const max = inp.getAttribute('max');
             if(max) inp.value = max;
         });
+        document.querySelectorAll('#returnItems .return-serial-cb').forEach(cb => { cb.checked = true; });
     } else {
         card.classList.remove('full-mode');
         partialSec.style.opacity='1';
@@ -701,13 +771,17 @@ function syncTransferTotal(){
     total.value = String(Math.round(sum * 100) / 100);
 }
 function fillMaxTransfer(btn){
-    const row = btn.closest('.row');
-    const input = row && row.querySelector('input.transfer-qty');
+    const block = btn.closest('.transfer-item-block') || btn.closest('.row');
+    const input = block && block.querySelector('input.transfer-qty');
     if(input) input.value = input.getAttribute('data-pending') || input.getAttribute('max') || '';
+    if(block){
+        block.querySelectorAll('.transfer-serial-cb').forEach(cb => { cb.checked = true; });
+    }
     syncTransferTotal();
 }
 function fillAllTransfer(){
     transferQtyInputs().forEach(i => { i.value = i.getAttribute('data-pending') || i.getAttribute('max') || ''; });
+    document.querySelectorAll('#transferItems .transfer-serial-cb').forEach(cb => { cb.checked = true; });
     syncTransferTotal();
 }
 transferQtyInputs().forEach(i => i.addEventListener('input', syncTransferTotal));

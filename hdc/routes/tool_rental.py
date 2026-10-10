@@ -32,8 +32,11 @@ from hdc.services.tool_rental import (
     void_tool_rental_discount, void_tool_rental_payment_in_accounts,
     # Serial management functions
     assign_serials_to_rental, create_tool_serials, create_serial_movement,
-    get_all_tool_serials_summary, get_available_serials, get_serial_status,
-    get_serials_by_tool_for_rental, get_serials_for_rental, get_serials_in_store_summary,
+    ensure_all_tools_serials, ensure_tool_serials,
+    get_all_tool_serials_summary, get_available_serials, get_out_of_store_serials,
+    get_serial_status, get_serials_by_tool_for_rental, get_serials_for_rental,
+    get_serials_in_store_summary, get_serials_out_of_store_summary,
+    parse_custom_serial_list, rename_tool_serial,
     return_serials_from_rental, transfer_serials, update_serial_status
 )
 from hdc.services.tool_audit import (
@@ -173,11 +176,17 @@ def register(app):
         repeated here — they live on the Tracking / Rentals pages (see
         `hdc.services.tool_tracking.tool_item_summary`).
         """
-        summary = tool_item_summary()
+        q = (request.args.get('q') or '').strip()
+        category_id = request.args.get('category_id', type=int)
+        summary = tool_item_summary(term=q or None, category_id=category_id)
+        categories = ToolCategory.query.order_by(ToolCategory.name.asc()).all()
 
         return render_template('tool_rental/tool_dashboard.html',
             summary=summary,
             totals=summary['totals'],
+            categories=categories,
+            q=q,
+            selected_category=category_id,
             today=_pkt_today().isoformat(),
         )
 
@@ -191,9 +200,13 @@ def register(app):
             return redirect(url_for('hdc_tool_rental_dashboard'))
         row = position['row']
         tool = row['tool']
+        ensure_tool_serials(tool=tool, commit=True)
         return render_template('tool_rental/tool_position.html',
             row=row,
             movements=position['movements'],
+            serials=tool.active_serials,
+            in_store_serials=tool.in_store_serials,
+            out_serials=tool.out_serials,
             recon={
                 'owned': row['owned_qty'], 'in_store': row['in_store_qty'],
                 'own_project': row['own_project_qty'], 'customer': row['customer_qty'],
@@ -310,6 +323,11 @@ def register(app):
 
                 # opening stock is a real purchase: it keeps "why do we own 8?"
                 # answerable from the stock register instead of a magic number
+                serial_start_no = request.form.get('serial_start_no', type=int)
+                custom_serials = (request.form.get('custom_serials') or '').strip() or None
+                if custom_serials and total_qty <= 0:
+                    total_qty = float(len(parse_custom_serial_list(custom_serials)))
+
                 purchase = None
                 if total_qty > 0:
                     ok_pur, msg_pur, purchase = record_tool_purchase(
@@ -323,6 +341,8 @@ def register(app):
                         is_opening_stock=True,
                         created_by=current_user.id if hasattr(current_user, 'id') else None,
                         commit=False,
+                        serial_numbers=custom_serials,
+                        start_no=serial_start_no,
                     )
                     if not ok_pur:
                         db.session.rollback()
@@ -331,8 +351,15 @@ def register(app):
 
                 db.session.commit()
                 if purchase is not None:
+                    serial_list = tool.active_serials
+                    serial_hint = ''
+                    if serial_list:
+                        if len(serial_list) <= 4:
+                            serial_hint = f" [{', '.join(s.serial_number for s in serial_list)}]"
+                        else:
+                            serial_hint = f" [{serial_list[0].serial_number} .. {serial_list[-1].serial_number}]"
                     flash(f'Tool {tool.name} ({code}) added with {total_qty:g} {unit} '
-                          f'opening stock ({purchase.purchase_code}).', 'success')
+                          f'opening stock ({purchase.purchase_code}){serial_hint}.', 'success')
                 else:
                     flash(f'Tool {tool.name} ({code}) added with 0 qty — '
                           f'use "Add Stock" when it arrives.', 'success')
@@ -362,9 +389,20 @@ def register(app):
             if cid is not None)
         kpis = tool_kpis()
 
-        # Get serial summary for inventory
+        # Sync serial markings with ledger quantities & get serial summary for inventory
+        ensure_all_tools_serials(
+            created_by=getattr(current_user, 'id', None),
+            commit=True,
+        )
         serial_summary = get_all_tool_serials_summary()
         serial_lookup = {s['tool_id']: s for s in serial_summary}
+        in_store_serials_by_tool = {}
+        for s in ToolSerial.query.filter_by(is_in_store=True).all():
+            if getattr(s, 'is_scrapped', False) or s.status == 'scrapped':
+                continue
+            in_store_serials_by_tool.setdefault(int(s.tool_id), []).append(s)
+        for tid_k in in_store_serials_by_tool:
+            in_store_serials_by_tool[tid_k].sort(key=lambda s: s.sort_key)
 
         return render_template('tool_rental/tool_inventory.html',
             tools=tools,
@@ -381,6 +419,7 @@ def register(app):
             today=_pkt_today().isoformat(),
             focus=(request.args.get('focus') or '').strip(),
             serial_lookup=serial_lookup,
+            in_store_serials_by_tool=in_store_serials_by_tool,
         )
 
     # ------------------ EDIT / ARCHIVE A TOOL ------------------
@@ -426,6 +465,7 @@ def register(app):
                 qty=diff,
                 notes=f'Stock adjusted from {old_qty} to {new_qty}'
             )
+        ensure_tool_serials(tool=tool, created_by=getattr(current_user, 'id', None), commit=False)
         db.session.commit()
         flash(f'Tool {tool.name} updated.', 'success')
         return redirect(url_for('hdc_tool_rental_inventory', q=tool.tool_code))
@@ -453,7 +493,11 @@ def register(app):
         both behave identically.
         """
         tool = Tool.query.get_or_404(tool_id)
+        custom_serials = (request.form.get('custom_serials') or '').strip() or None
+        serial_start_no = request.form.get('serial_start_no', type=int)
         qty = max(0.0, _flt(request.form.get('qty')))
+        if qty <= 0 and custom_serials:
+            qty = float(len(parse_custom_serial_list(custom_serials)))
         if qty <= 0:
             flash('Purchase quantity must be greater than 0.', 'danger')
             return redirect(url_for('hdc_tool_rental_inventory', q=tool.tool_code))
@@ -473,6 +517,8 @@ def register(app):
             notes=(request.form.get('notes') or '').strip(),
             update_cost=(request.form.get('update_cost') == '1'),
             created_by=current_user.id if hasattr(current_user, 'id') else None,
+            serial_numbers=custom_serials,
+            start_no=serial_start_no,
         )
         if not ok:
             flash(msg or 'Could not record purchase.', 'danger')
@@ -501,7 +547,18 @@ def register(app):
     def _do_tool_scrap(tool_id):
         """Throw away broken / lost tools: -qty, audit row, movement log."""
         tool = Tool.query.get_or_404(tool_id)
+        serial_ids = (
+            request.form.getlist('scrap_serial_ids[]')
+            or request.form.getlist('scrap_serial_ids')
+            or (request.form.get('scrap_serial_ids_csv') or '').strip()
+            or None
+        )
         qty = max(0.0, _flt(request.form.get('qty')))
+        if qty <= 0 and serial_ids:
+            if isinstance(serial_ids, str):
+                qty = float(len([x for x in serial_ids.split(',') if x.strip()]))
+            else:
+                qty = float(len([x for x in serial_ids if str(x).strip()]))
         if qty <= 0:
             flash('Scrap quantity must be greater than 0.', 'danger')
             return redirect(url_for('hdc_tool_rental_inventory', q=tool.tool_code))
@@ -514,11 +571,12 @@ def register(app):
             reference=(request.form.get('reference') or '').strip(),
             notes=(request.form.get('notes') or '').strip(),
             created_by=current_user.id if hasattr(current_user, 'id') else None,
+            serial_ids=serial_ids,
         )
         if not ok:
             flash(msg or 'Could not record scrap.', 'danger')
             return redirect(url_for('hdc_tool_rental_inventory', q=tool.tool_code))
-        flash(f'Scrapped {qty:g} {tool.unit} of {tool.name} ({scrap.scrap_code}, '
+        flash(f'Scrapped {scrap.qty:g} {tool.unit} of {tool.name} ({scrap.scrap_code}, '
               f'{scrap.reason_label}) — written off {scrap.value_written_off:,.0f}. '
               f'{tool.total_quantity:g} {tool.unit} left.', 'warning')
         return redirect(url_for('hdc_tool_rental_inventory', q=tool.tool_code))
@@ -602,6 +660,9 @@ def register(app):
         created_rental = db.session.get(ToolRental, created_rental_id) if created_rental_id else None
         recent_rentals = search_rentals({})[:RECENT_RENTALS_ON_NEW]
 
+        # Ensure all tools have their individual serial markings synced
+        ensure_all_tools_serials(commit=True)
+
         # For "Transfer Rental": offer each actual holder/location within the
         # latest active rentals, not just a rental-wide "current location". A
         # rental may have been split by earlier site transfers, so the list of
@@ -649,19 +710,61 @@ def register(app):
                 daily_rate = float(tool.rental_rate_per_day or 0) if tool else 0.0
                 if source_rate <= 0:
                     source_rate = daily_rate
+                cat_name = (tool.category.name if tool and tool.category else (tool.name if tool else f'Tool#{item.tool_id}'))
                 line = source['lines_by_id'].setdefault(item_id, {
                     'item_id': item_id,
                     'tool_id': int(item.tool_id),
+                    'category_id': int(tool.category_id) if tool and tool.category_id else None,
+                    'category_name': cat_name,
                     'name': tool.name if tool else f'Tool#{item.tool_id}',
                     'code': tool.tool_code if tool else '',
                     'qty': 0.0,
                     'rate': source_rate,
                     'daily_rate': daily_rate or source_rate,
                     'unit': (tool.unit if tool else '') or '',
+                    'serials': [],
                 })
                 available_here = float(holding['qty'] or 0)
                 line['qty'] += available_here
                 source['pending'] += available_here
+
+        # Attach out-of-store serial markings to each transfer source line
+        out_serials_by_rental_tool = {}
+        for s in ToolSerial.query.filter(
+            ToolSerial.is_in_store == False,  # noqa: E712
+            ToolSerial.current_rental_id.in_(active_rental_ids) if active_rental_ids else False,
+        ).all():
+            if getattr(s, 'is_scrapped', False) or s.status == 'scrapped':
+                continue
+            out_serials_by_rental_tool.setdefault((int(s.current_rental_id), int(s.tool_id)), []).append(s)
+        for key_rt in out_serials_by_rental_tool:
+            out_serials_by_rental_tool[key_rt].sort(key=lambda s: s.sort_key)
+
+        used_serial_ids_in_sources = set()
+        for source in source_groups.values():
+            holder_norm = (source['holder'] or '').strip().lower()
+            for line in source['lines_by_id'].values():
+                need_cnt = max(0, int(round(float(line['qty'] or 0))))
+                candidates = out_serials_by_rental_tool.get((int(source['id']), int(line['tool_id'])), [])
+                # Prefer serials whose current_location_label matches this holder
+                exact = [
+                    s for s in candidates
+                    if s.id not in used_serial_ids_in_sources
+                    and (s.current_location_label or '').strip().lower() == holder_norm
+                ]
+                fallback = [
+                    s for s in candidates
+                    if s.id not in used_serial_ids_in_sources and s not in exact
+                ]
+                chosen = (exact + fallback)[:need_cnt]
+                for s in chosen:
+                    used_serial_ids_in_sources.add(s.id)
+                    line['serials'].append({
+                        'id': s.id,
+                        'serial_number': s.serial_number,
+                        'condition': s.condition or 'good',
+                        'location': source['holder'],
+                    })
 
         transfer_sources = []
         for source in source_groups.values():
@@ -701,11 +804,23 @@ def register(app):
                     'id': tool_id,
                     'name': line['name'],
                     'code': line['code'],
+                    'category_id': line.get('category_id'),
+                    'category_name': line.get('category_name') or line['name'],
                     'qty': 0.0,
                     'location_keys': set(),
+                    'serials': [],
                 })
                 tool_group['qty'] += float(line['qty'] or 0)
                 tool_group['location_keys'].add(source['location_key'])
+                for s_info in line.get('serials', []):
+                    tool_group['serials'].append({
+                        **s_info,
+                        'source_key': source['key'],
+                        'rental_id': source['id'],
+                        'rental_code': source['code'],
+                        'item_id': line['item_id'],
+                        'holder': source['holder'],
+                    })
 
         transfer_locations = sorted(
             ({**location, 'tool_ids': sorted(location['tool_ids'])}
@@ -734,7 +849,33 @@ def register(app):
         ]
         projects = Project.query.order_by(Project.name.asc()).all()
         stages = Stage.query.options(joinedload(Stage.project)).order_by(Stage.name.asc()).all()
-        tools = Tool.query.filter(Tool.is_void==False).order_by(Tool.name.asc()).all()
+        all_tools = Tool.query.filter(Tool.is_void == False).order_by(Tool.name.asc()).all()
+        # For New Rental: only show tools that are currently IN STORE (available > 0)
+        tools = [t for t in all_tools if t.available_qty > 0.001 or len(t.in_store_serials) > 0]
+        categories = ToolCategory.query.order_by(ToolCategory.name.asc()).all()
+
+        in_store_tools_json = []
+        for t in tools:
+            cat_name = t.category.name if t.category else t.name
+            in_store_list = t.in_store_serials
+            in_store_tools_json.append({
+                'id': t.id,
+                'name': t.name,
+                'code': t.tool_code,
+                'category_id': t.category_id,
+                'category_name': cat_name,
+                'rate': float(t.rental_rate_per_day or 0.0),
+                'available_qty': float(t.available_qty),
+                'unit': t.unit or 'pcs',
+                'serials': [
+                    {
+                        'id': s.id,
+                        'serial_number': s.serial_number,
+                        'condition': s.condition or 'good',
+                    }
+                    for s in in_store_list
+                ],
+            })
 
         return render_template('tool_rental/tool_new_rental.html',
             projects=projects,
@@ -742,6 +883,8 @@ def register(app):
             stages=stages,
             stage_options=_tool_stage_combo_options(stages),
             tools=tools,
+            categories=categories,
+            in_store_tools_json=in_store_tools_json,
             known_customers=known_tool_customers(),
             recent_rentals=recent_rentals,
             created_rental=created_rental,
@@ -804,11 +947,41 @@ def register(app):
         on the form. Every contributing rental is settled, and ONE new rental
         is opened for the destination with all the moved lines.
         """
+        ensure_all_tools_serials(commit=False)
+
+        # Parse any global out-of-store serial markings chosen from the
+        # Category -> Out-of-Store Tool No selector
+        global_transfer_serial_ids = []
+        raw_global_serials = (
+            request.form.getlist('transfer_selected_serials[]')
+            or request.form.getlist('transfer_selected_serials')
+            or [(request.form.get('transfer_selected_serials_csv') or '').strip()]
+        )
+        for chunk in raw_global_serials:
+            for tok in str(chunk or '').split(','):
+                tok = tok.strip()
+                if tok.isdigit():
+                    sid = int(tok)
+                    if sid not in global_transfer_serial_ids:
+                        global_transfer_serial_ids.append(sid)
+
         # ---- the "from" side: a single holder, or every ticked holder ----
         raw_sources = [raw for raw in
                        (request.form.getlist('source_rental_id[]')
-                        or request.form.getlist('source_rental_id'))
+                        or request.form.getlist('source_rental_id')
+                        or request.form.getlist('from_source_key[]')
+                        or request.form.getlist('from_source_key'))
                        if (raw or '').strip()]
+
+        # If the user selected out-of-store serials directly from the cascading
+        # Category -> Tool No picker without ticking source_rental_id, derive
+        # the source rentals automatically from those serials.
+        if not raw_sources and global_transfer_serial_ids:
+            for sid in global_transfer_serial_ids:
+                s_obj = db.session.get(ToolSerial, sid)
+                if s_obj and not s_obj.is_in_store and s_obj.current_rental_id:
+                    raw_sources.append(str(int(s_obj.current_rental_id)))
+
         sources = []                       # [(rental, location)] in posted order
         seen_rental_ids = set()
         for raw in raw_sources:
@@ -843,6 +1016,7 @@ def register(app):
         pending_by_id = {}
         available_by_item = {}
         source_by_item = {}
+        location_by_item = {}
         for rental, location in sources:
             pending_items = [item for item in
                              ToolRentalItem.query.filter_by(rental_id=rental.id).all()
@@ -863,6 +1037,7 @@ def register(app):
                 item_id = int(item.id)
                 pending_by_id[item_id] = item
                 source_by_item[item_id] = rental
+                location_by_item[item_id] = location
                 available_by_item[item_id] = availability.get(item_id, 0.0)
 
         if not pending_by_id:
@@ -879,6 +1054,24 @@ def register(app):
         # former behaviour and transfers every pending line of the source(s).
         raw_item_ids = (request.form.getlist('transfer_item_id[]')
                         or request.form.getlist('transfer_item_id'))
+        if not raw_item_ids and global_transfer_serial_ids:
+            derived_item_ids = []
+            for sid in global_transfer_serial_ids:
+                s_obj = db.session.get(ToolSerial, sid)
+                if not s_obj or s_obj.is_in_store:
+                    continue
+                if s_obj.current_rental_item_id and int(s_obj.current_rental_item_id) in pending_by_id:
+                    iid = str(int(s_obj.current_rental_item_id))
+                    if iid not in derived_item_ids:
+                        derived_item_ids.append(iid)
+                else:
+                    for iid_cand, it_cand in pending_by_id.items():
+                        if it_cand.rental_id == s_obj.current_rental_id and it_cand.tool_id == s_obj.tool_id:
+                            if str(iid_cand) not in derived_item_ids:
+                                derived_item_ids.append(str(iid_cand))
+                            break
+            raw_item_ids = derived_item_ids
+
         explicit_selection = (request.form.get('transfer_selection_enabled') == '1'
                               or bool(raw_item_ids))
         if explicit_selection:
@@ -948,14 +1141,77 @@ def register(app):
             exp_date = None
         operator_notes = (request.form.get('notes') or '').strip()
 
-        # Snapshot the chosen lines and destination rates before touching the
-        # source rentals. Each checked line transfers its full qty at the
-        # selected From location; other locations and unchecked tools remain in
-        # place. Every line remembers which holder it leaves.
+        # Snapshot the chosen lines, out-of-store serial markings, and destination
+        # rates before touching the source rentals.
         moved = []
+        claimed_serial_ids = set()
         for item, available_qty in selected_items:
-            qty = min(max(0.0, float(available_qty or 0)),
-                      max(0.0, float(item.qty_pending or 0)))
+            max_avail = min(max(0.0, float(available_qty or 0)),
+                            max(0.0, float(item.qty_pending or 0)))
+            if max_avail <= 0.001:
+                continue
+
+            # Check if explicit out-of-store serial IDs were selected for this item
+            raw_item_serials = (
+                request.form.getlist(f'transfer_serial_ids_{item.id}[]')
+                or request.form.getlist(f'transfer_serial_ids_{item.id}')
+            )
+            item_serial_ids = []
+            for chunk in raw_item_serials:
+                for tok in str(chunk or '').split(','):
+                    tok = tok.strip()
+                    if tok.isdigit():
+                        sid = int(tok)
+                        if sid not in item_serial_ids:
+                            item_serial_ids.append(sid)
+
+            if not item_serial_ids and global_transfer_serial_ids:
+                for sid in global_transfer_serial_ids:
+                    s_obj = db.session.get(ToolSerial, sid)
+                    if (s_obj and not s_obj.is_in_store
+                            and s_obj.current_rental_id == item.rental_id
+                            and s_obj.tool_id == item.tool_id
+                            and sid not in claimed_serial_ids):
+                        item_serial_ids.append(sid)
+
+            chosen_serials = []
+            if item_serial_ids:
+                for sid in item_serial_ids:
+                    s_obj = db.session.get(ToolSerial, sid)
+                    if not s_obj or s_obj.tool_id != item.tool_id or getattr(s_obj, 'is_scrapped', False):
+                        flash(f'Invalid tool serial selected for {item.tool.name if item.tool else "tool"}.', 'danger')
+                        return redirect(url_for('hdc_tool_rental_new'))
+                    if s_obj.is_in_store:
+                        flash(f'{s_obj.serial_number} is currently in store — only tools out at a site/customer can be transferred.', 'danger')
+                        return redirect(url_for('hdc_tool_rental_new'))
+                    if s_obj.current_rental_id and int(s_obj.current_rental_id) != int(item.rental_id):
+                        flash(f'{s_obj.serial_number} belongs to a different rental.', 'danger')
+                        return redirect(url_for('hdc_tool_rental_new'))
+                    if sid not in claimed_serial_ids:
+                        chosen_serials.append(s_obj)
+                        claimed_serial_ids.add(sid)
+                qty = min(max_avail, float(len(chosen_serials)))
+                chosen_serials = chosen_serials[:int(round(qty))]
+            else:
+                qty_raw = request.form.get(f'transfer_qty_{item.id}')
+                if qty_raw is not None and str(qty_raw).strip():
+                    qty = min(max_avail, max(0.0, _flt(qty_raw, max_avail)))
+                else:
+                    qty = max_avail
+                if qty > 0.001:
+                    # Auto-pick matching out-of-store serials for this source rental/tool
+                    loc_info = location_by_item.get(int(item.id))
+                    _, _, _, _, src_loc_label = _transfer_from_parts(source_by_item[int(item.id)], loc_info)
+                    candidates = get_out_of_store_serials(
+                        tool_id=item.tool_id,
+                        rental_id=item.rental_id,
+                        location_label=src_loc_label,
+                    )
+                    for s_obj in candidates:
+                        if s_obj.id not in claimed_serial_ids and len(chosen_serials) < int(round(qty)):
+                            chosen_serials.append(s_obj)
+                            claimed_serial_ids.add(s_obj.id)
+
             if qty <= 0.001:
                 continue
             source_rate = float(item.rate or 0)
@@ -979,6 +1235,7 @@ def register(app):
                 'qty': qty,
                 'rate': rate,
                 'amount': qty * rate if billing_type != 'no_charge' else 0.0,
+                'serials': chosen_serials,
             })
         if not moved:
             flash('Select at least one tool with a quantity still out to transfer.', 'danger')
@@ -1134,13 +1391,33 @@ def register(app):
         for line in moved:
             rental = line['source']
             transfer, from_label = handovers[int(rental.id)]
-            db.session.add(ToolRentalItem(
+            sn_list = [s.serial_number for s in line.get('serials', [])]
+            item_note = f'From transfer of {rental.rental_code}'
+            if sn_list:
+                item_note += f" [{', '.join(sn_list)}]"
+            new_item = ToolRentalItem(
                 rental_id=new_rental.id,
                 tool_id=line['tool_id'],
                 qty_rented=line['qty'], qty_returned=0.0, qty_pending=line['qty'],
                 rate=line['rate'], amount=line['amount'],
-                notes=f'From transfer of {rental.rental_code}',
-            ))
+                notes=item_note[:300],
+            )
+            db.session.add(new_item)
+            db.session.flush()
+            movement_type = 'external_transfer' if to_type == 'external' else 'site_transfer'
+            if line.get('serials'):
+                transfer_serials(
+                    serial_ids=[s.id for s in line['serials']],
+                    from_label=from_label,
+                    to_label=to_label,
+                    transfer_id=transfer.id,
+                    rental_id=new_rental.id,
+                    rental_item_id=new_item.id,
+                    movement_type=movement_type,
+                    notes=f'Transferred from {rental.rental_code} ({from_label}) to {new_code} ({to_label})',
+                    created_by=current_user.id if hasattr(current_user, 'id') else None,
+                    commit=False,
+                )
             create_movement_log(
                 tool_id=line['tool_id'], rental_id=new_rental.id,
                 movement_type='rental_out',
@@ -1171,7 +1448,14 @@ def register(app):
             rental.notes = (src_note + ' ' + add).strip() if src_note else add
 
         marked = [lines[0]['source'] for lines in moved_by_source.values()]
-        moved_desc = ', '.join(f"{line['name']} x{line['qty']:g}" for line in moved)
+        moved_desc_parts = []
+        for line in moved:
+            sn_list = [s.serial_number for s in line.get('serials', [])]
+            if sn_list and len(sn_list) <= 5:
+                moved_desc_parts.append(f"{line['name']} x{line['qty']:g} ({', '.join(sn_list)})")
+            else:
+                moved_desc_parts.append(f"{line['name']} x{line['qty']:g}")
+        moved_desc = ', '.join(moved_desc_parts)
         db.session.commit()
 
         chain_str = ' > '.join(rental_transfer_chain(new_rental.id))
@@ -1239,6 +1523,38 @@ def register(app):
         qtys = request.form.getlist('qty[]') or request.form.getlist('qty')
         rates = request.form.getlist('rate[]') or request.form.getlist('rate')
         notes_list = request.form.getlist('item_notes[]') or request.form.getlist('item_notes')
+        row_serials_list = request.form.getlist('row_serial_ids[]') or request.form.getlist('row_serial_ids')
+        selected_serials_raw = (request.form.get('selected_serials') or '').strip()
+
+        # Parse global selected_serials (if submitted from Individual Serials picker)
+        global_serial_ids = []
+        if selected_serials_raw:
+            for tok in selected_serials_raw.split(','):
+                tok = tok.strip()
+                if tok.isdigit():
+                    sid = int(tok)
+                    if sid not in global_serial_ids:
+                        global_serial_ids.append(sid)
+
+        # If the user submitted via the Individual Serials picker and left tool_id[] empty,
+        # build rows grouped by tool_id from the selected serials.
+        non_empty_tool_ids = [t for t in tool_ids if str(t or '').strip()]
+        if not non_empty_tool_ids and global_serial_ids:
+            grouped_by_tid = {}
+            for sid in global_serial_ids:
+                s_obj = db.session.get(ToolSerial, sid)
+                if not s_obj or getattr(s_obj, 'is_scrapped', False):
+                    flash('One of the selected tool serials is invalid.', 'danger')
+                    return redirect(url_for('hdc_tool_rental_new'))
+                if not s_obj.is_in_store:
+                    flash(f'{s_obj.serial_number} is not available in store (currently at {s_obj.current_location_label}).', 'danger')
+                    return redirect(url_for('hdc_tool_rental_new'))
+                grouped_by_tid.setdefault(int(s_obj.tool_id), []).append(sid)
+            tool_ids = [str(tid) for tid in grouped_by_tid.keys()]
+            qtys = [str(len(sids)) for sids in grouped_by_tid.values()]
+            rates = []
+            notes_list = []
+            row_serials_list = [','.join(str(sid) for sid in sids) for sids in grouped_by_tid.values()]
 
         if not tool_ids or len(tool_ids)!=len(qtys):
             flash('Add at least one tool item.', 'danger')
@@ -1246,9 +1562,13 @@ def register(app):
 
         parsed_items = []
         requested_by_tool = {}
+        claimed_serial_ids = set()
         total_rented_qty = 0.0
         total_amount = 0.0
         for idx, (tid_raw, qty_raw) in enumerate(zip(tool_ids, qtys)):
+            # Skip completely blank extra rows if at least one row is valid
+            if not str(tid_raw or '').strip() and len(tool_ids) > 1:
+                continue
             try:
                 tid = int(tid_raw)
             except:
@@ -1258,10 +1578,47 @@ def register(app):
             if not tool or tool.is_void:
                 flash(f'Tool not found at row {idx+1}.', 'danger')
                 return redirect(url_for('hdc_tool_rental_new'))
-            qty = max(0.0, _flt(qty_raw))
-            if qty <= 0:
-                flash(f'Quantity must be >0 at row {idx+1}.', 'danger')
-                return redirect(url_for('hdc_tool_rental_new'))
+
+            ensure_tool_serials(tool=tool, commit=False)
+
+            # Parse explicit serial markings selected for this row (e.g. Shovel No 5, Shovel No 6)
+            raw_row_sids = row_serials_list[idx] if idx < len(row_serials_list) else ''
+            explicit_sids = []
+            for tok in str(raw_row_sids or '').split(','):
+                tok = tok.strip()
+                if tok.isdigit():
+                    sid = int(tok)
+                    if sid not in explicit_sids:
+                        explicit_sids.append(sid)
+
+            row_serials = []
+            if explicit_sids:
+                for sid in explicit_sids:
+                    s_obj = db.session.get(ToolSerial, sid)
+                    if not s_obj or s_obj.tool_id != tool.id or getattr(s_obj, 'is_scrapped', False):
+                        flash(f'Invalid serial number selected for {tool.name} at row {idx+1}.', 'danger')
+                        return redirect(url_for('hdc_tool_rental_new'))
+                    if not s_obj.is_in_store:
+                        flash(f'{s_obj.serial_number} is not available in store (currently out at {s_obj.current_location_label}).', 'danger')
+                        return redirect(url_for('hdc_tool_rental_new'))
+                    if sid in claimed_serial_ids:
+                        flash(f'{s_obj.serial_number} was selected more than once.', 'danger')
+                        return redirect(url_for('hdc_tool_rental_new'))
+                    claimed_serial_ids.add(sid)
+                    row_serials.append(s_obj)
+                qty = float(len(row_serials))
+            else:
+                qty = max(0.0, _flt(qty_raw))
+                if qty <= 0:
+                    flash(f'Quantity must be >0 at row {idx+1}.', 'danger')
+                    return redirect(url_for('hdc_tool_rental_new'))
+                # Auto-assign the first `qty` available in-store serial markings
+                in_store_candidates = [s for s in tool.in_store_serials if s.id not in claimed_serial_ids]
+                need_cnt = max(0, int(round(qty)))
+                for s_obj in in_store_candidates[:need_cnt]:
+                    claimed_serial_ids.add(s_obj.id)
+                    row_serials.append(s_obj)
+
             available = tool_available_for_integrity(tool)
             requested_by_tool[tid] = requested_by_tool.get(tid, 0) + qty
             if requested_by_tool[tid] > available + 0.001:
@@ -1273,9 +1630,17 @@ def register(app):
                 rate = 0.0
             amount = qty * rate
             note = (notes_list[idx] if idx < len(notes_list) else '').strip()
-            parsed_items.append((tool, qty, rate, amount, note))
+            if row_serials:
+                sn_str = ', '.join(s.serial_number for s in row_serials)
+                if sn_str not in note:
+                    note = f"{note} [Serials: {sn_str}]".strip() if note else f"Serials: {sn_str}"
+            parsed_items.append((tool, qty, rate, amount, note[:300], row_serials))
             total_rented_qty += qty
             total_amount += amount
+
+        if not parsed_items:
+            flash('Add at least one tool item.', 'danger')
+            return redirect(url_for('hdc_tool_rental_new'))
 
         rental_code = _next_rental_code()
         rental = ToolRental(
@@ -1302,7 +1667,7 @@ def register(app):
         db.session.add(rental)
         db.session.flush()
 
-        for tool, qty, rate, amount, note in parsed_items:
+        for tool, qty, rate, amount, note, row_serials in parsed_items:
             item = ToolRentalItem(
                 rental_id=rental.id,
                 tool_id=tool.id,
@@ -1325,6 +1690,16 @@ def register(app):
                         to_label += f" > {st.name}"
             else:
                 to_label = customer_name or 'External Customer'
+            if row_serials:
+                assign_serials_to_rental(
+                    rental_id=rental.id,
+                    serial_ids=[s.id for s in row_serials],
+                    rental_item_id=item.id,
+                    location_label=to_label,
+                    notes=f'Rental {rental_code} out to {to_label}',
+                    created_by=current_user.id if hasattr(current_user, 'id') else None,
+                    commit=False,
+                )
             create_movement_log(
                 tool_id=tool.id,
                 rental_id=rental.id,
@@ -1407,9 +1782,29 @@ def register(app):
             for link in links:
                 acct_links.setdefault(link.payment_id, []).append(link.account_txn_id)
 
+        # Serial markings currently out on this rental, grouped by rental_item_id
+        rental_serials = get_serials_for_rental(rental.id)
+        serials_by_item = {}
+        unassigned_by_tool = {}
+        for s_info in rental_serials:
+            ri_id = s_info.get('rental_item_id')
+            if ri_id:
+                serials_by_item.setdefault(int(ri_id), []).append(s_info)
+            else:
+                unassigned_by_tool.setdefault(int(s_info['tool_id']), []).append(s_info)
+        for it in items:
+            slot = serials_by_item.setdefault(int(it.id), [])
+            need = max(0, int(round(float(it.qty_pending or 0))) - len(slot))
+            pool = unassigned_by_tool.get(int(it.tool_id), [])
+            while need > 0 and pool:
+                slot.append(pool.pop(0))
+                need -= 1
+
         return render_template('tool_rental/tool_rental_detail.html',
             rental=rental,
             items=items,
+            rental_serials=rental_serials,
+            serials_by_item=serials_by_item,
             returns=returns,
             payments=payments,
             transfers=transfers,
@@ -1443,6 +1838,10 @@ def register(app):
             flash('Rental is voided.', 'danger')
             return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
 
+        for it in rental.items:
+            if it.tool:
+                ensure_tool_serials(tool=it.tool, commit=False)
+
         return_date_raw = (request.form.get('return_date') or '').strip()
         try:
             return_date = datetime.strptime(return_date_raw, '%Y-%m-%d').date() if return_date_raw else _pkt_today()
@@ -1472,6 +1871,7 @@ def register(app):
 
         total_tools_returned = 0.0
         parsed_returns = []
+        claimed_return_serial_ids = set()
         for idx, (ri_id_raw, qty_raw) in enumerate(zip(rental_item_ids, qty_returned_list)):
             try:
                 ri_id = int(ri_id_raw)
@@ -1481,14 +1881,53 @@ def register(app):
             if not r_item or int(r_item.rental_id)!=int(rental.id):
                 flash(f'Invalid rental item {ri_id_raw}.', 'danger')
                 return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
-            qty_ret = max(0.0, _flt(qty_raw))
+
+            # Check if specific out-of-store serial markings were selected for return
+            raw_ret_serials = (
+                request.form.getlist(f'return_serial_ids_{r_item.id}[]')
+                or request.form.getlist(f'return_serial_ids_{r_item.id}')
+            )
+            explicit_ret_sids = []
+            for chunk in raw_ret_serials:
+                for tok in str(chunk or '').split(','):
+                    tok = tok.strip()
+                    if tok.isdigit():
+                        sid = int(tok)
+                        if sid not in explicit_ret_sids:
+                            explicit_ret_sids.append(sid)
+
+            item_return_serials = []
+            if return_type != 'full' and explicit_ret_sids:
+                for sid in explicit_ret_sids:
+                    s_obj = db.session.get(ToolSerial, sid)
+                    if s_obj and not s_obj.is_in_store and s_obj.tool_id == r_item.tool_id and sid not in claimed_return_serial_ids:
+                        claimed_return_serial_ids.add(sid)
+                        item_return_serials.append(s_obj)
+                qty_ret = float(len(item_return_serials))
+            else:
+                qty_ret = max(0.0, _flt(qty_raw))
+                if qty_ret > 0:
+                    candidates = get_out_of_store_serials(
+                        tool_id=r_item.tool_id,
+                        rental_id=rental.id,
+                        rental_item_id=r_item.id,
+                    )
+                    for s_obj in candidates:
+                        if s_obj.id not in claimed_return_serial_ids and len(item_return_serials) < int(round(qty_ret)):
+                            claimed_return_serial_ids.add(s_obj.id)
+                            item_return_serials.append(s_obj)
+
             if qty_ret <= 0:
                 continue
             if qty_ret > float(r_item.qty_pending or 0) + 0.001:
                 flash(f'Return qty {qty_ret} exceeds pending {r_item.qty_pending} for {r_item.tool.name}.', 'danger')
                 return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
             cond_note = (condition_notes_list[idx] if idx < len(condition_notes_list) else '').strip()
-            parsed_returns.append((r_item, qty_ret, cond_note))
+            if item_return_serials:
+                sn_str = ', '.join(s.serial_number for s in item_return_serials)
+                if sn_str not in cond_note:
+                    cond_note = f"{cond_note} [Serials: {sn_str}]".strip() if cond_note else f"Serials: {sn_str}"
+            parsed_returns.append((r_item, qty_ret, cond_note[:300], item_return_serials))
             total_tools_returned += qty_ret
 
         if total_tools_returned <= 0:
@@ -1536,7 +1975,7 @@ def register(app):
         db.session.add(ret_rec)
         db.session.flush()
 
-        for r_item, qty_ret, cond_note in parsed_returns:
+        for r_item, qty_ret, cond_note, item_return_serials in parsed_returns:
             ret_item = ToolRentalReturnItem(
                 return_id=ret_rec.id,
                 rental_item_id=r_item.id,
@@ -1549,6 +1988,14 @@ def register(app):
             r_item.qty_pending = max(0.0, float(r_item.qty_rented or 0) - float(r_item.qty_returned or 0))
             from_label = rental.current_location_label or 'Site'
             to_label = 'Warehouse / Store'
+            if item_return_serials:
+                return_serials_from_rental(
+                    rental_id=rental.id,
+                    serial_ids=[s.id for s in item_return_serials],
+                    return_id=ret_rec.id,
+                    created_by=current_user.id if hasattr(current_user, 'id') else None,
+                    commit=False,
+                )
             create_movement_log(
                 tool_id=r_item.tool_id,
                 rental_id=rental.id,
@@ -1918,39 +2365,106 @@ def register(app):
         db.session.flush()
 
         rental_items = ToolRentalItem.query.filter_by(rental_id=rental.id).filter(ToolRentalItem.qty_pending>0).all()
+        for ri in rental_items:
+            if ri.tool:
+                ensure_tool_serials(tool=ri.tool, commit=False)
+
         # Split the transferred quantity across tools so the dashboard can say
         # *which* tool moved where (not just "20 pcs left Site1").  Per-tool
-        # qty_transfer[] fields win; otherwise allocate_transfer_qty fills the
-        # pending lines up to the requested total.
+        # qty_transfer[] or site_transfer_serial_ids_<id>[] fields win; otherwise
+        # allocate_transfer_qty fills the pending lines up to the requested total.
         per_item_raw = request.form.getlist('qty_transfer[]') or request.form.getlist('qty_transfer')
         item_id_raw = request.form.getlist('rental_item_id[]') or request.form.getlist('rental_item_id')
         allocations = []
+        serials_for_item_transfer = {}
+        claimed_site_serials = set()
+
+        by_id = {int(ri.id): ri for ri in rental_items}
+        # First check if explicit out-of-store serial markings were selected per item
+        for ri in rental_items:
+            raw_sids = (
+                request.form.getlist(f'transfer_serial_ids_{ri.id}[]')
+                or request.form.getlist(f'transfer_serial_ids_{ri.id}')
+                or request.form.getlist(f'site_transfer_serial_ids_{ri.id}[]')
+                or request.form.getlist(f'site_transfer_serial_ids_{ri.id}')
+            )
+            chosen_sids = []
+            for chunk in raw_sids:
+                for tok in str(chunk or '').split(','):
+                    tok = tok.strip()
+                    if tok.isdigit():
+                        sid = int(tok)
+                        s_obj = db.session.get(ToolSerial, sid)
+                        if s_obj and not s_obj.is_in_store and s_obj.tool_id == ri.tool_id and sid not in claimed_site_serials:
+                            claimed_site_serials.add(sid)
+                            chosen_sids.append(s_obj)
+            if chosen_sids:
+                serials_for_item_transfer[int(ri.id)] = chosen_sids
+
         if per_item_raw and len(per_item_raw) == len(item_id_raw):
-            by_id = {int(ri.id): ri for ri in rental_items}
             for ri_id_raw, qty_raw in zip(item_id_raw, per_item_raw):
                 try:
                     ri = by_id.get(int(ri_id_raw))
                 except (TypeError, ValueError):
                     ri = None
-                take = max(0.0, _flt(qty_raw))
-                if not ri or take <= 0:
+                if not ri:
                     continue
-                take = min(take, float(ri.qty_pending or 0))
+                chosen_s = serials_for_item_transfer.get(int(ri.id), [])
+                if chosen_s:
+                    take = min(float(len(chosen_s)), float(ri.qty_pending or 0))
+                else:
+                    take = max(0.0, _flt(qty_raw))
+                    take = min(take, float(ri.qty_pending or 0))
                 if take > 0:
                     allocations.append((ri, take))
+        elif serials_for_item_transfer:
+            for ri_id, chosen_s in serials_for_item_transfer.items():
+                ri = by_id.get(int(ri_id))
+                if ri:
+                    take = min(float(len(chosen_s)), float(ri.qty_pending or 0))
+                    if take > 0:
+                        allocations.append((ri, take))
         if not allocations:
             allocations = allocate_transfer_qty(
                 [(ri, float(ri.qty_pending or 0)) for ri in rental_items], qty_transferred)
 
         moved_qty = 0.0
         moved_tools = []
+        movement_type = 'site_transfer' if to_type=='site' else 'external_transfer'
         for ri, take in allocations:
             moved_qty += float(take)
-            moved_tools.append(f'{ri.tool.name if ri.tool else ri.tool_id} x{take:g}')
+            chosen_s = serials_for_item_transfer.get(int(ri.id), [])
+            if not chosen_s:
+                candidates = get_out_of_store_serials(
+                    tool_id=ri.tool_id,
+                    rental_id=rental.id,
+                    rental_item_id=ri.id,
+                )
+                for s_obj in candidates:
+                    if s_obj.id not in claimed_site_serials and len(chosen_s) < int(round(float(take))):
+                        claimed_site_serials.add(s_obj.id)
+                        chosen_s.append(s_obj)
+            if chosen_s:
+                transfer_serials(
+                    serial_ids=[s.id for s in chosen_s[:int(round(float(take)))]],
+                    from_label=from_label,
+                    to_label=to_label,
+                    transfer_id=transfer.id,
+                    rental_id=rental.id,
+                    rental_item_id=ri.id,
+                    movement_type=movement_type,
+                    notes=f'Transfer {from_label} > {to_label}',
+                    created_by=current_user.id if hasattr(current_user, 'id') else None,
+                    commit=False,
+                )
+                sn_txt = ', '.join(s.serial_number for s in chosen_s[:int(round(float(take)))])
+                moved_tools.append(f'{ri.tool.name if ri.tool else ri.tool_id} x{take:g} ({sn_txt})')
+            else:
+                moved_tools.append(f'{ri.tool.name if ri.tool else ri.tool_id} x{take:g}')
             create_movement_log(
                 tool_id=ri.tool_id,
                 rental_id=rental.id,
-                movement_type='site_transfer' if to_type=='site' else 'external_transfer',
+                movement_type=movement_type,
                 from_label=from_label,
                 to_label=to_label,
                 qty=float(take),
@@ -2511,21 +3025,30 @@ def register(app):
     @app.route('/hdc/api/tool-rental/serials/in-store')
     @login_required
     def hdc_api_serials_in_store():
-        """Get all serials currently in store for the rental creation picker.
+        """Get all serials currently IN STORE for the New Rental data-driven picker.
 
-        Returns a flat list of serials grouped by tool, suitable for the
-        multi-select tool picker in the new rental form.
+        Optional query params:
+            category_id: Filter by ToolCategory ID
+            tool_id: Filter by Tool ID
         """
-        serials = get_serials_in_store_summary()
-        # Group by tool for the picker UI
+        category_id = request.args.get('category_id', type=int)
+        tool_id = request.args.get('tool_id', type=int)
+        serials = get_serials_in_store_summary(category_id=category_id, tool_id=tool_id)
         by_tool = {}
+        categories_map = {}
         for s in serials:
             tid = s['tool_id']
+            cid = s.get('category_id') or 0
+            cname = s.get('category_name') or s['tool_name']
+            categories_map[cid] = {'category_id': cid, 'category_name': cname}
             if tid not in by_tool:
                 by_tool[tid] = {
                     'tool_id': tid,
                     'tool_name': s['tool_name'],
                     'tool_code': s['tool_code'],
+                    'category_id': s.get('category_id'),
+                    'category_name': cname,
+                    'rate': s.get('rate', 0.0),
                     'serials': [],
                     'in_store_count': 0,
                 }
@@ -2536,6 +3059,57 @@ def register(app):
                 'condition': s['condition'],
             })
             by_tool[tid]['in_store_count'] += 1
+
+        return jsonify({
+            'tools': sorted(by_tool.values(), key=lambda t: (t['tool_name'].lower(), t['tool_code'])),
+            'categories': sorted(categories_map.values(), key=lambda c: c['category_name'].lower()),
+            'total_serials': len(serials),
+        })
+
+    @app.route('/hdc/api/tool-rental/serials/out-of-store')
+    @login_required
+    def hdc_api_serials_out_of_store():
+        """Get all serials currently OUT OF STORE (at a site or customer) for
+        the Transfer Tools data-driven picker.
+
+        Optional query params:
+            category_id: Filter by ToolCategory ID
+            tool_id: Filter by Tool ID
+            rental_id: Filter by active Rental ID
+            holder: Filter by current location / holder name
+        """
+        category_id = request.args.get('category_id', type=int)
+        tool_id = request.args.get('tool_id', type=int)
+        rental_id = request.args.get('rental_id', type=int)
+        holder = (request.args.get('holder') or '').strip() or None
+        serials = get_serials_out_of_store_summary(
+            category_id=category_id, tool_id=tool_id, rental_id=rental_id, holder=holder
+        )
+        by_tool = {}
+        for s in serials:
+            tid = s['tool_id']
+            cname = s.get('category_name') or s['tool_name']
+            if tid not in by_tool:
+                by_tool[tid] = {
+                    'tool_id': tid,
+                    'tool_name': s['tool_name'],
+                    'tool_code': s['tool_code'],
+                    'category_id': s.get('category_id'),
+                    'category_name': cname,
+                    'rate': s.get('rate', 0.0),
+                    'serials': [],
+                    'out_count': 0,
+                }
+            by_tool[tid]['serials'].append({
+                'serial_id': s['serial_id'],
+                'serial_number': s['serial_number'],
+                'holder': s['holder'],
+                'rental_id': s['rental_id'],
+                'rental_item_id': s['rental_item_id'],
+                'rental_code': s['rental_code'],
+                'condition': s['condition'],
+            })
+            by_tool[tid]['out_count'] += 1
 
         return jsonify({
             'tools': sorted(by_tool.values(), key=lambda t: (t['tool_name'].lower(), t['tool_code'])),
@@ -2558,7 +3132,7 @@ def register(app):
             'serial_number': status['serial'].serial_number,
             'tool_id': status['serial'].tool_id,
             'tool_name': status['tool'].name if status['tool'] else '-',
-            'tool_code': status['serial'].serial_number,
+            'tool_code': status['tool'].tool_code if status['tool'] else status['serial'].serial_number,
             'status': status['status'],
             'status_label': status['status_label'],
             'is_in_store': status['is_in_store'],
@@ -2577,6 +3151,33 @@ def register(app):
             } for m in status['movements']],
         })
 
+    @app.route('/hdc/api/tool-rental/serials/<int:serial_id>/rename', methods=['POST'])
+    @login_required
+    @_money_write_required()
+    def hdc_api_serial_rename(serial_id):
+        """Rename or update an individual tool serial marking (e.g. 'Shovel No 5')."""
+        new_sn = (request.form.get('serial_number') or '').strip()
+        condition = (request.form.get('condition') or '').strip() or None
+        notes = request.form.get('notes')
+        ok, msg, s_obj = rename_tool_serial(
+            serial_id=serial_id,
+            new_serial_number=new_sn,
+            condition=condition,
+            notes=notes,
+            updated_by=getattr(current_user, 'id', None),
+            commit=True,
+        )
+        if not ok:
+            return jsonify({'success': False, 'message': msg}), 400
+        return jsonify({
+            'success': True,
+            'message': msg,
+            'serial_id': s_obj.id,
+            'serial_number': s_obj.serial_number,
+            'condition': s_obj.condition,
+            'notes': s_obj.notes,
+        })
+
     @app.route('/hdc/api/tool-rental/serials/tool/<int:tool_id>/available')
     @login_required
     def hdc_api_serials_for_tool(tool_id):
@@ -2591,6 +3192,8 @@ def register(app):
             'tool_id': tool.id,
             'tool_name': tool.name,
             'tool_code': tool.tool_code,
+            'category_id': tool.category_id,
+            'category_name': tool.category.name if tool.category else tool.name,
             'total_qty': float(tool.total_quantity or 0),
             'available_serials': len(serials),
             'serials': [{
@@ -2607,13 +3210,7 @@ def register(app):
     @login_required
     @_money_write_required()
     def hdc_api_serials_assign():
-        """Assign serials to a rental.
-
-        POST data:
-            rental_id: The rental ID.
-            serial_ids: Comma-separated list of serial IDs.
-            notes: Optional notes.
-        """
+        """Assign serials to a rental."""
         rental_id = request.form.get('rental_id', type=int)
         serial_ids_raw = request.form.get('serial_ids', '').strip()
         notes = (request.form.get('notes') or '').strip()
@@ -2648,14 +3245,7 @@ def register(app):
     @login_required
     @_money_write_required()
     def hdc_api_serials_return():
-        """Return serials from a rental.
-
-        POST data:
-            rental_id: The rental ID.
-            serial_ids: Comma-separated list of serial IDs.
-            return_id: Optional return transaction ID.
-            notes: Optional notes.
-        """
+        """Return serials from a rental."""
         rental_id = request.form.get('rental_id', type=int)
         serial_ids_raw = request.form.get('serial_ids', '').strip()
         return_id = request.form.get('return_id', type=int)
@@ -2674,7 +3264,7 @@ def register(app):
             return jsonify({'success': False, 'message': 'Invalid serial IDs'}), 400
 
         success, message, returned = return_serials_from_rental(
-            rental_id, serial_ids, return_id=return_id, created_by=created_by
+            rental_id, serial_ids, return_id=return_id, notes=notes, created_by=created_by
         )
 
         if not success:
@@ -2691,33 +3281,25 @@ def register(app):
     @login_required
     @_money_write_required()
     def hdc_api_serials_create():
-        """Create serial-numbered pieces for a tool.
-
-        POST data:
-            tool_id: The tool ID.
-            qty: Number of serials to create.
-            serial_numbers: Optional comma-separated list of serial numbers.
-        """
+        """Create serial-numbered pieces for a tool."""
         tool_id = request.form.get('tool_id', type=int)
         qty = request.form.get('qty', type=float)
-        serial_numbers_raw = request.form.get('serial_numbers', '').strip()
+        start_no = request.form.get('start_no', type=int)
+        serial_numbers_raw = (request.form.get('serial_numbers') or '').strip()
         created_by = getattr(current_user, 'id', None)
 
         if not tool_id:
             return jsonify({'success': False, 'message': 'Tool ID required'}), 400
 
+        serial_numbers = parse_custom_serial_list(serial_numbers_raw) if serial_numbers_raw else None
+        if (qty is None or qty <= 0) and serial_numbers:
+            qty = float(len(serial_numbers))
         if qty is None or qty <= 0:
             return jsonify({'success': False, 'message': 'Quantity must be > 0'}), 400
 
-        serial_numbers = None
-        if serial_numbers_raw:
-            try:
-                serial_numbers = [x.strip() for x in serial_numbers_raw.split(',') if x.strip()]
-            except Exception:
-                return jsonify({'success': False, 'message': 'Invalid serial numbers format'}), 400
-
         success, message, serial_ids = create_tool_serials(
-            tool_id, qty, serial_numbers=serial_numbers, created_by=created_by
+            tool_id, qty, serial_numbers=serial_numbers, start_no=start_no,
+            created_by=created_by, commit=True
         )
 
         if not success:
@@ -2733,15 +3315,14 @@ def register(app):
     @app.route('/hdc/api/tool-rental/tools/<int:tool_id>/summary')
     @login_required
     def hdc_api_tool_summary(tool_id):
-        """Get summary of a tool including serial breakdown.
-
-        Returns tool info with serial status for the tool-status dialog.
-        """
+        """Get summary of a tool including full serial breakdown (in store vs out at site/customer)."""
         tool = Tool.query.get_or_404(tool_id)
-        serials = ToolSerial.query.filter_by(tool_id=tool.id).all()
+        ensure_tool_serials(tool=tool, commit=True)
+        serials = tool.active_serials
 
         serial_data = []
         for s in serials:
+            rental = s.current_rental
             serial_data.append({
                 'serial_id': s.id,
                 'serial_number': s.serial_number,
@@ -2749,14 +3330,17 @@ def register(app):
                 'status_label': s.status_label,
                 'is_in_store': s.is_in_store,
                 'condition': s.condition,
-                'current_location': s.current_location_label,
+                'notes': s.notes or '',
+                'current_location': s.current_location_label or ('Warehouse / Store' if s.is_in_store else (rental.current_location_label if rental else 'Out of Store')),
                 'current_rental_id': s.current_rental_id,
+                'current_rental_code': rental.rental_code if rental else None,
             })
 
         return jsonify({
             'tool_id': tool.id,
             'tool_name': tool.name,
             'tool_code': tool.tool_code,
+            'category_name': tool.category.name if tool.category else tool.name,
             'owned': float(tool.total_quantity or 0),
             'in_store': float(tool.available_qty),
             'rented': float(tool.rented_out_qty),
@@ -2768,20 +3352,34 @@ def register(app):
     @app.route('/hdc/api/tool-rental/serials/inventory-summary')
     @login_required
     def hdc_api_serials_inventory_summary():
-        """Get serial summary for all tools (for inventory page).
-
-        Returns tool serial breakdown for the inventory table.
-        """
-        summary = get_all_tool_serials_summary()
+        """Get serial summary for tools (for inventory page)."""
+        tool_id = request.args.get('tool_id', type=int)
+        summary = get_all_tool_serials_summary(tool_id=tool_id)
         return jsonify([
             {
                 'tool_id': s['tool_id'],
+                'tool_name': s['tool_name'],
+                'tool_code': s['tool_code'],
                 'total_serials': s['total_serials'],
                 'in_store': s['in_store'],
                 'rented': s['rented'],
                 'maintenance': s['maintenance'],
                 'damaged': s['damaged'],
                 'lost': s['lost'],
+                'serials': [
+                    {
+                        'serial_id': sr.id,
+                        'serial_number': sr.serial_number,
+                        'is_in_store': sr.is_in_store,
+                        'status': sr.status,
+                        'status_label': sr.status_label,
+                        'condition': sr.condition,
+                        'location': sr.current_location_label or ('Warehouse / Store' if sr.is_in_store else 'Out of Store'),
+                        'rental_id': sr.current_rental_id,
+                        'rental_code': sr.current_rental.rental_code if sr.current_rental else None,
+                    }
+                    for sr in s['serials']
+                ],
             }
             for s in summary
         ])
@@ -2790,43 +3388,58 @@ def register(app):
     @login_required
     @_money_write_required()
     def hdc_tool_rental_serials_create(tool_id):
-        """Create serial-numbered pieces for a tool.
-
-        GET shows a form to create serials. POST processes the creation.
-        """
+        """Create or manage serial-numbered pieces for a tool (e.g. 'Shovel No 5')."""
         tool = Tool.query.get_or_404(tool_id)
 
         if request.method == 'POST':
-            qty = max(0, _flt(request.form.get('qty'), 0))
-            if qty <= 0:
-                flash('Quantity must be greater than 0.', 'danger')
+            action = (request.form.get('action') or 'create').strip()
+            if action == 'rename':
+                serial_id = request.form.get('serial_id', type=int)
+                new_sn = (request.form.get('serial_number') or '').strip()
+                condition = (request.form.get('condition') or '').strip() or None
+                notes = request.form.get('notes')
+                ok, msg, _ = rename_tool_serial(
+                    serial_id=serial_id,
+                    new_serial_number=new_sn,
+                    condition=condition,
+                    notes=notes,
+                    updated_by=getattr(current_user, 'id', None),
+                    commit=True,
+                )
+                flash(msg, 'success' if ok else 'danger')
                 return redirect(url_for('hdc_tool_rental_serials_create', tool_id=tool_id))
 
             serial_numbers_raw = (request.form.get('serial_numbers') or '').strip()
-            serial_numbers = None
-            if serial_numbers_raw:
-                serial_numbers = [s.strip() for s in serial_numbers_raw.split(',') if s.strip()]
-                if len(serial_numbers) != int(qty):
-                    flash(f'Serial number count ({len(serial_numbers)}) does not match quantity ({qty}).', 'danger')
-                    return redirect(url_for('hdc_tool_rental_serials_create', tool_id=tool_id))
+            start_no = request.form.get('start_no', type=int)
+            serial_numbers = parse_custom_serial_list(serial_numbers_raw) if serial_numbers_raw else None
+            qty = max(0, _flt(request.form.get('qty'), 0))
+            if qty <= 0 and serial_numbers:
+                qty = float(len(serial_numbers))
+            if qty <= 0:
+                flash('Quantity must be greater than 0.', 'danger')
+                return redirect(url_for('hdc_tool_rental_serials_create', tool_id=tool_id))
 
             success, message, serial_ids = create_tool_serials(
                 tool_id=tool_id,
                 qty=qty,
                 serial_numbers=serial_numbers,
+                start_no=start_no,
                 created_by=getattr(current_user, 'id', None),
+                commit=True,
             )
 
             if success:
                 flash(message, 'success')
             else:
                 flash(message or 'Could not create serials.', 'danger')
-            return redirect(url_for('hdc_tool_rental_inventory', q=tool.tool_code))
+            return redirect(url_for('hdc_tool_rental_serials_create', tool_id=tool_id))
 
-        # GET: show form
-        existing_serials = ToolSerial.query.filter_by(tool_id=tool_id).count()
+        # GET: ensure serials are synced and show management page
+        ensure_tool_serials(tool=tool, commit=True)
+        serials = tool.active_serials
         return render_template('tool_rental/tool_serials_create.html',
             tool=tool,
-            existing_serials=existing_serials,
+            serials=serials,
+            existing_serials=len(serials),
             today=_pkt_today().isoformat(),
         )

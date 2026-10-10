@@ -58,7 +58,7 @@
         <div class="kpi-card {% if t.pending_amount > 0 %}kpi-purple{% else %}kpi-teal{% endif %} h-100">
             <div class="kpi-icon"><i class="fas fa-hand-holding-dollar"></i></div>
             <div class="kpi-value small">{{ "{:,.0f}".format(t.pending_amount) }}</div>
-            <div class="kpi-label">Rent Not Paid (PKR)</div>
+            <div class="kpi-label">Rent Not Paid by Customers (PKR)</div>
             <div class="kpi-sub">
                 {% if t.pending_amount > 0 %}
                 {{ summary.customer_count }} customer(s) · {{ summary.unpaid_rental_count }} rental(s) unpaid
@@ -78,5 +78,85 @@
     </div>
 </div>
 
+<!-- ============ TOOLS BY ITEM TABLE ============ -->
+{% set rows = summary.rows or [] %}
+<div class="card shadow-sm border-0 mt-4">
+    <div class="card-header bg-white d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <div>
+            <span class="fw-bold"><i class="fas fa-list-check me-2 text-primary"></i>Tools by item</span>
+            <span class="text-muted small ms-2">Owned, in store, rented out &amp; unpaid customer rent per tool</span>
+        </div>
+        <form method="GET" action="{{ url_for('hdc_tool_rental_dashboard') }}" class="d-flex flex-wrap gap-2 align-items-center">
+            <input type="text" name="q" value="{{ q or '' }}" class="form-control form-control-sm" style="width:200px;" placeholder="Search tool name or code...">
+            {% if categories %}
+            <select name="category_id" class="form-select form-select-sm" style="width:170px;" onchange="this.form.submit()">
+                <option value="">All Categories</option>
+                {% for cat in categories %}
+                <option value="{{ cat.id }}" {% if selected_category == cat.id %}selected{% endif %}>{{ cat.name }}</option>
+                {% endfor %}
+            </select>
+            {% endif %}
+            <button type="submit" class="btn btn-sm btn-primary"><i class="fas fa-filter me-1"></i>Filter</button>
+            {% if q or selected_category %}
+            <a href="{{ url_for('hdc_tool_rental_dashboard') }}" class="btn btn-sm btn-outline-secondary">Reset</a>
+            {% endif %}
+        </form>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Tool Item</th>
+                        <th>Code</th>
+                        <th>Category</th>
+                        <th class="text-end">Total Owned</th>
+                        <th class="text-end">In Store</th>
+                        <th class="text-end">Rented Out</th>
+                        <th class="text-end">Own Sites</th>
+                        <th class="text-end">Customers</th>
+                        <th class="text-end">Unpaid Rent (PKR)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in rows %}
+                    <tr>
+                        <td class="fw-semibold">
+                            <a href="{{ url_for('hdc_tool_rental_tool_position', tool_id=r.tool_id) }}" class="text-decoration-none">{{ r.name }}</a>
+                        </td>
+                        <td><span class="badge bg-secondary">{{ r.code }}</span></td>
+                        <td class="text-muted small">{{ r.category or '-' }}</td>
+                        <td class="text-end fw-bold">{{ "%g"|format(r.owned_qty) }} {{ r.unit }}</td>
+                        <td class="text-end text-success fw-semibold">{{ "%g"|format(r.in_store_qty) }}</td>
+                        <td class="text-end text-warning fw-semibold">{{ "%g"|format(r.out_qty) }}</td>
+                        <td class="text-end">{{ "%g"|format(r.own_project_qty) }}</td>
+                        <td class="text-end">{{ "%g"|format(r.customer_qty) }}</td>
+                        <td class="text-end {% if r.pending_amount > 0 %}text-danger fw-bold{% else %}text-muted{% endif %}">
+                            {{ "{:,.0f}".format(r.pending_amount) }}
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="9" class="text-center text-muted py-4">No item matches this search</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+                {% if rows %}
+                <tfoot class="table-light fw-bold">
+                    <tr>
+                        <td colspan="3">Totals ({{ rows|length }} shown)</td>
+                        <td class="text-end">{{ "%g"|format(t.owned_qty) }}</td>
+                        <td class="text-end text-success">{{ "%g"|format(t.in_store_qty) }}</td>
+                        <td class="text-end text-warning">{{ "%g"|format(t.out_qty) }}</td>
+                        <td class="text-end">{{ "%g"|format(t.own_project_qty) }}</td>
+                        <td class="text-end">{{ "%g"|format(t.customer_qty) }}</td>
+                        <td class="text-end text-danger">{{ "{:,.0f}".format(t.pending_amount) }}</td>
+                    </tr>
+                </tfoot>
+                {% endif %}
+            </table>
+        </div>
+    </div>
+</div>
 
 {% endblock %}
