@@ -46,7 +46,7 @@
 <div class="tool-rental-form-header">
     <div>
         <h2><i class="fas fa-plus me-2" aria-hidden="true"></i><span id="pageFormHeading">New Rental</span></h2>
-        <div class="tool-rental-form-subtitle">Choose the transaction first. For transfers, find tools by site or find a tool to see where it is currently out; new rentals appear below.</div>
+        <div class="tool-rental-form-subtitle">Choose the transaction first: new rental, transfer, tool return or rent payment. Each one shows only the fields it needs; rentals made here appear below.</div>
     </div>
     <a href="{{ url_for('hdc_tool_rental') }}" class="btn btn-outline-secondary">
         <i class="fas fa-arrow-left me-1" aria-hidden="true"></i>Back to rentals
@@ -62,10 +62,11 @@
                 <div class="col-md-4">
                     <label class="form-label">Transaction type</label>
                     <select name="txn_type" id="txnType" class="form-select" required onchange="toggleTxnType()">
-                        <option value="new_rental">New Rental</option>
-                        <option value="transfer">Transfer Rental</option>
+                        {% for t in txn_types %}
+                        <option value="{{ t.key }}" data-needs-rental="{{ '1' if t.needs_rental else '0' }}">{{ t.label }}</option>
+                        {% endfor %}
                     </select>
-                    <small class="text-muted d-block">Choose the transaction first; the next fields follow the selected flow.</small>
+                    <small class="text-muted d-block" id="txnTypeHelp">Choose the transaction first; the next fields follow the selected flow.</small>
                 </div>
 
                 {# Transfer source can be found site-first or tool-first. A site
@@ -74,7 +75,7 @@
                    "Select all"), and any combination of their tools can move
                    together — each contributing rental still keeps its own exact
                    location + hand-over record, which keeps the ledger precise. #}
-                <div class="col-12 d-none" id="transferSourceField">
+                <div class="col-12 d-none" id="transferSourceField" data-txn-modes="transfer">
                     <div class="row g-3">
                         <div class="col-md-4">
                             <label class="form-label" for="transferSearchMode">Find transfer source by</label>
@@ -121,7 +122,7 @@
                     </div>
                 </div>
 
-                <div class="col-12 d-none" id="transferToolsPanel">
+                <div class="col-12 d-none" id="transferToolsPanel" data-txn-modes="transfer">
                     <input type="hidden" name="transfer_selection_enabled" value="1">
                     <div class="d-flex flex-wrap align-items-start justify-content-between gap-2 mb-2">
                         <div>
@@ -152,7 +153,7 @@
                     <div id="transferToolsError" class="small text-danger d-none mt-2" role="alert">Select at least one tool to transfer.</div>
                 </div>
 
-                <div class="col-md-6" id="billingField">
+                <div class="col-md-6" id="billingField" data-txn-modes="new_rental transfer">
                     <label class="form-label" id="billingLabel">How should rent be charged?</label>
                     <select name="billing_type" id="billingType" class="form-select" required onchange="syncBilling()">
                         <option value="fixed_fee">One rental fee</option>
@@ -162,7 +163,7 @@
                     <small id="billingSelectionHint" class="text-muted d-block"></small>
                 </div>
 
-                <div class="col-md-6" id="renterTypeField">
+                <div class="col-md-6" id="renterTypeField" data-txn-modes="new_rental transfer">
                     <label class="form-label" id="whoLabel">Who is renting?</label>
                     <select name="renter_type" id="renterType" class="form-select" required onchange="toggleRenter()">
                         <option value="internal">Our site</option>
@@ -170,7 +171,7 @@
                     </select>
                 </div>
 
-                <div class="col-12" id="internalFields">
+                <div class="col-12" id="internalFields" data-txn-modes="new_rental transfer">
                     <div class="row g-3">
                         <div class="col-md-6">
                             {{ combo_select('project_id', 'rentalProjectSelect', project_options,
@@ -185,7 +186,7 @@
                         </div>
                     </div>
                 </div>
-                <div class="col-12 d-none" id="externalFields">
+                <div class="col-12 d-none" id="externalFields" data-txn-modes="new_rental transfer">
                     <div class="row g-3">
                         <div class="col-md-6">
                             {{ combo_field('customer_name', 'rentalCustomerName',
@@ -205,7 +206,7 @@
                     </div>
                 </div>
 
-                <div class="col-12" id="newRentalTools">
+                <div class="col-12" id="newRentalTools" data-txn-modes="new_rental">
                     <label class="form-label fw-semibold">Tools to rent</label>
 
                     <!-- Mode toggle: quantity-based or serial-based -->
@@ -357,20 +358,160 @@
                     {% endif %}
                 </div>
 
-                <div class="col-12" id="otherSettings">
-                    <div class="border rounded p-3">
-                        <h6 class="mb-3"><i class="fas fa-sliders me-1" aria-hidden="true"></i>Other settings</h6>
+                {# ── Return tools / Rent payment: one panel per transaction, shown by
+                   data-txn-modes. Field names match the endpoints they post to
+                   (hdc_tool_rental_return / hdc_tool_rental_payment), so nothing
+                   is re-implemented here. Each rental picker lists only rentals
+                   that qualify for that transaction (see tool_txn_types). #}
+                <div class="col-12 d-none" id="rentalTxnPanel" data-txn-modes="return payment">
+                    <div class="border rounded p-3" data-txn-modes="return">
+                        <h6 class="mb-3"><i class="fas fa-rotate-left me-1" aria-hidden="true"></i>Return tools from a rental</h6>
                         <div class="row g-3">
                             <div class="col-md-6">
+                                {{ combo_select('rental_id', 'returnRentalSelect', return_rental_options,
+                                   label='Rental', placeholder='Search rental code, site or customer…',
+                                   required=true, max_items=60, empty_text='No rentals have tools still out.',
+                                   hint='Only rentals with tools still out are listed.') }}
+                                <small id="returnRentalInfo" class="text-muted d-block mt-1"></small>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Return date</label>
+                                <input type="date" name="return_date" value="{{ today }}" class="form-control">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">How much came back?</label>
+                                <select name="return_condition" class="form-select">
+                                    <option value="partial">Quantities below</option>
+                                    <option value="full">Everything still out</option>
+                                </select>
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label fw-semibold">Tools to take back</label>
+                                <div id="returnItemRows"><div class="small text-muted">Choose a rental to see the tools still out.</div></div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Rent settlement</label>
+                                <select name="payment_condition" class="form-select">
+                                    <option value="partial">Part payment now</option>
+                                    <option value="full">Full payment now</option>
+                                    <option value="credit">Credit — pay later</option>
+                                    <option value="no_payment">No payment (contract included)</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Amount received now (PKR)</label>
+                                <input type="number" name="amount_paid" class="form-control" min="0" step="0.01" placeholder="0">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Waive off (optional, PKR)</label>
+                                <input type="number" name="discount_amount" class="form-control" min="0" step="0.01" placeholder="0">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Payment mode</label>
+                                <select name="payment_mode" class="form-select">
+                                    <option value="cash">Cash</option>
+                                    <option value="bank">Bank</option>
+                                    <option value="jazzcash">JazzCash / Easypaisa</option>
+                                    <option value="online">Online Transfer</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                {{ combo_select('received_to_account_id', 'recvAccReturnTxn', receiving_account_options,
+                                   label='Receiving account (cash / bank)', placeholder='Type to search account…',
+                                   max_items=40, hint='Used when money is received now.') }}
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Payment reference (optional)</label>
+                                <input type="text" name="payment_reference" class="form-control" placeholder="Ref / transaction ID">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Waive-off reason</label>
+                                <select name="discount_reason" class="form-select">
+                                    {% for value, label in discount_reason_options %}
+                                    <option value="{{ value }}">{{ label }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label">Notes (optional)</label>
+                                <input type="text" name="notes" class="form-control" placeholder="Damage, credit reason…">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="border rounded p-3 mt-3" data-txn-modes="payment">
+                        <h6 class="mb-3"><i class="fas fa-money-bill me-1" aria-hidden="true"></i>Receive rent payment</h6>
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                {{ combo_select('rental_id', 'paymentRentalSelect', payment_rental_options,
+                                   label='Rental', placeholder='Search rental code, site or customer…',
+                                   required=true, max_items=60, empty_text='No rentals have rent still due.',
+                                   hint='Only rentals with rent still due are listed.') }}
+                                <small id="paymentRentalInfo" class="text-muted d-block mt-1"></small>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Payment date</label>
+                                <input type="date" name="payment_date" value="{{ today }}" class="form-control">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Amount received (PKR) *</label>
+                                <input type="number" name="amount" class="form-control" min="0.01" step="0.01" placeholder="0">
+                            </div>
+                            <div class="col-md-6">
+                                {{ combo_select('received_to_account_id', 'recvAccPaymentTxn', receiving_account_options,
+                                   label='Receiving account (cash / bank)', placeholder='Type to search account…',
+                                   max_items=40, hint='Where the money is received.') }}
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Payment mode</label>
+                                <select name="payment_mode" class="form-select">
+                                    <option value="cash">Cash</option>
+                                    <option value="bank">Bank</option>
+                                    <option value="jazzcash">JazzCash / Easypaisa</option>
+                                    <option value="online">Online Transfer</option>
+                                </select>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Reference (optional)</label>
+                                <input type="text" name="reference" class="form-control" placeholder="Txn ID">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Waive off (optional, PKR)</label>
+                                <input type="number" name="discount" class="form-control" min="0" step="0.01" placeholder="0">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Waive-off reason</label>
+                                <select name="discount_reason" class="form-select">
+                                    {% for value, label in discount_reason_options %}
+                                    <option value="{{ value }}">{{ label }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label">Notes (optional)</label>
+                                <input type="text" name="notes" class="form-control" placeholder="Partial payment, credit clear…">
+                            </div>
+                            <div class="col-12">
+                                <small id="paymentPendingInfo" class="text-muted"></small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-12" id="otherSettings">
+                    <div class="border rounded p-3">
+                        <h6 class="mb-3" data-txn-modes="new_rental transfer"><i class="fas fa-sliders me-1" aria-hidden="true"></i>Other settings</h6>
+                        <div class="row g-3">
+                            <div class="col-md-6" data-txn-modes="new_rental transfer">
                                 <label class="form-label" id="dateLabel">Rental date</label>
                                 <input type="date" name="rental_date" value="{{ today }}" class="form-control" required>
                             </div>
-                            <div class="col-md-6">
+                            <div class="col-md-6" data-txn-modes="new_rental transfer">
                                 <label class="form-label">Expected return date (optional)</label>
                                 <input type="date" name="expected_return_date" class="form-control">
                             </div>
 
-                            <div class="col-12 d-none" id="transferSettlementFields">
+                            <div class="col-12 d-none" id="transferSettlementFields" data-txn-modes="transfer">
                                 <div class="border rounded p-3">
                                     <h6 class="mb-3">Settle the previous holder's rent</h6>
                                     <div class="row g-3">
@@ -405,12 +546,12 @@
                                 </div>
                             </div>
 
-                            <div class="col-12">
+                            <div class="col-12" data-txn-modes="new_rental transfer">
                                 <label class="form-label">Notes or agreement details (optional)</label>
                                 <textarea name="notes" class="form-control" rows="2" placeholder="Add any rental terms or agreement reference"></textarea>
                             </div>
                             {% if tools %}
-                            <div class="col-12">
+                            <div class="col-12" id="rentalSubmitRow" data-txn-modes="new_rental transfer return payment">
                                 <button type="submit" id="rentalSubmitButton" class="btn btn-success"><i class="fas fa-check me-1" aria-hidden="true"></i><span>Create Rental</span></button>
                                 <a href="{{ url_for('hdc_tool_rental') }}" class="btn btn-outline-secondary ms-1">Cancel</a>
                             </div>
@@ -570,6 +711,36 @@ function toggleRenter(){
     if(stageLabel) stageLabel.textContent = transfer ? 'To stage (optional)' : 'Stage (optional)';
     const customerLabel = document.querySelector('label[for="rentalCustomerNameInput"]');
     if(customerLabel) customerLabel.textContent = transfer ? 'To customer name' : 'Customer name';
+}
+
+// ── Transaction registry (one table drives the dropdown, headings and endpoints)
+const TOOL_TXN_TYPES = {{ txn_types | tojson }};
+
+function currentTxnMode(){
+    return document.getElementById('txnType')?.value || 'new_rental';
+}
+
+function txnEntry(key){
+    return (TOOL_TXN_TYPES || []).find(function(t){ return t.key === key; }) || null;
+}
+
+// Show every [data-txn-modes] block that belongs to the current transaction
+// and hide (and disable) the rest, so hidden fields can never block or leak
+// into a submit. Blocks hidden here are tagged so they can be restored.
+function applyTxnModes(){
+    const mode = currentTxnMode();
+    document.querySelectorAll('[data-txn-modes]').forEach(function(el){
+        const modes = (el.dataset.txnModes || '').split(/\s+/);
+        if(!modes.includes(mode)){
+            el.classList.add('d-none');
+            el.dataset.txnHidden = '1';
+            setPanelControlsEnabled(el, false);
+        } else if(el.dataset.txnHidden === '1'){
+            el.classList.remove('d-none');
+            delete el.dataset.txnHidden;
+            setPanelControlsEnabled(el, true);
+        }
+    });
 }
 
 const TRANSFER_SOURCES = {{ transfer_sources | tojson }};
@@ -1179,18 +1350,27 @@ function toggleTxnType(){
     settlement?.classList.toggle('d-none', !transfer);
     setPanelControlsEnabled(settlement, transfer);
 
+    // Headings, submit button and help text come from the transaction
+    // registry (TOOL_TXN_TYPES), so a type's wording lives in one place.
+    const entry = txnEntry(txn.value);
     const pageHeading = document.getElementById('pageFormHeading');
-    if(pageHeading) pageHeading.textContent = transfer ? 'Transfer Rental' : 'New Rental';
+    if(pageHeading && entry) pageHeading.textContent = entry.label;
     const formTitle = document.getElementById('rentalFormTitle');
-    if(formTitle) formTitle.textContent = transfer ? 'Transfer details' : 'Rental details';
+    if(formTitle && entry) formTitle.textContent = transfer ? 'Transfer details' : entry.label + ' details';
     const dateLabel = document.getElementById('dateLabel');
     if(dateLabel) dateLabel.textContent = transfer ? 'Transfer date' : 'Rental date';
+    const help = document.getElementById('txnTypeHelp');
+    if(help && entry) help.textContent = entry.help;
     const submitButton = document.getElementById('rentalSubmitButton');
-    if(submitButton){
-        submitButton.classList.toggle('btn-warning', transfer);
-        submitButton.classList.toggle('btn-success', !transfer);
+    if(submitButton && entry){
+        ['btn-success', 'btn-warning', 'btn-primary'].forEach(function(cls){ submitButton.classList.remove(cls); });
+        submitButton.classList.add(entry.submit_class);
         const caption = submitButton.querySelector('span');
-        if(caption) caption.textContent = transfer ? 'Complete Transfer' : 'Create Rental';
+        if(caption) caption.textContent = entry.submit_label;
+    }
+    if(entry && !entry.needs_rental){
+        const form = document.getElementById('createRentalForm');
+        if(form) form.action = entry.action;
     }
 
     toggleRenter();
@@ -1198,6 +1378,13 @@ function toggleTxnType(){
     syncBilling();
     renderSourceTools();
     toggleSettle();
+
+    // Last: show only the panels this transaction uses, then let the
+    // destination / settlement toggles re-apply their own choices.
+    applyTxnModes();
+    toggleRenter();
+    toggleSettle();
+    syncBilling();
 }
 
 // ── Data-driven Category -> Tool No (Serial Marking) selection in each row ──
@@ -1428,6 +1615,144 @@ document.getElementById('createRentalForm')?.addEventListener('submit', function
         (document.querySelector('.transfer-holder-checkbox') ||
             document.getElementById('transferFromSiteInput'))?.focus();
     }
+});
+
+// ── Return tools / Rent payment: pick a rental, then fill its lines ─────────
+function rentalPickerFor(mode){
+    return document.getElementById(mode === 'return' ? 'returnRentalSelect' : 'paymentRentalSelect');
+}
+
+function formatPkr(n){
+    return Number(n || 0).toLocaleString('en-PK', { maximumFractionDigits: 0 });
+}
+
+function refreshRentalInfo(mode){
+    const sel = rentalPickerFor(mode);
+    const opt = sel && sel.value ? sel.options[sel.selectedIndex] : null;
+    const amount = opt ? parseFloat(opt.dataset.amount || '0') : 0;
+    const tools = opt ? parseFloat(opt.dataset.tools || '0') : 0;
+    if(mode === 'return'){
+        const info = document.getElementById('returnRentalInfo');
+        if(info) info.textContent = opt
+            ? formatPkr(tools) + ' tool(s) still out · ' + formatPkr(amount) + ' PKR rent due'
+            : '';
+    } else {
+        const info = document.getElementById('paymentRentalInfo');
+        if(info) info.textContent = opt ? 'Rent still due: ' + formatPkr(amount) + ' PKR' : '';
+        const pending = document.getElementById('paymentPendingInfo');
+        if(pending) pending.textContent = opt ? 'Outstanding now: ' + formatPkr(amount) + ' PKR. Cash plus any waive-off may not exceed it.' : '';
+        const amountInput = document.querySelector('#rentalTxnPanel input[name="amount"]');
+        if(amountInput && opt) amountInput.placeholder = amount.toFixed(2);
+    }
+}
+
+let returnRowsRequest = 0;
+
+async function loadReturnItems(rentalId){
+    const box = document.getElementById('returnItemRows');
+    if(!box) return;
+    const request = ++returnRowsRequest;
+    if(!rentalId){
+        box.innerHTML = '<div class="small text-muted">Choose a rental to see the tools still out.</div>';
+        return;
+    }
+    box.innerHTML = '<div class="small text-muted">Loading tools…</div>';
+    let items = [];
+    try {
+        const res = await fetch('/hdc/api/tool-rental/rental/' + encodeURIComponent(rentalId) + '/pending-items',
+                                { credentials: 'same-origin' });
+        if(!res.ok) throw new Error('HTTP ' + res.status);
+        items = await res.json();
+    } catch (err) {
+        if(request !== returnRowsRequest) return;
+        box.innerHTML = '<div class="small text-danger">Could not load this rental’s tools. Try again.</div>';
+        return;
+    }
+    if(request !== returnRowsRequest) return;
+    box.replaceChildren();
+    if(!items.length){
+        box.innerHTML = '<div class="small text-muted">Nothing is still out on this rental.</div>';
+        return;
+    }
+    items.forEach(function(it){
+        const row = document.createElement('div');
+        row.className = 'border rounded p-2 mb-2 return-item-block';
+
+        const grid = document.createElement('div');
+        grid.className = 'row g-2 align-items-center';
+
+        const nameCol = document.createElement('div');
+        nameCol.className = 'col-md-5';
+        const name = document.createElement('div');
+        name.className = 'fw-semibold small';
+        name.textContent = (it.tool_name || '-') + ' (' + (it.tool_code || '-') + ')';
+        const pending = document.createElement('div');
+        pending.className = 'small text-muted';
+        pending.textContent = 'Still out: ' + Number(it.qty_pending || 0).toFixed(0);
+        const hiddenId = document.createElement('input');
+        hiddenId.type = 'hidden';
+        hiddenId.name = 'rental_item_id[]';
+        hiddenId.value = String(it.rental_item_id);
+        nameCol.append(name, pending, hiddenId);
+
+        const qtyCol = document.createElement('div');
+        qtyCol.className = 'col-4 col-md-3';
+        const qty = document.createElement('input');
+        qty.type = 'number';
+        qty.name = 'qty_returned[]';
+        qty.className = 'form-control form-control-sm return-qty-input';
+        qty.min = '0';
+        qty.step = '0.1';
+        qty.max = String(it.qty_pending);
+        qty.placeholder = 'Qty back';
+        qtyCol.appendChild(qty);
+
+        const noteCol = document.createElement('div');
+        noteCol.className = 'col-8 col-md-4';
+        const note = document.createElement('input');
+        note.type = 'text';
+        note.name = 'condition_notes[]';
+        note.className = 'form-control form-control-sm';
+        note.placeholder = 'Condition (optional)';
+        noteCol.appendChild(note);
+
+        grid.append(nameCol, qtyCol, noteCol);
+        row.appendChild(grid);
+        box.appendChild(row);
+    });
+    const hint = document.createElement('small');
+    hint.className = 'text-muted d-block';
+    hint.textContent = 'Leave a quantity blank for a tool that did not come back. “Everything still out” ignores these quantities.';
+    box.appendChild(hint);
+    applyTxnModes();
+}
+
+document.getElementById('returnRentalSelect')?.addEventListener('change', function(){
+    refreshRentalInfo('return');
+    loadReturnItems(this.value);
+});
+document.getElementById('paymentRentalSelect')?.addEventListener('change', function(){
+    refreshRentalInfo('payment');
+});
+
+// Post the form to the endpoint of the chosen transaction. Rental-bound
+// types take the rental id from their picker; create/transfer keep the
+// create endpoint.
+document.getElementById('createRentalForm')?.addEventListener('submit', function(event){
+    const mode = currentTxnMode();
+    const entry = txnEntry(mode);
+    if(!entry) return;
+    if(!entry.needs_rental){
+        this.action = entry.action;
+        return;
+    }
+    const sel = rentalPickerFor(mode);
+    if(!sel || !sel.value){
+        event.preventDefault();
+        document.getElementById(mode === 'return' ? 'returnRentalSelectInput' : 'paymentRentalSelectInput')?.focus();
+        return;
+    }
+    this.action = entry.action.replace('__RENTAL_ID__', encodeURIComponent(sel.value));
 });
 
 // Reflect the defaults as soon as the page loads.

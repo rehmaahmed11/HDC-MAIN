@@ -19,6 +19,9 @@ from hdc.models.tool_rental import (
     ToolSerial, ToolSerialMovement
 )
 from hdc.services.cashflow_register import ensure_party
+from hdc.services.tool_txn_types import (
+    TOOL_TXN_TYPES, rental_eligible,
+)
 from hdc.services.tool_rental import (
     _ensure_tool_category, _next_rental_code, _next_tool_code,
     _parse_date, create_movement_log, discount_reason_options, get_rental_tracking_chain,
@@ -104,6 +107,51 @@ def _tool_project_option_label(project):
 def _tool_project_combo_options(projects):
     return [(project.id, _tool_project_option_label(project))
             for project in projects]
+
+
+def _tool_txn_type_context():
+    """The transaction registry, ready for the New Rental template.
+
+    Each entry gets the ``action`` its form posts to.  Rental-bound types get a
+    URL with a ``__RENTAL_ID__`` placeholder that the page fills from the
+    rental picker, so the route list is never duplicated in JavaScript.
+    """
+    rows = []
+    for entry in TOOL_TXN_TYPES:
+        row = dict(entry)
+        url = url_for(entry['endpoint'], rental_id=0) if entry['needs_rental'] \
+            else url_for(entry['endpoint'])
+        row['action'] = url.replace('/0/', '/__RENTAL_ID__/', 1) if entry['needs_rental'] else url
+        rows.append(row)
+    return rows
+
+
+def _tool_txn_rental_options(eligible_for, limit=300):
+    """Rentals a transaction may pick from, as combo options with their dues.
+
+    Each option carries ``data-amount`` (rent still owed) and ``data-tools``
+    (qty still out) so the page can show the balance without another request.
+    """
+    rentals = (ToolRental.query
+               .filter(ToolRental.is_void == False)
+               .order_by(ToolRental.rental_date.desc(), ToolRental.id.desc())
+               .limit(limit).all())
+    options = []
+    for rental in rentals:
+        tools_out = float(rental.total_pending_tools or 0)
+        amount_due = float(rental.total_pending_amount or 0)
+        if not rental_eligible(eligible_for, pending_tools=tools_out,
+                               pending_amount=amount_due,
+                               billing_type=rental.billing_type or ''):
+            continue
+        holder = (rental.project.name if rental.renter_type == 'internal' and rental.project
+                  else (rental.customer_name or 'Outside customer'))
+        label = f"{rental.rental_code} · {holder} · {tools_out:,.0f} out · {amount_due:,.0f} PKR due"
+        options.append((rental.id, label, {
+            'amount': f'{amount_due:.2f}',
+            'tools': f'{tools_out:.2f}',
+        }))
+    return options
 
 
 def _tool_stage_combo_options(stages):
@@ -896,6 +944,10 @@ def register(app):
             transfer_tools=transfer_tools,
             transfer_tool_options=transfer_tool_options,
             receiving_account_options=receiving_account_options,
+            txn_types=_tool_txn_type_context(),
+            discount_reason_options=discount_reason_options(),
+            return_rental_options=_tool_txn_rental_options('pending_tools'),
+            payment_rental_options=_tool_txn_rental_options('pending_amount'),
             today=_pkt_today().isoformat(),
         )
 
