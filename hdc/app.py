@@ -19,6 +19,34 @@ from hdc.core.bootstrap import _ensure_bootstrap_once
 from hdc.utils.dates import _fmt_pkt
 
 
+def _layout_asset_stamp():
+    """A ``?v=`` stamp for the stylesheets and scripts loaded by base.html.
+
+    Static files are served straight off disk (PythonAnywhere maps
+    ``/hdc_static`` itself), so a phone that fetched ``responsive.css`` last
+    week keeps using that copy and the operator sees the old, un-adapted page
+    no matter how the layout was fixed.  Stamping the layout assets with their
+    modified time makes every deploy land on every device without asking
+    anybody to hard-reload.  Computed once per process, not per request.
+    """
+    stamp = 0
+    roots = (os.path.join(BASE_DIR, 'static', 'hdc', 'css'),
+             os.path.join(BASE_DIR, 'static', 'hdc', 'js', 'core'))
+    for root in roots:
+        try:
+            names = os.listdir(root)
+        except OSError:
+            continue
+        for name in names:
+            if not name.endswith(('.css', '.js')):
+                continue
+            try:
+                stamp = max(stamp, int(os.path.getmtime(os.path.join(root, name))))
+            except OSError:
+                continue
+    return stamp or 1
+
+
 def _safe_url_for(endpoint, **values):
     """``url_for`` that degrades to ``'#'`` instead of raising BuildError.
 
@@ -214,6 +242,9 @@ def create_app(config_overrides=None):
     # purchased / scrapped totals for one tool without a query per row.
     from hdc.services.tool_rental import stock_stats_for
     app.jinja_env.filters["stock_lookup"] = stock_stats_for
+
+    # Cache-busting stamp for the layout-wide CSS / JS (see _layout_asset_stamp).
+    app.jinja_env.globals["hdc_asset_stamp"] = _layout_asset_stamp()
 
     register_audit_events()
     register_all(app)

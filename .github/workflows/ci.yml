@@ -42,6 +42,9 @@ jobs:
       - name: Check frontend organization
         run: python scripts/reorganize_frontend.py --check
 
+      - name: Check the adaptive/responsive layer
+        run: python scripts/qa_responsive.py
+
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
