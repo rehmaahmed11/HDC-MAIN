@@ -227,30 +227,6 @@ body.sidebar-scroll-lock { overflow: hidden; }
     flex: 0 0 auto;
 }
 
-/* Section label inside the sidebar ("Administration", "Accounts & Cash", …).
-   Purely a heading — not clickable, and visually quieter than the links so the
-   nav items stay the focus. */
-.sidebar-group-label {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin: 10px 22px 4px;
-    color: var(--sidebar-text);
-    opacity: 0.55;
-    font-size: 0.66rem;
-    font-weight: 800;
-    letter-spacing: 1.1px;
-    text-transform: uppercase;
-    white-space: nowrap;
-}
-
-.sidebar-group-label::after {
-    content: "";
-    flex: 1 1 auto;
-    height: 1px;
-    background: rgba(255, 255, 255, 0.14);
-}
-
 .sidebar-nav .nav-item a {
     display: flex;
     align-items: center;
@@ -829,6 +805,47 @@ a .kpi-card:hover,
     color: var(--text-muted);
 }
 
+/* ── Intelligent window system ─────────────────────────────────────────────
+   One rule set that governs EVERY dialog window in the app, so no modal
+   depends on remembering per-template patch classes:
+
+   1. every window is vertically centred (same as .modal-dialog-centered),
+      so dialogs no longer stick to the top of the viewport;
+   2. the body of a non-scrollable window is capped at 72vh with its own
+      scrollbar, so no dialog can ever run off-screen — the header and the
+      action buttons always stay visible;
+   3. every .modal-content is themed from the design tokens, so dialogs follow
+      light/dark mode without needing the .hdc-modal patch class. .hdc-modal
+      is kept below as a compatible alias for existing markup. */
+.modal-dialog {
+    display: flex;
+    align-items: center;
+    min-height: calc(100% - 1rem);
+}
+
+@media (min-width: 576px) {
+    .modal-dialog { min-height: calc(100% - 3.5rem); }
+}
+
+.modal-dialog > .modal-content { width: 100%; }
+
+.modal-dialog:not(.modal-dialog-scrollable) .modal-body {
+    max-height: 72vh;
+    overflow-y: auto;
+}
+
+.modal-content {
+    background: var(--modal-bg);
+    color: var(--text);
+    border: 1px solid var(--card-border);
+    border-radius: 14px;
+}
+
+.modal-header,
+.modal-footer {
+    border-color: var(--card-border);
+}
+
 .hdc-modal {
     background: var(--modal-bg) !important;
     color: var(--text);
@@ -1059,8 +1076,7 @@ code {
 /* Grey highlighter for every voided entry, in any table on any page. */
 tr[data-hdc-void="1"] > td,
 tr[data-hdc-void="1"] > th,
-li[data-hdc-void="1"],
-div[data-hdc-void="1"].hdc-void-row {
+li[data-hdc-void="1"] {
     background-color: var(--void-row-bg) !important;
     background-image: none !important;
 }

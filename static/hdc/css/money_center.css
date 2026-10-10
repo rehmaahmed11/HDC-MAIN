@@ -45,45 +45,6 @@
 .rm-pending-total { font-weight: 800; white-space: nowrap; }
 .rm-pending-help { color: var(--text-muted); font-size: .75rem; margin-bottom: 8px; }
 
-/* ── today's numbers (legacy page styles) ────────────────────────────────── */
-
-.rm-kpis {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-    gap: 12px;
-    margin-bottom: 16px;
-}
-
-.rm-kpi {
-    border: 1px solid var(--card-border);
-    border-radius: 12px;
-    background: var(--card-bg);
-    box-shadow: var(--shadow-card);
-    padding: 12px 14px;
-}
-
-.rm-kpi-label {
-    font-size: 0.72rem;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    font-weight: 700;
-    color: var(--text-muted);
-}
-
-.rm-kpi-value {
-    font-size: 1.3rem;
-    font-weight: 800;
-    margin-top: 2px;
-    color: var(--text);
-    white-space: nowrap;
-}
-
-.rm-kpi-sub { font-size: 0.75rem; color: var(--text-muted); margin-top: 2px; }
-.rm-kpi.in .rm-kpi-value { color: #059669; }
-.rm-kpi.out .rm-kpi-value { color: #e11d48; }
-[data-theme="dark"] .rm-kpi.in .rm-kpi-value { color: #34d399; }
-[data-theme="dark"] .rm-kpi.out .rm-kpi-value { color: #fb7185; }
-
 .rm-alert {
     display: flex;
     gap: 10px;
@@ -104,8 +65,6 @@
 }
 
 /* ── the open balances ───────────────────────────────────────────────────── */
-
-.rm-panel-total { font-weight: 800; color: var(--text); }
 
 .rm-group { padding: 8px 0; border-bottom: 1px solid var(--card-border); }
 .rm-group:last-of-type { border-bottom: none; }
@@ -166,9 +125,7 @@
 .rm-row-action:hover { border-color: var(--accent); color: var(--accent-strong); }
 .rm-row-action.in:hover { border-color: #10b981; color: #047857; }
 
-.rm-more,
-.rm-note { font-size: 0.72rem; color: var(--text-muted); padding-top: 4px; }
-.rm-note { border-top: 1px solid var(--card-border); margin-top: 8px; }
+.rm-more { font-size: 0.72rem; color: var(--text-muted); padding-top: 4px; }
 
 .rm-empty {
     font-size: 0.84rem;
@@ -217,6 +174,5 @@
 [data-theme="dark"] .rm-entry-amount.transfer { color: #60a5fa; }
 
 @media (max-width: 575.98px) {
-    .rm-kpi-value { font-size: 1.1rem; }
     .rm-row { align-items: flex-start; }
 }
