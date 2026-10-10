@@ -12,7 +12,10 @@ class OfflineAssetTest(unittest.TestCase):
             source = (ROOT / 'templates/hdc' / name).read_text()
             self.assertNotRegex(source, r'(?:src|href)=[\"\']https?://')
             for path in re.findall(r'(?:src|href)=[\"\'](/hdc_static/[^\"\']+)', source):
-                self.assertTrue((ROOT / 'static/hdc' / path.removeprefix('/hdc_static/')).is_file(), path)
+                # The ?v=<stamp> cache-buster is not part of the path.
+                clean = path.split('?')[0]
+                clean_path = clean.removeprefix('/hdc_static/')
+                self.assertTrue((ROOT / 'static/hdc' / clean_path).is_file(), clean_path)
         self.assertNotIn('fonts.googleapis.com', (ROOT / 'static/hdc/css/hdc.css').read_text())
 
     def test_vendor_css_resources_and_licenses_exist(self):

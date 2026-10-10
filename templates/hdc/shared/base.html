@@ -2,7 +2,14 @@
 <html lang="en" data-theme="light">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    {# width=device-width  → the layout is built for the device, not a 980px
+       desktop viewport squeezed into a phone.
+       viewport-fit=cover   → let the page paint under the notch / rounded
+       corners; the adaptive layer adds env(safe-area-inset-*) padding so no
+       control ever sits under them.
+       maximum-scale is deliberately NOT set: data-entry operators pinch-zoom
+       to read dense ledgers, and blocking that is an accessibility failure. #}
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="csrf-token" content="{{ csrf_token }}">
     <title>{% block title %}HDC ERP{% endblock %} - Hadi Design & Construction</title>
     <link href="/hdc_static/vendor/bootstrap/bootstrap.min.css" rel="stylesheet">
@@ -10,6 +17,12 @@
     <link rel="stylesheet" href="/hdc_static/css/hdc.css">
     <!-- Accounts section (hub / manage / edit) — ported from the AMS accounts UI. -->
     <link rel="stylesheet" href="/hdc_static/css/accounts.css">
+    <!-- ADAPTIVE LAYER — must stay LAST.  It retunes every section, page, form
+         and table for the screen it is on (320px phone → laptop → wide
+         desktop) without touching the 110+ templates.  Desktop rules in the
+         files above are left alone; anything below 992px is re-flowed here.
+         See static/hdc/css/responsive.css and RESPONSIVE_DESIGN.md. -->
+    <link rel="stylesheet" href="/hdc_static/css/responsive.css?v={{ hdc_asset_stamp }}">
     <script>
         (function(){
             var t = localStorage.getItem('hdc_theme') || 'light';
@@ -319,6 +332,10 @@ body[data-hdc-custom-access="true"][data-hdc-page-write="false"] form[method="PO
 <script src="/hdc_static/js/core/forms.js"></script>
 <script src="/hdc_static/js/core/combo.js"></script>
 <script src="/hdc_static/js/core/audit.js"></script>
+<!-- Every ordinary table becomes a stack of record cards on a phone.  Loaded
+     after core/audit.js so the "Entered by" column it appends is labelled
+     too; it also re-scans when that column arrives from its async fetch. -->
+<script src="/hdc_static/js/core/responsive_tables.js?v={{ hdc_asset_stamp }}"></script>
 <script src="/hdc_static/js/core/collapse_groups.js"></script>
 <script>
 (function () {
