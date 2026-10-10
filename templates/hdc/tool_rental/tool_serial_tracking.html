@@ -1,0 +1,213 @@
+{% extends "shared/base.html" %}
+{% block title %}Track by Serial{% endblock %}
+{% block page_heading %}Track by Serial — every piece, where it is, and how it got there{% endblock %}
+
+{% block content %}
+{% set tools_active = 'serials' %}
+{% from "shared/_combo_field.html" import combo_select %}
+{% include "tool_rental/_tools_nav.html" %}
+
+<div class="row g-3 mt-1">
+    <div class="col-6 col-md-3"><div class="kpi-card kpi-blue"><div class="kpi-icon"><i class="fas fa-barcode"></i></div><div class="kpi-value">{{ "%.0f"|format(kpis.total) }}</div><div class="kpi-label">Pieces Tracked</div></div></div>
+    <div class="col-6 col-md-3"><div class="kpi-card kpi-green"><div class="kpi-icon"><i class="fas fa-warehouse"></i></div><div class="kpi-value">{{ "%.0f"|format(kpis.in_store) }}</div><div class="kpi-label">In Warehouse</div></div></div>
+    <div class="col-6 col-md-3"><div class="kpi-card kpi-orange"><div class="kpi-icon"><i class="fas fa-map-location-dot"></i></div><div class="kpi-value">{{ "%.0f"|format(kpis.out) }}</div><div class="kpi-label">Out on Sites / Customers</div></div></div>
+    <div class="col-6 col-md-3"><div class="kpi-card kpi-purple"><div class="kpi-icon"><i class="fas fa-trash-can"></i></div><div class="kpi-value">{{ "%.0f"|format(kpis.scrapped) }}</div><div class="kpi-label">Scrapped / Written Off</div></div></div>
+</div>
+
+<div class="card hdc-card mt-3">
+    <div class="card-header hdc-card-header d-flex justify-content-between">
+        <span><i class="fas fa-filter me-2"></i>Filter Pieces by Serial / Tool / Status / Location</span>
+        <div class="d-flex gap-2">
+            <a href="{{ url_for('hdc_tool_rental_tracking') }}" class="btn btn-sm btn-outline-secondary">Tracking</a>
+            <a href="{{ url_for('hdc_tool_rental_reports') }}" class="btn btn-sm btn-outline-secondary">Reports</a>
+        </div>
+    </div>
+    <div class="card-body">
+        <form method="GET" class="row g-2">
+            <div class="col-md-3">
+                {{ combo_select('tool_id', 'serialTool', tool_options,
+                   label='Tool', placeholder='Search tool name or code…',
+                   selected=selected_tool, max_items=80) }}
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Status</label>
+                <select name="status" class="form-select">
+                    <option value="">All statuses</option>
+                    {% for st, st_label in status_options %}
+                        <option value="{{ st }}" {% if status == st %}selected{% endif %}>{{ st_label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Search Serial / Holder</label>
+                <input type="text" name="q" value="{{ search or '' }}" class="form-control" placeholder="Serial No, tool code or rental…">
+            </div>
+            <div class="col-md-3 d-flex align-items-end gap-2 flex-wrap">
+                <button type="submit" class="btn btn-mint"><i class="fas fa-search me-1"></i>Search</button>
+                <a href="{{ url_for('hdc_tool_rental_serials') }}" class="btn btn-outline-secondary">Reset</a>
+            </div>
+            <div class="col-12 d-flex gap-2 flex-wrap">
+                <a class="btn btn-sm {% if only=='out' %}btn-warning{% else %}btn-outline-secondary{% endif %}" href="{{ url_for('hdc_tool_rental_serials', only='out', tool_id=selected_tool or '', status=status or '', q=search or '') }}">Out only</a>
+                <a class="btn btn-sm {% if only=='in_store' %}btn-success{% else %}btn-outline-secondary{% endif %}" href="{{ url_for('hdc_tool_rental_serials', only='in_store', tool_id=selected_tool or '', status=status or '', q=search or '') }}">In store only</a>
+                {% if only %}<a class="btn btn-sm btn-link" href="{{ url_for('hdc_tool_rental_serials') }}">Clear quick filter</a>{% endif %}
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card hdc-card mt-3">
+    <div class="card-header hdc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span><i class="fas fa-barcode me-2"></i>Individual Serial Pieces</span>
+        <small class="text-muted">One row per serial-numbered piece · View opens its full movement log</small>
+    </div>
+    <div class="table-responsive">
+        <table class="table hdc-table table-sm mb-0 tool-serial-tracking-table">
+            <thead>
+                <tr>
+                    <th>Serial Piece</th>
+                    <th>Tool</th>
+                    <th>Current Location</th>
+                    <th class="text-center">Status</th>
+                    <th>Holder / Rental</th>
+                    <th>Movement Chain</th>
+                    <th class="text-center">Log</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for row in serials %}
+                {% set s = row.serial %}
+                <tr class="{% if row.is_scrapped %}serial-scrapped{% elif row.is_in_store %}serial-in-store{% else %}serial-out{% endif %}">
+                    <td>
+                        <strong>{{ row.serial_number }}</strong>
+                        <small class="d-block text-muted">{{ row.tool_code }}</small>
+                    </td>
+                    <td>
+                        {% if row.tool %}<a href="{{ url_for('hdc_tool_rental_tool_position', tool_id=row.tool.id) }}" class="fw-bold text-decoration-none">{{ row.tool_name }}</a>{% else %}{{ row.tool_name }}{% endif %}
+                        <small class="d-block text-muted">{{ row.category_name }}</small>
+                    </td>
+                    <td>
+                        {% if row.is_in_store %}
+                            <span class="badge bg-success-subtle text-success border border-success-subtle"><i class="fas fa-warehouse me-1"></i>{{ row.current_location_label }}</span>
+                        {% else %}
+                            <span class="badge bg-warning-subtle text-dark border border-warning-subtle"><i class="fas fa-map-location-dot me-1"></i>{{ row.current_location_label }}</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-center">
+                        {% if row.is_scrapped %}
+                            <span class="badge bg-secondary">{{ row.status_label }}</span>
+                        {% elif row.status == 'rented' %}
+                            <span class="badge bg-primary">{{ row.status_label }}</span>
+                        {% elif row.status == 'transferred' %}
+                            <span class="badge bg-info text-dark">{{ row.status_label }}</span>
+                        {% elif row.status == 'maintenance' or row.status == 'damaged' %}
+                            <span class="badge bg-danger">{{ row.status_label }}</span>
+                        {% elif row.status == 'lost' %}
+                            <span class="badge bg-dark">{{ row.status_label }}</span>
+                        {% else %}
+                            <span class="badge bg-success">{{ row.status_label }}</span>
+                        {% endif %}
+                        {% if row.condition and row.condition not in ('good',) %}
+                            <small class="d-block text-muted">{{ row.condition }}</small>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if row.rental %}
+                            <a href="{{ url_for('hdc_tool_rental_detail', rental_id=row.rental.id) }}" class="badge bg-secondary text-decoration-none">{{ row.rental_code }}</a>
+                        {% elif row.is_in_store %}
+                            <span class="text-muted">— (store stock)</span>
+                        {% else %}
+                            <span class="text-muted">—</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if row.chain %}
+                            <div class="tool-tracking-chain">
+                                {% for step in row.chain %}
+                                    <span class="c {% if loop.last %}active{% endif %}">{{ step }}</span>
+                                    {% if not loop.last %}<span class="arrow" aria-hidden="true">›</span>{% endif %}
+                                {% endfor %}
+                            </div>
+                        {% else %}
+                            <span class="text-muted">No movement yet</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-center">
+                        <button type="button" class="btn btn-sm btn-outline-primary"
+                                data-bs-toggle="modal" data-bs-target="#serialModal{{ loop.index }}"
+                                aria-label="View full movement log for {{ row.serial_number }}">
+                            <i class="fas fa-eye me-1" aria-hidden="true"></i>View
+                        </button>
+                    </td>
+                </tr>
+            {% else %}
+                <tr><td colspan="7" class="text-center text-muted py-4">No serial pieces match these filters.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% for row in serials %}
+{% set s = row.serial %}
+<div class="modal fade" id="serialModal{{ loop.index }}" tabindex="-1"
+     aria-labelledby="serialModalLabel{{ loop.index }}" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content hdc-modal">
+            <div class="modal-header">
+                <div>
+                    <h5 class="modal-title mb-1" id="serialModalLabel{{ loop.index }}">
+                        <i class="fas fa-barcode me-2"></i>{{ row.serial_number }}
+                    </h5>
+                    <small class="text-muted">{{ row.tool_name }} ({{ row.tool_code }}) · {{ row.status_label }}{% if row.condition and row.condition != 'good' %} · {{ row.condition }}{% endif %}</small>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row g-2 mb-3 text-center">
+                    <div class="col-6 col-md-3"><div class="border rounded-3 p-2"><small class="text-muted d-block">Current Location</small><strong>{{ row.current_location_label }}</strong></div></div>
+                    <div class="col-6 col-md-3"><div class="border rounded-3 p-2"><small class="text-muted d-block">Status</small><strong>{{ row.status_label }}</strong></div></div>
+                    <div class="col-6 col-md-3"><div class="border rounded-3 p-2"><small class="text-muted d-block">Condition</small><strong>{{ row.condition or 'good' }}</strong></div></div>
+                    <div class="col-6 col-md-3"><div class="border rounded-3 p-2"><small class="text-muted d-block">Holder</small><strong>{% if row.rental %}{{ row.rental_code }}{% else %}Store{% endif %}</strong></div></div>
+                </div>
+
+                <h6 class="small text-uppercase text-muted fw-bold">Movement Chain</h6>
+                {% if row.chain %}
+                    <div class="tool-tracking-chain mb-4">
+                        {% for step in row.chain %}
+                            <span class="c {% if loop.last %}active{% endif %}">{{ step }}</span>
+                            {% if not loop.last %}<span class="arrow" aria-hidden="true">›</span>{% endif %}
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <p class="text-muted">This piece has not moved — it is still in the warehouse as recorded at purchase.</p>
+                {% endif %}
+
+                <h6 class="small text-uppercase text-muted fw-bold">Full Movement Log</h6>
+                <div class="table-responsive">
+                    <table class="table hdc-table table-sm mb-0 tool-serial-log-table">
+                        <thead><tr><th>Date / Time</th><th>Type</th><th>From</th><th>To</th><th>Notes</th></tr></thead>
+                        <tbody>
+                        {% for m in row.movements %}
+                            <tr>
+                                <td class="text-nowrap">{{ m.timestamp.strftime('%Y-%m-%d %H:%M') if m.timestamp else '' }}</td>
+                                <td><span class="badge bg-secondary">{{ m.movement_type }}</span></td>
+                                <td>{{ m.from_location_label or '—' }}</td>
+                                <td>{{ m.to_location_label or '—' }}</td>
+                                <td>{{ m.notes or '' }}</td>
+                            </tr>
+                        {% else %}
+                            <tr><td colspan="5" class="text-center text-muted">No movement history recorded.</td></tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% if s.notes %}
+                    <p class="text-muted mt-3 mb-0"><i class="fas fa-note-sticky me-1"></i>{{ s.notes }}</p>
+                {% endif %}
+            </div>
+            <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button></div>
+        </div>
+    </div>
+</div>
+{% endfor %}
+{% endblock %}

@@ -35,6 +35,10 @@
        class="tools-subnav-link {% if tools_active == 'tracking' %}active{% endif %}">
         <i class="fas fa-map-location-dot me-1"></i>Tracking
     </a>
+    <a href="{{ url_for('hdc_tool_rental_serials') }}"
+       class="tools-subnav-link {% if tools_active == 'serials' %}active{% endif %}">
+        <i class="fas fa-barcode me-1"></i>Track by Serial
+    </a>
     <a href="{{ url_for('hdc_tool_rental_reports') }}"
        class="tools-subnav-link {% if tools_active == 'reports' %}active{% endif %}">
         <i class="fas fa-chart-bar me-1"></i>Reports
