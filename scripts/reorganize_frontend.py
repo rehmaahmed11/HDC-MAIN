@@ -97,7 +97,7 @@ DOMAIN_OF = {
     # HDC Tools section — position dashboard, rentals hub, inventory,
     # site-to-site tracking, reports and the shared section sub-nav.
     "tool_rental": ["tool_dashboard.html", "tool_position.html",
-                    "tool_rental.html", "tool_rental_detail.html",
+                    "tool_rental.html", "tool_rental_detail.html", "tool_glance.html",
                     "tool_new_rental.html",
                     "tool_inventory.html", "tool_tracking.html",
                     "tool_reports.html", "_tools_nav.html",

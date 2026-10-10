@@ -1,0 +1,166 @@
+{% extends "shared/base.html" %}
+{% block title %}Tools Glance{% endblock %}
+{% block page_heading %}Tools Glance — every piece, where it is, and every site and customer it went to{% endblock %}
+
+{% block content %}
+{% set tools_active = 'glance' %}
+{% include "tool_rental/_tools_nav.html" %}
+
+<div class="row g-3 mt-1">
+    <div class="col-6 col-md-3"><div class="kpi-card kpi-blue"><div class="kpi-icon"><i class="fas fa-barcode"></i></div><div class="kpi-value">{{ "%.0f"|format(kpis.pieces) }}</div><div class="kpi-label">Pieces (Tool + Serial)</div></div></div>
+    <div class="col-6 col-md-3"><div class="kpi-card kpi-green"><div class="kpi-icon"><i class="fas fa-warehouse"></i></div><div class="kpi-value">{{ "%.0f"|format(kpis.in_store) }}</div><div class="kpi-label">In Store</div></div></div>
+    <div class="col-6 col-md-3"><div class="kpi-card kpi-orange"><div class="kpi-icon"><i class="fas fa-helmet-safety"></i></div><div class="kpi-value">{{ "%.0f"|format(kpis.out_site) }}</div><div class="kpi-label">On Site ({{ kpis.sites }} sites)</div></div></div>
+    <div class="col-6 col-md-3"><div class="kpi-card kpi-purple"><div class="kpi-icon"><i class="fas fa-user-group"></i></div><div class="kpi-value">{{ "%.0f"|format(kpis.out_customer) }}</div><div class="kpi-label">With Customers ({{ kpis.customers }} customers)</div></div></div>
+</div>
+
+<div class="card hdc-card mt-3">
+    <div class="card-header hdc-card-header"><i class="fas fa-filter me-2"></i>Search / Filter</div>
+    <div class="card-body">
+        <form method="GET" class="row g-2">
+            <div class="col-md-6">
+                <label class="form-label">Search tool, serial, site, customer or rental</label>
+                <input type="text" name="q" value="{{ search or '' }}" class="form-control" placeholder="e.g. Shovel, Shovel No 5, Site A, customer name, RENT-00012">
+            </div>
+            <div class="col-md-6 d-flex align-items-end gap-2 flex-wrap">
+                <button type="submit" class="btn btn-mint"><i class="fas fa-search me-1"></i>Search</button>
+                <a href="{{ url_for('hdc_tool_rental_glance') }}" class="btn btn-outline-secondary">Reset</a>
+            </div>
+            <div class="col-12 d-flex gap-2 flex-wrap">
+                <a class="btn btn-sm {% if not only %}btn-primary{% else %}btn-outline-secondary{% endif %}" href="{{ url_for('hdc_tool_rental_glance', q=search or '') }}">All</a>
+                <a class="btn btn-sm {% if only=='in_store' %}btn-success{% else %}btn-outline-secondary{% endif %}" href="{{ url_for('hdc_tool_rental_glance', only='in_store', q=search or '') }}">In store</a>
+                <a class="btn btn-sm {% if only=='site' %}btn-warning{% else %}btn-outline-secondary{% endif %}" href="{{ url_for('hdc_tool_rental_glance', only='site', q=search or '') }}">On site</a>
+                <a class="btn btn-sm {% if only=='customer' %}btn-warning{% else %}btn-outline-secondary{% endif %}" href="{{ url_for('hdc_tool_rental_glance', only='customer', q=search or '') }}">With customer</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card hdc-card mt-3">
+    <div class="card-header hdc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span><i class="fas fa-table-list me-2"></i>Glance — Tool &amp; Serial</span>
+        <small class="text-muted">{{ rows|length }} row(s) shown</small>
+    </div>
+    <div class="table-responsive">
+        <table class="table hdc-table table-sm mb-0 tool-glance-table">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Tool Name &amp; Serial</th>
+                    <th>Tool Code</th>
+                    <th class="text-center">Store / Site Status</th>
+                    <th>In Store / On Site</th>
+                    <th>Site Name</th>
+                    <th>Customer</th>
+                    <th>Rental</th>
+                    <th>Date Sent</th>
+                    <th>Last Movement</th>
+                    <th>Condition</th>
+                    <th>Sites &amp; Customers Sent To</th>
+                    <th class="text-center">Times Sent</th>
+                    <th>Other Details</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for r in rows %}
+                <tr class="{% if r.is_scrapped %}serial-scrapped{% elif r.is_in_store %}serial-in-store{% else %}serial-out{% endif %}">
+                    <td class="text-muted">{{ loop.index }}</td>
+                    <td><strong>{{ r.tool_and_serial }}</strong></td>
+                    <td>{{ r.tool_code }}</td>
+                    <td class="text-center">
+                        {% if r.is_scrapped %}
+                            <span class="badge bg-secondary">Scrapped</span>
+                        {% elif r.is_in_store %}
+                            <span class="badge bg-success">In Store</span>
+                        {% else %}
+                            <span class="badge bg-warning text-dark">Out</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if r.is_in_store %}
+                            <span class="badge bg-success-subtle text-success border border-success-subtle"><i class="fas fa-warehouse me-1"></i>In Store</span>
+                        {% elif r.is_scrapped %}
+                            <span class="badge bg-secondary">Scrapped</span>
+                        {% else %}
+                            <span class="badge bg-warning-subtle text-dark border border-warning-subtle"><i class="fas fa-map-location-dot me-1"></i>{{ r.in_store_on_site }}</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ r.site_name }}</td>
+                    <td>{{ r.customer_name }}</td>
+                    <td>
+                        {% if r.rental_id %}
+                            <a href="{{ url_for('hdc_tool_rental_detail', rental_id=r.rental_id) }}" class="badge bg-secondary text-decoration-none">{{ r.rental_code }}</a>
+                        {% else %}
+                            <span class="text-muted">—</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-nowrap">{{ r.date_sent.strftime('%d-%b-%Y') if r.date_sent else '—' }}</td>
+                    <td class="text-nowrap">{{ r.last_movement.strftime('%d-%b-%Y') if r.last_movement else '—' }}</td>
+                    <td>{{ r.condition }}</td>
+                    <td>
+                        {% if r.sent_to %}
+                            <div class="tool-tracking-chain">
+                                {% for s in r.sent_to %}
+                                    <span class="c {% if loop.last %}active{% endif %}">{{ s.label }}{% if s.kind == 'customer' %} <small class="text-muted">(customer)</small>{% endif %}</span>
+                                    {% if not loop.last %}<span class="arrow" aria-hidden="true">›</span>{% endif %}
+                                {% endfor %}
+                            </div>
+                        {% else %}
+                            <span class="text-muted">Never sent out (in store)</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-center">{{ r.sent_count }}</td>
+                    <td>{{ r.notes or '—' }}</td>
+                </tr>
+            {% else %}
+                <tr><td colspan="14" class="text-center text-muted py-4">No tool pieces match this view.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="card hdc-card mt-3">
+    <div class="card-header hdc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span><i class="fas fa-location-dot me-2"></i>All Sites &amp; Customers Where Tools Were Sent</span>
+        <small class="text-muted">{{ destinations|length }} destination(s) · {{ kpis.sites }} site(s) · {{ kpis.customers }} customer(s)</small>
+    </div>
+    <div class="table-responsive">
+        <table class="table hdc-table table-sm mb-0 tool-glance-destinations-table">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Site / Customer Name</th>
+                    <th>Type</th>
+                    <th class="text-center">Pieces There Now</th>
+                    <th class="text-center">Pieces Sent (All Time)</th>
+                    <th>Tools Sent</th>
+                    <th>First Sent</th>
+                    <th>Last Sent</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for d in destinations %}
+                <tr>
+                    <td class="text-muted">{{ loop.index }}</td>
+                    <td><strong>{{ d.label }}</strong></td>
+                    <td>
+                        {% if d.kind == 'site' %}
+                            <span class="badge bg-info text-dark">Site</span>
+                        {% else %}
+                            <span class="badge bg-primary">Customer</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-center">{{ d.pieces_now }}</td>
+                    <td class="text-center">{{ d.pieces_sent }}</td>
+                    <td>{{ d.tools|join(', ') }}</td>
+                    <td class="text-nowrap">{{ d.first.strftime('%d-%b-%Y') if d.first else '—' }}</td>
+                    <td class="text-nowrap">{{ d.last.strftime('%d-%b-%Y') if d.last else '—' }}</td>
+                </tr>
+            {% else %}
+                <tr><td colspan="8" class="text-center text-muted py-4">No tools have been sent to a site or customer yet.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
