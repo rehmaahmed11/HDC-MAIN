@@ -35,6 +35,8 @@ live on their own pages, so no page repeats the same numbers twice.
   `tests/test_tool_audit.py` (35 cases),
   `tests/test_tool_new_rental_smoke.py` (New Rental form → smoke result →
   Tracking + Reports),
+  `tests/test_tool_rentals_transfers_populate.py` (populate + verify smoke:
+  new rentals and transfers → Audit book quantities, Tracking, reconciliation),
   `tests/test_tool_serial_tracking.py` (Track-by-Serial page + full-section
   smoke: inventory add, purchase, rental, transfer, return, scrap, payment,
   audit all asserted at the individual-serial level)
@@ -153,6 +155,36 @@ move their displayed quantity and use their own destination rate; unchecked
 lines and quantities at other locations stay with the previous rental. Choosing
 rent already fixed in the contact/contract hides the rate inputs but still
 allows the tools to be selected and moved.
+
+### Hand-overs vs in-place moves (no double count)
+
+Two different things both leave a `ToolRentalTransfer` row, and the replay
+treats them differently:
+
+- **In-place move** (`/hdc/tool-rental/<id>/transfer`): the rental itself
+  changes place. `to_rental_id` is NULL, so the destination bucket opens on
+  the same rental.
+- **Hand-over** (Transfer Rental on `/hdc/tool-rental/new`): the moved pieces
+  leave the source rental (its `qty_pending` falls) and a **new rental** is
+  opened for the destination. `to_rental_id` points at that new rental, so the
+  replay only *lifts* the pieces off the source bucket and does not open a
+  bucket for them on the source.
+
+Before this split, a partial hand-over from a line that was already split by an
+earlier hand-over was counted twice (Steel Shuttering Prop showed 210 out
+instead of 170, and the drift guard only trims the last bucket). Regression:
+`tests/test_tool_rentals_transfers_populate.py`.
+
+### Populate + verify (smoke)
+
+`scripts/seed_tools_rentals_transfers.py` fills the demo DB (`hdc_instance/`,
+git-ignored) through the real New Rental and Transfer Rental endpoints only:
+8 rentals (4 new, 4 opened by transfers), 5 hand-over rows (one transfer from
+two holders), no returns, no payments. It then checks the result against a
+hand-computed expectation: per-tool owned, store + out, every place's book
+quantity on **Tools > Audit**, and that every rental appears on **Tools >
+Tracking**. Run it with `HDC_BOOTSTRAP_ADMIN_PASSWORD=... python3
+scripts/seed_tools_rentals_transfers.py`; it exits non-zero if any check fails.
 
 ### Rent pending is apportioned, never duplicated
 

@@ -124,8 +124,12 @@ def _load_position_events(rental_ids, item_ids, names=None):
 
         for transfer in transfers:
             dest = _transfer_destination(transfer, names)
+            # A hand-over (the Transfer Rental flow) opened a NEW rental for the
+            # destination, so the pieces have left this rental.  Only an
+            # in-place move keeps the pieces on this rental (no to_rental_id).
             base = {'kind': 'transfer', 'date': transfer.transfer_date,
                     'dest': dest, 'transfer': transfer,
+                    'handover': transfer.to_rental_id is not None,
                     'seq': (kind_rank['transfer'], int(transfer.id or 0))}
             splits = splits_by_transfer.get(int(transfer.id))
             if splits:
@@ -256,7 +260,9 @@ def _resolve_position_buckets(rental, item, events, names=None):
                 bucket['qty'] = _round_qty(bucket['qty'] - take)
                 source_chain = bucket['chain']
             moved = _round_qty(item.qty_rented) if want is None else _round_qty((want or 0) - (remaining or 0))
-            if moved > EPS:
+            # A hand-over only lifts pieces off this rental: the destination
+            # rental opened for them owns the new bucket (no double count).
+            if moved > EPS and not event.get('handover'):
                 chain = list(source_chain or [origin_step]) + [
                     {'label': dest['label'], 'date': event['date'] or rental.rental_date}]
                 open_bucket(dest, moved, chain, event['date'] or rental.rental_date)
