@@ -16,10 +16,11 @@ Two forms read from here, and nothing else:
   ``TXN_GROUPS`` below *is* that tree — the group labels and icons, and for
   every option: the endpoint it posts to, the panels the page shows, the
   checks the page script runs, which rentals it may pick from and how its
-  submit button reads.  ``templates/hdc/tool_rental/tool_txn.html`` and
-  ``static/hdc/js/pages/tool_txn.js`` render from this table only, so adding a
-  transaction means adding one entry here (plus its panel markup) — never a
-  new page, a new dropdown or another ``if`` in the page script.
+  submit button reads. ``templates/hdc/tool_rental/tool_txn.html`` and
+  ``static/hdc/js/pages/tool_txn.js`` render from this table only: the three
+  group cards, shared entry dialog, and Return / Maintenance selector all use
+  this registry. Rent Out selects issue / transfer from its existing From / To
+  controls.
 
 * **The older New Rental page** (``/hdc/tool-rental/new``), which keeps its own
   four modes in ``NEW_RENTAL_TXN_TYPES``; ``TOOL_TXN_*`` names are gone so the
@@ -153,8 +154,8 @@ PHYSICAL_KINDS = (KIND_CREATE, KIND_TRANSFER, KIND_RETURN,
 MONEY_KINDS = (KIND_PAYMENT, KIND_ADJUSTMENT)
 
 #: Which panel groups the page shows, so the operator only ever sees the
-#: fields that apply.  The transaction selector and the date / reference /
-#: responsible fields carry ``common`` and are always on screen.
+#: fields that apply. Date / reference / responsible fields carry ``common``;
+#: the transaction selector is visible for Return and Maintenance only.
 PANEL_DESTINATION = 'destination'          # who receives (customer / site)
 PANEL_LINES = 'lines'                      # tool lines leaving the store
 PANEL_TERMS = 'terms'                      # billing unit, dates, agreement
@@ -228,8 +229,8 @@ def _option(raw: dict, group_key: str) -> dict:
     return option
 
 
-#: The three groups of the transaction page.  Order matters: it is the order of
-#: the tabs, of the dropdown and of the button on every row.
+#: The three groups of the transaction page. Order matters: it is the order of
+#: the entry cards and of each group's options in the dialog selector.
 TXN_GROUPS = (
     {
         'key': 'rent_out',

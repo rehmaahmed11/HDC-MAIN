@@ -62,6 +62,10 @@ const { window } = dom;
 const { document } = window;
 
 // The page's external scripts are not fetched by jsdom: run the real files.
+const bootstrapScript = document.createElement('script');
+bootstrapScript.textContent = fs.readFileSync(
+  path.join(repoRoot, 'static', 'hdc', 'vendor', 'bootstrap', 'bootstrap.bundle.min.js'), 'utf8');
+document.body.appendChild(bootstrapScript);
 ['core/layout.js', 'core/theme.js', 'core/dialog.js', 'core/forms.js', 'core/combo.js',
  'core/audit.js', 'core/responsive_tables.js', 'core/collapse_groups.js',
  'pages/tool_txn.js'].forEach((rel) => {
@@ -173,6 +177,34 @@ const results = {};
   const config = JSON.parse(document.getElementById('toolTxnConfig').textContent);
   const tools = {};
   config.tools.forEach((tool) => { tools[tool.name] = tool; });
+
+  // The three group cards open the shared entry dialog. Rent Out infers its
+  // issue/transfer type from the existing From / To controls, while Return and
+  // Maintenance keep their transaction selector visible.
+  const cards = Array.from(document.querySelectorAll('#txnGroupCards [data-txn-group]'));
+  equal(cards.map((card) => card.getAttribute('data-txn-group')),
+    ['rent_out', 'return', 'maintenance'], 'the page offers three transaction cards');
+  const transactionField = document.getElementById('txnTypeField');
+  ok(transactionField.classList.contains('d-none'),
+    'Rent Out hides the transaction selector');
+  press(cards.find((card) => card.getAttribute('data-txn-group') === 'return'));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  ok(document.getElementById('toolTxnModal').classList.contains('show'),
+    'clicking a group card opens the shared entry dialog');
+  ok(!transactionField.classList.contains('d-none'),
+    'Return shows the transaction selector');
+  equal(document.getElementById('txnType').value, 'partial_return',
+    'Return opens on its first transaction');
+  press(cards.find((card) => card.getAttribute('data-txn-group') === 'maintenance'));
+  ok(!transactionField.classList.contains('d-none'),
+    'Maintenance keeps the transaction selector visible');
+  equal(document.getElementById('txnType').value, 'maintenance_out',
+    'Maintenance opens on its first transaction');
+  press(cards.find((card) => card.getAttribute('data-txn-group') === 'rent_out'));
+  ok(transactionField.classList.contains('d-none'),
+    'switching back to Rent Out hides the transaction selector again');
+  equal(document.getElementById('txnType').value, 'rent_out_customer',
+    'Rent Out opens on its default issue action');
 
   // ── the store sheet: one checkbox per piece, no multi-select ─────────────
   const shovelTick = Array.from(document.querySelectorAll('#storeToolList .store-tool-check'))

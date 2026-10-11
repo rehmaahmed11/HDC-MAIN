@@ -12,18 +12,17 @@
                      damage or loss
        Maintenance   send for maintenance · back from maintenance
 
-   Nothing here is hard-coded per transaction.  The tabs, the dropdown, each
-   option's panels and its submit label all come from TXN_GROUPS
-   (hdc/services/tool_txn_types.py), and the page script switches the panels
-   by the data-txn-panels names the chosen option declares.  A block nobody
-   declares stays hidden *and* disabled, so it can never leak into a submit.
-   Each option posts to the endpoint that already implements it — the same
-   field names the older pages send — so no business rule is re-implemented
-   here.
+   Nothing here is hard-coded per transaction. The three entry cards and the
+   Return / Maintenance transaction selector, each option's panels and its
+   submit label come from TXN_GROUPS (hdc/services/tool_txn_types.py). Rent-out
+   actions are selected by the existing From / To choices; the page script
+   switches panels by the data-txn-panels names the chosen option declares.
+   A block nobody declares stays hidden *and* disabled, so it can never leak
+   into a submit. Each option posts to its existing endpoint and field names.
 
    Renting out is asked step by step, in page order — the same six steps the
-   New Rental form uses: 1) what is happening (group + transaction), 2) from
-   where (store, or transfer from a site / a customer), 3) the tools — a
+   New Rental form uses: 1) choose the Rent Out card, 2) from where (store, or
+   transfer from a site / a customer), 3) the tools — a
    searchable tick list of everything issuable, with the ticked tools in
    excel-style rows (tool, pieces, qty, rate) — 4) to whom (site / customer,
    then that destination's details), 5) the rent type and terms, and 6) for a
@@ -40,12 +39,29 @@
 .tool-txn-header { margin:4px 0 14px; }
 .tool-txn-header h2 { margin:0; font-size:1.3rem; }
 .tool-txn-subtitle { color:var(--text-muted, #64748b); margin-top:3px; max-width:70ch; }
-.tool-txn-groups { display:flex; flex-wrap:wrap; gap:.5rem; margin-bottom:.35rem; }
-.tool-txn-group { border:1px solid var(--card-border, #e2e8f0); border-radius:.5rem; background:var(--card-bg, #fff);
-                  padding:.45rem .9rem; font-weight:600; line-height:1.2; text-align:left; }
-.tool-txn-group .tool-txn-group-help { display:block; font-weight:400; font-size:.75rem;
-                                       color:var(--text-muted, #64748b); max-width:32ch; }
-.tool-txn-group.active { border-color:var(--bs-primary, #0d6efd); box-shadow:0 0 0 .15rem rgba(13,110,253,.15); }
+.tool-txn-choice-label { margin:0 0 .65rem; font-weight:700; }
+.tool-txn-cards { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:.9rem; }
+.tool-txn-card { display:flex; flex-direction:column; align-items:flex-start; gap:.55rem; width:100%; min-height:190px;
+                  padding:1rem; border:1px solid var(--card-border, #e2e8f0); border-radius:.8rem;
+                  background:var(--card-bg, #fff); color:var(--text, #1f2937); text-align:left;
+                  box-shadow:var(--shadow-card, 0 2px 8px rgba(15,23,42,.05)); cursor:pointer;
+                  transition:transform .15s ease, border-color .15s ease, box-shadow .15s ease; }
+.tool-txn-card:hover, .tool-txn-card:focus-visible, .tool-txn-card.active { transform:translateY(-2px);
+                  border-color:var(--bs-primary, #0d6efd); box-shadow:0 0 0 .15rem rgba(13,110,253,.14); }
+.tool-txn-card:focus-visible { outline:2px solid var(--bs-primary, #0d6efd); outline-offset:2px; }
+.tool-txn-card-icon { display:grid; place-items:center; width:2.65rem; height:2.65rem; border-radius:.65rem;
+                       background:var(--bs-tertiary-bg, #f1f5f9); color:var(--bs-primary, #0d6efd); font-size:1.15rem; }
+.tool-txn-card-title { font-size:1.05rem; font-weight:700; }
+.tool-txn-card-help { color:var(--text-muted, #64748b); font-size:.86rem; line-height:1.45; }
+.tool-txn-card-action { margin-top:auto; color:var(--bs-primary, #0d6efd); font-size:.84rem; font-weight:700; }
+.tool-txn-modal .modal-content { border-radius:.85rem; overflow:hidden; }
+.tool-txn-modal-form { display:flex; flex:1 1 auto; flex-direction:column; min-height:0; overflow:hidden; }
+.tool-txn-modal-form .modal-body { flex:1 1 auto; min-height:0; overflow-y:auto; }
+.tool-txn-modal-form .modal-footer { background:var(--bs-tertiary-bg, #f8fafc); }
+@media (max-width:767.98px) {
+    .tool-txn-cards { grid-template-columns:1fr; }
+    .tool-txn-card { min-height:150px; }
+}
 .tool-txn-panel { border:1px solid var(--card-border, #e2e8f0); border-radius:.5rem; padding:.85rem .95rem; margin-bottom:.85rem; background:var(--card-bg, #fff); }
 .tool-txn-panel > h6 { margin:0 0 .65rem; font-weight:700; }
 .tool-txn-panel .panel-hint { color:var(--text-muted, #64748b); font-size:.82rem; }
@@ -109,72 +125,80 @@
 <div class="tool-txn-header">
     <h2><i class="fas fa-arrow-right-arrow-left me-2" aria-hidden="true"></i>HDC Tool Transaction</h2>
     <div class="tool-txn-subtitle">
-        Pick Rent Out, Return or Maintenance, then the transaction under it. The form
-        shows only the fields that transaction needs, and asks them in one order:
-        from where → which tools → to whom → rent &amp; terms.
+        Choose Rent Out, Return or Maintenance. Its entry form opens in a dialog
+        with only the fields needed for that action.
     </div>
 </div>
 
-<div class="card hdc-card mb-3">
-    <div class="card-header hdc-card-header">
-        <h5 class="mb-0"><i class="fas fa-file-signature me-2" aria-hidden="true"></i><span id="txnFormTitle">Rent Out</span></h5>
-    </div>
-    <div class="card-body">
-        <form method="POST" action="{{ txn_groups[0].options[0].action }}" id="toolTxnForm" novalidate>
-            <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
-            <input type="hidden" name="txn_source" value="transaction">
-            <input type="hidden" name="txn_reference" id="txnReference" value="{{ txn_reference }}">
+<div class="tool-txn-choice-label">1 · What is happening?</div>
+<div class="tool-txn-cards" id="txnGroupCards" aria-label="Choose a tool transaction">
+    {% for group in txn_groups %}
+    <button type="button" class="tool-txn-card{% if loop.first %} active{% endif %}"
+            data-txn-group="{{ group.key }}" data-bs-toggle="modal" data-bs-target="#toolTxnModal"
+            aria-haspopup="dialog" aria-controls="toolTxnModal"
+            aria-pressed="{{ 'true' if loop.first else 'false' }}">
+        <span class="tool-txn-card-icon"><i class="fas {{ group.icon }}" aria-hidden="true"></i></span>
+        <span class="tool-txn-card-title">{{ group.label }}</span>
+        <span class="tool-txn-card-help">{{ group.help }}</span>
+        <span class="tool-txn-card-action">Open form <i class="fas fa-arrow-up-right-from-square ms-1" aria-hidden="true"></i></span>
+    </button>
+    {% endfor %}
+</div>
 
-            <!-- ── what is happening: group tabs + the transaction list ───── -->
-            <div class="row g-3" data-txn-panels="common">
-                <div class="col-12">
-                    <label class="form-label fw-semibold">1 · What is happening?</label>
-                    <div class="tool-txn-groups" id="txnGroupTabs" role="tablist">
-                        {% for group in txn_groups %}
-                        <button type="button" role="tab" data-txn-group="{{ group.key }}"
-                                class="tool-txn-group{% if loop.first %} active{% endif %}"
-                                aria-selected="{{ 'true' if loop.first else 'false' }}">
-                            <i class="fas {{ group.icon }} me-1" aria-hidden="true"></i>{{ group.label }}
-                            <span class="tool-txn-group-help">{{ group.help }}</span>
-                        </button>
-                        {% endfor %}
+<div class="modal fade tool-txn-modal" id="toolTxnModal" tabindex="-1"
+     aria-labelledby="txnFormTitle" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <form method="POST" action="{{ txn_groups[0].options[0].action }}"
+                  id="toolTxnForm" class="tool-txn-modal-form" novalidate>
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="txn_source" value="transaction">
+                <input type="hidden" name="txn_reference" id="txnReference" value="{{ txn_reference }}">
+
+                <div class="modal-header">
+                    <h5 class="modal-title mb-0">
+                        <i class="fas fa-file-signature me-2" aria-hidden="true"></i>
+                        <span id="txnFormTitle">Rent Out</span>
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3 mb-3" data-txn-panels="common">
+                        <div class="col-md-6 d-none" id="txnTypeField">
+                            <label class="form-label" for="txnType">Transaction</label>
+                            <select name="txn_type" id="txnType" class="form-select" required>
+                                {% for group in txn_groups %}
+                                <optgroup label="{{ group.label }}" data-txn-group="{{ group.key }}">
+                                    {% for option in group.options %}
+                                    <option value="{{ option.key }}" data-group="{{ group.key }}">{{ option.label }}</option>
+                                    {% endfor %}
+                                </optgroup>
+                                {% endfor %}
+                            </select>
+                            <small class="text-muted d-block" id="txnTypeHelp"></small>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label" for="transaction_date">Date</label>
+                            <input type="date" name="transaction_date" id="transaction_date"
+                                   class="form-control" value="{{ today }}" required>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label" for="txnReferenceValue">Reference</label>
+                            <input type="text" class="form-control tool-txn-mono" id="txnReferenceValue"
+                                   value="{{ txn_reference }}" readonly tabindex="-1">
+                            <small class="text-muted d-block">A repeated submission is ignored.</small>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label" for="responsible_person">Responsible person</label>
+                            <input type="text" name="responsible_person" id="responsible_person"
+                                   class="form-control" placeholder="Who is recording / handing over">
+                        </div>
+                        <div class="col-md-8">
+                            <label class="form-label" for="txnNotes">Notes</label>
+                            <input type="text" name="notes" id="txnNotes" class="form-control"
+                                   placeholder="Anything the next person needs to know">
+                        </div>
                     </div>
-                </div>
-                <div class="col-md-6">
-                    <label class="form-label" for="txnType">Transaction</label>
-                    <select name="txn_type" id="txnType" class="form-select" required>
-                        {% for group in txn_groups %}
-                        <optgroup label="{{ group.label }}" data-txn-group="{{ group.key }}">
-                            {% for option in group.options %}
-                            <option value="{{ option.key }}" data-group="{{ group.key }}">{{ option.label }}</option>
-                            {% endfor %}
-                        </optgroup>
-                        {% endfor %}
-                    </select>
-                    <small class="text-muted d-block" id="txnTypeHelp"></small>
-                </div>
-                <div class="col-md-3">
-                    <label class="form-label" for="transaction_date">Date</label>
-                    <input type="date" name="transaction_date" id="transaction_date"
-                           class="form-control" value="{{ today }}" required>
-                </div>
-                <div class="col-md-3">
-                    <label class="form-label" for="txnReferenceValue">Reference</label>
-                    <input type="text" class="form-control tool-txn-mono" id="txnReferenceValue"
-                           value="{{ txn_reference }}" readonly tabindex="-1">
-                    <small class="text-muted d-block">A repeated submission is ignored.</small>
-                </div>
-                <div class="col-md-4">
-                    <label class="form-label" for="responsible_person">Responsible person</label>
-                    <input type="text" name="responsible_person" id="responsible_person"
-                           class="form-control" placeholder="Who is recording / handing over">
-                </div>
-                <div class="col-md-8">
-                    <label class="form-label" for="txnNotes">Notes</label>
-                    <input type="text" name="notes" id="txnNotes" class="form-control"
-                           placeholder="Anything the next person needs to know">
-                </div>
-            </div>
 
             <!-- ── rent out setup, step 2: where the tools come from ──────── -->
             <div class="tool-txn-panel d-none" id="rentOutSourcePanel" data-txn-panels="rentout_source">
@@ -622,16 +646,18 @@
                     <span class="small text-muted">Nothing is with the workshop right now.</span>
                 </div>
             </div>
+                </div>
 
-            <!-- ── submit ─────────────────────────────────────────────────── -->
-            <div class="d-flex flex-wrap align-items-center gap-2 mt-3" id="txnSubmitRow">
-                <button type="submit" class="btn btn-success" id="txnSubmitButton">
-                    <i class="fas fa-check me-1" aria-hidden="true"></i><span id="txnSubmitLabel">Create Rental</span>
-                </button>
-                <button type="reset" class="btn btn-outline-secondary" id="txnResetButton">Clear</button>
-                <span class="small text-danger d-none" id="txnFormError" role="alert"></span>
-            </div>
-        </form>
+                <div class="modal-footer d-flex flex-wrap align-items-center gap-2" id="txnSubmitRow">
+                    <button type="submit" class="btn btn-success" id="txnSubmitButton">
+                        <i class="fas fa-check me-1" aria-hidden="true"></i><span id="txnSubmitLabel">Create Rental</span>
+                    </button>
+                    <button type="reset" class="btn btn-outline-secondary" id="txnResetButton">Clear</button>
+                    <span class="small text-danger d-none me-auto" id="txnFormError" role="alert"></span>
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                </div>
+            </form>
+        </div>
     </div>
 </div>
 

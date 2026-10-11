@@ -4,12 +4,12 @@
  * (rendered by hdc/routes/tool_rental.py from
  * hdc/services/tool_txn_entry.py) and does four jobs:
  *
- *   1. show the three groups (Rent Out / Return / Maintenance) and, under the
- *      chosen one, its transactions — then show only the panels the chosen
- *      transaction declares, and disable (not just hide) everything else, so a
- *      hidden panel can never post.  Renting out is asked step by step: from
- *      where (store / site / customer) and to whom pick the transaction, then
- *      the tools, the customer / site and the rent type follow in page order;
+ *   1. open the shared entry dialog from one of the three group cards (Rent
+ *      Out / Return / Maintenance), select a Return or Maintenance transaction,
+ *      and show only the panels that transaction declares. The transaction
+ *      selector stays hidden for Rent Out, where the existing From / To choices
+ *      select the issue or transfer action. Every other panel is disabled as
+ *      well as hidden, so it can never leak into a submit;
  *   2. build/validate the multi-item lines — a searchable tick list of every
  *      issuable tool, with the ticked tools in excel-style rows (tool,
  *      pieces, qty, rate) — against the store's real availability, not a
@@ -105,21 +105,22 @@
         });
     }
 
-    /* ── the three groups ───────────────────────────────────────────────── */
-    function groupTabs() {
-        return document.querySelectorAll('#txnGroupTabs [data-txn-group]');
+    /* ── the three entry cards ──────────────────────────────────────────── */
+    function groupCards() {
+        return document.querySelectorAll('#txnGroupCards [data-txn-group]');
     }
 
-    function paintGroupTabs() {
-        Array.prototype.forEach.call(groupTabs(), function (tab) {
-            var active = tab.getAttribute('data-txn-group') === activeGroup;
-            tab.classList.toggle('active', active);
-            tab.setAttribute('aria-selected', active ? 'true' : 'false');
+    function paintGroupCards() {
+        Array.prototype.forEach.call(groupCards(), function (card) {
+            var active = card.getAttribute('data-txn-group') === activeGroup;
+            card.classList.toggle('active', active);
+            card.setAttribute('aria-pressed', active ? 'true' : 'false');
         });
     }
 
-    /* Show only the chosen group's transactions, so the dropdown stays as
-       short as the tab the operator is looking at. */
+    /* Show only the chosen group's transactions in the selector. Rent Out
+       hides that selector; its existing From / To choices pick issue vs.
+       transfer and the destination type. */
     function filterTypeOptions() {
         if (!typeSelect) return;
         Array.prototype.forEach.call(typeSelect.querySelectorAll('option'), function (option) {
@@ -141,9 +142,17 @@
             var first = TYPES.filter(function (t) { return t.group === groupKey; })[0];
             if (first && typeSelect) typeSelect.value = first.key;
         }
-        paintGroupTabs();
+        paintGroupCards();
         filterTypeOptions();
         applyPanels();
+    }
+
+    function syncTransactionField(entry) {
+        var field = document.getElementById('txnTypeField');
+        if (!field) return;
+        var visible = !!entry && entry.group !== 'rent_out';
+        field.classList.toggle('d-none', !visible);
+        field.setAttribute('aria-hidden', visible ? 'false' : 'true');
     }
 
     /* ── panels ─────────────────────────────────────────────────────────── */
@@ -161,11 +170,13 @@
             block.classList.toggle('d-none', !wanted);
             setEnabled(block, wanted);
         });
+        syncTransactionField(entry);
         if (entry) {
             var group = groupFor(entry.group);
-            document.getElementById('txnFormTitle').textContent =
-                group ? group.label + ' · ' + entry.label : entry.label;
-            document.getElementById('txnTypeHelp').textContent = entry.help || '';
+            var title = document.getElementById('txnFormTitle');
+            var help = document.getElementById('txnTypeHelp');
+            if (title) title.textContent = group ? group.label + ' · ' + entry.label : entry.label;
+            if (help) help.textContent = entry.help || '';
             if (submitLabel) submitLabel.textContent = entry.submit_label || 'Save';
             if (submitButton) {
                 submitButton.classList.remove('btn-success', 'btn-primary', 'btn-warning', 'btn-danger', 'btn-secondary');
@@ -319,11 +330,10 @@
     }
 
     /* ── rent-out setup: from where, and to whom ───────────────────────────
-       Steps 1 + 2 of renting out.  The two answers pick the transaction: the
+       Steps 1 + 2 of renting out. The two answers pick the transaction: the
        store means a create, a site or a customer means a transfer — and To
-       decides the renter type.  The option is found in the registry by kind +
-       renter type, never by a hard-coded key; choosing the transaction
-       directly (tabs / dropdown) answers From/To back the same way. */
+       decides the renter type. The option is found in the registry by kind +
+       renter type, never by a hard-coded key. */
     function rentOutPanel() {
         return document.getElementById('rentOutSourcePanel');
     }
@@ -362,7 +372,7 @@
         if (!target) return;
         if (typeSelect.value !== target.key) typeSelect.value = target.key;
         activeGroup = target.group;
-        paintGroupTabs();
+        paintGroupCards();
         filterTypeOptions();
         applyPanels();
     }
@@ -385,9 +395,8 @@
         if (toRadio) toRadio.checked = true;
     }
 
-    /* A transfer picked straight from the dropdown keeps the operator's
-       site/customer answer; with no answer yet, whichever side actually
-       holds tools wins, so the location list is never empty by default. */
+    /* If the operator chooses To before From, prefer whichever source type
+       actually holds tools so the location list is never empty by default. */
     function defaultRentOutFrom() {
         var counts = {};
         SOURCES.forEach(function (source) {
@@ -1424,7 +1433,10 @@
 
     form.addEventListener('reset', function () {
         submitted = false;
-        if (submitButton) submitButton.disabled = false;
+        if (submitButton) {
+            submitButton.disabled = false;
+            submitButton.classList.remove('disabled');
+        }
         setTimeout(function () {
             showError('');
             // The browser resets native controls; the script-built pickers
@@ -1438,6 +1450,13 @@
             renderStoreToolList();
             toggleStoreEmpty();
             renderTransferHolders();
+            var entry = currentEntry();
+            if (!entry || entry.group !== activeGroup) {
+                var first = TYPES.filter(function (t) { return t.group === activeGroup; })[0];
+                if (first && typeSelect) typeSelect.value = first.key;
+            }
+            paintGroupCards();
+            filterTypeOptions();
             applyPanels();
         }, 0);
     });
@@ -1447,14 +1466,14 @@
         typeSelect.addEventListener('change', function () {
             var entry = currentEntry();
             if (entry) activeGroup = entry.group;
-            paintGroupTabs();
+            paintGroupCards();
             filterTypeOptions();
             applyPanels();
         });
     }
-    Array.prototype.forEach.call(groupTabs(), function (tab) {
-        tab.addEventListener('click', function () {
-            chooseGroup(tab.getAttribute('data-txn-group'));
+    Array.prototype.forEach.call(groupCards(), function (card) {
+        card.addEventListener('click', function () {
+            chooseGroup(card.getAttribute('data-txn-group'));
         });
     });
     Array.prototype.forEach.call(
@@ -1528,7 +1547,7 @@
         if (amount && option) amount.max = option.getAttribute('data-amount') || '';
     });
 
-    paintGroupTabs();
+    paintGroupCards();
     filterTypeOptions();
     applyPanels();
     renderStoreToolList();

@@ -190,11 +190,11 @@ class TxnFormTestCase(unittest.TestCase):
         return re.findall(r'<option value="(\d+)"', html[start:end])
 
     # ------------------------------------------------------------ the form
-    def test_dropdown_offers_every_transaction_from_the_registry(self):
+    def test_form_defaults_to_new_rental_and_keeps_the_registry_configured(self):
         html = self._form_html()
-        for entry in NEW_RENTAL_TXN_TYPES:
-            self.assertIn(f'<option value="{entry["key"]}"', html)
-            self.assertIn(f'>{entry["label"]}</option>', html)
+        self.assertIn('type="hidden" name="txn_type" id="txnType" value="new_rental"', html)
+        self.assertEqual([entry['key'] for entry in self._registry_from_page(html)],
+                         [entry['key'] for entry in NEW_RENTAL_TXN_TYPES])
 
     def test_page_script_gets_the_registry_with_the_right_actions(self):
         html = self._form_html()
@@ -296,20 +296,20 @@ class TxnFormTestCase(unittest.TestCase):
 
 
     def test_form_asks_the_steps_in_one_numbered_order(self):
-        """The New Rental form reads 1 → 6, matching the Tools transaction page.
-        Transaction type first, then from where, the tools, to whom, rent &
-        terms, and — for a transfer only — settling the previous holder.
+        """New Rental reads source → tools → destination → terms, with the
+        previous-holder settlement as its final, transfer-only step.
         """
         html = self._form_html()
-        steps = ['1 · What is happening?', '2 · From where are the tools coming?',
-                 '3 · Which tools are moving?', '4 · To — who receives the tools?',
-                 '5 · Rent type &amp; terms', "6 · Settle the previous holder's rent"]
+        steps = ['1 · From where are the tools coming?',
+                 '2 · Which tools are moving?',
+                 '3 · To — who receives the tools?',
+                 '4 · Rent type &amp; terms',
+                 "5 · Settle the previous holder's rent"]
         for step in steps:
             self.assertIn(step, html)
         positions = [html.index(step) for step in steps]
         self.assertEqual(positions, sorted(positions))
-        # Rent type is a term, not a first question: it follows the destination,
-        # and the submit row closes the form in every transaction.
+        # Rent type follows the destination, and the submit row closes the form.
         controls = ['id="txnType"', 'id="transferSourceField"', 'id="newRentalTools"',
                     'id="renterType"', 'id="billingType"', 'name="rental_date"',
                     'id="rentalSubmitRow"']
