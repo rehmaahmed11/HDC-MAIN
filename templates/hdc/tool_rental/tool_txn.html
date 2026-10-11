@@ -19,7 +19,14 @@
    declares stays hidden *and* disabled, so it can never leak into a submit.
    Each option posts to the endpoint that already implements it — the same
    field names the older pages send — so no business rule is re-implemented
-   here. #}
+   here.
+
+   Renting out is asked step by step, in page order: 1) from where (store, or
+   transfer from a site / a customer) and 2) to whom (site / customer) in the
+   setup block, 3) the tools — a searchable tick list of everything issuable,
+   with the ticked tools in excel-style rows (tool, pieces, qty, rate) — then
+   4) the customer / site details and 5) the rent type.  A "no rent" answer
+   greys out and disables the rate cells in the rows above. #}
 {% block content %}
 {% set tools_active = 'transaction' %}
 {% set tools_out = 'pending_tools' %}
@@ -49,6 +56,33 @@
 .tool-txn-sheet input[type=number] { min-width:85px; }
 .tool-txn-sheet .tool-txn-line { border:0; border-radius:0; padding:0; margin:0; }
 .tool-txn-summary { background:var(--bs-tertiary-bg, #f8fafc); border-radius:.5rem; padding:.5rem .7rem; font-size:.86rem; }
+/* Rent-out setup: From where? / Rent to? radio cards. */
+.rentout-choices { display:flex; flex-wrap:wrap; gap:.5rem; }
+.rentout-choice { display:flex; align-items:flex-start; gap:.5rem; border:1px solid var(--card-border, #e2e8f0);
+                  border-radius:.5rem; padding:.5rem .7rem; cursor:pointer; font-weight:600;
+                  background:var(--bs-tertiary-bg, #f8fafc); }
+.rentout-choice small { display:block; font-weight:400; color:var(--text-muted, #64748b); }
+.rentout-choice input { margin-top:.2rem; flex:0 0 auto; }
+/* Store picker: searchable tick list, then excel-style ticked rows. */
+.store-tool-list { max-height:230px; overflow:auto; background:var(--card-bg, #fff); }
+.store-tool-row { display:flex; align-items:center; gap:.55rem; padding:.38rem .6rem; cursor:pointer; margin:0; }
+.store-tool-row + .store-tool-row { border-top:1px dashed var(--card-border, #e2e8f0); }
+.store-tool-row:hover { background:var(--bs-tertiary-bg, #f8fafc); }
+.store-tool-row .store-tool-check { flex:0 0 auto; }
+.store-tool-row .store-tool-meta { margin-left:auto; white-space:nowrap; padding-left:.75rem; }
+/* Right-sized sheet columns: names breathe, qty/rate stay compact. */
+.tool-txn-sheet .col-pick { width:40px; text-align:center; }
+.tool-txn-sheet .col-idx { width:44px; }
+.tool-txn-sheet .col-qty { width:100px; }
+.tool-txn-sheet .col-rate { width:132px; }
+.tool-txn-sheet .col-action { width:52px; text-align:center; }
+.tool-txn-sheet .col-rental { width:120px; }
+.tool-txn-sheet .col-source { width:110px; }
+.tool-txn-sheet .col-pieces { min-width:150px; }
+.tool-txn-sheet td .form-control-sm, .tool-txn-sheet td .form-select-sm { font-size:.85rem; }
+/* A "no rent" answer greys the rate cells out; the zero still posts. */
+.tool-txn-sheet input[type=number].rate-off { background:var(--bs-secondary-bg, #e9ecef);
+                                              color:var(--text-muted, #64748b); }
 </style>
 
 <div class="tool-txn-header">
@@ -120,6 +154,111 @@
                 </div>
             </div>
 
+            <!-- ── rent out setup: from where, and to whom ────────────────── -->
+            <div class="tool-txn-panel d-none" id="rentOutSourcePanel" data-txn-panels="rentout_source">
+                <h6><i class="fas fa-truck-fast me-1" aria-hidden="true"></i>Rent out — from where, to whom</h6>
+                <div class="row g-3">
+                    <div class="col-md-7">
+                        <span class="form-label fw-semibold d-block">1 · From where are the tools coming?</span>
+                        <div class="rentout-choices" role="radiogroup" aria-label="From where">
+                            <label class="rentout-choice">
+                                <input type="radio" name="rentout_from" value="store" class="form-check-input" checked>
+                                <span><i class="fas fa-warehouse me-1" aria-hidden="true"></i>From store<small>New rental — tools leave the warehouse</small></span>
+                            </label>
+                            <label class="rentout-choice">
+                                <input type="radio" name="rentout_from" value="site" class="form-check-input" data-loc-type="{{ rentout_site_loc }}">
+                                <span><i class="fas fa-diagram-project me-1" aria-hidden="true"></i>Transfer from site<small>Tools move on from one of our sites</small></span>
+                            </label>
+                            <label class="rentout-choice">
+                                <input type="radio" name="rentout_from" value="customer" class="form-check-input" data-loc-type="{{ rentout_customer_loc }}">
+                                <span><i class="fas fa-user-tie me-1" aria-hidden="true"></i>Transfer from customer<small>Tools move on from an outside customer</small></span>
+                            </label>
+                        </div>
+                        <small class="text-muted d-block mt-1">A transfer settles the previous holder and starts a fresh cycle for the next one.</small>
+                    </div>
+                    <div class="col-md-5">
+                        <span class="form-label fw-semibold d-block">2 · Rent to?</span>
+                        <div class="rentout-choices" role="radiogroup" aria-label="Rent to">
+                            <label class="rentout-choice">
+                                <input type="radio" name="rentout_to" value="internal" class="form-check-input">
+                                <span><i class="fas fa-diagram-project me-1" aria-hidden="true"></i>Our site<small>Issue to an HDC project</small></span>
+                            </label>
+                            <label class="rentout-choice">
+                                <input type="radio" name="rentout_to" value="external" class="form-check-input" checked>
+                                <span><i class="fas fa-user-tie me-1" aria-hidden="true"></i>Outside customer<small>Rent out to a customer</small></span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ── tool lines leaving the store ───────────────────────────── -->
+            <div class="tool-txn-panel d-none" id="linesPanel" data-txn-panels="lines">
+                <h6><i class="fas fa-toolbox me-1" aria-hidden="true"></i>3 · Tools from the store</h6>
+                <div class="row g-2 align-items-end">
+                    <div class="col-md-8">
+                        <label class="form-label small fw-semibold mb-1" for="storeToolSearch">Find a tool — tick one or more</label>
+                        <input type="text" id="storeToolSearch" class="form-control"
+                               placeholder="Search tool name, code or category…" autocomplete="off"
+                               role="combobox" aria-expanded="false" aria-autocomplete="list" aria-controls="storeToolList">
+                    </div>
+                    <div class="col-md-4">
+                        <div class="small text-muted" id="storeToolCount" role="status"></div>
+                        <button type="button" class="btn btn-sm btn-outline-secondary mt-1" id="storeSelectVisibleBtn">Tick all shown</button>
+                    </div>
+                </div>
+                <div id="storeToolList" class="store-tool-list border rounded mt-2"
+                     role="listbox" aria-multiselectable="true" aria-label="Tools in store"></div>
+                <div class="table-responsive mt-2">
+                    <table class="table table-sm table-bordered table-striped align-middle tool-txn-sheet d-none" id="storeSelectedSheet">
+                        <caption class="caption-top">Ticked tools — fill quantity and rate per row</caption>
+                        <thead><tr>
+                            <th scope="col" class="col-idx">#</th>
+                            <th scope="col">Tool</th>
+                            <th scope="col" class="col-pieces">Pieces / serial</th>
+                            <th scope="col" class="col-qty">Qty</th>
+                            <th scope="col" class="col-rate">Rate (PKR)</th>
+                            <th scope="col" class="col-action"><span class="visually-hidden">Remove</span></th>
+                        </tr></thead>
+                        <tbody id="storeSelectedRows"></tbody>
+                    </table>
+                    <div class="small text-muted" id="storeSelectedEmpty">Nothing ticked yet — tick tools in the list above.</div>
+                </div>
+                <div class="small text-danger mt-2 d-none" id="lineItemsError" role="alert"></div>
+                <div class="small text-muted mt-2">
+                    Checked against the store: a tool cannot go out for more than it holds,
+                    and one piece cannot go out twice in the same transaction.
+                </div>
+            </div>
+
+            <!-- ── transfer: from the current holder ──────────────────────── -->
+            <div class="tool-txn-panel d-none" id="transferSourcePanel" data-txn-panels="transfer_source">
+                <h6><i class="fas fa-location-dot me-1" aria-hidden="true"></i>3 · Tools at the current holder</h6>
+                <input type="hidden" name="transfer_selection_enabled" value="1">
+                {{ combo_select('source_key', 'transferSourceSelect', transfer_source_options,
+                                label='Current site / holder', placeholder='Search site or customer',
+                                hint='Only tools that are actually out are offered.') }}
+                <div class="mt-2">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="selectAllTransferHolders">
+                        <label class="form-check-label small" for="selectAllTransferHolders">All holders at this location</label>
+                    </div>
+                    <div id="transferHoldersList" class="border rounded p-2 mt-1" style="max-height:180px; overflow:auto;"></div>
+                </div>
+                <div class="row g-2 align-items-end mt-2">
+                    <div class="col-md-8">
+                        <label class="form-label small fw-semibold mb-1" for="transferLinesSearch">Find a tool in the list below</label>
+                        <input type="text" id="transferLinesSearch" class="form-control"
+                               placeholder="Search tool name, code or rental…" autocomplete="off">
+                    </div>
+                    <div class="col-md-4">
+                        <div class="small text-muted" id="transferLinesCount" role="status"></div>
+                    </div>
+                </div>
+                <div id="transferLinesContainer" class="mt-2" aria-live="polite"></div>
+                <div class="small text-danger mt-2 d-none" id="transferError" role="alert"></div>
+            </div>
+
             <!-- ── destination: outside customer (rent out / transfer) ────── -->
             <div class="tool-txn-panel d-none" id="destinationCustomerPanel"
                  data-txn-panels="destination" data-renter-type="external">
@@ -157,26 +296,12 @@
                 </div>
             </div>
 
-            <!-- ── tool lines leaving the store ───────────────────────────── -->
-            <div class="tool-txn-panel d-none" id="linesPanel" data-txn-panels="lines">
-                <h6><i class="fas fa-toolbox me-1" aria-hidden="true"></i>Tools from the store</h6>
-                <div id="lineItemsContainer"></div>
-                <button type="button" class="btn btn-sm btn-outline-primary" id="addLineBtn">
-                    <i class="fas fa-plus me-1" aria-hidden="true"></i>Add item
-                </button>
-                <div class="small text-danger mt-2 d-none" id="lineItemsError" role="alert"></div>
-                <div class="small text-muted mt-2">
-                    Checked against the store: a tool cannot go out for more than it holds,
-                    and one piece cannot go out twice in the same transaction.
-                </div>
-            </div>
-
             <!-- ── terms: how the rent is charged ─────────────────────────── -->
             <div class="tool-txn-panel d-none" id="termsPanel" data-txn-panels="terms">
-                <h6><i class="fas fa-file-invoice-dollar me-1" aria-hidden="true"></i>Rental terms</h6>
+                <h6><i class="fas fa-file-invoice-dollar me-1" aria-hidden="true"></i>5 · Rent type &amp; terms</h6>
                 <div class="row g-3">
                     <div class="col-md-4">
-                        <label class="form-label" for="billing_type">Billing unit</label>
+                        <label class="form-label" for="billing_type">Rent type</label>
                         <select name="billing_type" id="billing_type" class="form-select">
                             {% for mode in billing_modes %}
                             <option value="{{ mode.key }}">{{ mode.label }}</option>
@@ -203,24 +328,6 @@
                     </div>
                 </div>
                 <div id="billingStatus" class="tool-txn-summary mt-3" role="status" aria-live="polite"></div>
-            </div>
-
-            <!-- ── transfer: from the current holder … ───────────────────── -->
-            <div class="tool-txn-panel d-none" id="transferSourcePanel" data-txn-panels="transfer_source">
-                <h6><i class="fas fa-location-dot me-1" aria-hidden="true"></i>From — current holder</h6>
-                <input type="hidden" name="transfer_selection_enabled" value="1">
-                {{ combo_select('source_key', 'transferSourceSelect', transfer_source_options,
-                                label='Current site / holder', placeholder='Search site or customer',
-                                hint='Only tools that are actually out are offered.') }}
-                <div class="mt-2">
-                    <div class="form-check">
-                        <input class="form-check-input" type="checkbox" id="selectAllTransferHolders">
-                        <label class="form-check-label small" for="selectAllTransferHolders">All holders at this location</label>
-                    </div>
-                    <div id="transferHoldersList" class="border rounded p-2 mt-1" style="max-height:180px; overflow:auto;"></div>
-                </div>
-                <div id="transferLinesContainer" class="mt-2" aria-live="polite"></div>
-                <div class="small text-danger mt-2 d-none" id="transferError" role="alert"></div>
             </div>
 
             <!-- ── transfer: … and what the old holder is owed ────────────── -->
