@@ -58,7 +58,7 @@ from hdc.services.tool_txn_entry import (                          # noqa: E402
 from hdc.services.tool_txn_types import (                          # noqa: E402
     BILLING_MODES, DEFAULT_TXN_OPTION, KINDS, KIND_ADJUSTMENT, KIND_CREATE, KIND_DAMAGE_LOSS,
     KIND_MAINTENANCE_IN, KIND_MAINTENANCE_OUT, KIND_PAYMENT, KIND_RETURN,
-    KIND_TRANSFER, MONEY_KINDS, PHYSICAL_KINDS, TXN_GROUPS, TXN_OPTIONS,
+    KIND_TRANSFER, MONEY_KINDS, PANEL_RENTOUT_SOURCE, PHYSICAL_KINDS, TXN_GROUPS, TXN_OPTIONS,
     registry_problems, txn_group, txn_option,
 )
 from hdc.services.tool_tracking import tool_ledger                 # noqa: E402
@@ -149,6 +149,13 @@ class TxnRegistryTests(unittest.TestCase):
     def test_lookup_returns_entry_or_none(self):
         self.assertEqual(txn_option('damage_loss')['kind'], KIND_DAMAGE_LOSS)
         self.assertIsNone(txn_option('nope'))
+
+    def test_rentout_setup_panel_declared_on_movement_options_only(self):
+        for entry in TXN_OPTIONS:
+            if entry['kind'] in (KIND_CREATE, KIND_TRANSFER):
+                self.assertIn(PANEL_RENTOUT_SOURCE, entry['panels'], entry['key'])
+            else:
+                self.assertNotIn(PANEL_RENTOUT_SOURCE, entry['panels'], entry['key'])
 
 
 class TxnFormTestCase(unittest.TestCase):
@@ -440,6 +447,63 @@ class TxnFormTestCase(unittest.TestCase):
         for panel in sorted(panels):
             self.assertIn(f'data-txn-panels="{panel}"', html, panel)
 
+    def test_rent_out_setup_renders_from_and_to_choices(self):
+        html = self.client.get('/hdc/tool-rental/transaction').get_data(as_text=True)
+        self.assertIn('data-txn-panels="rentout_source"', html)
+        self.assertIn('name="rentout_from" value="store"', html)
+        self.assertIn('name="rentout_from" value="site"', html)
+        self.assertIn('name="rentout_from" value="customer"', html)
+        self.assertIn('name="rentout_to" value="internal"', html)
+        self.assertIn('name="rentout_to" value="external"', html)
+        self.assertIn('id="storeToolSearch"', html)
+        self.assertIn('id="storeToolList"', html)
+        self.assertIn('id="storeSelectedRows"', html)
+        self.assertIn('id="transferLinesSearch"', html)
+
+    def test_rent_out_panels_follow_the_setup_order(self):
+        html = self.client.get('/hdc/tool-rental/transaction').get_data(as_text=True)
+        order = ['data-txn-panels="rentout_source"', 'data-txn-panels="lines"',
+                 'data-txn-panels="transfer_source"', 'data-txn-panels="destination"',
+                 'data-txn-panels="terms"']
+        positions = [html.index(marker) for marker in order]
+        self.assertEqual(positions, sorted(positions))
+
+    def test_rent_type_offers_full_rent_and_no_rent(self):
+        html = self.client.get('/hdc/tool-rental/transaction').get_data(as_text=True)
+        self.assertIn('<option value="per_day">Full rent — per day</option>', html)
+        self.assertIn('<option value="no_charge">No rent (adjusted in contract)</option>', html)
+
+    def test_store_tools_config_carries_rates_and_availability(self):
+        html = self.client.get('/hdc/tool-rental/transaction').get_data(as_text=True)
+        config = json.loads(re.search(
+            r'<script id="toolTxnConfig" type="application/json">(.*?)</script>',
+            html, re.S).group(1))
+        tools = {t['name']: t for t in config['tools']}
+        self.assertIn('Vibrator', tools)
+        vibrator = tools['Vibrator']
+        self.assertEqual(vibrator['code'], 'TOOL-1001')
+        self.assertEqual(vibrator['availableQty'], 6)
+        self.assertEqual(vibrator['rate'], 500.0)
+        self.assertIn('serials', vibrator)
+
+    def test_transfer_sources_carry_location_types_for_the_from_filter(self):
+        self._rent(self.vibrator, 2, renter_type='internal', project=self.site_a)
+        self._rent(self.drill, 1, renter_type='external', customer='Filter Customer')
+        html = self.client.get('/hdc/tool-rental/transaction').get_data(as_text=True)
+        config = json.loads(re.search(
+            r'<script id="toolTxnConfig" type="application/json">(.*?)</script>',
+            html, re.S).group(1))
+        sources = config['transferSources']
+        self.assertTrue(sources)
+        for source in sources:
+            self.assertTrue(source['key'])
+            self.assertTrue(source['locationKey'])
+            self.assertTrue(source['locType'])
+            self.assertTrue(source['lines'])
+        loc_types = {s['locType'] for s in sources}
+        self.assertIn('own_project', loc_types)
+        self.assertIn('customer', loc_types)
+
     def test_page_script_implements_every_declared_check(self):
         """The registry may only ask for checks the script actually has."""
         script = _txn_script()
@@ -552,6 +616,49 @@ class TxnFormTestCase(unittest.TestCase):
         new_rental = self._latest_rental()
         self.assertEqual(new_rental.customer_name, 'Second Customer')
         self.assertAlmostEqual(self._ledger_row(self.vibrator)['customer_qty'], 2.0)
+
+    def test_transfer_from_site_to_customer_crosses_holder_types(self):
+        self._rent(self.vibrator, 2, renter_type='internal', project=self.site_a)
+        rental = self._latest_rental()
+        item = ToolRentalItem.query.filter_by(rental_id=rental.id).first()
+        source_key = f'{rental.id}|own_project|{self.site_a.id}|0|'
+        self._txn('transfer_customer', {
+            'customer_name': 'Second Customer',
+            'billing_type': 'per_day',
+            'rental_date': _pkt_today().isoformat(),
+            'transfer_selection_enabled': '1',
+            'source_rental_id[]': [source_key],
+            'transfer_item_id[]': [str(item.id)],
+            f'transfer_qty_{item.id}': '2',
+            'settle_choice': 'add_credit',
+        })
+        new_rental = self._latest_rental()
+        self.assertNotEqual(new_rental.id, rental.id)
+        self.assertEqual(new_rental.renter_type, 'external')
+        self.assertEqual(new_rental.customer_name, 'Second Customer')
+        self.assertAlmostEqual(self._ledger_row(self.vibrator)['customer_qty'], 2.0)
+
+    def test_transfer_from_customer_to_site_crosses_holder_types(self):
+        self._rent(self.vibrator, 2, renter_type='external', customer='First Customer')
+        rental = self._latest_rental()
+        item = ToolRentalItem.query.filter_by(rental_id=rental.id).first()
+        source_key = f'{rental.id}|customer|0|0|First%20Customer'
+        self._txn('transfer_site', {
+            'project_id': str(self.site_b.id),
+            'billing_type': 'per_day',
+            'rental_date': _pkt_today().isoformat(),
+            'transfer_selection_enabled': '1',
+            'source_rental_id[]': [source_key],
+            'transfer_item_id[]': [str(item.id)],
+            f'transfer_qty_{item.id}': '2',
+            'settle_choice': 'add_credit',
+        })
+        new_rental = self._latest_rental()
+        self.assertNotEqual(new_rental.id, rental.id)
+        self.assertEqual(new_rental.renter_type, 'internal')
+        self.assertEqual(new_rental.project_id, self.site_b.id)
+        self.assertAlmostEqual(self._ledger_row(self.vibrator)['customer_qty'], 0.0)
+        self.assertAlmostEqual(self._ledger_row(self.vibrator)['own_project_qty'], 2.0)
 
     def test_partial_return_keeps_the_remaining_outstanding(self):
         self._rent(self.vibrator, 5, renter_type='external', customer='Part Return Co')

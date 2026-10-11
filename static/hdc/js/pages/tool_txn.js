@@ -7,9 +7,13 @@
  *   1. show the three groups (Rent Out / Return / Maintenance) and, under the
  *      chosen one, its transactions — then show only the panels the chosen
  *      transaction declares, and disable (not just hide) everything else, so a
- *      hidden panel can never post;
- *   2. build/validate the multi-item lines — against the store's real
- *      availability, not a guess — including per-piece (serial) selection;
+ *      hidden panel can never post.  Renting out is asked step by step: from
+ *      where (store / site / customer) and to whom pick the transaction, then
+ *      the tools, the customer / site and the rent type follow in page order;
+ *   2. build/validate the multi-item lines — a searchable tick list of every
+ *      issuable tool, with the ticked tools in excel-style rows (tool,
+ *      pieces, qty, rate) — against the store's real availability, not a
+ *      guess, including per-piece (serial) selection;
  *   3. copy the one visible transaction date into the endpoint's own date
  *      field, and stamp the reference / responsible person onto the notes, so
  *      the record that gets created carries the number on the printed form;
@@ -166,6 +170,8 @@
             }
         }
         syncDestinationPanels();
+        syncRentOutRadios();
+        syncTransferLocationFilter();
         syncReturnMode();
         syncTransferSettlement();
         syncBilling();
@@ -212,8 +218,11 @@
         });
     }
 
-    /* A no-charge rental is a physical issue, not a receivable.  The mode
-       comes from the server's billing registry; never infer it from a label. */
+    /* A no-rent answer means the rate cells above go grey and disabled: the
+       tools are a physical issue, not a receivable.  The mode comes from the
+       server's billing registry; never infer it from a label.  The rate cells
+       carry no field names — the submit copies their (zero) values into
+       hidden fields — so disabling them can never lose a posting. */
     function syncBilling() {
         var select = document.getElementById('billing_type');
         var mode = select && BILLING[select.value];
@@ -222,13 +231,16 @@
         if (status && mode) status.textContent = mode.status;
         Array.prototype.forEach.call(document.querySelectorAll('.txn-line-rate, .transfer-rate'), function (input) {
             if (free) {
-                if (!input.readOnly) input.dataset.paidRate = input.value;
+                if (!input.classList.contains('rate-off')) input.dataset.paidRate = input.value;
                 input.value = '0';
-            } else if (input.readOnly) {
+            } else if (input.classList.contains('rate-off')) {
                 input.value = input.dataset.paidRate || '';
             }
-            input.readOnly = free;
-            input.setAttribute('aria-label', free ? 'No charge — rate is zero' : 'Rental rate');
+            input.classList.toggle('rate-off', free);
+            // A rate cell stays disabled while its panel is hidden, whatever
+            // the rent type — a hidden panel never posts.
+            input.disabled = free || !!input.closest('.d-none');
+            input.setAttribute('aria-label', free ? 'No rent — rate is zero' : 'Rental rate');
         });
     }
 
@@ -303,175 +315,330 @@
         return document.querySelector('[data-rental-picker="' + entry.picker + '"] select[name="rental_id"]');
     }
 
-    /* ── tool lines (rent out / issue) ──────────────────────────────────── */
-    function serialOptionsFor(toolId) {
-        var tool = TOOLS_BY_ID[String(toolId)];
-        return (tool && tool.serials) || [];
+    /* ── rent-out setup: from where, and to whom ───────────────────────────
+       Steps 1 + 2 of renting out.  The two answers pick the transaction: the
+       store means a create, a site or a customer means a transfer — and To
+       decides the renter type.  The option is found in the registry by kind +
+       renter type, never by a hard-coded key; choosing the transaction
+       directly (tabs / dropdown) answers From/To back the same way. */
+    function rentOutPanel() {
+        return document.getElementById('rentOutSourcePanel');
     }
 
-    function buildLineRow() {
-        var row = document.createElement('div');
-        row.className = 'tool-txn-line';
-        row.innerHTML =
-            '<div class="row g-2 align-items-end">' +
-            '  <div class="col-md-5">' +
-            '    <label class="form-label small fw-semibold">Tool (in store)</label>' +
-            '    <select class="form-select txn-line-tool" required><option value=""></option></select>' +
-            '  </div>' +
-            '  <div class="col-4 col-md-2">' +
-            '    <label class="form-label small">Quantity</label>' +
-            '    <input type="number" class="form-control txn-line-qty" min="0.1" step="0.1" placeholder="Qty">' +
-            '  </div>' +
-            '  <div class="col-4 col-md-2">' +
-            '    <label class="form-label small">Rate</label>' +
-            '    <input type="number" class="form-control txn-line-rate" min="0" step="0.01" placeholder="Saved rate">' +
-            '  </div>' +
-            '  <div class="col-4 col-md-2 d-flex align-items-end">' +
-            '    <button type="button" class="btn btn-sm btn-outline-danger txn-line-remove" title="Remove item">' +
-            '      <i class="fas fa-trash" aria-hidden="true"></i><span class="visually-hidden">Remove</span>' +
-            '    </button>' +
-            '  </div>' +
-            '  <div class="col-12">' +
-            '    <div class="small text-muted txn-line-avail"></div>' +
-            '    <select class="form-select form-select-sm txn-line-serials mt-1 d-none" multiple size="3" aria-label="Individual pieces to issue"></select>' +
-            '  </div>' +
-            '  <div class="col-12">' +
-            '    <input type="text" class="form-control form-control-sm txn-line-note" placeholder="Condition / remarks (optional)">' +
-            '  </div>' +
-            '  <input type="hidden" class="txn-line-id">' +
-            '  <input type="hidden" class="txn-line-ids">' +
-            '  <input type="hidden" class="txn-line-tool-hidden">' +
-            '  <input type="hidden" class="txn-line-note-hidden">' +
-            '</div>';
-
-        var toolSelect = row.querySelector('.txn-line-tool');
-        TOOLS.forEach(function (tool) {
-            var option = document.createElement('option');
-            option.value = String(tool.id);
-            option.textContent = tool.name + (tool.code ? ' (' + tool.code + ')' : '') +
-                ' — ' + tool.availableQty + ' available';
-            option.setAttribute('data-avail', String(tool.availableQty));
-            option.setAttribute('data-rate', String(tool.rate || 0));
-            toolSelect.appendChild(option);
-        });
-        toolSelect.addEventListener('change', function () { onLineToolChange(row); });
-        row.querySelector('.txn-line-qty').addEventListener('input', function () { validateLine(row); });
-        row.querySelector('.txn-line-serials').addEventListener('change', function () { onLineSerialsChange(row); });
-        row.querySelector('.txn-line-remove').addEventListener('click', function () {
-            row.remove();
-            if (!document.querySelectorAll('#lineItemsContainer .tool-txn-line').length) addLineRow();
-        });
-        return row;
+    function rentOutFrom() {
+        var checked = document.querySelector('input[name="rentout_from"]:checked');
+        return checked ? checked.value : 'store';
     }
 
-    function onLineToolChange(row) {
-        var select = row.querySelector('.txn-line-tool');
-        var tool = TOOLS_BY_ID[String(select.value)];
-        var avail = row.querySelector('.txn-line-avail');
-        var serialBox = row.querySelector('.txn-line-serials');
-        var rateInput = row.querySelector('.txn-line-rate');
-        var chosen = tool ? serialOptionsFor(tool.id) : [];
-        serialBox.innerHTML = '';
-        chosen.forEach(function (serial) {
-            var option = document.createElement('option');
-            option.value = String(serial.id);
-            option.textContent = serial.serial_number + ' (' + (serial.condition || 'good') + ')';
-            serialBox.appendChild(option);
+    function rentOutTo() {
+        var checked = document.querySelector('input[name="rentout_to"]:checked');
+        return checked ? checked.value : 'external';
+    }
+
+    function rentOutFromLocType() {
+        var checked = document.querySelector('input[name="rentout_from"]:checked');
+        return checked ? (checked.getAttribute('data-loc-type') || '') : '';
+    }
+
+    function rentOutFromRadio(value) {
+        return document.querySelector('input[name="rentout_from"][value="' + value + '"]');
+    }
+
+    function rentOutToRadio(value) {
+        return document.querySelector('input[name="rentout_to"][value="' + value + '"]');
+    }
+
+    function retargetRentOut() {
+        if (!typeSelect) return;
+        var wantKind = rentOutFrom() === 'store' ? 'create' : 'transfer';
+        var wantRenter = rentOutTo();
+        var target = null;
+        TYPES.forEach(function (option) {
+            if (option.kind === wantKind && option.renter_type === wantRenter) target = option;
         });
-        serialBox.classList.toggle('d-none', !chosen.length);
-        if (tool) {
-            avail.textContent = 'In store: ' + tool.availableQty + ' ' + (tool.unit || '') +
-                (tool.serials.length ? ' · ' + tool.serials.length + ' marked piece(s)' : '');
-            if (rateInput && !rateInput.value) rateInput.value = tool.rate || '';
-        } else {
-            avail.textContent = '';
+        if (!target) return;
+        if (typeSelect.value !== target.key) typeSelect.value = target.key;
+        activeGroup = target.group;
+        paintGroupTabs();
+        filterTypeOptions();
+        applyPanels();
+    }
+
+    function syncRentOutRadios() {
+        var panel = rentOutPanel();
+        if (!panel || panel.classList.contains('d-none')) return;
+        var entry = currentEntry();
+        if (!entry) return;
+        var fromRadio = null;
+        if (entry.kind === 'create') {
+            fromRadio = rentOutFromRadio('store');
+        } else if (entry.kind === 'transfer') {
+            var current = rentOutFrom();
+            fromRadio = rentOutFromRadio(
+                (current === 'site' || current === 'customer') ? current : defaultRentOutFrom());
         }
-        validateLine(row);
+        if (fromRadio) fromRadio.checked = true;
+        var toRadio = rentOutToRadio(entry.renter_type || rentOutTo());
+        if (toRadio) toRadio.checked = true;
+    }
+
+    /* A transfer picked straight from the dropdown keeps the operator's
+       site/customer answer; with no answer yet, whichever side actually
+       holds tools wins, so the location list is never empty by default. */
+    function defaultRentOutFrom() {
+        var counts = {};
+        SOURCES.forEach(function (source) {
+            counts[source.locType] = (counts[source.locType] || 0) + 1;
+        });
+        var siteRadio = rentOutFromRadio('site');
+        var customerRadio = rentOutFromRadio('customer');
+        var siteLoc = siteRadio ? siteRadio.getAttribute('data-loc-type') : '';
+        var customerLoc = customerRadio ? customerRadio.getAttribute('data-loc-type') : '';
+        var hasSite = !!siteLoc && !!counts[siteLoc];
+        var hasCustomer = !!customerLoc && !!counts[customerLoc];
+        if (hasSite && !hasCustomer) return 'site';
+        if (hasCustomer && !hasSite) return 'customer';
+        return 'site';
+    }
+
+    /* A transfer From a site only offers site locations; From a customer only
+       customer locations.  The location an option stands for is resolved
+       through the transfer sources the server sent, so the filter can never
+       disagree with the data.  The combo widget hides hidden options on its
+       own; clearing the select through a change event keeps its visible
+       label and the holder list in sync. */
+    function transferSourceLocType(sourceKey) {
+        for (var i = 0; i < SOURCES.length; i++) {
+            if (String(SOURCES[i].key) === String(sourceKey)) return SOURCES[i].locType || '';
+        }
+        return '';
+    }
+
+    function syncTransferLocationFilter() {
+        var select = document.getElementById('transferSourceSelect');
+        if (!select) return;
+        var want = rentOutFromLocType();
+        Array.prototype.forEach.call(select.options, function (option) {
+            if (!option.value) { option.hidden = false; return; }
+            var loc = option.getAttribute('data-loc-type') || transferSourceLocType(option.value);
+            option.hidden = !!want && !!loc && loc !== want;
+        });
+        var current = select.options[select.selectedIndex];
+        if (current && current.value && current.hidden) {
+            select.value = '';
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+    }
+
+    /* ── store tools: searchable tick list → excel-style selected rows ────
+       Step 3 of renting out from the store.  Every issuable tool is listed
+       with a checkbox and a search box; each tick adds one excel-style row
+       (tool, pieces / serial, qty, rate).  One row per tool, in tick order. */
+    function storeToolById(toolId) {
+        return TOOLS_BY_ID[String(toolId)];
+    }
+
+    function storeSelectedIds() {
+        var ids = {};
+        Array.prototype.forEach.call(
+            document.querySelectorAll('#storeSelectedRows .store-line-row'), function (row) {
+                ids[String(row.getAttribute('data-tool-id'))] = true;
+            });
+        return ids;
+    }
+
+    function renderStoreToolList() {
+        var list = document.getElementById('storeToolList');
+        var search = document.getElementById('storeToolSearch');
+        if (!list) return;
+        var query = search ? search.value.trim().toLowerCase() : '';
+        var selected = storeSelectedIds();
+        list.innerHTML = '';
+        var shown = 0;
+        TOOLS.forEach(function (tool) {
+            var haystack = ((tool.name || '') + ' ' + (tool.code || '') + ' ' +
+                (tool.categoryName || '')).toLowerCase();
+            if (query && haystack.indexOf(query) === -1) return;
+            shown++;
+            var row = document.createElement('label');
+            row.className = 'store-tool-row';
+            var box = document.createElement('input');
+            box.type = 'checkbox';
+            box.className = 'form-check-input store-tool-check';
+            box.value = String(tool.id);
+            box.checked = !!selected[String(tool.id)];
+            box.setAttribute('aria-label', 'Select ' + tool.name);
+            box.addEventListener('change', function () {
+                if (box.checked) addStoreRow(tool.id);
+                else removeStoreRow(tool.id);
+            });
+            var name = document.createElement('span');
+            name.innerHTML = '<strong>' + escapeHtml(tool.name) + '</strong>' +
+                (tool.code ? ' <small class="text-muted">(' + escapeHtml(tool.code) + ')</small>' : '') +
+                (tool.categoryName && tool.categoryName !== tool.name
+                    ? '<br><small class="text-muted">' + escapeHtml(tool.categoryName) + '</small>' : '');
+            var meta = document.createElement('span');
+            meta.className = 'store-tool-meta small text-muted';
+            meta.textContent = String(tool.availableQty) + ' ' + (tool.unit || 'pcs') +
+                ' in store · rate ' + (tool.rate || 0);
+            row.appendChild(box);
+            row.appendChild(name);
+            row.appendChild(meta);
+            list.appendChild(row);
+        });
+        if (!shown) {
+            list.innerHTML = '<div class="small text-muted p-2">' +
+                (TOOLS.length ? 'No tool matches this search.' : 'Nothing is in the store right now.') +
+                '</div>';
+        }
+        updateStoreCount();
+    }
+
+    function updateStoreCount() {
+        var node = document.getElementById('storeToolCount');
+        if (!node) return;
+        var total = TOOLS.length;
+        var count = document.querySelectorAll('#storeSelectedRows .store-line-row').length;
+        node.textContent = total ? (count + ' of ' + total + ' ticked') : 'No tools in store';
+    }
+
+    function addStoreRow(toolId) {
+        var tool = storeToolById(toolId);
+        var tbody = document.getElementById('storeSelectedRows');
+        if (!tool || !tbody) return;
+        if (tbody.querySelector('.store-line-row[data-tool-id="' + tool.id + '"]')) return;
+        var row = document.createElement('tr');
+        row.className = 'store-line-row';
+        row.setAttribute('data-tool-id', String(tool.id));
+        row.innerHTML =
+            '<td class="store-line-idx"></td>' +
+            '<td><strong>' + escapeHtml(tool.name) + '</strong>' +
+            (tool.code ? '<br><small class="text-muted">' + escapeHtml(tool.code) + '</small>' : '') +
+            '<br><small class="text-muted">' + escapeHtml(String(tool.availableQty)) + ' ' +
+            escapeHtml(tool.unit || 'pcs') + ' in store</small></td>' +
+            '<td class="store-line-pieces"></td>' +
+            '<td><input type="number" class="form-control form-control-sm store-line-qty" min="0.1" step="0.1" max="' +
+            escapeHtml(String(tool.availableQty)) + '" placeholder="Qty" aria-label="Quantity of ' +
+            escapeHtml(tool.name) + '"></td>' +
+            '<td><input type="number" class="form-control form-control-sm txn-line-rate" min="0" step="0.01" value="' +
+            escapeHtml(String(tool.rate == null ? '' : tool.rate)) + '" aria-label="Rate for ' +
+            escapeHtml(tool.name) + '"></td>' +
+            '<td class="col-action"><button type="button" class="btn btn-sm btn-outline-danger store-line-remove" ' +
+            'title="Remove" aria-label="Remove ' + escapeHtml(tool.name) + '">' +
+            '<i class="fas fa-times" aria-hidden="true"></i></button></td>';
+        var piecesCell = row.querySelector('.store-line-pieces');
+        var serials = tool.serials || [];
+        if (serials.length) {
+            var serialBox = document.createElement('select');
+            serialBox.className = 'form-select form-select-sm store-line-serials';
+            serialBox.multiple = true;
+            serialBox.size = 2;
+            serialBox.setAttribute('aria-label', 'Pieces of ' + tool.name);
+            serials.forEach(function (serial) {
+                var option = document.createElement('option');
+                option.value = String(serial.id);
+                option.textContent = serial.serial_number + ' (' + (serial.condition || 'good') + ')';
+                serialBox.appendChild(option);
+            });
+            serialBox.addEventListener('change', function () { onStoreSerialsChange(row); });
+            piecesCell.appendChild(serialBox);
+        } else {
+            piecesCell.innerHTML = '<span class="small text-muted">Qty only</span>';
+        }
+        row.querySelector('.store-line-remove').addEventListener('click', function () {
+            removeStoreRow(tool.id);
+        });
+        tbody.appendChild(row);
+        renumberStoreRows();
+        updateStoreCount();
+        toggleStoreEmpty();
         syncBilling();
     }
 
-    function onLineSerialsChange(row) {
-        var serialBox = row.querySelector('.txn-line-serials');
-        var count = serialBox ? serialBox.selectedOptions.length : 0;
-        var qty = row.querySelector('.txn-line-qty');
-        if (count > 0 && qty) {
-            qty.value = String(count);
-            qty.readOnly = true;
-        } else if (qty) {
-            qty.readOnly = false;
-        }
-        validateLine(row);
+    function removeStoreRow(toolId) {
+        var tbody = document.getElementById('storeSelectedRows');
+        if (!tbody) return;
+        var row = tbody.querySelector('.store-line-row[data-tool-id="' + toolId + '"]');
+        if (row) row.remove();
+        var box = document.querySelector('#storeToolList .store-tool-check[value="' + toolId + '"]');
+        if (box) box.checked = false;
+        renumberStoreRows();
+        updateStoreCount();
+        toggleStoreEmpty();
     }
 
-    function validateLine(row) {
-        var toolSelect = row.querySelector('.txn-line-tool');
-        var qty = row.querySelector('.txn-line-qty');
-        var avail = row.querySelector('.txn-line-avail');
-        row.dataset.invalid = '';
-        if (!toolSelect || !toolSelect.value) return;
-        var tool = TOOLS_BY_ID[String(toolSelect.value)];
-        if (!tool) return;
-        var qtyValue = parseFloat(qty.value || '0');
-        var serialBox = row.querySelector('.txn-line-serials');
-        var serialCount = serialBox ? serialBox.selectedOptions.length : 0;
-        if (serialCount > qtyValue + 0.001 || qtyValue > tool.availableQty + 0.001) {
-            row.dataset.invalid = '1';
-            if (avail) {
-                avail.textContent = 'Only ' + tool.availableQty + ' available in store.';
-                avail.classList.add('text-danger');
-            }
-        } else if (avail) {
-            avail.classList.remove('text-danger');
+    function renumberStoreRows() {
+        Array.prototype.forEach.call(
+            document.querySelectorAll('#storeSelectedRows .store-line-row'), function (row, index) {
+                var cell = row.querySelector('.store-line-idx');
+                if (cell) cell.textContent = String(index + 1);
+            });
+    }
+
+    function toggleStoreEmpty() {
+        var empty = document.getElementById('storeSelectedEmpty');
+        var sheet = document.getElementById('storeSelectedSheet');
+        var hasRows = !!document.querySelector('#storeSelectedRows .store-line-row');
+        if (empty) empty.classList.toggle('d-none', hasRows);
+        if (sheet) sheet.classList.toggle('d-none', !hasRows);
+    }
+
+    function onStoreSerialsChange(row) {
+        var serialBox = row.querySelector('.store-line-serials');
+        var qty = row.querySelector('.store-line-qty');
+        if (!serialBox || !qty) return;
+        var count = serialBox.selectedOptions.length;
+        if (count > 0) {
+            qty.value = String(count);
+            qty.readOnly = true;
+        } else {
+            qty.readOnly = false;
         }
     }
 
     function validateLines() {
-        var lines = document.querySelectorAll('#lineItemsContainer .tool-txn-line');
+        var rows = document.querySelectorAll('#storeSelectedRows .store-line-row');
+        if (!rows.length) return ['Tick at least one tool from the store list.'];
         var messages = [];
-        var claimed = {};
-        Array.prototype.forEach.call(lines, function (row) {
-            var toolSelect = row.querySelector('.txn-line-tool');
-            if (!toolSelect || !toolSelect.value) return;
-            var tool = TOOLS_BY_ID[String(toolSelect.value)];
-            var qty = parseFloat(row.querySelector('.txn-line-qty').value || '0');
-            var serialBox = row.querySelector('.txn-line-serials');
+        Array.prototype.forEach.call(rows, function (row) {
+            var tool = storeToolById(row.getAttribute('data-tool-id'));
+            if (!tool) return;
+            var qtyInput = row.querySelector('.store-line-qty');
+            var qty = parseFloat((qtyInput && qtyInput.value) || '0');
+            var serialBox = row.querySelector('.store-line-serials');
             var serialCount = serialBox ? serialBox.selectedOptions.length : 0;
-            if (!qty && !serialCount) messages.push('Enter a quantity or tick pieces for ' + tool.name + '.');
-            if (qty > tool.availableQty + 0.001) messages.push('Only ' + tool.availableQty + ' of ' + tool.name + ' is in store.');
-            if (serialCount > qty + 0.001 && qty > 0) messages.push('More pieces ticked than the quantity for ' + tool.name + '.');
-            if (serialBox) {
-                Array.prototype.forEach.call(serialBox.selectedOptions, function (option) {
-                    if (claimed[option.value]) {
-                        messages.push('Piece ' + option.textContent + ' is ticked twice.');
-                    }
-                    claimed[option.value] = true;
-                });
+            if (!qty && !serialCount) {
+                messages.push('Enter a quantity for ' + tool.name + ' — or tick its pieces.');
+            } else if (qty > tool.availableQty + 0.001) {
+                messages.push('Only ' + tool.availableQty + ' of ' + tool.name + ' is in store.');
+            } else if (serialCount && Math.abs(serialCount - qty) > 0.001) {
+                messages.push('Quantity must match the ticked pieces for ' + tool.name + '.');
             }
         });
         return messages;
     }
 
     function collectLineFields() {
-        var container = document.getElementById('lineItemsContainer');
-        if (!container) return;
-        Array.prototype.forEach.call(
-            container.querySelectorAll('.txn-line-tool-hidden, .txn-line-qty-hidden, .txn-line-rate-hidden, .txn-line-ids-hidden, .txn-line-note-hidden'),
-            function (node) { node.remove(); });
-        var lines = container.querySelectorAll('.tool-txn-line');
-        Array.prototype.forEach.call(lines, function (row) {
-            var toolSelect = row.querySelector('.txn-line-tool');
-            if (!toolSelect || !toolSelect.value) return;
-            var serialBox = row.querySelector('.txn-line-serials');
-            var serialIds = serialBox ? Array.prototype.map.call(serialBox.selectedOptions, function (o) { return o.value; }) : [];
-            addHidden(row, 'tool_id[]', toolSelect.value, 'txn-line-tool-hidden');
+        var tbody = document.getElementById('storeSelectedRows');
+        if (!tbody) return;
+        Array.prototype.forEach.call(tbody.querySelectorAll('.store-post'), function (node) {
+            node.remove();
+        });
+        Array.prototype.forEach.call(tbody.querySelectorAll('.store-line-row'), function (row) {
+            var serialBox = row.querySelector('.store-line-serials');
+            var serialIds = serialBox
+                ? Array.prototype.map.call(serialBox.selectedOptions, function (o) { return o.value; })
+                : [];
+            var qtyInput = row.querySelector('.store-line-qty');
+            var rateInput = row.querySelector('.txn-line-rate');
+            var cell = row.querySelector('td');
+            addHidden(cell, 'tool_id[]', row.getAttribute('data-tool-id'), 'store-post');
             // qty[] and rate[] are emitted for every tool_id[] row, even when
             // blank: the create route zips the three lists positionally and
             // tolerates a blank value, but not a missing slot.
-            addHidden(row, 'qty[]', row.querySelector('.txn-line-qty').value, 'txn-line-qty-hidden');
-            addHidden(row, 'rate[]', row.querySelector('.txn-line-rate').value, 'txn-line-rate-hidden');
-            addHidden(row, 'row_serial_ids[]', serialIds.join(','), 'txn-line-ids-hidden');
-            var note = row.querySelector('.txn-line-note').value;
-            addHidden(row, 'item_notes[]', note, 'txn-line-note-hidden');
+            addHidden(cell, 'qty[]', (qtyInput && qtyInput.value) || '', 'store-post');
+            addHidden(cell, 'rate[]', (rateInput && rateInput.value) || '', 'store-post');
+            addHidden(cell, 'row_serial_ids[]', serialIds.join(','), 'store-post');
         });
     }
 
@@ -485,12 +652,6 @@
         return input;
     }
 
-    function addLineRow() {
-        var container = document.getElementById('lineItemsContainer');
-        if (!container) return;
-        container.appendChild(buildLineRow());
-    }
-
     /* ── transfer: holders and the lines moving out ─────────────────────── */
     function renderTransferHolders() {
         var list = document.getElementById('transferHoldersList');
@@ -498,6 +659,14 @@
         if (!list || !select) return;
         list.innerHTML = '';
         var key = select.value;
+        var current = select.options[select.selectedIndex];
+        if (current && current.value && current.hidden) {
+            // The From filter just hid this location: drop the stale choice
+            // instead of showing holders the operator can no longer pick.
+            select.value = '';
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+            return;
+        }
         var selected = SOURCES.filter(function (source) { return String(source.key) === String(key); })[0];
         var matching = selected ? SOURCES.filter(function (source) {
             return source.locationKey === selected.locationKey;
@@ -547,17 +716,21 @@
         syncTransferSettlement();
         if (!sources.length) {
             container.textContent = 'Tick a holder to see the tools at this site / customer.';
+            updateTransferCount();
             return;
         }
         var wrap = document.createElement('div');
         wrap.className = 'table-responsive';
         wrap.innerHTML = '<table class="table table-sm table-bordered table-striped align-middle tool-txn-sheet">' +
             '<caption class="caption-top">Tools currently at ' + escapeHtml(sources[0].holder) +
-            ' — edit the Move qty column; zero leaves a tool here.</caption>' +
-            '<thead><tr><th scope="col">#</th><th scope="col">Rental</th><th scope="col">Tool</th>' +
-            '<th scope="col">At source</th><th scope="col">Move qty</th>' +
-            '<th scope="col">New rate (PKR)</th><th scope="col">Exact pieces</th>' +
-            '<th scope="col">Action</th></tr></thead><tbody></tbody></table>';
+            ' — tick the rows to move, unticked rows stay here.</caption>' +
+            '<thead><tr><th scope="col" class="col-pick">' +
+            '<input type="checkbox" class="form-check-input transfer-pick-all" checked aria-label="Tick all tools">' +
+            '</th><th scope="col" class="col-idx">#</th><th scope="col" class="col-rental">Rental</th>' +
+            '<th scope="col">Tool</th>' +
+            '<th scope="col" class="col-source">At source</th><th scope="col" class="col-qty">Move qty</th>' +
+            '<th scope="col" class="col-rate">New rate (PKR)</th><th scope="col" class="col-pieces">Exact pieces</th>' +
+            '</tr></thead><tbody></tbody></table>';
         var tbody = wrap.querySelector('tbody');
         var index = 0;
         sources.forEach(function (source) {
@@ -565,17 +738,21 @@
                 index++;
                 var row = document.createElement('tr');
                 row.className = 'transfer-line-row';
+                row.setAttribute('data-search', (source.rentalCode + ' ' + line.name + ' ' +
+                    (line.code || '')).toLowerCase());
                 row.innerHTML =
+                    '<td class="col-pick"><input type="checkbox" class="form-check-input transfer-pick" checked aria-label="Move ' +
+                    escapeHtml(line.name) + '"></td>' +
                     '<td>' + index + '</td><td>' + escapeHtml(source.rentalCode) + '</td>' +
                     '<td><strong>' + escapeHtml(line.name) + '</strong><br><small>' + escapeHtml(line.code) + '</small>' +
                     '<input type="hidden" class="transfer-item-id" value="' + Number(line.itemId) + '"></td>' +
                     '<td>' + Number(line.qty) + ' ' + escapeHtml(line.unit || '') + '</td>' +
                     '<td><input type="number" class="form-control form-control-sm transfer-qty" aria-label="Move quantity of ' +
                     escapeHtml(line.name) + '" min="0" step="0.1" max="' + Number(line.qty) + '" value="' + Number(line.qty) + '"></td>' +
-                    '<td><input type="number" class="form-control form-control-sm transfer-rate" min="0" step="0.01" value="' +
+                    '<td><input type="number" class="form-control form-control-sm transfer-rate" aria-label="New rate for ' +
+                    escapeHtml(line.name) + '" min="0" step="0.01" value="' +
                     Number(line.dailyRate || line.rate || 0) + '"></td>' +
-                    '<td><select class="form-select form-select-sm transfer-serials" multiple size="2" aria-label="Pieces to move"></select></td>' +
-                    '<td><button type="button" class="btn btn-sm btn-outline-danger transfer-remove">Leave here</button></td>';
+                    '<td><select class="form-select form-select-sm transfer-serials" multiple size="2" aria-label="Pieces to move"></select></td>';
                 var serialBox = row.querySelector('.transfer-serials');
                 (line.serials || []).forEach(function (serial) {
                     var option = document.createElement('option');
@@ -589,12 +766,56 @@
                 serialBox.addEventListener('change', function () {
                     if (serialBox.selectedOptions.length) row.querySelector('.transfer-qty').value = serialBox.selectedOptions.length;
                 });
-                row.querySelector('.transfer-remove').addEventListener('click', function () { row.remove(); });
+                row.querySelector('.transfer-pick').addEventListener('change', function () {
+                    updateTransferPickAll();
+                    updateTransferCount();
+                });
                 tbody.appendChild(row);
             });
         });
+        wrap.querySelector('.transfer-pick-all').addEventListener('change', function () {
+            var checked = this.checked;
+            Array.prototype.forEach.call(tbody.querySelectorAll('.transfer-line-row'), function (row) {
+                if (row.style.display === 'none') return; // search-hidden rows keep their tick
+                row.querySelector('.transfer-pick').checked = checked;
+            });
+            updateTransferCount();
+        });
         container.appendChild(wrap);
+        applyTransferSearch();
         syncBilling();
+    }
+
+    function updateTransferPickAll() {
+        var all = document.querySelector('#transferLinesContainer .transfer-pick-all');
+        if (!all) return;
+        var boxes = document.querySelectorAll('#transferLinesContainer .transfer-pick');
+        var ticked = document.querySelectorAll('#transferLinesContainer .transfer-pick:checked');
+        all.checked = boxes.length > 0 && boxes.length === ticked.length;
+    }
+
+    function applyTransferSearch() {
+        var input = document.getElementById('transferLinesSearch');
+        var query = input ? input.value.trim().toLowerCase() : '';
+        Array.prototype.forEach.call(
+            document.querySelectorAll('#transferLinesContainer .transfer-line-row'), function (row) {
+                var hay = row.getAttribute('data-search') || '';
+                row.style.display = (!query || hay.indexOf(query) !== -1) ? '' : 'none';
+            });
+        updateTransferCount();
+    }
+
+    function updateTransferCount() {
+        var node = document.getElementById('transferLinesCount');
+        if (!node) return;
+        var rows = document.querySelectorAll('#transferLinesContainer .transfer-line-row');
+        if (!rows.length) { node.textContent = ''; return; }
+        var ticked = 0;
+        Array.prototype.forEach.call(rows, function (row) {
+            var pick = row.querySelector('.transfer-pick');
+            if (pick && pick.checked) ticked++;
+        });
+        node.textContent = ticked + ' of ' + rows.length + ' ticked to move';
     }
 
     function collectTransferFields() {
@@ -602,6 +823,8 @@
         if (!container) return;
         Array.prototype.forEach.call(container.querySelectorAll('.transfer-post'), function (node) { node.remove(); });
         Array.prototype.forEach.call(container.querySelectorAll('.transfer-line-row'), function (row) {
+            var pick = row.querySelector('.transfer-pick');
+            if (pick && !pick.checked) return; // unticked rows stay at the holder
             var qty = parseFloat(row.querySelector('.transfer-qty').value || '0');
             var itemId = row.querySelector('.transfer-item-id').value;
             if (!qty || qty <= 0) return;
@@ -619,14 +842,36 @@
 
     function validateTransfer() {
         var rows = document.querySelectorAll('#transferLinesContainer .transfer-line-row');
-        if (!rows.length) return ['Tick at least one holder and keep at least one tool line to transfer.'];
-        var moving = 0;
+        var ticked = [];
         Array.prototype.forEach.call(rows, function (row) {
+            var pick = row.querySelector('.transfer-pick');
+            if (!pick || pick.checked) ticked.push(row);
+        });
+        if (!ticked.length) {
+            var select = document.getElementById('transferSourceSelect');
+            var offered = 0;
+            if (select) {
+                Array.prototype.forEach.call(select.options, function (option) {
+                    if (option.value && !option.hidden) offered++;
+                });
+            }
+            if (!offered) {
+                var from = rentOutFrom();
+                var where = from === 'customer' ? 'any customer'
+                    : (from === 'site' ? 'any site' : 'the selected source');
+                return ['No tools are currently out at ' + where +
+                    ' — switch "From where?" above or rent from the store.'];
+            }
+            if (select && !select.value) return ['Choose the current site / holder to transfer from.'];
+            return ['Tick at least one holder and keep at least one tool ticked to transfer.'];
+        }
+        var moving = 0;
+        Array.prototype.forEach.call(ticked, function (row) {
             if (parseFloat(row.querySelector('.transfer-qty').value || '0') > 0) moving++;
         });
-        if (!moving) return ['Enter a quantity for at least one tool to transfer.'];
+        if (!moving) return ['Enter a quantity for at least one ticked tool to transfer.'];
         var errors = [];
-        Array.prototype.forEach.call(rows, function (row) {
+        Array.prototype.forEach.call(ticked, function (row) {
             var qty = Number(row.querySelector('.transfer-qty').value);
             var max = Number(row.querySelector('.transfer-qty').max);
             var serials = row.querySelector('.transfer-serials');
@@ -887,9 +1132,6 @@
     }
 
     function checkLines() {
-        if (!document.querySelector('#lineItemsContainer .tool-txn-line')) {
-            return ['Add at least one tool item.'];
-        }
         return validateLines();
     }
 
@@ -1027,6 +1269,17 @@
         if (submitButton) submitButton.disabled = false;
         setTimeout(function () {
             showError('');
+            // The browser resets native controls; the script-built pickers
+            // (store tick list + rows, transfer holders + rows) reset here.
+            var storeSearch = document.getElementById('storeToolSearch');
+            if (storeSearch) storeSearch.value = '';
+            var transferSearch = document.getElementById('transferLinesSearch');
+            if (transferSearch) transferSearch.value = '';
+            var tbody = document.getElementById('storeSelectedRows');
+            if (tbody) tbody.innerHTML = '';
+            renderStoreToolList();
+            toggleStoreEmpty();
+            renderTransferHolders();
             applyPanels();
         }, 0);
     });
@@ -1046,8 +1299,25 @@
             chooseGroup(tab.getAttribute('data-txn-group'));
         });
     });
-    var addBtn = document.getElementById('addLineBtn');
-    if (addBtn) addBtn.addEventListener('click', addLineRow);
+    Array.prototype.forEach.call(
+        document.querySelectorAll('input[name="rentout_from"], input[name="rentout_to"]'),
+        function (radio) {
+            radio.addEventListener('change', retargetRentOut);
+        });
+    var storeSearch = document.getElementById('storeToolSearch');
+    if (storeSearch) storeSearch.addEventListener('input', renderStoreToolList);
+    var storeSelectVisible = document.getElementById('storeSelectVisibleBtn');
+    if (storeSelectVisible) storeSelectVisible.addEventListener('click', function () {
+        Array.prototype.forEach.call(
+            document.querySelectorAll('#storeToolList .store-tool-check'), function (box) {
+                if (!box.checked) {
+                    box.checked = true;
+                    addStoreRow(box.value);
+                }
+            });
+    });
+    var transferSearch = document.getElementById('transferLinesSearch');
+    if (transferSearch) transferSearch.addEventListener('input', applyTransferSearch);
     var transferSelect = document.getElementById('transferSourceSelect');
     if (transferSelect) transferSelect.addEventListener('change', renderTransferHolders);
     var selectAllHolders = document.getElementById('selectAllTransferHolders');
@@ -1103,7 +1373,8 @@
     paintGroupTabs();
     filterTypeOptions();
     applyPanels();
-    addLineRow();
+    renderStoreToolList();
+    toggleStoreEmpty();
     renderMaintenanceReturn();
     renderDamageSerials();
     renderMaintenanceSend();

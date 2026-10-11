@@ -118,14 +118,14 @@ def rental_eligible(eligible_for: Optional[str], *, pending_tools: float,
 # Billing is a contract, not a display-only dropdown.  ``charges_rent`` drives
 # the page's rate/cash controls and the explicit status shown to the operator.
 BILLING_MODES = (
-    {'key': 'per_day', 'label': 'Per day', 'charges_rent': True,
+    {'key': 'per_day', 'label': 'Full rent — per day', 'charges_rent': True,
      'status': 'Rent charged — payment may be due.'},
-    {'key': 'per_hour', 'label': 'Per hour', 'charges_rent': True,
+    {'key': 'per_hour', 'label': 'Full rent — per hour', 'charges_rent': True,
      'status': 'Rent charged — payment may be due.'},
-    {'key': 'fixed_fee', 'label': 'Fixed fee', 'charges_rent': True,
+    {'key': 'fixed_fee', 'label': 'One rental fee', 'charges_rent': True,
      'status': 'Rent charged — payment may be due.'},
-    {'key': 'no_charge', 'label': 'No charge (contract included)', 'charges_rent': False,
-     'status': 'No charge — no rent due, no cash receipt or payment required.'},
+    {'key': 'no_charge', 'label': 'No rent (adjusted in contract)', 'charges_rent': False,
+     'status': 'No rent — adjusted in contract. No rent due, no cash receipt or payment required.'},
 )
 
 
@@ -158,6 +158,9 @@ MONEY_KINDS = (KIND_PAYMENT, KIND_ADJUSTMENT)
 PANEL_DESTINATION = 'destination'          # who receives (customer / site)
 PANEL_LINES = 'lines'                      # tool lines leaving the store
 PANEL_TERMS = 'terms'                      # billing unit, dates, agreement
+PANEL_RENTOUT_SOURCE = 'rentout_source'    # rent-out setup: where the tools
+                                           # come from (store / site /
+                                           # customer) and who they go to
 PANEL_TRANSFER_SOURCE = 'transfer_source'  # where the tools are now, and the
                                            # settlement of the old holder
 PANEL_RETURN = 'return'                    # outstanding lines coming back
@@ -168,9 +171,10 @@ PANEL_DAMAGE = 'damage'
 PANEL_MAINTENANCE_SEND = 'maintenance_send'
 PANEL_MAINTENANCE_RETURN = 'maintenance_return'
 
-PANELS = (PANEL_DESTINATION, PANEL_LINES, PANEL_TERMS, PANEL_TRANSFER_SOURCE,
-          PANEL_RETURN, PANEL_SETTLEMENT, PANEL_PAYMENT, PANEL_ADJUSTMENT,
-          PANEL_DAMAGE, PANEL_MAINTENANCE_SEND, PANEL_MAINTENANCE_RETURN)
+PANELS = (PANEL_DESTINATION, PANEL_LINES, PANEL_TERMS, PANEL_RENTOUT_SOURCE,
+          PANEL_TRANSFER_SOURCE, PANEL_RETURN, PANEL_SETTLEMENT, PANEL_PAYMENT,
+          PANEL_ADJUSTMENT, PANEL_DAMAGE, PANEL_MAINTENANCE_SEND,
+          PANEL_MAINTENANCE_RETURN)
 
 #: Which rental combo a transaction picks from.  The page finds the picker by
 #: its ``data-rental-picker`` attribute, so the script never names a DOM id.
@@ -240,7 +244,8 @@ TXN_GROUPS = (
                 'kind': KIND_CREATE,
                 'endpoint': 'hdc_tool_rental_create',
                 'renter_type': 'external',
-                'panels': (PANEL_DESTINATION, PANEL_LINES, PANEL_TERMS),
+                'panels': (PANEL_RENTOUT_SOURCE, PANEL_LINES, PANEL_DESTINATION,
+                           PANEL_TERMS),
                 'checks': (CHECK_CUSTOMER, CHECK_LINES),
                 'submit_label': 'Create Rental',
                 'submit_class': 'btn-success',
@@ -254,7 +259,8 @@ TXN_GROUPS = (
                 'kind': KIND_CREATE,
                 'endpoint': 'hdc_tool_rental_create',
                 'renter_type': 'internal',
-                'panels': (PANEL_DESTINATION, PANEL_LINES, PANEL_TERMS),
+                'panels': (PANEL_RENTOUT_SOURCE, PANEL_LINES, PANEL_DESTINATION,
+                           PANEL_TERMS),
                 'checks': (CHECK_PROJECT, CHECK_LINES),
                 'submit_label': 'Issue to Site',
                 'help': 'Move tools to an HDC site or project. It is not an outside rental.',
@@ -267,7 +273,8 @@ TXN_GROUPS = (
                 'kind': KIND_TRANSFER,
                 'endpoint': 'hdc_tool_rental_create',
                 'renter_type': 'internal',
-                'panels': (PANEL_TRANSFER_SOURCE, PANEL_DESTINATION, PANEL_TERMS),
+                'panels': (PANEL_RENTOUT_SOURCE, PANEL_TRANSFER_SOURCE,
+                           PANEL_DESTINATION, PANEL_TERMS),
                 'checks': (CHECK_TRANSFER, CHECK_PROJECT),
                 'submit_label': 'Complete Transfer',
                 'submit_class': 'btn-warning',
@@ -281,7 +288,8 @@ TXN_GROUPS = (
                 'kind': KIND_TRANSFER,
                 'endpoint': 'hdc_tool_rental_create',
                 'renter_type': 'external',
-                'panels': (PANEL_TRANSFER_SOURCE, PANEL_DESTINATION, PANEL_TERMS),
+                'panels': (PANEL_RENTOUT_SOURCE, PANEL_TRANSFER_SOURCE,
+                           PANEL_DESTINATION, PANEL_TERMS),
                 'checks': (CHECK_TRANSFER, CHECK_CUSTOMER),
                 'submit_label': 'Transfer to Customer',
                 'submit_class': 'btn-warning',

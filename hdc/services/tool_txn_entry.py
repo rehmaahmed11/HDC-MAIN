@@ -50,7 +50,7 @@ from hdc.services.tool_rental import (
     known_tool_customers, recalc_rental_totals, record_tool_scrap,
     return_serials_from_rental, tool_available_for_integrity, get_out_of_store_serials,
 )
-from hdc.services.tool_tracking import tool_ledger
+from hdc.services.tool_tracking import LOC_CUSTOMER, LOC_OWN_PROJECT, tool_ledger
 from hdc.utils.dates import _pkt_now_naive, _pkt_today
 from hdc.utils.format import _flt
 
@@ -450,6 +450,11 @@ def txn_form_context():
         'store_label': STORE_LABEL,
         'maintenance_label': MAINTENANCE_LABEL,
         'scrap_label': SCRAP_LABEL,
+        # The rent-out setup question ("From where?") filters the transfer
+        # locations by the holding type the ledger itself uses — a site is an
+        # own-project holding, a customer an outside holding.
+        'rentout_site_loc': LOC_OWN_PROJECT,
+        'rentout_customer_loc': LOC_CUSTOMER,
     }
 
 
