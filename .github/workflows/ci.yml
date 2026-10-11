@@ -57,11 +57,15 @@ jobs:
       - name: Drive the tool transaction page in a DOM (jsdom)
         # tests/test_tool_txn_pieces.py drives the real rendered page with the
         # real scripts to pin that Pieces / serial is ticked, not ctrl-clicked.
-        # Without jsdom those cases skip instead of failing, so an npm hiccup
-        # here never turns into a red build.
+        # An npm hiccup only skips those cases; an install that lands but does
+        # not load is a real failure, so the harness can never stop running
+        # unnoticed.
         run: |
-          npm ci --prefix tests --no-audit --no-fund \
-            || echo "jsdom unavailable — the pieces DOM harness will be skipped"
+          if npm ci --prefix tests --no-audit --no-fund; then
+            node -e "require(require.resolve('jsdom', {paths:['./tests']}))"
+          else
+            echo "jsdom unavailable — the pieces DOM harness will be skipped"
+          fi
           python -m unittest tests.test_tool_txn_pieces -v
 
       - name: Run fresh-database smoke flow

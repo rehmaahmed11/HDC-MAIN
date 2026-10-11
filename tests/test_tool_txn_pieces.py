@@ -78,19 +78,31 @@ TICK_CLASS = 'pieces-pick-box'
 TICK_FIELDS = ('row_serial_ids[]', 'transfer_serial_ids_', 'return_serial_ids_')
 
 
-def _jsdom_available() -> bool:
-    """Whether the DOM harness can run here (node + jsdom, resolved from tests/)."""
+def _jsdom_probe() -> tuple[bool, str]:
+    """Whether the DOM harness can run here, and why not when it cannot.
+
+    ``jsdom`` is *loaded*, not just resolved, so a jsdom whose engine range
+    does not cover this Node (pinned in ``tests/package.json``, installed with
+    ``npm ci --prefix tests``) skips with the real reason instead of failing
+    the suite for an environment the app cannot control.
+    """
     if shutil.which('node') is None:
-        return False
+        return False, 'node is not installed'
     try:
-        probe = subprocess.run(['node', '-e', 'require.resolve("jsdom")'],
-                               cwd=TESTS_DIR, capture_output=True, text=True, timeout=60)
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return probe.returncode == 0
+        probe = subprocess.run(['node', '-e', 'require("jsdom")'], cwd=TESTS_DIR,
+                               capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, str(exc)
+    if probe.returncode == 0:
+        return True, ''
+    lines = [line.strip() for line in (probe.stderr or probe.stdout or '').splitlines()
+             if line.strip()]
+    errors = [line for line in lines if line.startswith(('Error:', 'TypeError:'))]
+    detail = errors[0] if errors else (lines[0] if lines else '')
+    return False, detail or 'jsdom could not be loaded'
 
 
-JSDOM_AVAILABLE = _jsdom_available()
+JSDOM_AVAILABLE, JSDOM_DETAIL = _jsdom_probe()
 
 
 def _read(path: str) -> str:
@@ -239,8 +251,8 @@ class PiecesPickerTestCase(unittest.TestCase):
         if self._results is not None:
             return self._results
         if not JSDOM_AVAILABLE:
-            self.skipTest('node + jsdom are needed to drive the rendered page '
-                          '(run: npm ci --prefix tests)')
+            self.skipTest('the DOM harness needs node + jsdom to drive the rendered '
+                          'page (run: npm ci --prefix tests) — ' + JSDOM_DETAIL)
         result = subprocess.run(
             ['node', HARNESS, REPO_ROOT, self.page_file, self.context_file],
             capture_output=True, text=True, timeout=180, cwd=TESTS_DIR,
