@@ -19,6 +19,12 @@
        class="tools-subnav-link {% if tools_active == 'rentals' %}active{% endif %}">
         <i class="fas fa-file-contract me-1"></i>Rentals
     </a>
+    {# The central uniform transaction form.  Everyone who can see the Tools
+       section sees the tab; the page itself gates who may record. #}
+    <a href="{{ url_for('hdc_tool_txn') }}"
+       class="tools-subnav-link {% if tools_active == 'transaction' %}active{% endif %}">
+        <i class="fas fa-arrow-right-arrow-left me-1"></i>New Transaction
+    </a>
     <a href="{{ url_for('hdc_tool_rental_inventory') }}"
        class="tools-subnav-link {% if tools_active == 'inventory' %}active{% endif %}">
         <i class="fas fa-warehouse me-1"></i>Inventory
