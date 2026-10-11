@@ -1381,12 +1381,152 @@
         return_items: collectReturnFields
     };
 
-    /* ── submit ─────────────────────────────────────────────────────────── */
-    form.addEventListener('submit', function (event) {
-        if (submitted) {
-            event.preventDefault();
+    /* ── posting: the entry goes in the background, the dialogue box reports it ──
+       A refused entry must leave the form exactly as the operator filled it in,
+       so the browser never navigates away from it. The post is sent with fetch;
+       the server answers with the outcome and its messages (see
+       _txn_post_answers_as_data in hdc/routes/tool_rental.py), and that answer
+       decides what the entry-result dialogue box says:
+         saved      → "Entry Saved"; OK clears the form for the next entry
+         duplicate  → "Already Recorded"; OK clears the form as well
+         failed     → "Entry Not Saved"; the form stays as it is, fix the options
+         notice     → nothing was posted; the form stays as it is              */
+    var SAVING_LABEL = 'Saving…';
+    var NOT_SAVED_NOTE = 'Everything you entered is still on the form. Fix the options listed, then save again.';
+
+    function setSaving(saving) {
+        if (submitButton) {
+            submitButton.disabled = saving;
+            submitButton.classList.toggle('disabled', saving);
+        }
+        // Clear would wipe the entry that is on its way; it waits for the answer.
+        var reset = document.getElementById('txnResetButton');
+        if (reset) reset.disabled = saving;
+        if (submitLabel) {
+            var entry = currentEntry();
+            submitLabel.textContent = saving ? SAVING_LABEL
+                : (entry ? entry.submit_label : (submitLabel.textContent || 'Save'));
+        }
+    }
+
+    /* Run `then` once the operator has acknowledged the dialogue box (or at
+       once when the dialogue box cannot be shown). */
+    function whenAcknowledged(then) {
+        var node = document.getElementById('hdcResultDialog');
+        if (!then) return;
+        if (!node || !window.bootstrap) { then(); return; }
+        node.addEventListener('hidden.bs.modal', function once() {
+            node.removeEventListener('hidden.bs.modal', once);
+            then();
+        });
+    }
+
+    function showResult(result, then) {
+        if (!window.hdcDialog) {
+            window.alert([result.title].concat(result.lines || []).join('\n'));
+            if (then) then();
             return;
         }
+        hdcDialog.show({
+            kind: result.kind,
+            title: result.title,
+            lines: result.lines,
+            note: result.note,
+            cta: result.cta
+        });
+        whenAcknowledged(then);
+    }
+
+    function clearForNextEntry() {
+        // A recorded entry changes the stock and the holders on the page, and
+        // its reference is spent, so the page is loaded again for the next one.
+        window.location.reload();
+    }
+
+    function finishPost(status, answer) {
+        var outcome = (answer && answer.outcome) || '';
+        var lines = ((answer && answer.items) || []).map(function (item) { return item.text; });
+
+        if (outcome === 'saved') {
+            showResult({
+                kind: 'success',
+                title: 'Entry Saved',
+                lines: lines.length ? lines : ['The transaction was recorded.'],
+                note: 'The form is cleared for the next entry.',
+                cta: 'OK'
+            }, clearForNextEntry);
+            return;
+        }
+        if (outcome === 'duplicate') {
+            showResult({
+                kind: 'warning',
+                title: 'Already Recorded',
+                lines: lines,
+                note: 'The form is cleared for the next entry.',
+                cta: 'OK'
+            }, clearForNextEntry);
+            return;
+        }
+
+        // Nothing was recorded: unlock the form and keep every entry on it.
+        submitted = false;
+        setSaving(false);
+        if (outcome === 'signed_out') {
+            showResult({
+                kind: 'danger',
+                title: 'Entry Not Saved',
+                lines: ['Your session has ended, so this entry was not recorded.'],
+                note: 'Log in again in another tab, then come back and save. The form has not been cleared.',
+                cta: 'Fix Entry'
+            });
+            return;
+        }
+        if (!lines.length) {
+            if (status === 0) {
+                lines = ['The server could not be reached. Nothing was recorded; check the connection and save again.'];
+            } else if (status === 403) {
+                lines = ['You do not have permission to record this entry.'];
+            } else if (status >= 400) {
+                lines = ['The server refused this entry (error ' + status + '). Nothing was recorded.'];
+            } else {
+                lines = ['The server did not confirm this entry, so nothing was recorded.'];
+            }
+        }
+        showError(lines[0]);
+        showResult({
+            kind: outcome === 'failed' || !outcome ? 'danger' : 'warning',
+            title: 'Entry Not Saved',
+            lines: lines,
+            note: NOT_SAVED_NOTE,
+            cta: outcome === 'failed' || !outcome ? 'Fix Entry' : 'OK'
+        });
+    }
+
+    function postEntry(action) {
+        fetch(action, {
+            method: 'POST',
+            body: new FormData(form),
+            credentials: 'same-origin',
+            // The header asks the server for the outcome as data, not a redirect.
+            headers: { 'Accept': 'application/json', 'X-HDC-Entry-Dialog': '1' }
+        }).then(function (response) {
+            // The server's answer is JSON; anything else (an error page) is
+            // reported by its status below.
+            return response.json().catch(function () { return null; }).then(function (answer) {
+                return { status: response.status, answer: answer };
+            });
+        }, function () {
+            return { status: 0, answer: null };
+        }).then(function (result) {
+            finishPost(result.status, result.answer);
+        });
+    }
+
+    /* ── submit ─────────────────────────────────────────────────────────── */
+    form.addEventListener('submit', function (event) {
+        // Every save is sent by postEntry(); the browser never submits the form.
+        event.preventDefault();
+        if (submitted) return;
         var entry = currentEntry();
         if (!entry) return;
         showError('');
@@ -1397,8 +1537,16 @@
             if (check) problems = problems.concat(check() || []);
         });
         if (problems.length) {
-            event.preventDefault();
             showError(problems[0]);
+            showResult({
+                kind: 'danger',
+                title: 'Entry Not Saved',
+                lines: problems.length === 1
+                    ? ['Fix this before saving:', problems[0]]
+                    : [problems.length + ' things need attention before saving:'].concat(problems),
+                note: NOT_SAVED_NOTE,
+                cta: 'Fix Entry'
+            });
             return;
         }
 
@@ -1417,18 +1565,11 @@
         });
 
         if (entry.confirm && typeof window.confirm === 'function') {
-            if (!window.confirm(entry.confirm)) {
-                event.preventDefault();
-                return;
-            }
+            if (!window.confirm(entry.confirm)) return;
         }
         submitted = true;
-        if (submitButton) {
-            submitButton.disabled = true;
-            submitButton.classList.add('disabled');
-            var caption = submitButton.querySelector('span');
-            if (caption) caption.textContent = 'Saving…';
-        }
+        setSaving(true);
+        postEntry(form.action);
     });
 
     form.addEventListener('reset', function () {

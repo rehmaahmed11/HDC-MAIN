@@ -157,9 +157,12 @@ function collectFields() {
   });
   return fields;
 }
-function submit() {
+async function submit() {
   const form = document.getElementById('toolTxnForm');
   form.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+  // The entry is posted in the background. The stubbed server below refuses
+  // it, so let that answer land (and the page unlock) before the next step.
+  await flush();
   return { action: form.getAttribute('action'), fields: collectFields() };
 }
 /* The page locks its submit button on the first submit (a double click must
@@ -258,7 +261,14 @@ const results = {};
   // The ticked pieces are what the form posts, under the existing field name.
   selectValue(document.getElementById('txnType'), 'rent_out_customer');
   document.getElementById('txnCustomerNameInput').value = 'Harness Customer';
-  results.store = submit();
+  results.store = await submit();
+  // The stubbed server refuses this post. A refused entry is kept: the ticked
+  // pieces stay on the form, the submit button is unlocked for the fix, and the
+  // entry-result dialogue box says it was not saved.
+  equal(tickedPieces(storeCell).length, 3, 'a refused entry keeps the ticked pieces on the form');
+  ok(!document.getElementById('txnSubmitButton').disabled, 'a refused entry unlocks the submit button');
+  equal(document.getElementById('hdcResultDialogTitle').textContent, 'Entry Not Saved',
+    'a refused entry is reported in the entry-result dialogue box');
   equal(results.store.fields['tool_id[]'], [String(shovel.id)], 'the row posts its tool');
   equal(results.store.fields['qty[]'], ['3'], 'the row posts the count of ticked pieces');
   equal(results.store.fields['row_serial_ids[]'], [tickedPieces(storeCell).join(',')],
@@ -308,7 +318,7 @@ const results = {};
   tick(transferPieces[0]);
   equal(transferRow.querySelector('.transfer-qty').value, '1', 'ticking one piece sets the move quantity');
   ok(transferPick.checked, 'ticking a piece ticks its row — a tick can never be dropped unnoticed');
-  results.transfer = submit();
+  results.transfer = await submit();
   const transferItemId = transferRow.querySelector('.transfer-item-id').value;
   equal(results.transfer.fields['transfer_serial_ids_' + transferItemId + '[]'],
     [tickedPieces(transferCell).join(',')],
@@ -326,7 +336,7 @@ const results = {};
   tick(plainRow.querySelector('.transfer-pick'), true);
   plainRow.querySelector('.transfer-qty').value = '1';
   const plainItemId = plainRow.querySelector('.transfer-item-id').value;
-  results.transferQtyOnly = submit();
+  results.transferQtyOnly = await submit();
   equal(results.transferQtyOnly.fields['transfer_qty_' + plainItemId], ['1'],
     'a quantity-only transfer posts its quantity');
   ok(!results.transferQtyOnly.fields['transfer_serial_ids_' + plainItemId + '[]'],
@@ -352,7 +362,7 @@ const results = {};
   const returnQty = returnRow.querySelector('.return-qty-input');
   equal(returnQty.value, '2', 'the returning quantity follows the ticked pieces');
   ok(returnQty.readOnly, 'ticked pieces decide the returning quantity');
-  results.returns = submit();
+  results.returns = await submit();
   const returnItemId = returnRow.querySelector('.return-item-id').value;
   equal(results.returns.fields['return_serial_ids_' + returnItemId + '[]'],
     [tickedPieces(returnCell).join(',')],
