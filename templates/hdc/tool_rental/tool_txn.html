@@ -21,12 +21,14 @@
    field names the older pages send — so no business rule is re-implemented
    here.
 
-   Renting out is asked step by step, in page order: 1) from where (store, or
-   transfer from a site / a customer) and 2) to whom (site / customer) in the
-   setup block, 3) the tools — a searchable tick list of everything issuable,
-   with the ticked tools in excel-style rows (tool, pieces, qty, rate) — then
-   4) the customer / site details and 5) the rent type.  A "no rent" answer
-   greys out and disables the rate cells in the rows above. #}
+   Renting out is asked step by step, in page order — the same six steps the
+   New Rental form uses: 1) what is happening (group + transaction), 2) from
+   where (store, or transfer from a site / a customer), 3) the tools — a
+   searchable tick list of everything issuable, with the ticked tools in
+   excel-style rows (tool, pieces, qty, rate) — 4) to whom (site / customer,
+   then that destination's details), 5) the rent type and terms, and 6) for a
+   transfer, settling the previous holder.  A "no rent" answer greys out and
+   disables the rate cells in the rows above. #}
 {% block content %}
 {% set tools_active = 'transaction' %}
 {% set tools_out = 'pending_tools' %}
@@ -108,7 +110,8 @@
     <h2><i class="fas fa-arrow-right-arrow-left me-2" aria-hidden="true"></i>HDC Tool Transaction</h2>
     <div class="tool-txn-subtitle">
         Pick Rent Out, Return or Maintenance, then the transaction under it. The form
-        shows only the fields that transaction needs.
+        shows only the fields that transaction needs, and asks them in one order:
+        from where → which tools → to whom → rent &amp; terms.
     </div>
 </div>
 
@@ -125,7 +128,7 @@
             <!-- ── what is happening: group tabs + the transaction list ───── -->
             <div class="row g-3" data-txn-panels="common">
                 <div class="col-12">
-                    <label class="form-label fw-semibold">What is happening?</label>
+                    <label class="form-label fw-semibold">1 · What is happening?</label>
                     <div class="tool-txn-groups" id="txnGroupTabs" role="tablist">
                         {% for group in txn_groups %}
                         <button type="button" role="tab" data-txn-group="{{ group.key }}"
@@ -173,12 +176,11 @@
                 </div>
             </div>
 
-            <!-- ── rent out setup: from where, and to whom ────────────────── -->
+            <!-- ── rent out setup, step 2: where the tools come from ──────── -->
             <div class="tool-txn-panel d-none" id="rentOutSourcePanel" data-txn-panels="rentout_source">
-                <h6><i class="fas fa-truck-fast me-1" aria-hidden="true"></i>Rent out — from where, to whom</h6>
+                <h6><i class="fas fa-truck-fast me-1" aria-hidden="true"></i>2 · From where are the tools coming?</h6>
                 <div class="row g-3">
-                    <div class="col-md-7">
-                        <span class="form-label fw-semibold d-block">1 · From where are the tools coming?</span>
+                    <div class="col-12">
                         <div class="rentout-choices" role="radiogroup" aria-label="From where">
                             <label class="rentout-choice">
                                 <input type="radio" name="rentout_from" value="store" class="form-check-input" checked>
@@ -194,19 +196,6 @@
                             </label>
                         </div>
                         <small class="text-muted d-block mt-1">A transfer settles the previous holder and starts a fresh cycle for the next one.</small>
-                    </div>
-                    <div class="col-md-5">
-                        <span class="form-label fw-semibold d-block">2 · Rent to?</span>
-                        <div class="rentout-choices" role="radiogroup" aria-label="Rent to">
-                            <label class="rentout-choice">
-                                <input type="radio" name="rentout_to" value="internal" class="form-check-input">
-                                <span><i class="fas fa-diagram-project me-1" aria-hidden="true"></i>Our site<small>Issue to an HDC project</small></span>
-                            </label>
-                            <label class="rentout-choice">
-                                <input type="radio" name="rentout_to" value="external" class="form-check-input" checked>
-                                <span><i class="fas fa-user-tie me-1" aria-hidden="true"></i>Outside customer<small>Rent out to a customer</small></span>
-                            </label>
-                        </div>
                     </div>
                 </div>
             </div>
@@ -279,6 +268,21 @@
                 </div>
                 <div id="transferLinesContainer" class="mt-2" aria-live="polite"></div>
                 <div class="small text-danger mt-2 d-none" id="transferError" role="alert"></div>
+            </div>
+
+            <!-- ── step 4: to whom — the choice, then its details ─────────── -->
+            <div class="tool-txn-panel d-none" id="rentToPanel" data-txn-panels="destination">
+                <h6><i class="fas fa-user-check me-1" aria-hidden="true"></i>4 · To — who receives the tools?</h6>
+                <div class="rentout-choices" role="radiogroup" aria-label="Rent to">
+                    <label class="rentout-choice">
+                        <input type="radio" name="rentout_to" value="internal" class="form-check-input">
+                        <span><i class="fas fa-diagram-project me-1" aria-hidden="true"></i>Our site<small>Issue to an HDC project</small></span>
+                    </label>
+                    <label class="rentout-choice">
+                        <input type="radio" name="rentout_to" value="external" class="form-check-input" checked>
+                        <span><i class="fas fa-user-tie me-1" aria-hidden="true"></i>Outside customer<small>Rent out to a customer</small></span>
+                    </label>
+                </div>
             </div>
 
             <!-- ── destination: outside customer (rent out / transfer) ────── -->
@@ -354,7 +358,7 @@
 
             <!-- ── transfer: … and what the old holder is owed ────────────── -->
             <div class="tool-txn-panel d-none" id="transferSettlementPanel" data-txn-panels="transfer_source">
-                <h6><i class="fas fa-scale-balanced me-1" aria-hidden="true"></i>Settle the previous holder</h6>
+                <h6><i class="fas fa-scale-balanced me-1" aria-hidden="true"></i>6 · Settle the previous holder</h6>
                 <div class="tool-txn-summary mb-2" id="transferSettlementStatus" role="status" aria-live="polite">Choose a source to see its rent status.</div>
                 <div class="row g-3">
                     <div class="col-md-4">

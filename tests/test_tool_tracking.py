@@ -279,23 +279,32 @@ class ToolTrackingTestCase(unittest.TestCase):
         self.assertEqual(ToolRentalTransferItem.query.filter_by(tool_id=jack.id).count(), 0)
         self.assertTrue(tools_reconciliation(ledger)['balanced'])
 
-    def test_transfer_rental_form_follows_from_rent_type_to_tools_settings_order(self):
+    def test_transfer_rental_form_follows_from_tools_to_terms_order(self):
         vib = self._make_tool('TOOL-0001', 'Vibrator', 10)
         source = self._rent([(vib, 4)], renter_type='internal', project=self.site_a)
 
         response = self.client.get('/hdc/tool-rental/new')
         self.assertEqual(response.status_code, 200)
         html = response.get_data(as_text=True)
-        # The transfer UI is ordered so the available-tool list sits directly
-        # below the From holder picker (holder list → tools), and the
-        # destination follows, with rates controlled by rent type.
+        # The form reads in one order, the same six steps the Tools transaction
+        # page uses: what is happening → from where → which tools → to whom →
+        # rent & terms → settle the previous holder.  So the holder list sits
+        # directly below the From picker, the available tools below that, the
+        # destination after the tools, and rent type only at the end.
         ordered_ids = [
             'id="txnType"', 'id="transferSourceField"', 'id="transferHoldersList"',
-            'id="transferToolsPanel"', 'id="billingType"',
-            'id="renterType"', 'id="otherSettings"',
+            'id="transferToolsPanel"', 'id="renterType"',
+            'id="otherSettings"', 'id="billingType"',
+            'id="transferSettlementFields"', 'id="rentalSubmitRow"',
         ]
         positions = [html.index(marker) for marker in ordered_ids]
         self.assertEqual(positions, sorted(positions))
+        # … and the steps are numbered the same way on both tool forms.
+        steps = ['1 · What is happening?', '2 · From where are the tools coming?',
+                 '3 · Which tools are moving?', '4 · To — who receives the tools?',
+                 '5 · Rent type &amp; terms', "6 · Settle the previous holder's rent"]
+        step_positions = [html.index(step) for step in steps]
+        self.assertEqual(step_positions, sorted(step_positions))
         self.assertIn('Rent already fixed in contact / contract (no extra rent)', html)
         self.assertIn('transfer_item_id[]', html)
         self.assertIn('transfer_rate_', html)

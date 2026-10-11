@@ -870,5 +870,31 @@ class TxnFormTestCase(unittest.TestCase):
         self.assertNotEqual(match.group(1), other)
 
 
+    def test_page_asks_the_steps_in_one_numbered_order(self):
+        """The rent-out flow reads 1 → 6, in the same order as the New Rental form.
+        What is happening → from where → which tools → to whom → rent & terms →
+        settle the previous holder.  The order is the contract an operator
+        learns once, so it is pinned here rather than left to markup taste.
+        """
+        html = self.client.get('/hdc/tool-rental/transaction').get_data(as_text=True)
+        steps = ['1 · What is happening?', '2 · From where are the tools coming?',
+                 '3 · Tools from the store', '3 · Tools at the current holder',
+                 '4 · To — who receives the tools?', '5 · Rent type &amp; terms',
+                 '6 · Settle the previous holder']
+        for step in steps:
+            self.assertIn(step, html)
+        positions = [html.index(step) for step in steps]
+        self.assertEqual(positions, sorted(positions))
+        # The controls follow the same order: from → tools → to → terms → settle.
+        controls = ['name="rentout_from"', 'id="storeToolSearch"',
+                    'id="transferLinesSearch"', 'name="rentout_to"',
+                    'id="txnCustomerName"', 'id="billing_type"', 'id="settle_choice"']
+        control_positions = [html.index(control) for control in controls]
+        self.assertEqual(control_positions, sorted(control_positions))
+        # The To step and the destination details it opens are one block of the
+        # page, so the operator never answers "to whom" twice.
+        self.assertLess(html.index('id="rentToPanel"'), html.index('id="destinationCustomerPanel"'))
+        self.assertLess(html.index('id="rentToPanel"'), html.index('id="destinationSitePanel"'))
+
 if __name__ == '__main__':
     unittest.main()

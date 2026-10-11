@@ -295,5 +295,26 @@ class TxnFormTestCase(unittest.TestCase):
         self.assertAlmostEqual(float(rental.total_pending_amount), 0.0, places=2)
 
 
+    def test_form_asks_the_steps_in_one_numbered_order(self):
+        """The New Rental form reads 1 → 6, matching the Tools transaction page.
+        Transaction type first, then from where, the tools, to whom, rent &
+        terms, and — for a transfer only — settling the previous holder.
+        """
+        html = self._form_html()
+        steps = ['1 · What is happening?', '2 · From where are the tools coming?',
+                 '3 · Which tools are moving?', '4 · To — who receives the tools?',
+                 '5 · Rent type &amp; terms', "6 · Settle the previous holder's rent"]
+        for step in steps:
+            self.assertIn(step, html)
+        positions = [html.index(step) for step in steps]
+        self.assertEqual(positions, sorted(positions))
+        # Rent type is a term, not a first question: it follows the destination,
+        # and the submit row closes the form in every transaction.
+        controls = ['id="txnType"', 'id="transferSourceField"', 'id="newRentalTools"',
+                    'id="renterType"', 'id="billingType"', 'name="rental_date"',
+                    'id="rentalSubmitRow"']
+        control_positions = [html.index(control) for control in controls]
+        self.assertEqual(control_positions, sorted(control_positions))
+
 if __name__ == '__main__':
     unittest.main()
