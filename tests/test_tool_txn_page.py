@@ -56,7 +56,7 @@ from hdc.services.tool_txn_entry import (                          # noqa: E402
     MAINTENANCE_LABEL, new_txn_reference, txn_reference_seen,
 )
 from hdc.services.tool_txn_types import (                          # noqa: E402
-    DEFAULT_TXN_OPTION, KINDS, KIND_ADJUSTMENT, KIND_CREATE, KIND_DAMAGE_LOSS,
+    BILLING_MODES, DEFAULT_TXN_OPTION, KINDS, KIND_ADJUSTMENT, KIND_CREATE, KIND_DAMAGE_LOSS,
     KIND_MAINTENANCE_IN, KIND_MAINTENANCE_OUT, KIND_PAYMENT, KIND_RETURN,
     KIND_TRANSFER, MONEY_KINDS, PHYSICAL_KINDS, TXN_GROUPS, TXN_OPTIONS,
     registry_problems, txn_group, txn_option,
@@ -349,6 +349,90 @@ class TxnFormTestCase(unittest.TestCase):
         self.assertIn('data-txn-panels="lines"', html)
         self.assertIn('data-rental-picker="' + txn_option('rental_payment')['picker'] + '"', html)
         self.assertIn('id="toolTxnForm"', html)
+
+    def test_billing_registry_renders_status_and_cash_controls(self):
+        html = self.client.get('/hdc/tool-rental/transaction').get_data(as_text=True)
+        config = json.loads(re.search(r'<script id="toolTxnConfig" type="application/json">(.*?)</script>',
+                                      html, re.S).group(1))
+        self.assertEqual(config['billingModes'], list(BILLING_MODES))
+        for mode in BILLING_MODES:
+            self.assertIn(f'<option value="{mode["key"]}">{mode["label"]}</option>', html)
+        self.assertIn('id="billingStatus"', html)
+        self.assertIn('id="returnSettlementStatus"', html)
+        self.assertIn('id="returnCashFields"', html)
+        self.assertIn('id="transferSettlementStatus"', html)
+        self.assertIn('tool-txn-sheet', _txn_script())
+
+    def test_selected_site_groups_holders_with_sheet_lines_and_status(self):
+        from hdc.services.tool_txn_entry import txn_form_context
+        self._rent(self.vibrator, 2, billing='no_charge', project=self.site_a)
+        free = self._latest_rental()
+        self._rent(self.drill, 1, billing='per_day', project=self.site_a)
+        paid = self._latest_rental()
+        context = txn_form_context()
+        site = [s for s in context['transfer_sources'] if s['rental_id'] in (free.id, paid.id)]
+        self.assertEqual(len(site), 2)
+        self.assertEqual(site[0]['location_key'], site[1]['location_key'])
+        options = [o for o in context['transfer_source_options'] if o[0] in {s['key'] for s in site}]
+        self.assertEqual(len(options), 1)
+        self.assertIn('2 rental(s)', options[0][1])
+        html = self.client.get('/hdc/tool-rental/transaction').get_data(as_text=True)
+        config = json.loads(re.search(r'<script id="toolTxnConfig" type="application/json">(.*?)</script>',
+                                      html, re.S).group(1))
+        source_rows = [s for s in config['transferSources'] if s['rentalId'] in (free.id, paid.id)]
+        self.assertEqual(len(source_rows), 2)
+        self.assertEqual({s['billingType'] for s in source_rows}, {'no_charge', 'per_day'})
+        self.assertEqual([s['amountDue'] for s in source_rows if s['rentalId'] == free.id], [0.0])
+        self.assertTrue(all(s['lines'] for s in source_rows))
+        self.assertIn('No charge · no rent due', html)
+
+    def test_free_return_records_no_payment_even_with_stale_cash_form(self):
+        self._rent(self.vibrator, 1, renter_type='external', billing='no_charge')
+        rental = self._latest_rental()
+        item = ToolRentalItem.query.filter_by(rental_id=rental.id).first()
+        self._return_qty(rental, item, 1, payment='full')
+        ret = ToolRentalReturn.query.filter_by(rental_id=rental.id).first()
+        self.assertEqual(ret.payment_type, 'no_payment')
+        self.assertEqual(float(ret.amount_paid), 0)
+        self.assertEqual(ToolRentalPayment.query.count(), 0)
+        self.assertEqual(AccountTransaction.query.count(), 0)
+
+    def test_no_charge_transfer_has_no_cash_settlement_or_receivable(self):
+        self._rent(self.vibrator, 1, billing='no_charge', project=self.site_a)
+        rental = self._latest_rental()
+        item = ToolRentalItem.query.filter_by(rental_id=rental.id).first()
+        source_key = f'{rental.id}|own_project|{self.site_a.id}|0|'
+        self._txn('transfer_site', {
+            'project_id': str(self.site_b.id), 'billing_type': 'no_charge',
+            'source_rental_id[]': [source_key],
+            'transfer_selection_enabled': '1',
+            'transfer_item_id[]': [str(item.id)],
+            f'transfer_qty_{item.id}': '1',
+            'settle_choice': 'pay_now',  # stale cash selection cannot charge a free rental
+        })
+        moved = self._latest_rental()
+        self.assertNotEqual(moved.id, rental.id)
+        self.assertEqual(moved.payment_status, 'no_charge')
+        self.assertEqual(float(moved.total_pending_amount), 0)
+        self.assertEqual(ToolRentalPayment.query.count(), 0)
+        self.assertEqual(AccountTransaction.query.count(), 0)
+
+    def test_transfer_collect_now_requires_explicit_account(self):
+        self._rent(self.vibrator, 2, renter_type='external', customer='Paying customer')
+        rental = self._latest_rental()
+        item = ToolRentalItem.query.filter_by(rental_id=rental.id).first()
+        source_key = f'{rental.id}|customer|0|0|Paying%20customer'
+        response = self._txn('transfer_site', {
+            'project_id': str(self.site_b.id), 'billing_type': 'per_day',
+            'source_rental_id[]': [source_key],
+            'transfer_selection_enabled': '1',
+            'transfer_item_id[]': [str(item.id)],
+            f'transfer_qty_{item.id}': '2',
+            'settle_choice': 'pay_now',
+        })
+        self.assertIn('Choose a Cash/Bank account', response.get_data(as_text=True))
+        self.assertEqual(ToolRental.query.count(), 1)
+        self.assertEqual(ToolRentalPayment.query.count(), 0)
 
     def test_every_declared_panel_has_markup(self):
         html = self.client.get('/hdc/tool-rental/transaction').get_data(as_text=True)

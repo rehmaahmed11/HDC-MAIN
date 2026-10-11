@@ -21,10 +21,10 @@
     <div class="col-md-8">
         <div class="card hdc-card">
             <div class="card-header hdc-card-header d-flex justify-content-between">
-                <span><i class="fas fa-receipt me-2"></i>{{ rental.rental_code }} — {{ rental.renter_type|title }} | {{ rental.billing_type }}</span>
+                <span><i class="fas fa-receipt me-2"></i>{{ rental.rental_code }} — {{ rental.renter_type|title }} | {{ 'No charge (contract included)' if rental.billing_type == 'no_charge' else rental.billing_type|replace('_', ' ')|title }}</span>
                 <div>
                     <span class="badge {% if rental.status=='active' %}bg-primary{% elif rental.status=='partially_returned' %}bg-warning text-dark{% elif rental.status=='overdue' %}bg-danger{% elif rental.status=='closed' %}bg-success{% else %}bg-secondary{% endif %}">{{ rental.status }}</span>
-                    <span class="badge {% if rental.payment_status=='paid' %}bg-success{% elif rental.payment_status=='partial' %}bg-warning text-dark{% elif rental.payment_status=='credit' %}bg-danger{% else %}bg-secondary{% endif %}">{{ rental.payment_status }}</span>
+                    <span class="badge {% if rental.payment_status=='paid' %}bg-success{% elif rental.payment_status=='partial' %}bg-warning text-dark{% elif rental.payment_status=='credit' %}bg-danger{% else %}bg-secondary{% endif %}">{{ 'No charge — no rent due' if rental.billing_type == 'no_charge' else rental.payment_status|replace('_', ' ')|title }}</span>
                 </div>
             </div>
             <div class="card-body">

@@ -266,6 +266,7 @@ def transfer_source_rows(limit=TRANSFER_SOURCE_LIMIT):
                 'stage_id': stage_id,
                 'customer_name': customer_name,
                 'billing_type': rental.billing_type,
+                'amount_due': 0.0 if rental.billing_type == 'no_charge' else _flt(rental.total_pending_amount),
                 'pending': 0.0,
                 'lines': [],
             })
@@ -355,14 +356,15 @@ def rental_picker_rows(eligible_for, limit=RENTAL_PICKER_LIMIT):
             continue
         holder = (rental.project.name if rental.renter_type == 'internal' and rental.project
                   else (rental.customer_name or 'Outside customer'))
-        label = (f'{rental.rental_code} · {holder} · {tools_out:,.0f} out · '
-                 f'{amount_due:,.0f} PKR due')
+        status = ('No charge · no rent due' if rental.billing_type == 'no_charge'
+                  else f'{amount_due:,.0f} PKR due')
+        label = f'{rental.rental_code} · {holder} · {tools_out:,.0f} out · {status}'
         options.append((rental.id, label, {
             'amount': f'{amount_due:.2f}',
             'tools': f'{tools_out:.2f}',
             'holder': holder,
             'renter_type': rental.renter_type or '',
-            'billing_type': rental.billing_type or '',
+            'billing-type': rental.billing_type or '',
         }))
     return options
 
@@ -378,6 +380,24 @@ def damage_reason_options():
 
 def adjustment_reason_options():
     return [(key, label) for key, label in TOOL_DISCOUNT_REASONS]
+
+
+def location_source_options(sources):
+    """One picker entry per real location, not one per rental at that location.
+
+    The value stays a real source key; the browser expands it to the other
+    rental keys at that same location and posts exactly the holders ticked.
+    """
+    locations = {}
+    for source in sources:
+        row = locations.setdefault(source['location_key'], {
+            'key': source['key'], 'holder': source['holder'], 'qty': 0.0,
+            'rentals': set(),
+        })
+        row['qty'] += source['pending']
+        row['rentals'].add(source['rental_id'])
+    return [(row['key'], f"{row['holder']} · {row['qty']:g} out · {len(row['rentals'])} rental(s)")
+            for row in locations.values()]
 
 
 def txn_form_context():
@@ -416,10 +436,7 @@ def txn_form_context():
             for tool in in_store
         ],
         'transfer_sources': transfer_sources,
-        'transfer_source_options': [
-            (source['key'], f"{source['holder']} · {source['rental_code']} — {source['pending']:g} out")
-            for source in transfer_sources
-        ],
+        'transfer_source_options': location_source_options(transfer_sources),
         'rental_picker_options': rental_picker_options,
         'maintenance_pieces': maintenance_pieces(),
         'receiving_account_options': account_options(),
