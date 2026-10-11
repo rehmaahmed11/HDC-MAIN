@@ -457,15 +457,8 @@ def register(app):
             'search_text': (request.args.get('q') or '').strip() or None,
         }
         rentals = search_rentals(filters)
-        # Only users who may create rentals see the "New Rental" action.
-        role = (current_user.role or '').strip().lower()
-        write_access = may_access_path(current_user, '/hdc/tool-rental/new', 'write')
-        can_manage_tools = (write_access if write_access is not None else
-                            role in ('admin', 'accountant'))
-
         return render_template('tool_rental/tool_rental.html',
             kpis=kpis,
-            can_manage_tools=can_manage_tools,
             rentals=rentals,
             filters=filters,
             known_customers=known_tool_customers(),

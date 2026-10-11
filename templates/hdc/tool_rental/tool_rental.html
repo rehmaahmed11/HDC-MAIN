@@ -3,8 +3,8 @@
 {% block page_heading %}Tool Rentals{% endblock %}
 
 {# The Rentals hub is deliberately a simple page: headline numbers, a short
-   search, and the rental list.  Creating a rental has its own page (opened by
-   the "New Rental" action below), and the audit-style blocks — reconciliation
+   search, and the rental list.  Creating a rental has its own tab (New Rental),
+   and the audit-style blocks — reconciliation
    strip, detailed checks, advanced filters, movement chains — are not
    repeated here; they live on the Tracking / Reports pages. #}
 {% block content %}
@@ -16,24 +16,16 @@
 .tool-rentals-header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:4px 0 16px; }
 .tool-rentals-header h2 { margin:0; font-size:1.35rem; }
 .tool-rentals-subtitle { color:var(--text-muted, #64748b); margin-top:3px; }
-.tool-rental-actions { display:grid; grid-template-columns:repeat(auto-fit,minmax(205px,1fr)); gap:12px; }
-.tool-rental-action { display:block; min-height:140px; padding:17px; border:1px solid var(--card-border); border-radius:12px; background:var(--card-bg); color:var(--text); text-decoration:none; transition:transform .15s, box-shadow .15s, border-color .15s; }
-.tool-rental-action:hover { transform:translateY(-2px); box-shadow:0 8px 22px rgba(15,23,42,.08); border-color:#10b981; color:var(--text); }
-.tool-rental-action-icon { display:flex; align-items:center; justify-content:center; width:40px; height:40px; margin-bottom:9px; border-radius:11px; background:#ecfdf5; color:#047857; font-size:1.05rem; }
-.tool-rental-action.blue .tool-rental-action-icon { background:#eff6ff; color:#1d4ed8; }
-.tool-rental-action.violet .tool-rental-action-icon { background:#f5f3ff; color:#6d28d9; }
-.tool-rental-action .small { display:block; margin-top:4px; }
 .tool-rental-row:hover { background:var(--card-header-bg); }
 @media (max-width:575.98px) {
   .tool-rentals-header { align-items:flex-start; }
-  .tool-rental-action { min-height:120px; padding:14px; }
-}
+  }
 </style>
 
 <div class="tool-rentals-header">
     <div>
         <h2><i class="fas fa-file-contract me-2" aria-hidden="true"></i>Tool Rentals</h2>
-        <div class="tool-rentals-subtitle">Create rentals, record returns, and see what is still due.</div>
+        <div class="tool-rentals-subtitle">Made rentals and what is still due. New rentals are created on the New Rental tab.</div>
     </div>
 </div>
 
@@ -74,36 +66,6 @@
 {% endif %}
 
 <div class="card hdc-card mb-3">
-    <div class="card-header hdc-card-header"><h5 class="mb-0"><i class="fas fa-hand-pointer me-2" aria-hidden="true"></i>Choose an action</h5></div>
-    <div class="card-body">
-        <div class="tool-rental-actions">
-            {% if can_manage_tools %}
-            <a class="tool-rental-action" href="{{ url_for('hdc_tool_rental_new') }}">
-                <div class="tool-rental-action-icon"><i class="fas fa-plus" aria-hidden="true"></i></div>
-                <strong>New Rental</strong>
-                <span class="small text-muted">Send tools to one of your sites or to a customer.</span>
-            </a>
-            {% endif %}
-            <a class="tool-rental-action blue" href="#rentalList">
-                <div class="tool-rental-action-icon"><i class="fas fa-list" aria-hidden="true"></i></div>
-                <strong>Find a Rental</strong>
-                <span class="small text-muted">Open a rental to record returns or payments.</span>
-            </a>
-            <a class="tool-rental-action violet" href="{{ url_for('hdc_tool_rental_inventory') }}">
-                <div class="tool-rental-action-icon"><i class="fas fa-warehouse" aria-hidden="true"></i></div>
-                <strong>Tool Stock</strong>
-                <span class="small text-muted">See tools in the store and available quantities.</span>
-            </a>
-            <a class="tool-rental-action blue" href="{{ url_for('hdc_tool_rental_dashboard') }}">
-                <div class="tool-rental-action-icon"><i class="fas fa-clipboard-list" aria-hidden="true"></i></div>
-                <strong>Tools Summary</strong>
-                <span class="small text-muted">How many tools are in the store, how many are rented, and rent still due.</span>
-            </a>
-        </div>
-    </div>
-</div>
-
-<div class="card hdc-card mb-3">
     <div class="card-header hdc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
         <span><i class="fas fa-magnifying-glass me-2" aria-hidden="true"></i>Find a rental</span>
         <span class="small text-muted">{{ rentals|length }} matching rental{{ '' if rentals|length == 1 else 's' }}</span>
@@ -139,7 +101,7 @@
 <div class="card hdc-card" id="rentalList">
     <div class="card-header hdc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
         <span><i class="fas fa-list me-2" aria-hidden="true"></i>Rentals</span>
-        <span class="small text-muted">Open a rental to record a return, collect payment, or move tools.</span>
+        <span class="small text-muted">Open a rental to see its details.</span>
     </div>
     <div class="table-responsive">
         <table class="table hdc-table table-sm mb-0 align-middle">
@@ -208,7 +170,7 @@
                 </tr>
             {% else %}
                 <tr><td colspan="7" class="text-center text-muted py-4">
-                    No rentals match this search. {% if filters.search_text or filters.status %}<a href="{{ url_for('hdc_tool_rental') }}">Clear the search</a>.{% elif can_manage_tools %}Choose <a href="{{ url_for('hdc_tool_rental_new') }}">New Rental</a> above to get started.{% else %}No rentals have been recorded yet.{% endif %}
+                    No rentals match this search. {% if filters.search_text or filters.status %}<a href="{{ url_for('hdc_tool_rental') }}">Clear the search</a>.{% else %}No rentals have been made yet.{% endif %}
                 </td></tr>
             {% endfor %}
             </tbody>
