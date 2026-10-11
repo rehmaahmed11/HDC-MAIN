@@ -47,6 +47,12 @@ live on their own pages, so no page repeats the same numbers twice.
 
 ## 0. One transaction form (`/hdc/tool-rental/new`)
 
+> The tools also have a newer, wider page — `/hdc/tool-rental/transaction` —
+> which groups every transaction under **Rent Out**, **Return** and
+> **Maintenance** (`TXN_GROUPS` in the same registry module, see
+> `TOOL_TRANSACTION_FORM_REPORT.md`).  This section documents the older New
+> Rental page, which still works and still uses the four modes below.
+
 Every rental-life-cycle transaction is entered on the same page. The operator
 picks the **Transaction type** first and only that type's fields appear:
 
@@ -58,7 +64,7 @@ picks the **Transaction type** first and only that type's fields appear:
 | Rent Payment | `POST /hdc/tool-rental/<id>/payment` | a rental that still owes rent; amount, account, mode, waive-off |
 
 It is data-driven: the table lives in `hdc/services/tool_txn_types.py`
-(`TOOL_TXN_TYPES`: key, label, endpoint, whether it needs a rental, which
+(`NEW_RENTAL_TXN_TYPES`: key, label, endpoint, whether it needs a rental, which
 rentals qualify, submit label and help text). The route hands that table to the
 page, which builds the dropdown, headings, submit button and the form's
 `action` from it. Each panel is tagged with `data-txn-modes="…"`; the page shows

@@ -19,8 +19,9 @@
        class="tools-subnav-link {% if tools_active == 'rentals' %}active{% endif %}">
         <i class="fas fa-file-contract me-1"></i>Rentals
     </a>
-    {# The central uniform transaction form.  Everyone who can see the Tools
-       section sees the tab; the page itself gates who may record. #}
+    {# The one tool transaction form (Rent Out / Return / Maintenance).
+       Everyone who can see the Tools section sees the tab; the page itself
+       gates who may record. #}
     <a href="{{ url_for('hdc_tool_txn') }}"
        class="tools-subnav-link {% if tools_active == 'transaction' %}active{% endif %}">
         <i class="fas fa-arrow-right-arrow-left me-1"></i>New Transaction

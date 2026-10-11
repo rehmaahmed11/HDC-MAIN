@@ -1,23 +1,26 @@
 #!/usr/bin/env python3
-"""The uniform HDC Tool Transaction form — one form, every transaction.
+"""The HDC Tool Transaction form — one page: three groups, every transaction.
 
 ``/hdc/tool-rental/transaction`` records every equipment transaction from one
-page: rent out, issue to an own site, transfer between sites or customers,
-partial / full / store returns, rent payments, credit adjustments, damage &
-loss, and send / return from maintenance.  These cases drive the form the way
-the page posts (``txn_source=uniform`` + a generated ``txn_reference``) and
-assert what actually moved:
+page, and every transaction sits under one of three groups — **Rent Out**
+(rent out to a customer / issue to an own site / transfer to another site or
+customer / receive rent / credit), **Return** (partial / full / to store /
+damage-loss) and **Maintenance** (send / back).  These cases drive the form the
+way the page posts (``txn_source=transaction`` + a generated
+``txn_reference``) and assert what actually moved:
 
-  1. the registry itself (pure data, no database);
-  2. the rendered page: every transaction type, the page config, the panels;
-  3. each transaction type against an isolated app + database;
+  1. the registry itself (pure data, no database) and its self-check;
+  2. the rendered page: the three groups, every transaction, the page config,
+     the panels;
+  3. each transaction against an isolated app + database;
   4. the rules the task pins: no internal external-income, no payment-driven
      movement, partial vs full returns, unavailable stock refused, duplicate
-     submissions handled, balance kept (owned = in_store + out).
+     submissions handled, balance kept (owned = in_store + out);
+  5. that the page script is data-driven — it names no transaction of its own.
 
 Run with:
     HDC_BOOTSTRAP_ADMIN_PASSWORD='Admin@1234' \\
-        python -m unittest tests.test_tool_txn_uniform -v
+        python -m unittest tests.test_tool_txn_page -v
 """
 
 from __future__ import annotations
@@ -53,67 +56,106 @@ from hdc.services.tool_txn_entry import (                          # noqa: E402
     MAINTENANCE_LABEL, new_txn_reference, txn_reference_seen,
 )
 from hdc.services.tool_txn_types import (                          # noqa: E402
-    KIND_ADJUSTMENT, KIND_CREATE, KIND_DAMAGE_LOSS, KIND_MAINTENANCE_IN,
-    KIND_MAINTENANCE_OUT, KIND_PAYMENT, KIND_RETURN, KIND_TRANSFER,
-    MONEY_KINDS, PHYSICAL_KINDS, UNIFORM_TXN_TYPES, uniform_txn_type,
+    DEFAULT_TXN_OPTION, KINDS, KIND_ADJUSTMENT, KIND_CREATE, KIND_DAMAGE_LOSS,
+    KIND_MAINTENANCE_IN, KIND_MAINTENANCE_OUT, KIND_PAYMENT, KIND_RETURN,
+    KIND_TRANSFER, MONEY_KINDS, PHYSICAL_KINDS, TXN_GROUPS, TXN_OPTIONS,
+    registry_problems, txn_group, txn_option,
 )
 from hdc.services.tool_tracking import tool_ledger                 # noqa: E402
 from hdc.utils.dates import _pkt_today                             # noqa: E402
 
 ADMIN_PASSWORD = os.environ['HDC_BOOTSTRAP_ADMIN_PASSWORD']
 
-#: Every transaction type the task requires the one form to support.
-REQUIRED_KEYS = (
-    'rent_out_customer', 'issue_own_site', 'transfer_site', 'transfer_customer',
-    'partial_return', 'full_return', 'return_to_store', 'rental_payment',
-    'credit_adjustment', 'damage_loss', 'maintenance_out', 'maintenance_in',
+#: The three groups the page offers, in tab order, with the transactions the
+#: task requires under each of them.
+REQUIRED_GROUPS = (
+    ('rent_out', ('rent_out_customer', 'issue_own_site', 'transfer_site',
+                  'transfer_customer', 'rental_payment', 'credit_adjustment')),
+    ('return', ('partial_return', 'full_return', 'return_to_store',
+                'damage_loss')),
+    ('maintenance', ('maintenance_out', 'maintenance_in')),
 )
+REQUIRED_KEYS = tuple(key for _group, keys in REQUIRED_GROUPS for key in keys)
+
+SCRIPT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..',
+                           'static', 'hdc', 'js', 'pages', 'tool_txn.js')
 
 
-class UniformRegistryTests(unittest.TestCase):
+def _txn_script():
+    with open(SCRIPT_PATH, encoding='utf-8') as handle:
+        return handle.read()
+
+
+def _js_object(script, name):
+    """The body of one ``var NAME = { … };`` table in the page script."""
+    match = re.search(r'var ' + name + r' = \{(.*?)\n    \};', script, re.S)
+    if not match:
+        raise AssertionError(f'{name} table missing from the page script')
+    return match.group(1)
+
+
+class TxnRegistryTests(unittest.TestCase):
     """Pure data: no app, no database."""
 
-    def test_registry_covers_every_required_transaction(self):
-        keys = [t['key'] for t in UNIFORM_TXN_TYPES]
+    def test_registry_is_exactly_three_groups_in_order(self):
+        self.assertEqual([g['key'] for g in TXN_GROUPS],
+                         [key for key, _keys in REQUIRED_GROUPS])
+        for group, (key, keys) in zip(TXN_GROUPS, REQUIRED_GROUPS):
+            self.assertEqual(key, group['key'])
+            self.assertEqual([o['key'] for o in group['options']], list(keys))
+            self.assertIs(txn_group(key), group)
+            self.assertTrue(group['label'])
+            self.assertTrue(group['icon'])
+            self.assertTrue(group['help'])
+
+    def test_every_transaction_sits_under_one_group(self):
+        keys = [t['key'] for t in TXN_OPTIONS]
         self.assertEqual(keys, list(REQUIRED_KEYS))
         self.assertEqual(len(keys), len(set(keys)))
+        for group in TXN_GROUPS:
+            for entry in group['options']:
+                self.assertEqual(entry['group'], group['key'], entry['key'])
+                self.assertIs(txn_option(entry['key']), entry)
+
+    def test_registry_checks_itself(self):
+        self.assertEqual(registry_problems(), [])
 
     def test_every_type_declares_its_controller_contract(self):
-        valid_kinds = (KIND_CREATE, KIND_TRANSFER, KIND_RETURN, KIND_PAYMENT,
-                       KIND_ADJUSTMENT, KIND_DAMAGE_LOSS, KIND_MAINTENANCE_OUT,
-                       KIND_MAINTENANCE_IN)
-        for entry in UNIFORM_TXN_TYPES:
-            self.assertIn(entry['kind'], valid_kinds, entry['key'])
+        for entry in TXN_OPTIONS:
+            self.assertIn(entry['kind'], KINDS, entry['key'])
             self.assertTrue(entry['panels'], entry['key'])
+            self.assertTrue(entry['checks'], entry['key'])
             self.assertTrue(entry['submit_label'])
             self.assertTrue(entry['help'])
             self.assertTrue(entry['confirm'])
             self.assertTrue(entry['icon'])
 
     def test_rental_bound_types_pick_from_rentals_and_nothing_else_does(self):
-        for entry in UNIFORM_TXN_TYPES:
+        for entry in TXN_OPTIONS:
             if entry['needs_rental']:
                 self.assertIn(entry['kind'], (KIND_RETURN, KIND_PAYMENT, KIND_ADJUSTMENT),
                               entry['key'])
+                self.assertTrue(entry['picker'], entry['key'])
             else:
                 self.assertIsNone(entry['eligible_for'], entry['key'])
+                self.assertIsNone(entry['picker'], entry['key'])
 
     def test_money_and_physical_kinds_are_disjoint(self):
-        for entry in UNIFORM_TXN_TYPES:
+        for entry in TXN_OPTIONS:
             in_money = entry['kind'] in MONEY_KINDS
             in_physical = entry['kind'] in PHYSICAL_KINDS
             self.assertNotEqual(in_money, in_physical, entry['key'])
 
     def test_lookup_returns_entry_or_none(self):
-        self.assertEqual(uniform_txn_type('damage_loss')['kind'], KIND_DAMAGE_LOSS)
-        self.assertIsNone(uniform_txn_type('nope'))
+        self.assertEqual(txn_option('damage_loss')['kind'], KIND_DAMAGE_LOSS)
+        self.assertIsNone(txn_option('nope'))
 
 
-class UniformFormTestCase(unittest.TestCase):
-    """One isolated app + database for the rendered form and its endpoints."""
+class TxnFormTestCase(unittest.TestCase):
+    """One isolated app + database for the rendered page and its endpoints."""
 
     def setUp(self):
-        self.tmp = tempfile.mkdtemp(prefix='hdc-tool-txn-uniform-')
+        self.tmp = tempfile.mkdtemp(prefix='hdc-tool-txn-')
         self.app = create_app({
             'HDC_DB_PATH': os.path.join(self.tmp, 'test.db'),
             'HDC_INSTANCE_DIR': self.tmp,
@@ -179,17 +221,17 @@ class UniformFormTestCase(unittest.TestCase):
     def _post(self, url, data, follow=False):
         payload = dict(data)
         payload['_csrf_token'] = self._token()
-        payload.setdefault('txn_source', 'uniform')
+        payload.setdefault('txn_source', 'transaction')
         return self.client.post(url, data=payload, follow_redirects=follow)
 
-    def _uniform(self, txn_type, extra, follow=True):
-        """Post the way the uniform page does: page action, source + reference.
+    def _txn(self, txn_type, extra, follow=True):
+        """Post the way the transaction page does: page action, source + reference.
 
         The endpoint is taken from the registry entry — the same contract the
         page script uses — so a rental-bound transaction lands on its own
         route and a physical/financial one on its handler.
         """
-        entry = uniform_txn_type(txn_type)
+        entry = txn_option(txn_type)
         self.assertIsNotNone(entry, txn_type)
         with self.app.test_request_context():
             if entry['needs_rental']:
@@ -225,7 +267,7 @@ class UniformFormTestCase(unittest.TestCase):
             data['project_id'] = str((project or self.site_a).id)
         else:
             data['customer_name'] = customer or 'Outside Customer'
-        response = self._uniform(txn_type or (
+        response = self._txn(txn_type or (
             'rent_out_customer' if renter_type == 'external' else 'issue_own_site'),
             data, follow=follow)
         return response
@@ -242,7 +284,6 @@ class UniformFormTestCase(unittest.TestCase):
                     payment=None):
         data = {
             'txn_type': 'partial_return',
-            'transport': 'uniform',
             'txn_reference': reference or new_txn_reference(),
             'return_condition': return_type,
             'return_date': _pkt_today().isoformat(),
@@ -254,29 +295,85 @@ class UniformFormTestCase(unittest.TestCase):
         return self._post(f'/hdc/tool-rental/{rental.id}/return', data, follow=True)
 
     # ------------------------------------------------------------ the page
-    def test_page_offers_every_transaction_type(self):
+    def test_page_offers_three_groups_and_every_transaction(self):
         response = self.client.get('/hdc/tool-rental/transaction')
         self.assertEqual(response.status_code, 200)
         html = response.get_data(as_text=True)
-        for entry in UNIFORM_TXN_TYPES:
+        for group in TXN_GROUPS:
+            self.assertIn(f'data-txn-group="{group["key"]}"', html)
+            self.assertIn(f'<optgroup label="{group["label"]}"', html)
+            self.assertIn(group['label'], html)
+        for entry in TXN_OPTIONS:
             self.assertIn(f'<option value="{entry["key"]}"', html)
             self.assertIn(entry['label'], html)
+        # The page opens on the first group's first transaction.
+        self.assertEqual(DEFAULT_TXN_OPTION, TXN_GROUPS[0]['options'][0]['key'])
+        self.assertEqual(re.findall(r'<option value="([a-z_]+)"', html)[0],
+                         DEFAULT_TXN_OPTION)
 
-    def test_page_config_carries_types_panels_and_reference(self):
+    def test_every_option_sits_in_its_group_optgroup(self):
+        html = self.client.get('/hdc/tool-rental/transaction').get_data(as_text=True)
+        for group in TXN_GROUPS:
+            block = re.search(
+                r'<optgroup label="' + re.escape(group['label']) + r'".*?</optgroup>',
+                html, re.S)
+            self.assertIsNotNone(block, group['key'])
+            keys = re.findall(r'<option value="([a-z_]+)"', block.group(0))
+            self.assertEqual(keys, [o['key'] for o in group['options']])
+
+    def test_page_config_carries_groups_panels_and_reference(self):
         html = self.client.get('/hdc/tool-rental/transaction').get_data(as_text=True)
         match = re.search(
             r'<script id="toolTxnConfig" type="application/json">(.*?)</script>',
             html, re.S)
         self.assertIsNotNone(match, 'page config JSON missing')
         config = json.loads(match.group(1))
-        self.assertEqual([t['key'] for t in config['types']], list(REQUIRED_KEYS))
+        self.assertEqual([g['key'] for g in config['groups']],
+                         [g['key'] for g in TXN_GROUPS])
+        self.assertEqual(
+            [o['key'] for g in config['groups'] for o in g['options']],
+            list(REQUIRED_KEYS))
         self.assertTrue(config['txnReference'].startswith('HDC-TX-'))
         self.assertEqual(config['storeLabel'], 'Warehouse / Store')
         self.assertEqual(config['maintenanceLabel'], MAINTENANCE_LABEL)
-        for entry in UNIFORM_TXN_TYPES:
-            self.assertIn(entry['kind'], {t['kind'] for t in config['types']})
+        # Every option reaches the page with the contract the script reads.
+        for group in config['groups']:
+            for option in group['options']:
+                self.assertTrue(option['panels'], option['key'])
+                self.assertTrue(option['checks'], option['key'])
+                self.assertEqual(option['group'], group['key'])
+                if option['needs_rental']:
+                    self.assertIn('__RENTAL_ID__', option['action'], option['key'])
+                else:
+                    self.assertNotIn('__RENTAL_ID__', option['action'], option['key'])
         self.assertIn('data-txn-panels="lines"', html)
+        self.assertIn('data-rental-picker="' + txn_option('rental_payment')['picker'] + '"', html)
         self.assertIn('id="toolTxnForm"', html)
+
+    def test_every_declared_panel_has_markup(self):
+        html = self.client.get('/hdc/tool-rental/transaction').get_data(as_text=True)
+        panels = {panel for entry in TXN_OPTIONS for panel in entry['panels']}
+        for panel in sorted(panels):
+            self.assertIn(f'data-txn-panels="{panel}"', html, panel)
+
+    def test_page_script_implements_every_declared_check(self):
+        """The registry may only ask for checks the script actually has."""
+        script = _txn_script()
+        checks = set(re.findall(r'^\s+(\w+):', _js_object(script, 'CHECKS'), re.M))
+        collectors = set(re.findall(r'^\s+(\w+):', _js_object(script, 'COLLECTORS'), re.M))
+        declared = {check for entry in TXN_OPTIONS for check in entry['checks']}
+        self.assertTrue(declared, 'no transaction declares a check')
+        self.assertEqual(declared - checks, set(), 'declared but unimplemented checks')
+        self.assertEqual(collectors - checks, set(), 'collectors without a check')
+
+    def test_page_script_names_no_transaction_of_its_own(self):
+        """Data-driven only: the script reads the config, it does not know
+        which transactions exist."""
+        script = _txn_script()
+        for entry in TXN_OPTIONS:
+            self.assertNotIn(entry['key'], script, entry['key'])
+        for panel in {panel for entry in TXN_OPTIONS for panel in entry['panels']}:
+            self.assertNotIn(f"'{panel}'", script, panel)
 
     def test_page_is_linked_from_the_tools_subnav_and_dashboard(self):
         nav = self.client.get('/hdc/tool-rental/dashboard').get_data(as_text=True)
@@ -332,7 +429,7 @@ class UniformFormTestCase(unittest.TestCase):
         rental = self._latest_rental()
         item = ToolRentalItem.query.filter_by(rental_id=rental.id).first()
         source_key = f'{rental.id}|own_project|{self.site_a.id}|0|'
-        response = self._uniform('transfer_site', {
+        response = self._txn('transfer_site', {
             'renter_type': 'internal',
             'project_id': str(self.site_b.id),
             'billing_type': 'per_day',
@@ -357,7 +454,7 @@ class UniformFormTestCase(unittest.TestCase):
         rental = self._latest_rental()
         item = ToolRentalItem.query.filter_by(rental_id=rental.id).first()
         source_key = f'{rental.id}|customer|0|0|First%20Customer'
-        self._uniform('transfer_customer', {
+        self._txn('transfer_customer', {
             'renter_type': 'external',
             'customer_name': 'Second Customer',
             'billing_type': 'per_day',
@@ -411,7 +508,7 @@ class UniformFormTestCase(unittest.TestCase):
         due = float(rental.total_pending_amount)
         self.assertGreater(due, 0)
         reference = new_txn_reference()
-        self._uniform('rental_payment', {
+        self._txn('rental_payment', {
             'rental_id': str(rental.id),
             'amount': f'{due:.2f}',
             'payment_date': _pkt_today().isoformat(),
@@ -435,7 +532,7 @@ class UniformFormTestCase(unittest.TestCase):
         self._rent(self.drill, 2, renter_type='external', customer='Credit Customer')
         rental = self._latest_rental()
         due = float(rental.total_pending_amount)
-        self._uniform('credit_adjustment', {
+        self._txn('credit_adjustment', {
             'rental_id': str(rental.id),
             'amount': f'{due:.2f}',
             'discount_date': _pkt_today().isoformat(),
@@ -449,7 +546,7 @@ class UniformFormTestCase(unittest.TestCase):
 
     # ------------------------------------------------- damage / loss / service
     def test_damage_loss_from_store_writes_off_stock(self):
-        self._uniform('damage_loss', {
+        self._txn('damage_loss', {
             'damage_source': 'store',
             'tool_id': str(self.vibrator.id),
             'qty': '2',
@@ -469,7 +566,7 @@ class UniformFormTestCase(unittest.TestCase):
         self._rent(self.vibrator, 4, renter_type='external', customer='Rough Site Co')
         rental = self._latest_rental()
         item = ToolRentalItem.query.filter_by(rental_id=rental.id).first()
-        self._uniform('damage_loss', {
+        self._txn('damage_loss', {
             'damage_source': 'rental',
             'rental_id': str(rental.id),
             'rental_item_id': str(item.id),
@@ -493,7 +590,7 @@ class UniformFormTestCase(unittest.TestCase):
         ensure_tool_serials(tool=self.vibrator, commit=True)
         pieces = [s.id for s in self.vibrator.in_store_serials][:2]
         self.assertEqual(len(pieces), 2, 'fixture must have serial markings')
-        self._uniform('maintenance_out', {
+        self._txn('maintenance_out', {
             'tool_id': str(self.vibrator.id),
             'maintenance_serial_ids[]': [str(p) for p in pieces],
             'maintenance_reason': 'Service',
@@ -506,7 +603,7 @@ class UniformFormTestCase(unittest.TestCase):
         self.assertTrue(all(s.current_location_label == MAINTENANCE_LABEL for s in sent))
         self.assertTrue(all(s.is_in_store for s in sent))
 
-        self._uniform('maintenance_in', {
+        self._txn('maintenance_in', {
             'maintenance_serial_ids[]': [str(p) for p in pieces],
             'maintenance_condition': 'good',
         })
@@ -549,8 +646,8 @@ class UniformFormTestCase(unittest.TestCase):
             'reference': 'SLIP-DUP',
             'txn_reference': reference,
         }
-        self._uniform('rental_payment', data)
-        self._uniform('rental_payment', dict(data))
+        self._txn('rental_payment', data)
+        self._txn('rental_payment', dict(data))
         self.assertEqual(ToolRentalPayment.query.count(), 1)
         self.assertTrue(txn_reference_seen(reference))
 

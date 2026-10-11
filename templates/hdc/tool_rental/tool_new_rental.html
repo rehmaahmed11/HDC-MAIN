@@ -714,14 +714,14 @@ function toggleRenter(){
 }
 
 // ── Transaction registry (one table drives the dropdown, headings and endpoints)
-const TOOL_TXN_TYPES = {{ txn_types | tojson }};
+const NEW_RENTAL_TXN_TYPES = {{ txn_types | tojson }};
 
 function currentTxnMode(){
     return document.getElementById('txnType')?.value || 'new_rental';
 }
 
 function txnEntry(key){
-    return (TOOL_TXN_TYPES || []).find(function(t){ return t.key === key; }) || null;
+    return (NEW_RENTAL_TXN_TYPES || []).find(function(t){ return t.key === key; }) || null;
 }
 
 // Show every [data-txn-modes] block that belongs to the current transaction
@@ -1351,7 +1351,7 @@ function toggleTxnType(){
     setPanelControlsEnabled(settlement, transfer);
 
     // Headings, submit button and help text come from the transaction
-    // registry (TOOL_TXN_TYPES), so a type's wording lives in one place.
+    // registry (NEW_RENTAL_TXN_TYPES), so a type's wording lives in one place.
     const entry = txnEntry(txn.value);
     const pageHeading = document.getElementById('pageFormHeading');
     if(pageHeading && entry) pageHeading.textContent = entry.label;
