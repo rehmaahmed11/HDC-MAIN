@@ -13,7 +13,10 @@
  *   2. build/validate the multi-item lines — a searchable tick list of every
  *      issuable tool, with the ticked tools in excel-style rows (tool,
  *      pieces, qty, rate) — against the store's real availability, not a
- *      guess, including per-piece (serial) selection;
+ *      guess, including per-piece (serial) selection: the Pieces / serial
+ *      cell of every sheet (store, transfer, return) is one *tick per piece
+ *      marking*, with a search box and a tick-all-shown shortcut, never a
+ *      ctrl-click multi-select;
  *   3. copy the one visible transaction date into the endpoint's own date
  *      field, and stamp the reference / responsible person onto the notes, so
  *      the record that gets created carries the number on the printed form;
@@ -430,6 +433,147 @@
         }
     }
 
+    /* ── the piece picker: tick the exact pieces ─────────────────────────
+       One control for every place the form asks *which individual pieces*
+       are moving — the Pieces / serial cell of the store sheet, the Exact
+       pieces cell of the transfer sheet and of the return sheet.  It is one
+       checkbox per serial marking (a plain multi-select needed ctrl-clicks
+       and simply had no tick to give), with a search box when a tool has
+       many markings and a "tick all shown" shortcut.
+
+       Nothing about posting changes: the same hidden fields carry the ticked
+       ids the routes already read (``row_serial_ids[]``,
+       ``transfer_serial_ids_<item>[]``, ``return_serial_ids_<item>[]``), so a
+       ticked piece means exactly what a ctrl-clicked option meant before. */
+    //: Above this many markings a picker offers its own search box.
+    var PIECE_SEARCH_FROM = 8;
+
+    function buildPiecePicker(pieces, options) {
+        options = options || {};
+        pieces = pieces || [];
+        if (!pieces.length) return null;
+        var wrap = document.createElement('div');
+        wrap.className = 'pieces-picker' + (options.className ? ' ' + options.className : '');
+        wrap.setAttribute('data-piece-picker', '');
+
+        var label = options.label || 'Pieces';
+        var bar = document.createElement('div');
+        bar.className = 'pieces-picker-bar';
+        if (pieces.length > PIECE_SEARCH_FROM) {
+            var search = document.createElement('input');
+            search.type = 'search';
+            search.className = 'form-control form-control-sm pieces-picker-search';
+            search.placeholder = options.searchPlaceholder || 'Find a piece…';
+            search.setAttribute('aria-label', 'Find a piece of ' + label);
+            search.addEventListener('input', function () { applyPieceSearch(wrap); });
+            bar.appendChild(search);
+        }
+        var allButton = document.createElement('button');
+        allButton.type = 'button';
+        allButton.className = 'btn btn-sm btn-outline-secondary pieces-picker-all';
+        allButton.addEventListener('click', function () {
+            var tick = allButton.getAttribute('data-tick') !== '0';
+            piecePickerVisibleRows(wrap).forEach(function (row) {
+                row.querySelector('.pieces-pick-box').checked = tick;
+            });
+            paintPiecePicker(wrap);
+            if (options.onChange) options.onChange(piecePickerIds(wrap));
+        });
+        bar.appendChild(allButton);
+        var count = document.createElement('span');
+        count.className = 'pieces-picker-count small text-muted';
+        count.setAttribute('role', 'status');
+        count.setAttribute('aria-live', 'polite');
+        bar.appendChild(count);
+        wrap.appendChild(bar);
+
+        var list = document.createElement('div');
+        list.className = 'pieces-picker-list';
+        list.setAttribute('role', 'group');
+        list.setAttribute('aria-label', label);
+        pieces.forEach(function (piece) {
+            var row = document.createElement('label');
+            row.className = 'pieces-pick';
+            row.setAttribute('data-search', (String(piece.serial_number || '') + ' ' +
+                String(piece.condition || '')).toLowerCase());
+            var box = document.createElement('input');
+            box.type = 'checkbox';
+            box.className = 'form-check-input pieces-pick-box';
+            box.value = String(piece.id);
+            box.addEventListener('change', function () {
+                paintPiecePicker(wrap);
+                if (options.onChange) options.onChange(piecePickerIds(wrap));
+            });
+            var name = document.createElement('span');
+            name.className = 'pieces-pick-name';
+            name.textContent = String(piece.serial_number || '');
+            var note = document.createElement('span');
+            note.className = 'pieces-pick-note';
+            note.textContent = String(piece.condition || 'good');
+            row.appendChild(box);
+            row.appendChild(name);
+            row.appendChild(note);
+            list.appendChild(row);
+        });
+        wrap.appendChild(list);
+        var empty = document.createElement('div');
+        empty.className = 'pieces-picker-empty small text-muted d-none';
+        empty.textContent = options.emptyText || 'No piece matches this search.';
+        wrap.appendChild(empty);
+
+        paintPiecePicker(wrap);
+        return wrap;
+    }
+
+    function piecePickerBoxes(picker) {
+        if (!picker) return [];
+        return Array.prototype.slice.call(picker.querySelectorAll('.pieces-pick-box'));
+    }
+
+    /* The ticked pieces, in the order they are listed — the ids the hidden
+       fields post and the count the quantity cell follows. */
+    function piecePickerIds(picker) {
+        return piecePickerBoxes(picker).filter(function (box) {
+            return box.checked;
+        }).map(function (box) { return box.value; });
+    }
+
+    function piecePickerVisibleRows(picker) {
+        return Array.prototype.filter.call(picker.querySelectorAll('.pieces-pick'), function (row) {
+            return !row.classList.contains('pieces-pick-off');
+        });
+    }
+
+    function applyPieceSearch(picker) {
+        var input = picker.querySelector('.pieces-picker-search');
+        var query = input ? input.value.trim().toLowerCase() : '';
+        Array.prototype.forEach.call(picker.querySelectorAll('.pieces-pick'), function (row) {
+            var hay = row.getAttribute('data-search') || '';
+            row.classList.toggle('pieces-pick-off', !!query && hay.indexOf(query) === -1);
+        });
+        paintPiecePicker(picker);
+    }
+
+    function paintPiecePicker(picker) {
+        if (!picker) return;
+        var boxes = piecePickerBoxes(picker);
+        var ticked = boxes.filter(function (box) { return box.checked; }).length;
+        var visible = piecePickerVisibleRows(picker);
+        var allTicked = visible.length > 0 && visible.every(function (row) {
+            return row.querySelector('.pieces-pick-box').checked;
+        });
+        var count = picker.querySelector('.pieces-picker-count');
+        if (count) count.textContent = ticked + ' of ' + boxes.length + ' ticked';
+        var allButton = picker.querySelector('.pieces-picker-all');
+        if (allButton) {
+            allButton.setAttribute('data-tick', allTicked ? '0' : '1');
+            allButton.textContent = allTicked ? 'Clear all shown' : 'Tick all shown';
+            allButton.disabled = !visible.length;
+        }
+        var empty = picker.querySelector('.pieces-picker-empty');
+        if (empty) empty.classList.toggle('d-none', visible.length > 0);
+    }
+
     /* ── store tools: searchable tick list → excel-style selected rows ────
        Step 3 of renting out from the store.  Every issuable tool is listed
        with a checkbox and a search box; each tick adds one excel-style row
@@ -527,21 +671,13 @@
             'title="Remove" aria-label="Remove ' + escapeHtml(tool.name) + '">' +
             '<i class="fas fa-times" aria-hidden="true"></i></button></td>';
         var piecesCell = row.querySelector('.store-line-pieces');
-        var serials = tool.serials || [];
-        if (serials.length) {
-            var serialBox = document.createElement('select');
-            serialBox.className = 'form-select form-select-sm store-line-serials';
-            serialBox.multiple = true;
-            serialBox.size = 2;
-            serialBox.setAttribute('aria-label', 'Pieces of ' + tool.name);
-            serials.forEach(function (serial) {
-                var option = document.createElement('option');
-                option.value = String(serial.id);
-                option.textContent = serial.serial_number + ' (' + (serial.condition || 'good') + ')';
-                serialBox.appendChild(option);
-            });
-            serialBox.addEventListener('change', function () { onStoreSerialsChange(row); });
-            piecesCell.appendChild(serialBox);
+        var picker = buildPiecePicker(tool.serials || [], {
+            className: 'store-line-serials',
+            label: 'Pieces of ' + tool.name,
+            onChange: function () { onStoreSerialsChange(row); }
+        });
+        if (picker) {
+            piecesCell.appendChild(picker);
         } else {
             piecesCell.innerHTML = '<span class="small text-muted">Qty only</span>';
         }
@@ -583,13 +719,16 @@
         if (sheet) sheet.classList.toggle('d-none', !hasRows);
     }
 
+    /* Ticked pieces are the quantity: the row posts exactly those markings,
+       so a typed quantity would only contradict them.  Clearing every tick
+       hands the quantity cell back to the operator. */
     function onStoreSerialsChange(row) {
-        var serialBox = row.querySelector('.store-line-serials');
+        var picker = row.querySelector('.store-line-serials');
         var qty = row.querySelector('.store-line-qty');
-        if (!serialBox || !qty) return;
-        var count = serialBox.selectedOptions.length;
-        if (count > 0) {
-            qty.value = String(count);
+        if (!picker || !qty) return;
+        var ids = piecePickerIds(picker);
+        if (ids.length) {
+            qty.value = String(ids.length);
             qty.readOnly = true;
         } else {
             qty.readOnly = false;
@@ -605,8 +744,8 @@
             if (!tool) return;
             var qtyInput = row.querySelector('.store-line-qty');
             var qty = parseFloat((qtyInput && qtyInput.value) || '0');
-            var serialBox = row.querySelector('.store-line-serials');
-            var serialCount = serialBox ? serialBox.selectedOptions.length : 0;
+            var picker = row.querySelector('.store-line-serials');
+            var serialCount = picker ? piecePickerIds(picker).length : 0;
             if (!qty && !serialCount) {
                 messages.push('Enter a quantity for ' + tool.name + ' — or tick its pieces.');
             } else if (qty > tool.availableQty + 0.001) {
@@ -625,10 +764,8 @@
             node.remove();
         });
         Array.prototype.forEach.call(tbody.querySelectorAll('.store-line-row'), function (row) {
-            var serialBox = row.querySelector('.store-line-serials');
-            var serialIds = serialBox
-                ? Array.prototype.map.call(serialBox.selectedOptions, function (o) { return o.value; })
-                : [];
+            var picker = row.querySelector('.store-line-serials');
+            var serialIds = picker ? piecePickerIds(picker) : [];
             var qtyInput = row.querySelector('.store-line-qty');
             var rateInput = row.querySelector('.txn-line-rate');
             var cell = row.querySelector('td');
@@ -752,20 +889,29 @@
                     '<td><input type="number" class="form-control form-control-sm transfer-rate" aria-label="New rate for ' +
                     escapeHtml(line.name) + '" min="0" step="0.01" value="' +
                     Number(line.dailyRate || line.rate || 0) + '"></td>' +
-                    '<td><select class="form-select form-select-sm transfer-serials" multiple size="2" aria-label="Pieces to move"></select></td>';
-                var serialBox = row.querySelector('.transfer-serials');
-                (line.serials || []).forEach(function (serial) {
-                    var option = document.createElement('option');
-                    option.value = String(serial.id);
-                    option.textContent = serial.serial_number + ' (' + (serial.condition || 'good') + ')';
-                    // Do not preselect all: quantity changes must not accidentally
-                    // override the operator's requested quantity on the server.
-                    serialBox.appendChild(option);
+                    '<td class="col-pieces transfer-pieces"></td>';
+                var picker = buildPiecePicker(line.serials || [], {
+                    className: 'transfer-serials',
+                    label: 'Pieces of ' + line.name + ' to move',
+                    // Nothing is ticked to begin with: a tick is a deliberate
+                    // "move *these* pieces", and a quantity typed by hand must
+                    // keep deciding the movement until the operator ticks.
+                    onChange: function (ids) {
+                        if (!ids.length) return;
+                        row.querySelector('.transfer-qty').value = String(ids.length);
+                        var pick = row.querySelector('.transfer-pick');
+                        if (pick && !pick.checked) {
+                            // Ticking pieces is choosing the row: never leave a
+                            // ticked piece on a row that would not be posted.
+                            pick.checked = true;
+                            updateTransferPickAll();
+                            updateTransferCount();
+                        }
+                    }
                 });
-                if (!(line.serials || []).length) serialBox.classList.add('d-none');
-                serialBox.addEventListener('change', function () {
-                    if (serialBox.selectedOptions.length) row.querySelector('.transfer-qty').value = serialBox.selectedOptions.length;
-                });
+                if (picker) row.querySelector('.transfer-pieces').appendChild(picker);
+                else row.querySelector('.transfer-pieces').innerHTML =
+                    '<span class="small text-muted">Qty only</span>';
                 row.querySelector('.transfer-pick').addEventListener('change', function () {
                     updateTransferPickAll();
                     updateTransferCount();
@@ -832,9 +978,9 @@
             addHidden(row.querySelector('td'), 'transfer_qty_' + itemId, String(qty), 'transfer-post');
             var rate = row.querySelector('.transfer-rate').value;
             if (rate) addHidden(row.querySelector('td'), 'transfer_rate_' + itemId, rate, 'transfer-post');
-            var serialBox = row.querySelector('.transfer-serials');
-            if (serialBox && serialBox.selectedOptions.length) {
-                var ids = Array.prototype.map.call(serialBox.selectedOptions, function (o) { return o.value; });
+            var picker = row.querySelector('.transfer-serials');
+            var ids = picker ? piecePickerIds(picker) : [];
+            if (ids.length) {
                 addHidden(row.querySelector('td'), 'transfer_serial_ids_' + itemId + '[]', ids.join(','), 'transfer-post');
             }
         });
@@ -874,10 +1020,11 @@
         Array.prototype.forEach.call(ticked, function (row) {
             var qty = Number(row.querySelector('.transfer-qty').value);
             var max = Number(row.querySelector('.transfer-qty').max);
-            var serials = row.querySelector('.transfer-serials');
+            var picker = row.querySelector('.transfer-serials');
+            var ids = picker ? piecePickerIds(picker) : [];
             if (!Number.isFinite(qty) || qty < 0 || qty > max) errors.push('Move quantity must be between 0 and the stock at source.');
-            if (serials && serials.selectedOptions.length && serials.selectedOptions.length !== qty) {
-                errors.push('Move quantity must match the number of exact pieces selected.');
+            if (ids.length && ids.length !== qty) {
+                errors.push('Move quantity must match the number of exact pieces ticked.');
             }
         });
         if (textValue('settle_choice') === 'pay_now' && !textValue('transferAccount') &&
@@ -946,9 +1093,9 @@
                 escapeHtml(item.tool_name) + '" min="0" step="0.1" max="' + Number(item.qty_pending) +
                 '" data-pending="' + Number(item.qty_pending) + '" placeholder="0"></td>' +
                 '<td><input type="text" class="form-control form-control-sm return-condition" aria-label="Condition" placeholder="Condition / notes"></td>' +
-                '<td><select class="form-select form-select-sm return-serials d-none" multiple size="2" aria-label="Exact pieces coming back"></select></td>';
+                '<td class="col-pieces return-pieces"></td>';
             row.querySelector('.return-item-id').dataset.pending = String(item.qty_pending);
-            var serialBox = row.querySelector('.return-serials');
+            var piecesCell = row.querySelector('.return-pieces');
             var rentalId = picker ? picker.value : '';
             fetch('/hdc/api/tool-rental/serials/out-of-store?tool_id=' + encodeURIComponent(item.tool_id) +
                   '&rental_id=' + encodeURIComponent(rentalId),
@@ -966,22 +1113,15 @@
                         });
                     });
                     if (!serials.length) return;
-                    serialBox.classList.remove('d-none');
-                    serials.forEach(function (serial) {
-                        var option = document.createElement('option');
-                        option.value = String(serial.serial_id);
-                        option.textContent = serial.serial_number;
-                        serialBox.appendChild(option);
+                    var piece = buildPiecePicker(serials.map(function (serial) {
+                        return { id: serial.serial_id, serial_number: serial.serial_number,
+                                 condition: serial.condition || 'good' };
+                    }), {
+                        className: 'return-serials',
+                        label: 'Pieces of ' + item.tool_name + ' coming back',
+                        onChange: function () { syncReturnPieceQty(row); }
                     });
-                    serialBox.addEventListener('change', function () {
-                        var qty = row.querySelector('.return-qty-input');
-                        if (serialBox.selectedOptions.length) {
-                            qty.value = String(serialBox.selectedOptions.length);
-                            qty.readOnly = true;
-                        } else {
-                            qty.readOnly = false;
-                        }
-                    });
+                    if (piece) piecesCell.appendChild(piece);
                 })
                 .catch(function () { /* the quantity path still works */ });
             tbody.appendChild(row);
@@ -994,6 +1134,24 @@
         syncReturnMode();
     }
 
+    /* Ticked pieces are the quantity coming back; untick them all and the
+       typed quantity decides again.  A *full* return takes everything still
+       outstanding, so its quantity cells stay exactly as the panel set them. */
+    function syncReturnPieceQty(row) {
+        var picker = row.querySelector('.return-serials');
+        var qty = row.querySelector('.return-qty-input');
+        if (!picker || !qty) return;
+        var entry = currentEntry();
+        if (entry && entry.return_type === 'full') return;
+        var ids = piecePickerIds(picker);
+        if (ids.length) {
+            qty.value = String(ids.length);
+            qty.readOnly = true;
+        } else {
+            qty.readOnly = false;
+        }
+    }
+
     function collectReturnFields() {
         var container = document.getElementById('returnItemRows');
         if (!container) return;
@@ -1002,8 +1160,8 @@
             var itemId = row.querySelector('.return-item-id');
             if (!itemId) return;
             var qty = parseFloat(row.querySelector('.return-qty-input').value || '0');
-            var serialBox = row.querySelector('.return-serials');
-            var serialIds = serialBox ? Array.prototype.map.call(serialBox.selectedOptions, function (o) { return o.value; }) : [];
+            var picker = row.querySelector('.return-serials');
+            var serialIds = picker ? piecePickerIds(picker) : [];
             if (!qty && !serialIds.length) return;
             addHidden(row.querySelector('td'), 'rental_item_id[]', itemId.value, 'return-post');
             addHidden(row.querySelector('td'), 'qty_returned[]', serialIds.length ? String(serialIds.length) : String(qty), 'return-post');
