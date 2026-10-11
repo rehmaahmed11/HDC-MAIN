@@ -78,8 +78,27 @@
 .tool-txn-sheet .col-action { width:52px; text-align:center; }
 .tool-txn-sheet .col-rental { width:120px; }
 .tool-txn-sheet .col-source { width:110px; }
-.tool-txn-sheet .col-pieces { min-width:150px; }
+.tool-txn-sheet .col-pieces { min-width:196px; }
 .tool-txn-sheet td .form-control-sm, .tool-txn-sheet td .form-select-sm { font-size:.85rem; }
+/* Pieces / serial: one tick per serial marking — never a ctrl-click list. */
+.pieces-picker { border:1px solid var(--card-border, #e2e8f0); border-radius:.45rem;
+                 background:var(--card-bg, #fff); overflow:hidden; }
+.pieces-picker-bar { display:flex; flex-wrap:wrap; align-items:center; gap:.35rem;
+                     padding:.28rem .4rem; border-bottom:1px solid var(--card-border, #e2e8f0);
+                     background:var(--bs-tertiary-bg, #f8fafc); }
+.pieces-picker-search { flex:1 1 110px; min-width:96px; font-size:.8rem; }
+.pieces-picker-all { flex:0 0 auto; padding:.1rem .45rem; font-size:.78rem; }
+.pieces-picker-count { margin-left:auto; white-space:nowrap; font-size:.75rem; }
+.pieces-picker-list { max-height:158px; overflow:auto; padding:.22rem .45rem; }
+.pieces-pick { display:flex; align-items:center; gap:.4rem; margin:0; padding:.12rem 0;
+               cursor:pointer; font-size:.85rem; line-height:1.25; }
+.pieces-pick + .pieces-pick { border-top:1px dashed var(--card-border, #e2e8f0); }
+.pieces-pick:hover { background:var(--bs-tertiary-bg, #f8fafc); }
+.pieces-pick input { flex:0 0 auto; margin:0; }
+.pieces-pick-name { font-variant-numeric:tabular-nums; }
+.pieces-pick-note { color:var(--text-muted, #64748b); font-size:.75rem; margin-left:auto; }
+.pieces-pick.pieces-pick-off { display:none; }
+.pieces-picker-empty { padding:0 .45rem .35rem; }
 /* A "no rent" answer greys the rate cells out; the zero still posts. */
 .tool-txn-sheet input[type=number].rate-off { background:var(--bs-secondary-bg, #e9ecef);
                                               color:var(--text-muted, #64748b); }
@@ -215,7 +234,7 @@
                         <thead><tr>
                             <th scope="col" class="col-idx">#</th>
                             <th scope="col">Tool</th>
-                            <th scope="col" class="col-pieces">Pieces / serial</th>
+                            <th scope="col" class="col-pieces" title="Tick the exact piece markings to send those pieces">Pieces / serial</th>
                             <th scope="col" class="col-qty">Qty</th>
                             <th scope="col" class="col-rate">Rate (PKR)</th>
                             <th scope="col" class="col-action"><span class="visually-hidden">Remove</span></th>
@@ -228,6 +247,9 @@
                 <div class="small text-muted mt-2">
                     Checked against the store: a tool cannot go out for more than it holds,
                     and one piece cannot go out twice in the same transaction.
+                    Tick the exact markings in <strong>Pieces / serial</strong> to send those
+                    pieces — the quantity follows the ticks, and a row you leave unticked
+                    sends the quantity you type.
                 </div>
             </div>
 

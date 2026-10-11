@@ -1,0 +1,8 @@
+{
+  "name": "hdc-test-harness",
+  "private": true,
+  "description": "A DOM for the page-script tests. Only tests/tool_txn_pieces_harness.js needs it; the Python suite skips that harness when jsdom is missing, so the tests still run without npm.",
+  "devDependencies": {
+    "jsdom": "^30.1.2"
+  }
+}
