@@ -149,8 +149,11 @@
      aria-labelledby="txnFormTitle" aria-hidden="true">
     <div class="modal-dialog modal-xl modal-dialog-scrollable">
         <div class="modal-content">
+            {# data-own-submit: the page script posts this form in the background and
+               reports the result in the entry-result dialogue box, so the shared
+               double-submit guard in core/forms.js must leave it alone. #}
             <form method="POST" action="{{ txn_groups[0].options[0].action }}"
-                  id="toolTxnForm" class="tool-txn-modal-form" novalidate>
+                  id="toolTxnForm" class="tool-txn-modal-form" novalidate data-own-submit>
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
                 <input type="hidden" name="txn_source" value="transaction">
                 <input type="hidden" name="txn_reference" id="txnReference" value="{{ txn_reference }}">
@@ -668,5 +671,6 @@
 {% endblock %}
 
 {% block extra_js %}
+{% include 'shared/_result_dialog.html' %}
 <script src="/hdc_static/js/pages/tool_txn.js"></script>
 {% endblock %}

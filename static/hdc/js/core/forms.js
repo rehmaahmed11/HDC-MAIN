@@ -15,6 +15,10 @@
     document.addEventListener('submit', function (e) {
         var form = e.target;
         if (!form || form.tagName !== 'FORM') return;
+        // A page that posts in the background and reports the result itself
+        // (the tool transaction page) keeps its own lock and must not be
+        // disabled here: a refused entry has to be correctable at once.
+        if (form.hasAttribute('data-own-submit')) return;
         if (form.dataset.submitted === '1') {
             e.preventDefault();
             return;

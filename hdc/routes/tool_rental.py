@@ -3,8 +3,11 @@ Now includes Accounts integration: payment receiving in Cash/Bank accounts.
 """
 
 from datetime import datetime
+from functools import wraps
 from urllib.parse import quote, unquote
-from flask import flash, jsonify, redirect, render_template, request, url_for
+from flask import (
+    flash, g, jsonify, make_response, redirect, render_template, request, session, url_for,
+)
 from flask_login import current_user, login_required
 from sqlalchemy import func
 from sqlalchemy.orm import joinedload
@@ -271,6 +274,14 @@ def _txn_return_url(default_url):
     return default_url
 
 
+#: Header the transaction page sends with the posts it makes in the background.
+#: Only a post that carries it is answered with data (see
+#: ``_txn_post_answers_as_data`` in :func:`register`).
+TXN_DIALOG_HEADER = 'X-HDC-Entry-Dialog'
+#: The flash categories the entry-result dialogue box understands.
+TXN_RESULT_KINDS = ('success', 'danger', 'warning', 'info')
+
+
 def _txn_reference_blocked(default_redirect):
     """Refuse a re-posted transaction.
 
@@ -285,11 +296,71 @@ def _txn_reference_blocked(default_redirect):
     reference = (request.form.get('txn_reference') or '').strip()
     if not reference or not txn_reference_seen(reference):
         return None
+    g.txn_duplicate = True
     flash(f'Transaction {reference} was already recorded. This submission was '
           f'ignored, so nothing was posted twice.', 'warning')
     from_txn_page = (request.form.get('txn_source') or '').strip() == 'transaction'
     return redirect(url_for('hdc_tool_txn') if from_txn_page else default_redirect)
 
+
+
+def _txn_answer(response):
+    """Answer a transaction-page post with its result instead of a redirect.
+
+    The transaction page posts in the background (``tool_txn.js``), so a
+    refused entry leaves the form exactly as the operator filled it in.  Each
+    endpoint still does what it always did: it records the transaction, or
+    refuses it with a flash and a redirect.  When the post declares it came from
+    the transaction page (``TXN_DIALOG_HEADER`` plus ``txn_source=transaction``),
+    that redirect is swapped for a JSON answer — the outcome and the flash
+    messages — which the page shows in the entry-result dialogue box.  The
+    flashes are taken out of the session here so the next page does not show
+    them a second time.  Any other response passes through untouched.
+
+    Outcomes: ``saved``, ``duplicate`` (the reference was already recorded),
+    ``failed`` (a refusal), ``signed_out`` (the session ended) and ``notice``
+    (nothing was posted, for a reason that is only a warning or information).
+    """
+    response = make_response(response)
+    # The duplicate flag belongs to this request only; take it off here.
+    duplicate = g.pop('txn_duplicate', False)
+    if (request.headers.get(TXN_DIALOG_HEADER) != '1'
+            or (request.form.get('txn_source') or '').strip() != 'transaction'
+            or not 300 <= response.status_code < 400):
+        return response
+    location = response.headers.get('Location', '')
+    items = []
+    for category, message in (session.pop('_flashes', None) or []):
+        text = str(message or '').strip()
+        if text:
+            kind = category if category in TXN_RESULT_KINDS else 'info'
+            items.append({'kind': kind, 'text': text})
+    kinds = {item['kind'] for item in items}
+    if url_for('hdc_login') in location:
+        outcome = 'signed_out'
+    elif duplicate:
+        outcome = 'duplicate'
+    elif 'danger' in kinds:
+        outcome = 'failed'
+    elif 'success' in kinds:
+        outcome = 'saved'
+    else:
+        outcome = 'notice'
+    answer = jsonify(outcome=outcome, items=items)
+    answer.headers['Cache-Control'] = 'no-store'
+    return answer
+
+
+def _answers_txn_post_as_data(view):
+    """Mark a POST endpoint the transaction page posts to (see ``_txn_answer``).
+
+    Put it directly above ``@login_required`` so the sign-in redirect is
+    answered as data too.
+    """
+    @wraps(view)
+    def answered(*args, **kwargs):
+        return _txn_answer(view(*args, **kwargs))
+    return answered
 
 
 def _tool_txn_rental_options(eligible_for, limit=300):
@@ -1145,6 +1216,7 @@ def register(app):
         return render_template('tool_rental/tool_txn.html', **context)
 
     @app.route('/hdc/tool-rental/transaction/damage-loss', methods=['POST'])
+    @_answers_txn_post_as_data
     @login_required
     @_money_write_required()
     def hdc_tool_txn_damage_loss():
@@ -1178,6 +1250,7 @@ def register(app):
         return redirect(url_for('hdc_tool_txn'))
 
     @app.route('/hdc/tool-rental/transaction/maintenance', methods=['POST'])
+    @_answers_txn_post_as_data
     @login_required
     @_money_write_required()
     def hdc_tool_txn_maintenance():
@@ -1200,6 +1273,7 @@ def register(app):
         return redirect(url_for('hdc_tool_txn'))
 
     @app.route('/hdc/tool-rental/transaction/maintenance-return', methods=['POST'])
+    @_answers_txn_post_as_data
     @login_required
     @_money_write_required()
     def hdc_tool_txn_maintenance_return():
@@ -1805,6 +1879,7 @@ def register(app):
 
     # ------------------ CREATE RENTAL ------------------
     @app.route('/hdc/tool-rental/create', methods=['POST'])
+    @_answers_txn_post_as_data
     @login_required
     @_money_write_required()
     def hdc_tool_rental_create():
@@ -2173,6 +2248,7 @@ def register(app):
 
     # ------------------ RETURN (FULL/PARTIAL) WITH ACCOUNTS ------------------
     @app.route('/hdc/tool-rental/<int:rental_id>/return', methods=['POST'])
+    @_answers_txn_post_as_data
     @login_required
     @_money_write_required()
     def hdc_tool_rental_return(rental_id):
@@ -2412,6 +2488,7 @@ def register(app):
 
     # ------------------ ADD PAYMENT WITH ACCOUNTS ------------------
     @app.route('/hdc/tool-rental/<int:rental_id>/payment', methods=['POST'])
+    @_answers_txn_post_as_data
     @login_required
     @_money_write_required()
     def hdc_tool_rental_payment(rental_id):
@@ -2559,6 +2636,7 @@ def register(app):
 
     # ------------------ DISCOUNT / WAIVE OFF ------------------
     @app.route('/hdc/tool-rental/<int:rental_id>/discount', methods=['POST'])
+    @_answers_txn_post_as_data
     @login_required
     @_money_write_required()
     def hdc_tool_rental_add_discount(rental_id):

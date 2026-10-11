@@ -39,7 +39,7 @@ os.environ.setdefault('HDC_ENV', 'test')
 os.environ.setdefault('HDC_SECRET_KEY', 'unit-test-secret')
 os.environ.setdefault('HDC_BOOTSTRAP_ADMIN_PASSWORD', 'Admin@1234')
 
-from flask import url_for                                          # noqa: E402
+from flask import g, url_for                                      # noqa: E402
 
 from hdc.app import create_app                                     # noqa: E402
 from hdc.extensions import db                                      # noqa: E402
@@ -906,6 +906,125 @@ class TxnFormTestCase(unittest.TestCase):
         # page, so the operator never answers "to whom" twice.
         self.assertLess(html.index('id="rentToPanel"'), html.index('id="destinationCustomerPanel"'))
         self.assertLess(html.index('id="rentToPanel"'), html.index('id="destinationSitePanel"'))
+
+    # ------------------------------------------- the entry-result dialogue box
+    # The page posts in the background with this header; the server then
+    # answers with the outcome and its flash messages instead of a redirect, so
+    # a refused entry leaves the form alone (see _txn_post_answers_as_data).
+
+    def _create_url(self):
+        with self.app.test_request_context():
+            return url_for('hdc_tool_rental_create')
+
+    def _rent_out_data(self, qty, reference=None):
+        return {
+            'txn_type': 'rent_out_customer',
+            'transaction_date': _pkt_today().isoformat(),
+            'txn_reference': reference or new_txn_reference(),
+            'responsible_person': 'Office Test',
+            'renter_type': 'external',
+            'customer_name': 'Dialog Customer',
+            'billing_type': 'per_day',
+            'rental_date': _pkt_today().isoformat(),
+            'tool_id[]': [str(self.vibrator.id)],
+            'qty[]': [str(qty)],
+            'rate[]': ['500'],
+        }
+
+    def _post_from_page(self, url, data, dialog=True):
+        payload = dict(data)
+        payload['_csrf_token'] = self._token()
+        payload.setdefault('txn_source', 'transaction')
+        headers = {'X-HDC-Entry-Dialog': '1'} if dialog else {}
+        return self.client.post(url, data=payload, headers=headers)
+
+    def test_a_refused_entry_is_answered_as_data_and_nothing_is_recorded(self):
+        before = ToolRental.query.count()
+        response = self._post_from_page(self._create_url(), self._rent_out_data(999))
+        self.assertEqual(response.status_code, 200)
+        answer = response.get_json()
+        self.assertEqual(answer['outcome'], 'failed')
+        self.assertTrue(any(item['kind'] == 'danger' and item['text'] for item in answer['items']),
+                        answer)
+        self.assertEqual(ToolRental.query.count(), before)
+
+    def test_a_saved_entry_is_answered_as_saved_and_its_message_is_taken_back(self):
+        before = ToolRental.query.count()
+        answer = self._post_from_page(self._create_url(), self._rent_out_data(2)).get_json()
+        self.assertEqual(answer['outcome'], 'saved')
+        self.assertTrue(any(item['kind'] == 'success' for item in answer['items']), answer)
+        self.assertEqual(ToolRental.query.count(), before + 1)
+        with self.client.session_transaction() as sess:
+            self.assertNotIn('_flashes', sess)
+
+    def test_a_repeated_reference_is_answered_as_already_recorded(self):
+        data = self._rent_out_data(1)
+        self.assertEqual(self._post_from_page(self._create_url(), data).get_json()['outcome'],
+                         'saved')
+        again = self._post_from_page(self._create_url(), data).get_json()
+        self.assertEqual(again['outcome'], 'duplicate')
+        self.assertEqual(ToolRental.query.filter(ToolRental.rental_code.isnot(None)).count(), 1)
+
+    def test_a_refused_return_and_maintenance_post_are_answered_as_data(self):
+        """The same answer for every group: the return and the workshop too."""
+        rent = self._post_from_page(self._create_url(), self._rent_out_data(2)).get_json()
+        self.assertEqual(rent['outcome'], 'saved')
+        rental = self._latest_rental()
+        item = rental.items[0]
+        too_many = self._post_from_page(
+            f'/hdc/tool-rental/{rental.id}/return', {
+                'txn_type': 'partial_return',
+                'txn_reference': new_txn_reference(),
+                'return_condition': 'partial',
+                'return_date': _pkt_today().isoformat(),
+                'payment_condition': 'no_payment',
+                'rental_item_id[]': [str(item.id)],
+                'qty_returned[]': ['50'],
+                'condition_notes[]': [''],
+            }).get_json()
+        self.assertEqual(too_many['outcome'], 'failed')
+        self.assertTrue(any('exceeds' in i['text'] for i in too_many['items']), too_many)
+        nothing_ticked = self._post_from_page(
+            '/hdc/tool-rental/transaction/maintenance', {
+                'txn_type': 'maintenance_out',
+                'txn_reference': new_txn_reference(),
+            }).get_json()
+        self.assertEqual(nothing_ticked['outcome'], 'failed')
+        self.assertTrue(any('at least one piece' in i['text'] for i in nothing_ticked['items']),
+                        nothing_ticked)
+
+    def test_a_post_without_the_dialogue_header_still_redirects_as_before(self):
+        response = self._post_from_page(self._create_url(), self._rent_out_data(999), dialog=False)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('/hdc/tool-rental/transaction', response.headers['Location'])
+
+    def test_a_session_that_has_ended_is_answered_as_signed_out(self):
+        # TESTING switches Flask-Login's checks off, and this test's own app
+        # context keeps the signed-in user cached on g: both must be undone so
+        # the anonymous client is really anonymous.
+        self.app.config['LOGIN_DISABLED'] = False
+        g.pop('_login_user', None)
+        anonymous = self.app.test_client()
+        with anonymous.session_transaction() as sess:
+            sess['_csrf_token'] = token = 'signed-out-token'
+        response = anonymous.post('/hdc/tool-rental/transaction/maintenance', data={
+            '_csrf_token': token, 'txn_source': 'transaction',
+            'txn_reference': new_txn_reference(), 'tool_id': str(self.vibrator.id), 'qty': '1',
+        }, headers={'X-HDC-Entry-Dialog': '1'})
+        self.assertEqual(response.get_json()['outcome'], 'signed_out')
+
+    def test_the_page_posts_in_the_background_and_reports_through_the_dialogue_box(self):
+        html = self.client.get('/hdc/tool-rental/transaction').get_data(as_text=True)
+        self.assertIn('id=\"toolTxnForm\"', html)
+        self.assertIn('data-own-submit', html)
+        script = _txn_script()
+        self.assertIn("'X-HDC-Entry-Dialog': '1'", script)
+        self.assertIn('window.location.reload()', script)
+        self.assertIn('hdcDialog.show(', script)
+        with open(os.path.join(os.path.dirname(SCRIPT_PATH), '..', 'core', 'forms.js'),
+                  encoding='utf-8') as handle:
+            self.assertIn("form.hasAttribute('data-own-submit')", handle.read())
+
 
 if __name__ == '__main__':
     unittest.main()
