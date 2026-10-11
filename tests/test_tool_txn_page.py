@@ -318,6 +318,18 @@ class TxnFormTestCase(unittest.TestCase):
         self.assertEqual(re.findall(r'<option value="([a-z_]+)"', html)[0],
                          DEFAULT_TXN_OPTION)
 
+    def test_group_cards_open_a_shared_modal_and_rent_out_hides_its_selector(self):
+        html = self.client.get('/hdc/tool-rental/transaction').get_data(as_text=True)
+        for group in TXN_GROUPS:
+            self.assertIn(f'data-txn-group="{group["key"]}"', html)
+            self.assertIn('data-bs-target="#toolTxnModal"', html)
+        self.assertIn('id="toolTxnModal"', html)
+        self.assertIn('class="col-md-6 d-none" id="txnTypeField"', html)
+        self.assertIn('id="txnType"', html)
+        self.assertIn('data-bs-toggle="modal"', html)
+        script = _txn_script()
+        self.assertIn("entry.group !== 'rent_out'", script)
+
     def test_every_option_sits_in_its_group_optgroup(self):
         html = self.client.get('/hdc/tool-rental/transaction').get_data(as_text=True)
         for group in TXN_GROUPS:
@@ -531,9 +543,8 @@ class TxnFormTestCase(unittest.TestCase):
     def test_legacy_new_rental_page_still_works(self):
         html = self.client.get('/hdc/tool-rental/new').get_data(as_text=True)
         self.assertEqual(html.count('id="txnType"'), 1)
-        legacy = [t for t in re.findall(r'<option value="([a-z_]+)"', html)
-                  if t in ('new_rental', 'transfer', 'return', 'payment')]
-        self.assertTrue(legacy)
+        self.assertIn('type="hidden" name="txn_type" id="txnType" value="new_rental"', html)
+        self.assertIn('id="createRentalForm"', html)
 
     def test_existing_tools_tabs_still_render(self):
         for url in ('/hdc/tool-rental', '/hdc/tool-rental/dashboard',

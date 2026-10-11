@@ -67,9 +67,10 @@ panels the page shows, the checks the page script runs, which rentals it may
 pick from, and how its submit button reads.
 
 The template (`templates/hdc/tool_rental/tool_txn.html`) loops over that table
-to render the three tabs, the dropdown (one `<optgroup>` per group) and the
-submit label. The page script (`static/hdc/js/pages/tool_txn.js`) reads the same
-table from the page config and:
+to render three entry cards and one shared modal form. The transaction selector
+is shown for Return and Maintenance; Rent Out hides it and derives issue versus
+transfer from the existing From / To choices. The page script
+(`static/hdc/js/pages/tool_txn.js`) reads the same table from the page config and:
 
 * shows the panels the chosen transaction declares, and **disables** everything
   else, so a hidden panel can never leak into a submit;
@@ -125,8 +126,8 @@ sentence, and a test asserts the list is empty.
 | `hdc/services/tool_txn_types.py` | The grouped, self-checking registry; `NEW_RENTAL_TXN_TYPES` for the old page. |
 | `hdc/services/tool_txn_entry.py` | Form context builds one picker list per eligibility rule from the registry. |
 | `hdc/routes/tool_rental.py` | `_txn_group_context()` / `_txn_page_config()`; the three thin POST handlers unchanged. |
-| `templates/hdc/tool_rental/tool_txn.html` | Three group tabs + `<optgroup>` dropdown from data; legacy panels deleted. |
-| `static/hdc/js/pages/tool_txn.js` | Group tabs; checks/collectors by name; picker by data attribute. |
+| `templates/hdc/tool_rental/tool_txn.html` | Three group cards + shared modal form; the Return / Maintenance `<optgroup>` selector is data-driven. |
+| `static/hdc/js/pages/tool_txn.js` | Opens each card's group in the modal; rent-out type follows From / To; checks/collectors by name. |
 | `templates/hdc/tool_rental/tool_new_rental.html` | Its registry const renamed to match `NEW_RENTAL_TXN_TYPES`. |
 | `tests/test_tool_txn_page.py` | Registry, page and per-transaction cases for the grouped page, plus the data-driven guard. |
 | `tests/test_tool_txn_form.py` | Imports the renamed New Rental registry. |
