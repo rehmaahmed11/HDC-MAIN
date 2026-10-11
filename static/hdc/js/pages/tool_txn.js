@@ -44,6 +44,20 @@
     });
     var TOOLS = CONFIG.tools || [];
     var SOURCES = CONFIG.transferSources || [];
+    var BILLING = {};
+    (CONFIG.billingModes || []).forEach(function (mode) { BILLING[mode.key] = mode; });
+
+    function moneyStatus(type, amount) {
+        var mode = BILLING[type];
+        if (mode && !mode.charges_rent) return mode.status;
+        return 'Rent charged — ' + Number(amount || 0).toFixed(2) + ' PKR currently due.';
+    }
+
+    function escapeHtml(value) {
+        return String(value == null ? '' : value).replace(/[&<>"']/g, function (c) {
+            return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c];
+        });
+    }
     var MAINTENANCE_PIECES = CONFIG.maintenancePieces || [];
     var TOOLS_BY_ID = {};
     TOOLS.forEach(function (tool) { TOOLS_BY_ID[String(tool.id)] = tool; });
@@ -154,6 +168,8 @@
         syncDestinationPanels();
         syncReturnMode();
         syncTransferSettlement();
+        syncBilling();
+        syncReturnSettlement();
         syncDamageSource();
         syncDateFields();
         showError('');
@@ -186,19 +202,69 @@
         var full = !!(entry && entry.return_type === 'full');
         Array.prototype.forEach.call(document.querySelectorAll('.return-qty-input'), function (input) {
             if (full) {
+                if (!input.readOnly) input.dataset.partialQty = input.value;
                 input.value = input.getAttribute('data-pending') || input.value;
                 input.readOnly = true;
             } else {
+                if (input.readOnly) input.value = input.dataset.partialQty || '';
                 input.readOnly = false;
             }
         });
     }
 
+    /* A no-charge rental is a physical issue, not a receivable.  The mode
+       comes from the server's billing registry; never infer it from a label. */
+    function syncBilling() {
+        var select = document.getElementById('billing_type');
+        var mode = select && BILLING[select.value];
+        var free = !!(mode && !mode.charges_rent);
+        var status = document.getElementById('billingStatus');
+        if (status && mode) status.textContent = mode.status;
+        Array.prototype.forEach.call(document.querySelectorAll('.txn-line-rate, .transfer-rate'), function (input) {
+            if (free) {
+                if (!input.readOnly) input.dataset.paidRate = input.value;
+                input.value = '0';
+            } else if (input.readOnly) {
+                input.value = input.dataset.paidRate || '';
+            }
+            input.readOnly = free;
+            input.setAttribute('aria-label', free ? 'No charge — rate is zero' : 'Rental rate');
+        });
+    }
+
+    function syncReturnSettlement() {
+        var select = document.getElementById('returnRentalSelect');
+        var option = select && select.options[select.selectedIndex];
+        var fields = document.getElementById('returnCashFields');
+        var status = document.getElementById('returnSettlementStatus');
+        var free = !!(option && option.value && BILLING[option.dataset.billingType] &&
+                     !BILLING[option.dataset.billingType].charges_rent);
+        if (status) status.textContent = option && option.value
+            ? moneyStatus(option.dataset.billingType, option.dataset.amount) : 'Choose a rental to see its rent status.';
+        if (fields) {
+            fields.classList.toggle('d-none', free);
+            setEnabled(fields, !free && !fields.closest('.d-none'));
+        }
+    }
+
     function syncTransferSettlement() {
         var select = document.getElementById('settle_choice');
         var fields = document.getElementById('transferPayNowFields');
+        var status = document.getElementById('transferSettlementStatus');
         if (!select || !fields) return;
-        var payNow = select.value === 'pay_now';
+        var sources = tickedTransferSources();
+        var due = sources.reduce(function (sum, source) { return sum + Number(source.amountDue || 0); }, 0);
+        var free = sources.length && sources.every(function (source) {
+            return BILLING[source.billingType] && !BILLING[source.billingType].charges_rent;
+        });
+        if (status) status.textContent = !sources.length ? 'Choose a source to see its rent status.'
+            : (free ? BILLING[sources[0].billingType].status
+               : moneyStatus('', due) + (sources.some(function (source) {
+                   return BILLING[source.billingType] && !BILLING[source.billingType].charges_rent;
+               }) ? ' No-charge holders have no balance to settle.' : ''));
+        if (free) select.value = 'add_credit';
+        select.disabled = !!free || !sources.length || !!select.closest('.d-none');
+        var payNow = !free && select.value === 'pay_now';
         fields.classList.toggle('d-none', !payNow);
         setEnabled(fields, payNow && !fields.closest('.d-none'));
     }
@@ -321,6 +387,7 @@
             avail.textContent = '';
         }
         validateLine(row);
+        syncBilling();
     }
 
     function onLineSerialsChange(row) {
@@ -431,7 +498,10 @@
         if (!list || !select) return;
         list.innerHTML = '';
         var key = select.value;
-        var matching = SOURCES.filter(function (source) { return String(source.key) === String(key); });
+        var selected = SOURCES.filter(function (source) { return String(source.key) === String(key); })[0];
+        var matching = selected ? SOURCES.filter(function (source) {
+            return source.locationKey === selected.locationKey;
+        }) : [];
         if (!matching.length) {
             list.innerHTML = '<span class="small text-muted">Choose a site / holder above.</span>';
             renderTransferLines();
@@ -474,43 +544,57 @@
         if (!container) return;
         container.innerHTML = '';
         var sources = tickedTransferSources();
+        syncTransferSettlement();
         if (!sources.length) {
-            container.innerHTML = '<span class="small text-muted">Tick a holder to see the tools to move.</span>';
+            container.textContent = 'Tick a holder to see the tools at this site / customer.';
             return;
         }
+        var wrap = document.createElement('div');
+        wrap.className = 'table-responsive';
+        wrap.innerHTML = '<table class="table table-sm table-bordered table-striped align-middle tool-txn-sheet">' +
+            '<caption class="caption-top">Tools currently at ' + escapeHtml(sources[0].holder) +
+            ' — edit the Move qty column; zero leaves a tool here.</caption>' +
+            '<thead><tr><th scope="col">#</th><th scope="col">Rental</th><th scope="col">Tool</th>' +
+            '<th scope="col">At source</th><th scope="col">Move qty</th>' +
+            '<th scope="col">New rate (PKR)</th><th scope="col">Exact pieces</th>' +
+            '<th scope="col">Action</th></tr></thead><tbody></tbody></table>';
+        var tbody = wrap.querySelector('tbody');
+        var index = 0;
         sources.forEach(function (source) {
-            var heading = document.createElement('div');
-            heading.className = 'small fw-semibold mt-2';
-            heading.textContent = source.rentalCode + ' · ' + source.holder;
-            container.appendChild(heading);
             source.lines.forEach(function (line) {
-                var row = document.createElement('div');
-                row.className = 'row g-2 align-items-end border rounded p-2 mt-1 transfer-line-row';
+                index++;
+                var row = document.createElement('tr');
+                row.className = 'transfer-line-row';
                 row.innerHTML =
-                    '<div class="col-md-4"><div class="small fw-semibold">' + line.name +
-                    (line.code ? ' (' + line.code + ')' : '') + '</div>' +
-                    '<div class="small text-muted">' + line.qty + ' out · rate ' + line.rate + '</div>' +
-                    '<input type="hidden" class="transfer-item-id" value="' + line.itemId + '"></div>' +
-                    '<div class="col-4 col-md-2"><label class="form-label small mb-0">Move qty</label>' +
-                    '<input type="number" class="form-control form-control-sm transfer-qty" min="0" step="0.1" max="' + line.qty + '" value="' + line.qty + '"></div>' +
-                    '<div class="col-4 col-md-2"><label class="form-label small mb-0">New rate</label>' +
-                    '<input type="number" class="form-control form-control-sm transfer-rate" min="0" step="0.01" value="' + (line.dailyRate || line.rate) + '"></div>' +
-                    '<div class="col-4 col-md-2 d-flex align-items-end">' +
-                    '<button type="button" class="btn btn-sm btn-outline-danger transfer-remove">Remove</button></div>' +
-                    '<div class="col-12"><select class="form-select form-select-sm transfer-serials" multiple size="2" aria-label="Pieces to move"></select></div>';
+                    '<td>' + index + '</td><td>' + escapeHtml(source.rentalCode) + '</td>' +
+                    '<td><strong>' + escapeHtml(line.name) + '</strong><br><small>' + escapeHtml(line.code) + '</small>' +
+                    '<input type="hidden" class="transfer-item-id" value="' + Number(line.itemId) + '"></td>' +
+                    '<td>' + Number(line.qty) + ' ' + escapeHtml(line.unit || '') + '</td>' +
+                    '<td><input type="number" class="form-control form-control-sm transfer-qty" aria-label="Move quantity of ' +
+                    escapeHtml(line.name) + '" min="0" step="0.1" max="' + Number(line.qty) + '" value="' + Number(line.qty) + '"></td>' +
+                    '<td><input type="number" class="form-control form-control-sm transfer-rate" min="0" step="0.01" value="' +
+                    Number(line.dailyRate || line.rate || 0) + '"></td>' +
+                    '<td><select class="form-select form-select-sm transfer-serials" multiple size="2" aria-label="Pieces to move"></select></td>' +
+                    '<td><button type="button" class="btn btn-sm btn-outline-danger transfer-remove">Leave here</button></td>';
                 var serialBox = row.querySelector('.transfer-serials');
                 (line.serials || []).forEach(function (serial) {
                     var option = document.createElement('option');
                     option.value = String(serial.id);
                     option.textContent = serial.serial_number + ' (' + (serial.condition || 'good') + ')';
-                    option.selected = true;
+                    // Do not preselect all: quantity changes must not accidentally
+                    // override the operator's requested quantity on the server.
                     serialBox.appendChild(option);
                 });
                 if (!(line.serials || []).length) serialBox.classList.add('d-none');
+                serialBox.addEventListener('change', function () {
+                    if (serialBox.selectedOptions.length) row.querySelector('.transfer-qty').value = serialBox.selectedOptions.length;
+                });
                 row.querySelector('.transfer-remove').addEventListener('click', function () { row.remove(); });
-                container.appendChild(row);
+                tbody.appendChild(row);
             });
         });
+        container.appendChild(wrap);
+        syncBilling();
     }
 
     function collectTransferFields() {
@@ -521,14 +605,14 @@
             var qty = parseFloat(row.querySelector('.transfer-qty').value || '0');
             var itemId = row.querySelector('.transfer-item-id').value;
             if (!qty || qty <= 0) return;
-            addHidden(row, 'transfer_item_id[]', itemId, 'transfer-post');
-            addHidden(row, 'transfer_qty_' + itemId, String(qty), 'transfer-post');
+            addHidden(row.querySelector('td'), 'transfer_item_id[]', itemId, 'transfer-post');
+            addHidden(row.querySelector('td'), 'transfer_qty_' + itemId, String(qty), 'transfer-post');
             var rate = row.querySelector('.transfer-rate').value;
-            if (rate) addHidden(row, 'transfer_rate_' + itemId, rate, 'transfer-post');
+            if (rate) addHidden(row.querySelector('td'), 'transfer_rate_' + itemId, rate, 'transfer-post');
             var serialBox = row.querySelector('.transfer-serials');
             if (serialBox && serialBox.selectedOptions.length) {
                 var ids = Array.prototype.map.call(serialBox.selectedOptions, function (o) { return o.value; });
-                addHidden(row, 'transfer_serial_ids_' + itemId + '[]', ids.join(','), 'transfer-post');
+                addHidden(row.querySelector('td'), 'transfer_serial_ids_' + itemId + '[]', ids.join(','), 'transfer-post');
             }
         });
     }
@@ -541,7 +625,21 @@
             if (parseFloat(row.querySelector('.transfer-qty').value || '0') > 0) moving++;
         });
         if (!moving) return ['Enter a quantity for at least one tool to transfer.'];
-        return [];
+        var errors = [];
+        Array.prototype.forEach.call(rows, function (row) {
+            var qty = Number(row.querySelector('.transfer-qty').value);
+            var max = Number(row.querySelector('.transfer-qty').max);
+            var serials = row.querySelector('.transfer-serials');
+            if (!Number.isFinite(qty) || qty < 0 || qty > max) errors.push('Move quantity must be between 0 and the stock at source.');
+            if (serials && serials.selectedOptions.length && serials.selectedOptions.length !== qty) {
+                errors.push('Move quantity must match the number of exact pieces selected.');
+            }
+        });
+        if (textValue('settle_choice') === 'pay_now' && !textValue('transferAccount') &&
+            tickedTransferSources().some(function (source) { return Number(source.amountDue || 0) > 0; })) {
+            errors.push('Choose the cash / bank account receiving rent from the previous holder.');
+        }
+        return errors;
     }
 
     /* ── returns ────────────────────────────────────────────────────────── */
@@ -551,6 +649,7 @@
         var box = document.getElementById('returnItemRows');
         if (!box) return;
         if (!rentalId) {
+            ++returnRequest; // invalidate an in-flight fetch when the selection is cleared
             box.innerHTML = '<div class="small text-muted">Choose a rental to see the tools still out.</div>';
             return;
         }
@@ -581,26 +680,28 @@
             box.innerHTML = '<div class="small text-muted">Nothing is still out on this rental.</div>';
             return;
         }
-        items.forEach(function (item) {
-            var row = document.createElement('div');
+        var wrap = document.createElement('div');
+        wrap.className = 'table-responsive';
+        wrap.innerHTML = '<table class="table table-sm table-bordered table-striped align-middle tool-txn-sheet">' +
+            '<caption class="caption-top">Tools still at the selected site / customer</caption>' +
+            '<thead><tr><th scope="col">#</th><th scope="col">Tool</th><th scope="col">Issued</th>' +
+            '<th scope="col">Already back</th><th scope="col">Still out</th><th scope="col">Returning now</th>' +
+            '<th scope="col">Condition</th><th scope="col">Exact pieces</th></tr></thead><tbody></tbody></table>';
+        var tbody = wrap.querySelector('tbody');
+        items.forEach(function (item, index) {
+            var row = document.createElement('tr');
             row.className = 'tool-txn-line';
             row.innerHTML =
-                '<div class="row g-2 align-items-end">' +
-                '  <div class="col-md-4"><div class="fw-semibold small">' + item.tool_name +
-                ' (' + item.tool_code + ')</div>' +
-                '    <div class="small text-muted">Issued ' + item.qty_rented +
-                ' · already back ' + item.qty_returned + ' · outstanding ' +
-                '    <span class="fw-bold return-outstanding">' + item.qty_pending + '</span></div>' +
-                '    <input type="hidden" class="return-item-id" value="' + item.rental_item_id + '"></div>' +
-                '  <div class="col-4 col-md-2"><label class="form-label small mb-0">Returning now</label>' +
-                '    <input type="number" class="form-control form-control-sm return-qty-input" min="0" step="0.1" ' +
-                '           max="' + item.qty_pending + '" data-pending="' + item.qty_pending + '" placeholder="0"></div>' +
-                '  <div class="col-8 col-md-3"><label class="form-label small mb-0">Condition</label>' +
-                '    <input type="text" class="form-control form-control-sm return-condition" placeholder="Good / damaged…"></div>' +
-                '  <div class="col-md-3">' +
-                '    <select class="form-select form-select-sm return-serials d-none" multiple size="2" aria-label="Exact pieces coming back"></select>' +
-                '  </div>' +
-                '</div>';
+                '<td>' + (index + 1) + '</td><td><strong>' + escapeHtml(item.tool_name) +
+                '</strong><br><small>' + escapeHtml(item.tool_code) + '</small>' +
+                '<input type="hidden" class="return-item-id" value="' + Number(item.rental_item_id) + '"></td>' +
+                '<td>' + Number(item.qty_rented) + '</td><td>' + Number(item.qty_returned) + '</td>' +
+                '<td class="fw-bold return-outstanding">' + Number(item.qty_pending) + '</td>' +
+                '<td><input type="number" class="form-control form-control-sm return-qty-input" aria-label="Returning ' +
+                escapeHtml(item.tool_name) + '" min="0" step="0.1" max="' + Number(item.qty_pending) +
+                '" data-pending="' + Number(item.qty_pending) + '" placeholder="0"></td>' +
+                '<td><input type="text" class="form-control form-control-sm return-condition" aria-label="Condition" placeholder="Condition / notes"></td>' +
+                '<td><select class="form-select form-select-sm return-serials d-none" multiple size="2" aria-label="Exact pieces coming back"></select></td>';
             row.querySelector('.return-item-id').dataset.pending = String(item.qty_pending);
             var serialBox = row.querySelector('.return-serials');
             var rentalId = picker ? picker.value : '';
@@ -638,8 +739,9 @@
                     });
                 })
                 .catch(function () { /* the quantity path still works */ });
-            box.appendChild(row);
+            tbody.appendChild(row);
         });
+        box.appendChild(wrap);
         var hint = document.createElement('div');
         hint.className = 'small text-muted';
         hint.textContent = 'Leave a quantity blank for a tool that did not come back. “Full Return” takes everything still outstanding.';
@@ -658,11 +760,11 @@
             var serialBox = row.querySelector('.return-serials');
             var serialIds = serialBox ? Array.prototype.map.call(serialBox.selectedOptions, function (o) { return o.value; }) : [];
             if (!qty && !serialIds.length) return;
-            addHidden(row, 'rental_item_id[]', itemId.value, 'return-post');
-            addHidden(row, 'qty_returned[]', serialIds.length ? String(serialIds.length) : String(qty), 'return-post');
-            addHidden(row, 'condition_notes[]', row.querySelector('.return-condition').value, 'return-post');
+            addHidden(row.querySelector('td'), 'rental_item_id[]', itemId.value, 'return-post');
+            addHidden(row.querySelector('td'), 'qty_returned[]', serialIds.length ? String(serialIds.length) : String(qty), 'return-post');
+            addHidden(row.querySelector('td'), 'condition_notes[]', row.querySelector('.return-condition').value, 'return-post');
             if (serialIds.length) {
-                addHidden(row, 'return_serial_ids_' + itemId.value + '[]', serialIds.join(','), 'return-post');
+                addHidden(row.querySelector('td'), 'return_serial_ids_' + itemId.value + '[]', serialIds.join(','), 'return-post');
             }
         });
     }
@@ -801,7 +903,14 @@
         if (!coming) {
             return ['Enter the quantity coming back — or choose Full Return to close the whole issue.'];
         }
-        return [];
+        var errors = [];
+        Array.prototype.forEach.call(document.querySelectorAll('#returnItemRows .return-qty-input'), function (input) {
+            var qty = Number(input.value || 0);
+            if (!Number.isFinite(qty) || qty < 0 || qty > Number(input.max)) {
+                errors.push('Returning quantity cannot exceed the tools still out.');
+            }
+        });
+        return errors;
     }
 
     function checkPayment() {
@@ -952,6 +1061,8 @@
     }
     var settleChoice = document.getElementById('settle_choice');
     if (settleChoice) settleChoice.addEventListener('change', syncTransferSettlement);
+    var billingSelect = document.getElementById('billing_type');
+    if (billingSelect) billingSelect.addEventListener('change', syncBilling);
     var damageSource = document.getElementById('damage_source');
     if (damageSource) damageSource.addEventListener('change', syncDamageSource);
     var damageTool = document.getElementById('damageToolSelect');
@@ -963,7 +1074,7 @@
     var dateInput = document.getElementById('transaction_date');
     if (dateInput) dateInput.addEventListener('change', syncDateFields);
     var returnSelect = document.getElementById('returnRentalSelect');
-    if (returnSelect) returnSelect.addEventListener('change', function () { loadReturnItems(this.value); });
+    if (returnSelect) returnSelect.addEventListener('change', function () { loadReturnItems(this.value); syncReturnSettlement(); });
     var paymentSelect = document.getElementById('paymentRentalSelect');
     if (paymentSelect) paymentSelect.addEventListener('change', function () {
         var option = paymentSelect.options[paymentSelect.selectedIndex];

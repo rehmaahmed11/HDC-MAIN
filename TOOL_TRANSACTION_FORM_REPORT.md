@@ -37,6 +37,21 @@ this page posts to the same endpoint that implements it.
 | Maintenance | Send for Maintenance | `POST /hdc/tool-rental/transaction/maintenance` | Pieces leave the available pool (serial status → `maintenance`) but stay owned and store-side, with a workshop location and movement history. |
 | Maintenance | Back from Maintenance | `POST /hdc/tool-rental/transaction/maintenance-return` | Pieces come back to the store — or are written off through the scrap register when the operator marks them unrepairable. |
 
+**Billing and source sheet.** Billing choices and their explicit cash status are
+served from `BILLING_MODES` in `tool_txn_types.py`. Choosing **No charge** shows
+"no rent due" immediately, zeros and locks new rates, and hides collection
+fields when returning a no-charge rental. The saved rental and return also say
+No charge / No payment; the payment endpoint still refuses a free rental.
+Transfer now picks one real site/customer location, expands its live holdings
+into one tickable row per rental, and shows each tool as a spreadsheet-style row
+with available quantity, move quantity, new rate and exact serials. Returns
+show the selected rental's tools in the same row format. Both sheets use the
+server's real rental/ledger data; quantity limits are rechecked on posting.
+For a transfer, the old holder's outstanding balance and free status are visible
+before settlement. The new page defaults to **leave on credit**, never silently
+collects cash, and requires a chosen receiving account to collect now (older
+forms keep their existing behavior).
+
 Common fields (transaction date, one unique reference, responsible person,
 notes) are on every transaction. Duplicate submissions are refused twice: the
 page locks its submit button and the server refuses a `txn_reference` it has

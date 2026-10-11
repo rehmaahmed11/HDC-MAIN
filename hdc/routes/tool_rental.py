@@ -20,7 +20,7 @@ from hdc.models.tool_rental import (
 )
 from hdc.services.cashflow_register import ensure_party
 from hdc.services.tool_txn_types import (
-    NEW_RENTAL_TXN_TYPES, TXN_GROUPS, rental_eligible,
+    NEW_RENTAL_TXN_TYPES, TXN_GROUPS, BILLING_MODES, rental_eligible,
 )
 from hdc.services.tool_txn_entry import (
     MAINTENANCE_LABEL, record_damage_loss, return_from_maintenance, send_to_maintenance,
@@ -193,6 +193,7 @@ def _txn_page_config(context, groups):
         'locType': s['loc_type'],
         'pending': s['pending'],
         'billingType': s['billing_type'],
+        'amountDue': s['amount_due'],
         'lines': [{
             'itemId': line['item_id'],
             'toolId': line['tool_id'],
@@ -211,6 +212,7 @@ def _txn_page_config(context, groups):
 
     return {
         'groups': groups,
+        'billingModes': BILLING_MODES,
         'today': context['today'],
         'txnReference': context['txn_reference'],
         'storeLabel': context['store_label'],
@@ -1145,6 +1147,7 @@ def register(app):
         context = txn_form_context()
         groups = _txn_group_context()
         context['txn_groups'] = groups
+        context['billing_modes'] = BILLING_MODES
         context['txn_config'] = _txn_page_config(context, groups)
         return render_template('tool_rental/tool_txn.html', **context)
 
@@ -1595,7 +1598,8 @@ def register(app):
             to_label = to_customer_name or 'External Customer'
 
         # ---- settle the previous holder(s)' outstanding rent ----
-        settle_choice = (request.form.get('settle_choice') or 'pay_now').strip().lower()
+        settle_choice = (request.form.get('settle_choice') or
+                         ('add_credit' if request.form.get('txn_source') == 'transaction' else 'pay_now')).strip().lower()
         if settle_choice not in ('pay_now', 'add_credit'):
             settle_choice = 'pay_now'
         finalized_amount = 0.0
@@ -1622,7 +1626,10 @@ def register(app):
                 if (not candidate) or candidate.is_void \
                         or str(candidate.status or 'active').lower() != 'active' \
                         or str(candidate.type or '').lower() not in ('company', 'cash', 'bank'):
-                    candidate = _accounts_default_company_cash()
+                    # Never silently post cash to a default account from the
+                    # new transaction form. Legacy transfer forms keep theirs.
+                    candidate = (None if request.form.get('txn_source') == 'transaction'
+                                 else _accounts_default_company_cash())
                 if not candidate:
                     db.session.rollback()
                     flash('Choose a Cash/Bank account to receive the finalised rent before transferring.', 'danger')
@@ -2202,6 +2209,9 @@ def register(app):
         payment_type = (request.form.get('payment_condition') or request.form.get('payment_type') or 'partial').strip().lower()
         if payment_type not in ('full','partial','credit','no_payment'):
             payment_type = 'partial'
+        if rental.billing_type == 'no_charge':
+            # A free issue has no settlement, even if an old form posts cash.
+            payment_type = 'no_payment'
 
         rental_item_ids = request.form.getlist('rental_item_id[]') or request.form.getlist('rental_item_id')
         qty_returned_list = request.form.getlist('qty_returned[]') or request.form.getlist('qty_returned')

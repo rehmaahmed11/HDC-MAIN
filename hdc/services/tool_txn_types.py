@@ -115,6 +115,20 @@ def rental_eligible(eligible_for: Optional[str], *, pending_tools: float,
     return False
 
 
+# Billing is a contract, not a display-only dropdown.  ``charges_rent`` drives
+# the page's rate/cash controls and the explicit status shown to the operator.
+BILLING_MODES = (
+    {'key': 'per_day', 'label': 'Per day', 'charges_rent': True,
+     'status': 'Rent charged — payment may be due.'},
+    {'key': 'per_hour', 'label': 'Per hour', 'charges_rent': True,
+     'status': 'Rent charged — payment may be due.'},
+    {'key': 'fixed_fee', 'label': 'Fixed fee', 'charges_rent': True,
+     'status': 'Rent charged — payment may be due.'},
+    {'key': 'no_charge', 'label': 'No charge (contract included)', 'charges_rent': False,
+     'status': 'No charge — no rent due, no cash receipt or payment required.'},
+)
+
+
 # --------------------------------------------------------------------------- #
 # The transaction page — what each transaction does on the server
 # --------------------------------------------------------------------------- #
