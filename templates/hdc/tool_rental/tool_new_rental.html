@@ -3,11 +3,15 @@
 {% block page_heading %}New Rental{% endblock %}
 
 {# The rental creation form lives on its own page so the Rentals hub stays a
-   simple summary + list. The operator chooses the transaction first. A new
-   rental shows the stock tool picker; a transfer can find its source site-first
-   or tool-first, then lists the available tools (with per-tool rates) right
-   below the holder picker, before rent type → To → other settings. The destination site/customer fields adapt to the selected renter type,
-   and a no-additional-rent choice hides the rate inputs without hiding tools.
+   simple summary + list. The operator chooses the transaction first, and the
+   form then reads as one sequence of numbered steps — the same order the Tools
+   transaction page uses: 1 what is happening → 2 from where → 3 which tools →
+   4 to whom → 5 rent type & terms → 6 settle the previous holder (transfer).
+   A new rental takes its tools from the store picker; a transfer finds its
+   source site-first or tool-first and lists the holder's tools (with per-tool
+   rates) in the same step. The destination site/customer fields adapt to the
+   selected renter type, and a no-additional-rent choice hides the rate inputs
+   without hiding tools.
 
    Every rental made here shows below the form, newest first, with the one just
    created highlighted. Opening a row leads to its detail page (returns /
@@ -26,6 +30,12 @@
 .tool-rental-row:hover { background:var(--card-header-bg); }
 .tool-rental-row.is-new:hover { background:var(--bs-success-bg-subtle, #e7f7ee); }
 #billingHint { display:block; margin-top:2px; }
+/* Every step of the form starts with the same numbered heading, so the operator
+   always reads it in one order: what → from where → tools → to whom → terms. */
+.txn-step-heading { font-size:.95rem; font-weight:700; border-left:3px solid var(--bs-primary, #2563eb);
+                    padding-left:.5rem; }
+.txn-step-choice { border:1px dashed var(--card-border, #e2e8f0); border-radius:.5rem;
+                   padding:.5rem .75rem; background:var(--bs-tertiary-bg, #f8fafc); }
 .tool-item-row .form-label.small { margin-bottom:2px; }
 .transfer-tools-list { background:var(--card-bg, #fff); }
 .transfer-holders-list { background:var(--card-bg, #fff); max-height:260px; overflow:auto; }
@@ -46,7 +56,7 @@
 <div class="tool-rental-form-header">
     <div>
         <h2><i class="fas fa-plus me-2" aria-hidden="true"></i><span id="pageFormHeading">New Rental</span></h2>
-        <div class="tool-rental-form-subtitle">Choose the transaction first: new rental, transfer, tool return or rent payment. Each one shows only the fields it needs; rentals made here appear below.</div>
+        <div class="tool-rental-form-subtitle">Choose the transaction first, then answer the steps in order: from where → which tools → to whom → rent &amp; terms. Rentals made here appear below.</div>
     </div>
     <a href="{{ url_for('hdc_tool_rental') }}" class="btn btn-outline-secondary">
         <i class="fas fa-arrow-left me-1" aria-hidden="true"></i>Back to rentals
@@ -59,6 +69,16 @@
         <form method="POST" action="{{ url_for('hdc_tool_rental_create') }}" id="createRentalForm">
             <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
             <div class="row g-3">
+                {# ── One form, one reading order.  The steps below are the same six
+                   the Tools transaction page uses (see tool_txn.html): what is
+                   happening → from where → which tools → to whom → rent & terms →
+                   settle the previous holder.  Each step heading carries the modes
+                   it belongs to, so applyTxnModes() hides whole steps at once. #}
+
+                <!-- 1 · what is happening -->
+                <div class="col-12">
+                    <h6 class="txn-step-heading mb-2"><i class="fas fa-hand-pointer me-1" aria-hidden="true"></i>1 · What is happening?</h6>
+                </div>
                 <div class="col-md-4">
                     <label class="form-label">Transaction type</label>
                     <select name="txn_type" id="txnType" class="form-select" required onchange="toggleTxnType()">
@@ -69,6 +89,16 @@
                     <small class="text-muted d-block" id="txnTypeHelp">Choose the transaction first; the next fields follow the selected flow.</small>
                 </div>
 
+                <div class="col-12" data-txn-modes="new_rental transfer">
+                    <h6 class="txn-step-heading mb-2"><i class="fas fa-truck-fast me-1" aria-hidden="true"></i>2 · From where are the tools coming?</h6>
+                </div>
+                <div class="col-12" data-txn-modes="new_rental">
+                    <div class="txn-step-choice">
+                        <i class="fas fa-warehouse me-1 text-success" aria-hidden="true"></i>
+                        <strong>From the store / warehouse.</strong>
+                        <span class="text-muted">Only tools that are in store right now are offered in the next step.</span>
+                    </div>
+                </div>
                 {# Transfer source can be found site-first or tool-first. A site
                    often holds tools under more than one rental, so every holder
                    at the chosen location is listed with a checkbox (and a
@@ -122,90 +152,9 @@
                     </div>
                 </div>
 
-                <div class="col-12 d-none" id="transferToolsPanel" data-txn-modes="transfer">
-                    <input type="hidden" name="transfer_selection_enabled" value="1">
-                    <div class="d-flex flex-wrap align-items-start justify-content-between gap-2 mb-2">
-                        <div>
-                            <label class="form-label fw-semibold mb-0">Tools available at the selected holders</label>
-                            <small id="transferToolsSummary" class="text-muted d-block">Select a site/location or find a tool above to see current holdings.</small>
-                        </div>
-                        <label class="form-check d-flex align-items-center gap-2 mb-0">
-                            <input type="checkbox" class="form-check-input mt-0" id="selectAllTransferTools" onchange="toggleAllTransferTools(this.checked)">
-                            <span class="form-check-label">Select all tools</span>
-                        </label>
-                    </div>
-                    <div class="row g-2 mb-2">
-                        <div class="col-md-6">
-                            <label class="form-label small mb-1" for="transferToolSearchInput">Find a tool among the ticked holders</label>
-                            <input type="text" id="transferToolSearchInput" class="form-control"
-                                   placeholder="Search available tool names or codes…" autocomplete="off"
-                                   role="combobox" aria-expanded="false" aria-autocomplete="list"
-                                   data-hdc-combo="transferToolSearchSelect" data-hdc-combo-strict="true" data-hdc-combo-manual="true">
-                            <select id="transferToolSearchSelect" class="form-select d-none"
-                                    data-hdc-combo-source><option value=""></option></select>
-                            <small class="text-muted">Choose a suggestion to tick its row; checkboxes allow multiple tools.</small>
-                        </div>
-                    </div>
-                    <div id="transferToolsList" class="transfer-tools-list border rounded p-2">
-                        <div class="small text-muted">Select a From site/location above to see the tools of each holder there.</div>
-                    </div>
-                    <small id="transferBillingHint" class="text-muted d-block mt-2"></small>
-                    <div id="transferToolsError" class="small text-danger d-none mt-2" role="alert">Select at least one tool to transfer.</div>
+                <div class="col-12" data-txn-modes="new_rental transfer">
+                    <h6 class="txn-step-heading mb-2"><i class="fas fa-toolbox me-1" aria-hidden="true"></i>3 · Which tools are moving?</h6>
                 </div>
-
-                <div class="col-md-6" id="billingField" data-txn-modes="new_rental transfer">
-                    <label class="form-label" id="billingLabel">How should rent be charged?</label>
-                    <select name="billing_type" id="billingType" class="form-select" required onchange="syncBilling()">
-                        <option value="fixed_fee">One rental fee</option>
-                        <option value="per_day">Per day</option>
-                        <option value="no_charge">No charge (included in contract)</option>
-                    </select>
-                    <small id="billingSelectionHint" class="text-muted d-block"></small>
-                </div>
-
-                <div class="col-md-6" id="renterTypeField" data-txn-modes="new_rental transfer">
-                    <label class="form-label" id="whoLabel">Who is renting?</label>
-                    <select name="renter_type" id="renterType" class="form-select" required onchange="toggleRenter()">
-                        <option value="internal">Our site</option>
-                        <option value="external">Outside customer</option>
-                    </select>
-                </div>
-
-                <div class="col-12" id="internalFields" data-txn-modes="new_rental transfer">
-                    <div class="row g-3">
-                        <div class="col-md-6">
-                            {{ combo_select('project_id', 'rentalProjectSelect', project_options,
-                               label='Site / project', label_id='projectLabel',
-                               placeholder='Search site, project code, or client…',
-                               max_items=80) }}
-                        </div>
-                        <div class="col-md-6">
-                            {{ combo_select('stage_id', 'rentalStageSelect', stage_options,
-                               label='Stage (optional)', label_id='stageLabel',
-                               placeholder='Search a stage…', max_items=80) }}
-                        </div>
-                    </div>
-                </div>
-                <div class="col-12 d-none" id="externalFields" data-txn-modes="new_rental transfer">
-                    <div class="row g-3">
-                        <div class="col-md-6">
-                            {{ combo_field('customer_name', 'rentalCustomerName',
-                               known_customers, label='Customer name',
-                               placeholder='Search or type a customer…',
-                               hint='Choose an existing customer or type a new name.',
-                               max_items=60) }}
-                        </div>
-                        <div class="col-md-6">
-                            <label class="form-label">Phone</label>
-                            <input type="text" name="customer_phone" class="form-control" placeholder="03xx-xxxxxxx">
-                        </div>
-                        <div class="col-12">
-                            <label class="form-label">Address (optional)</label>
-                            <input type="text" name="customer_address" class="form-control" placeholder="Customer address">
-                        </div>
-                    </div>
-                </div>
-
                 <div class="col-12" id="newRentalTools" data-txn-modes="new_rental">
                     <label class="form-label fw-semibold">Tools to rent</label>
 
@@ -358,6 +307,83 @@
                     {% endif %}
                 </div>
 
+                <div class="col-12 d-none" id="transferToolsPanel" data-txn-modes="transfer">
+                    <input type="hidden" name="transfer_selection_enabled" value="1">
+                    <div class="d-flex flex-wrap align-items-start justify-content-between gap-2 mb-2">
+                        <div>
+                            <label class="form-label fw-semibold mb-0">Tools available at the selected holders</label>
+                            <small id="transferToolsSummary" class="text-muted d-block">Select a site/location or find a tool above to see current holdings.</small>
+                        </div>
+                        <label class="form-check d-flex align-items-center gap-2 mb-0">
+                            <input type="checkbox" class="form-check-input mt-0" id="selectAllTransferTools" onchange="toggleAllTransferTools(this.checked)">
+                            <span class="form-check-label">Select all tools</span>
+                        </label>
+                    </div>
+                    <div class="row g-2 mb-2">
+                        <div class="col-md-6">
+                            <label class="form-label small mb-1" for="transferToolSearchInput">Find a tool among the ticked holders</label>
+                            <input type="text" id="transferToolSearchInput" class="form-control"
+                                   placeholder="Search available tool names or codes…" autocomplete="off"
+                                   role="combobox" aria-expanded="false" aria-autocomplete="list"
+                                   data-hdc-combo="transferToolSearchSelect" data-hdc-combo-strict="true" data-hdc-combo-manual="true">
+                            <select id="transferToolSearchSelect" class="form-select d-none"
+                                    data-hdc-combo-source><option value=""></option></select>
+                            <small class="text-muted">Choose a suggestion to tick its row; checkboxes allow multiple tools.</small>
+                        </div>
+                    </div>
+                    <div id="transferToolsList" class="transfer-tools-list border rounded p-2">
+                        <div class="small text-muted">Select a From site/location above to see the tools of each holder there.</div>
+                    </div>
+                    <small id="transferBillingHint" class="text-muted d-block mt-2"></small>
+                    <div id="transferToolsError" class="small text-danger d-none mt-2" role="alert">Select at least one tool to transfer.</div>
+                </div>
+
+                <div class="col-12" data-txn-modes="new_rental transfer">
+                    <h6 class="txn-step-heading mb-2"><i class="fas fa-user-check me-1" aria-hidden="true"></i>4 · To — who receives the tools?</h6>
+                </div>
+                <div class="col-md-6" id="renterTypeField" data-txn-modes="new_rental transfer">
+                    <label class="form-label" id="whoLabel">Who is renting?</label>
+                    <select name="renter_type" id="renterType" class="form-select" required onchange="toggleRenter()">
+                        <option value="internal">Our site</option>
+                        <option value="external">Outside customer</option>
+                    </select>
+                </div>
+
+                <div class="col-12" id="internalFields" data-txn-modes="new_rental transfer">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            {{ combo_select('project_id', 'rentalProjectSelect', project_options,
+                               label='Site / project', label_id='projectLabel',
+                               placeholder='Search site, project code, or client…',
+                               max_items=80) }}
+                        </div>
+                        <div class="col-md-6">
+                            {{ combo_select('stage_id', 'rentalStageSelect', stage_options,
+                               label='Stage (optional)', label_id='stageLabel',
+                               placeholder='Search a stage…', max_items=80) }}
+                        </div>
+                    </div>
+                </div>
+                <div class="col-12 d-none" id="externalFields" data-txn-modes="new_rental transfer">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            {{ combo_field('customer_name', 'rentalCustomerName',
+                               known_customers, label='Customer name',
+                               placeholder='Search or type a customer…',
+                               hint='Choose an existing customer or type a new name.',
+                               max_items=60) }}
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Phone</label>
+                            <input type="text" name="customer_phone" class="form-control" placeholder="03xx-xxxxxxx">
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Address (optional)</label>
+                            <input type="text" name="customer_address" class="form-control" placeholder="Customer address">
+                        </div>
+                    </div>
+                </div>
+
                 {# ── Return tools / Rent payment: one panel per transaction, shown by
                    data-txn-modes. Field names match the endpoints they post to
                    (hdc_tool_rental_return / hdc_tool_rental_payment), so nothing
@@ -498,10 +524,20 @@
                     </div>
                 </div>
 
-                <div class="col-12" id="otherSettings">
+                <!-- 5 · rent type & terms, then 6 · settling a transfer -->
+                <div class="col-12" id="otherSettings" data-txn-modes="new_rental transfer">
                     <div class="border rounded p-3">
-                        <h6 class="mb-3" data-txn-modes="new_rental transfer"><i class="fas fa-sliders me-1" aria-hidden="true"></i>Other settings</h6>
+                        <h6 class="mb-3"><i class="fas fa-file-invoice-dollar me-1" aria-hidden="true"></i>5 · Rent type &amp; terms</h6>
                         <div class="row g-3">
+                            <div class="col-md-6" id="billingField" data-txn-modes="new_rental transfer">
+                                <label class="form-label" id="billingLabel">How should rent be charged?</label>
+                                <select name="billing_type" id="billingType" class="form-select" required onchange="syncBilling()">
+                                    <option value="fixed_fee">One rental fee</option>
+                                    <option value="per_day">Per day</option>
+                                    <option value="no_charge">No charge (included in contract)</option>
+                                </select>
+                                <small id="billingSelectionHint" class="text-muted d-block"></small>
+                            </div>
                             <div class="col-md-6" data-txn-modes="new_rental transfer">
                                 <label class="form-label" id="dateLabel">Rental date</label>
                                 <input type="date" name="rental_date" value="{{ today }}" class="form-control" required>
@@ -510,10 +546,14 @@
                                 <label class="form-label">Expected return date (optional)</label>
                                 <input type="date" name="expected_return_date" class="form-control">
                             </div>
+                            <div class="col-12" data-txn-modes="new_rental transfer">
+                                <label class="form-label">Notes or agreement details (optional)</label>
+                                <textarea name="notes" class="form-control" rows="2" placeholder="Add any rental terms or agreement reference"></textarea>
+                            </div>
 
                             <div class="col-12 d-none" id="transferSettlementFields" data-txn-modes="transfer">
                                 <div class="border rounded p-3">
-                                    <h6 class="mb-3">Settle the previous holder's rent</h6>
+                                    <h6 class="mb-3"><i class="fas fa-scale-balanced me-1" aria-hidden="true"></i>6 · Settle the previous holder's rent</h6>
                                     <div class="row g-3">
                                         <div class="col-md-6">
                                             <label class="form-label">Settlement choice</label>
@@ -545,19 +585,16 @@
                                     </div>
                                 </div>
                             </div>
-
-                            <div class="col-12" data-txn-modes="new_rental transfer">
-                                <label class="form-label">Notes or agreement details (optional)</label>
-                                <textarea name="notes" class="form-control" rows="2" placeholder="Add any rental terms or agreement reference"></textarea>
-                            </div>
-                            {% if tools %}
-                            <div class="col-12" id="rentalSubmitRow" data-txn-modes="new_rental transfer return payment">
-                                <button type="submit" id="rentalSubmitButton" class="btn btn-success"><i class="fas fa-check me-1" aria-hidden="true"></i><span>Create Rental</span></button>
-                                <a href="{{ url_for('hdc_tool_rental') }}" class="btn btn-outline-secondary ms-1">Cancel</a>
-                            </div>
-                            {% endif %}
                         </div>
                     </div>
+                </div>
+
+                <!-- submit -->
+                <!-- submit — always present: a return or a payment needs it even
+                     when the store is empty, and the row is mode-gated anyway -->
+                <div class="col-12" id="rentalSubmitRow" data-txn-modes="new_rental transfer return payment">
+                    <button type="submit" id="rentalSubmitButton" class="btn btn-success"><i class="fas fa-check me-1" aria-hidden="true"></i><span>Create Rental</span></button>
+                    <a href="{{ url_for('hdc_tool_rental') }}" class="btn btn-outline-secondary ms-1">Cancel</a>
                 </div>
             </div>
         </form>
