@@ -449,6 +449,132 @@ def _holding_is_at_transfer_source(holding, source_location):
     )
 
 
+def _apply_rental_item_edit(rental, rows, billing_type, to_label, old_location_label,
+                            actor_id=None):
+    """Reconcile a rental's tool lines with what the edit form posted.
+
+    The caller only runs this while the rental has no return or transfer yet,
+    so every piece is still at the rental's first destination and each line's
+    ``qty_rented`` is the whole story.  Lines the form kept are resized (and
+    their serial markings moved with them), lines it dropped come back to the
+    store, and lines it added go out exactly like the create form sends them —
+    so the stock ledger, the serial chain and the movement log stay intact.
+    """
+    claimed_serial_ids = set()
+
+    def out_serials_for(item):
+        serials = (ToolSerial.query
+                   .filter(ToolSerial.current_rental_id == rental.id,
+                           ToolSerial.current_rental_item_id == item.id,
+                           ToolSerial.is_in_store == False)
+                   .all())
+        kept = [s for s in serials
+                if not (getattr(s, 'is_scrapped', False) or s.status == 'scrapped')]
+        return sorted(kept, key=lambda s: (s.tool_id, s.sort_key))
+
+    def release_serials(item, qty, reason):
+        """Bring ``qty`` pieces of this line back to the store."""
+        if qty <= 0:
+            return
+        taking = out_serials_for(item)[:max(0, int(round(qty)))]
+        if taking:
+            return_serials_from_rental(
+                rental.id, [s.id for s in taking], return_id=None,
+                notes=f'Rental {rental.rental_code} edited: {reason}',
+                created_by=actor_id, commit=False)
+        create_movement_log(
+            tool_id=item.tool_id, rental_id=rental.id,
+            movement_type='return_in',
+            from_label=old_location_label or 'Site',
+            to_label='Warehouse / Store',
+            qty=float(qty),
+            notes=f'Rental {rental.rental_code} edited: {reason}',
+        )
+
+    def claim_serials(item, tool, qty, reason):
+        """Send ``qty`` in-store pieces of ``tool`` out on this line."""
+        if qty <= 0:
+            return
+        ensure_tool_serials(tool=tool, created_by=actor_id, commit=False)
+        candidates = [s for s in tool.in_store_serials
+                      if s.id not in claimed_serial_ids]
+        taking = candidates[:max(0, int(round(qty)))]
+        for s in taking:
+            claimed_serial_ids.add(s.id)
+        if taking:
+            assign_serials_to_rental(
+                rental.id, [s.id for s in taking], rental_item_id=item.id,
+                location_label=to_label,
+                notes=f'Rental {rental.rental_code} edited',
+                created_by=actor_id, commit=False)
+        create_movement_log(
+            tool_id=tool.id, rental_id=rental.id,
+            movement_type='rental_out',
+            from_label='Warehouse / Store', to_label=to_label,
+            qty=float(qty),
+            notes=f'Rental {rental.rental_code} edited: {reason}',
+        )
+
+    existing_items = {int(item.id): item for item in rental.items}
+    referenced = {row['item_id'] for row in rows
+                  if row['item_id'] in existing_items}
+
+    # Lines the form no longer lists give their pieces back to the store.
+    for item_id, item in existing_items.items():
+        if item_id in referenced:
+            continue
+        release_serials(item, float(item.qty_rented or 0), 'line removed')
+        db.session.delete(item)
+    db.session.flush()
+
+    for row in rows:
+        tool = row['tool']
+        qty = row['qty']
+        rate = 0.0 if billing_type == 'no_charge' else row['rate']
+        amount = 0.0 if billing_type == 'no_charge' else qty * row['rate']
+        note = (row['note'] or '')[:300]
+        item = existing_items.get(row['item_id']) if row['item_id'] else None
+
+        if item is not None:
+            old_qty = float(item.qty_rented or 0)
+            if int(item.tool_id) != int(tool.id):
+                # The line swapped its tool: old pieces come home, new ones go out.
+                old_name = item.tool.name if item.tool else f'Tool#{item.tool_id}'
+                release_serials(item, old_qty, f'{old_name} swapped out')
+                item.tool_id = tool.id
+                item.qty_rented = qty
+                item.qty_returned = 0.0
+                item.qty_pending = qty
+                claim_serials(item, tool, qty, f'{tool.name} swapped in')
+            elif qty < old_qty - 0.001:
+                release_serials(item, old_qty - qty, 'quantity reduced')
+                item.qty_rented = qty
+                item.qty_pending = qty
+            elif qty > old_qty + 0.001:
+                item.qty_rented = qty
+                item.qty_pending = qty
+                claim_serials(item, tool, qty - old_qty, 'quantity increased')
+            item.rate = rate
+            item.amount = amount
+            if note:
+                item.notes = note
+        else:
+            item = ToolRentalItem(
+                rental_id=rental.id,
+                tool_id=tool.id,
+                qty_rented=qty,
+                qty_returned=0.0,
+                qty_pending=qty,
+                rate=rate,
+                amount=amount,
+                notes=note or None,
+            )
+            db.session.add(item)
+            db.session.flush()
+            claim_serials(item, tool, qty, 'line added')
+    db.session.flush()
+
+
 def register(app):
 
     # ------------------ TOOLS DASHBOARD (simple stock & rent summary) ------------------
@@ -920,29 +1046,21 @@ def register(app):
         return redirect(url_for('hdc_tool_rental_inventory'))
 
     # ------------------ NEW RENTAL (its own page) ------------------
-    @app.route('/hdc/tool-rental/new')
-    @login_required
-    def hdc_tool_rental_new():
-        """The rental creation form lives on its own page.
-
-        The Rentals hub keeps the summary, the search and the list; its
-        "New Rental" action opens this form.  Only users who may write the
-        tools page can open it — the same users who could ever see the form.
-        """
+    def _rental_form_access_allowed():
+        """Same write gate for the rental form, whether it creates or edits."""
         role = (current_user.role or '').strip().lower()
         write_access = may_access_path(current_user, '/hdc/tool-rental/new', 'write')
-        can_manage_tools = (write_access if write_access is not None else
-                            role in ('admin', 'accountant'))
-        if not can_manage_tools:
-            flash('You do not have permission to create rentals.', 'danger')
-            return redirect(url_for('hdc_tool_rental'))
+        return (write_access if write_access is not None else
+                role in ('admin', 'accountant'))
 
-        # Landing back here after a create (or a rejected create) keeps the
-        # operator in one place: the form up top, the rentals they just made
-        # *below* it.  ``created`` highlights the fresh rental so "where did my
-        # rental go?" is answered on the same screen instead of a jump away.
-        created_rental_id = request.args.get('created', type=int)
-        created_rental = db.session.get(ToolRental, created_rental_id) if created_rental_id else None
+    def _new_rental_page_context(edit_rental=None):
+        """Everything the rental form page renders from.
+
+        One builder feeds both faces of the form: the New Rental page
+        (``edit_rental=None``) and the Edit Rental page (``edit_rental`` set),
+        so the two can never drift apart — editing a rental shows exactly the
+        fields that created it, prefilled with what was saved.
+        """
         recent_rentals = search_rentals({})[:RECENT_RENTALS_ON_NEW]
 
         # Ensure all tools have their individual serial markings synced
@@ -1139,6 +1257,59 @@ def register(app):
         tools = [t for t in all_tools if t.available_qty > 0.001 or len(t.in_store_serials) > 0]
         categories = ToolCategory.query.order_by(ToolCategory.name.asc()).all()
 
+        # Edit mode: the rental's own tools stay in the picker even when the
+        # store is empty of them — the existing lines keep their tool choice,
+        # and their still-out pieces count as available to the form (reducing
+        # a line gives them back to the store).
+        edit_items = []
+        edit_items_locked = False
+        edit_billing_locked = False
+        extra_pending_by_tool = {}
+        if edit_rental is not None:
+            listed_ids = {int(t.id) for t in tools}
+            rental_tool_ids = sorted({int(item.tool_id) for item in edit_rental.items}
+                                     - listed_ids)
+            if rental_tool_ids:
+                extra_tools = (Tool.query
+                               .filter(Tool.id.in_(rental_tool_ids),
+                                       Tool.is_void == False)
+                               .order_by(Tool.name.asc()).all())
+                tools = tools + extra_tools
+            for item in edit_rental.items:
+                extra_pending_by_tool[int(item.tool_id)] = (
+                    extra_pending_by_tool.get(int(item.tool_id), 0.0)
+                    + float(item.qty_pending or 0))
+            out_serials = (ToolSerial.query
+                           .filter(ToolSerial.current_rental_id == edit_rental.id,
+                                   ToolSerial.is_in_store == False)
+                           .all())
+            serials_by_item = {}
+            for s in out_serials:
+                if getattr(s, 'is_scrapped', False) or s.status == 'scrapped':
+                    continue
+                serials_by_item.setdefault(int(s.current_rental_item_id or 0), []).append(s)
+            for serial_list in serials_by_item.values():
+                serial_list.sort(key=lambda s: s.sort_key)
+            for item in sorted(edit_rental.items, key=lambda i: i.id):
+                tool = item.tool
+                slot = serials_by_item.get(int(item.id), [])
+                edit_items.append({
+                    'item_id': item.id,
+                    'tool_id': int(item.tool_id),
+                    'name': tool.name if tool else f'Tool#{item.tool_id}',
+                    'code': tool.tool_code if tool else '',
+                    'qty': float(item.qty_rented or 0),
+                    'pending': float(item.qty_pending or 0),
+                    'rate': float(item.rate or 0),
+                    'amount': float(item.amount or 0),
+                    'notes': item.notes or '',
+                    'serials': [s.serial_number for s in slot],
+                })
+            edit_items_locked = bool(edit_rental.returns or edit_rental.transfers)
+            edit_billing_locked = bool(
+                any(not p.is_void for p in edit_rental.payments)
+                or any(not d.is_void for d in edit_rental.discounts))
+
         in_store_tools_json = []
         for t in tools:
             cat_name = t.category.name if t.category else t.name
@@ -1150,7 +1321,8 @@ def register(app):
                 'category_id': t.category_id,
                 'category_name': cat_name,
                 'rate': float(t.rental_rate_per_day or 0.0),
-                'available_qty': float(t.available_qty),
+                'available_qty': float(t.available_qty)
+                                 + extra_pending_by_tool.get(int(t.id), 0.0),
                 'unit': t.unit or 'pcs',
                 'serials': [
                     {
@@ -1162,29 +1334,82 @@ def register(app):
                 ],
             })
 
+        return {
+            'projects': projects,
+            'project_options': _tool_project_combo_options(projects),
+            'stages': stages,
+            'stage_options': _tool_stage_combo_options(stages),
+            'tools': tools,
+            'categories': categories,
+            'in_store_tools_json': in_store_tools_json,
+            'known_customers': known_tool_customers(),
+            'recent_rentals': recent_rentals,
+            'transfer_sources': transfer_sources,
+            'transfer_locations': transfer_locations,
+            'transfer_location_options': transfer_location_options,
+            'transfer_tools': transfer_tools,
+            'transfer_tool_options': transfer_tool_options,
+            'receiving_account_options': receiving_account_options,
+            'txn_types': _new_rental_txn_type_context(),
+            'discount_reason_options': discount_reason_options(),
+            'return_rental_options': _tool_txn_rental_options('pending_tools'),
+            'payment_rental_options': _tool_txn_rental_options('pending_amount'),
+            'today': _pkt_today().isoformat(),
+            'edit_rental': edit_rental,
+            'edit_items': edit_items,
+            'edit_items_locked': edit_items_locked,
+            'edit_billing_locked': edit_billing_locked,
+        }
+
+    @app.route('/hdc/tool-rental/new')
+    @login_required
+    def hdc_tool_rental_new():
+        """The rental creation form lives on its own page.
+
+        The Rentals hub keeps the summary, the search and the list; its
+        "New Rental" action opens this form.  Only users who may write the
+        tools page can open it — the same users who could ever see the form.
+        """
+        if not _rental_form_access_allowed():
+            flash('You do not have permission to create rentals.', 'danger')
+            return redirect(url_for('hdc_tool_rental'))
+
+        # Landing back here after a create (or a rejected create) keeps the
+        # operator in one place: the form up top, the rentals they just made
+        # *below* it.  ``created`` highlights the fresh rental so "where did my
+        # rental go?" is answered on the same screen instead of a jump away.
+        created_rental_id = request.args.get('created', type=int)
+        created_rental = db.session.get(ToolRental, created_rental_id) if created_rental_id else None
+        context = _new_rental_page_context()
         return render_template('tool_rental/tool_new_rental.html',
-            projects=projects,
-            project_options=_tool_project_combo_options(projects),
-            stages=stages,
-            stage_options=_tool_stage_combo_options(stages),
-            tools=tools,
-            categories=categories,
-            in_store_tools_json=in_store_tools_json,
-            known_customers=known_tool_customers(),
-            recent_rentals=recent_rentals,
-            created_rental=created_rental,
-            transfer_sources=transfer_sources,
-            transfer_locations=transfer_locations,
-            transfer_location_options=transfer_location_options,
-            transfer_tools=transfer_tools,
-            transfer_tool_options=transfer_tool_options,
-            receiving_account_options=receiving_account_options,
-            txn_types=_new_rental_txn_type_context(),
-            discount_reason_options=discount_reason_options(),
-            return_rental_options=_tool_txn_rental_options('pending_tools'),
-            payment_rental_options=_tool_txn_rental_options('pending_amount'),
-            today=_pkt_today().isoformat(),
-        )
+                               created_rental=created_rental, **context)
+
+    # ------------------ EDIT RENTAL (the same form, prefilled) ------------------
+    @app.route('/hdc/tool-rental/<int:rental_id>/edit')
+    @login_required
+    def hdc_tool_rental_edit(rental_id):
+        """Edit a rental on the very form that created it.
+
+        The page is ``tool_new_rental.html`` in edit mode: every field the
+        operator filled in to make the rental is here again, prefilled —
+        renter type, site/customer, tools with their quantities and rates,
+        rent type, dates and notes.  Nothing is left out, because nothing is
+        duplicated: one template, one set of fields.
+        """
+        if not _rental_form_access_allowed():
+            flash('You do not have permission to edit rentals.', 'danger')
+            return redirect(url_for('hdc_tool_rental'))
+        rental = ToolRental.query.get_or_404(rental_id)
+        if rental.is_void:
+            flash('This rental is voided — it cannot be edited.', 'danger')
+            return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+        if rental.status in ('returned', 'closed'):
+            flash(f'{rental.rental_code} is closed — it can no longer be edited.',
+                  'warning')
+            return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+        context = _new_rental_page_context(edit_rental=rental)
+        return render_template('tool_rental/tool_new_rental.html',
+                               created_rental=None, **context)
 
     # ------------------ TOOL TRANSACTION (one form: rent out / return / maintenance) ------------------
     def _can_manage_tools():
@@ -2141,6 +2366,208 @@ def register(app):
         flash(f'Rental {rental_code} created — {total_rented_qty:g} {qty_word} '
               f'shown in the list below.', 'success')
         return redirect(_txn_return_url(url_for('hdc_tool_rental_new', created=rental.id)))
+
+    # ------------------ UPDATE RENTAL (edit form post) ------------------
+    @app.route('/hdc/tool-rental/<int:rental_id>/update', methods=['POST'])
+    @login_required
+    @_money_write_required()
+    def hdc_tool_rental_update(rental_id):
+        """Save the edit form — the same fields the create form posts.
+
+        Header details (renter, destination, rent type, dates, notes) are
+        applied directly.  The tool lines are reconciled against what the form
+        posted while the rental is still untouched (no return or transfer yet):
+        resized lines move their serial markings with them, removed lines come
+        back to the store, added lines go out like a fresh create.  Once a
+        return or transfer exists, only the header details may change — the
+        physical history belongs to the Return / Transfer forms by then.
+        """
+        rental = ToolRental.query.get_or_404(rental_id)
+        edit_url = url_for('hdc_tool_rental_edit', rental_id=rental.id)
+        detail_url = url_for('hdc_tool_rental_detail', rental_id=rental.id)
+        if rental.is_void:
+            flash('This rental is voided — it cannot be edited.', 'danger')
+            return redirect(detail_url)
+        if rental.status in ('returned', 'closed'):
+            flash(f'{rental.rental_code} is closed — it can no longer be edited.',
+                  'warning')
+            return redirect(detail_url)
+
+        # ---- destination (same rules as the create form) ----
+        renter_type = (request.form.get('renter_type') or rental.renter_type
+                       or 'internal').strip().lower()
+        if renter_type not in ('internal', 'external'):
+            renter_type = 'internal'
+        project_id = request.form.get('project_id', type=int) if renter_type == 'internal' else None
+        stage_id = request.form.get('stage_id', type=int) if renter_type == 'internal' else None
+        customer_name = (request.form.get('customer_name') or '').strip() if renter_type == 'external' else None
+        customer_phone = (request.form.get('customer_phone') or '').strip() if renter_type == 'external' else None
+        customer_address = (request.form.get('customer_address') or '').strip() if renter_type == 'external' else None
+
+        if renter_type == 'internal' and not project_id:
+            flash('Select a project/site for internal rental.', 'danger')
+            return redirect(edit_url)
+        if renter_type == 'external' and not customer_name:
+            flash('Customer name required for external rental.', 'danger')
+            return redirect(edit_url)
+        if renter_type == 'internal' and stage_id:
+            stage = db.session.get(Stage, stage_id)
+            if not stage or stage.project_id != project_id:
+                flash('Selected stage does not belong to the selected project/site.', 'danger')
+                return redirect(edit_url)
+
+        billing_type = (request.form.get('billing_type') or rental.billing_type
+                        or 'fixed_fee').strip().lower()
+        if billing_type not in ('no_charge', 'fixed_fee', 'per_day', 'per_hour'):
+            billing_type = 'fixed_fee'
+        money_moved = (any(not p.is_void for p in rental.payments)
+                       or any(not d.is_void for d in rental.discounts))
+        if billing_type != (rental.billing_type or '') and money_moved:
+            flash('The rent type cannot change once money has been received or '
+                  'a discount granted on this rental.', 'danger')
+            return redirect(edit_url)
+
+        rental_date_raw = (request.form.get('rental_date') or '').strip()
+        try:
+            rental_date = (datetime.strptime(rental_date_raw, '%Y-%m-%d').date()
+                           if rental_date_raw else rental.rental_date)
+        except Exception:
+            rental_date = rental.rental_date
+        expected_raw = (request.form.get('expected_return_date') or '').strip()
+        try:
+            expected_date = (datetime.strptime(expected_raw, '%Y-%m-%d').date()
+                             if expected_raw else None)
+        except Exception:
+            expected_date = None
+
+        # ---- tool lines (aligned arrays, one row each) ----
+        tool_ids = request.form.getlist('tool_id[]') or request.form.getlist('tool_id')
+        qtys = request.form.getlist('qty[]') or request.form.getlist('qty')
+        rates = request.form.getlist('rate[]') or request.form.getlist('rate')
+        notes_list = request.form.getlist('item_notes[]') or request.form.getlist('item_notes')
+        item_ids = request.form.getlist('rental_item_id[]') or request.form.getlist('rental_item_id')
+
+        rows = []
+        for idx, tid_raw in enumerate(tool_ids):
+            if not str(tid_raw or '').strip():
+                continue
+            try:
+                tid = int(tid_raw)
+            except (TypeError, ValueError):
+                flash(f'Invalid tool at row {idx + 1}.', 'danger')
+                return redirect(edit_url)
+            tool = Tool.query.get(tid)
+            if not tool or tool.is_void:
+                flash(f'Tool not found at row {idx + 1}.', 'danger')
+                return redirect(edit_url)
+            qty = max(0.0, _flt(qtys[idx] if idx < len(qtys) else None))
+            if qty <= 0:
+                flash(f'Quantity must be >0 at row {idx + 1}.', 'danger')
+                return redirect(edit_url)
+            rate = max(0.0, _flt(rates[idx] if idx < len(rates) else None,
+                                 tool.rental_rate_per_day))
+            if billing_type == 'no_charge':
+                rate = 0.0
+            raw_item_id = str(item_ids[idx] if idx < len(item_ids) else '').strip()
+            rows.append({
+                'item_id': int(raw_item_id) if raw_item_id.isdigit() else None,
+                'tool': tool,
+                'qty': qty,
+                'rate': rate,
+                'note': (notes_list[idx] if idx < len(notes_list) else '').strip(),
+            })
+        if not rows:
+            flash('A rental needs at least one tool line.', 'danger')
+            return redirect(edit_url)
+
+        # Integrity: after the edit, this rental may hold at most what the
+        # store can release now plus what this rental already has out.
+        posted_by_tool = {}
+        for row in rows:
+            posted_by_tool[int(row['tool'].id)] = (
+                posted_by_tool.get(int(row['tool'].id), 0.0) + row['qty'])
+        pending_by_tool = {}
+        for item in rental.items:
+            pending_by_tool[int(item.tool_id)] = (
+                pending_by_tool.get(int(item.tool_id), 0.0)
+                + float(item.qty_pending or 0))
+        for tool_id, requested in posted_by_tool.items():
+            tool = db.session.get(Tool, tool_id)
+            if not tool:
+                continue
+            in_store_now = tool_available_for_integrity(tool)
+            allowed = in_store_now + pending_by_tool.get(tool_id, 0.0)
+            if requested > allowed + 0.001:
+                flash(integrity_message(
+                    'Not enough available tool stock.',
+                    f'Not enough stock for {tool.name}: {in_store_now:g} in store '
+                    f'plus {pending_by_tool.get(tool_id, 0.0):g} already on this '
+                    f'rental, requested {requested:g}.'), 'danger')
+                return redirect(edit_url)
+
+        # ---- apply the header details ----
+        old_location_label = rental.current_location_label
+        rental.renter_type = renter_type
+        rental.project_id = project_id
+        rental.stage_id = stage_id
+        rental.customer_name = customer_name
+        rental.customer_phone = customer_phone
+        rental.customer_address = customer_address
+        rental.rental_date = rental_date
+        rental.expected_return_date = expected_date
+        rental.billing_type = billing_type
+        rental.notes = (request.form.get('notes') or '').strip()
+        rental.updated_at = _pkt_now_naive()
+
+        if renter_type == 'internal' and project_id:
+            proj = db.session.get(Project, project_id)
+            to_label = proj.name if proj else 'Internal Site'
+            if stage_id:
+                st = db.session.get(Stage, stage_id)
+                if st:
+                    to_label += f" > {st.name}"
+        else:
+            to_label = customer_name or 'External Customer'
+
+        # ---- reconcile the tool lines ----
+        items_locked = bool(rental.returns or rental.transfers)
+        if items_locked:
+            existing_rows = sorted(
+                (int(item.tool_id), round(float(item.qty_rented or 0), 3),
+                 round(float(item.rate or 0), 3))
+                for item in rental.items)
+            posted_rows = sorted(
+                (int(row['tool'].id), round(row['qty'], 3), round(row['rate'], 3))
+                for row in rows)
+            if existing_rows != posted_rows:
+                flash('The tool lines cannot change on this rental — a return or '
+                      'transfer is already recorded on it. The details were '
+                      'updated; use Return / Transfer to move its tools.',
+                      'warning')
+        else:
+            _apply_rental_item_edit(
+                rental, rows, billing_type, to_label, old_location_label,
+                actor_id=current_user.id if hasattr(current_user, 'id') else None)
+            # Pieces still out sit where the form says the rental is, so their
+            # location labels follow a changed destination too.
+            for serial in ToolSerial.query.filter(
+                    ToolSerial.current_rental_id == rental.id,
+                    ToolSerial.is_in_store == False).all():
+                if getattr(serial, 'is_scrapped', False) or serial.status == 'scrapped':
+                    continue
+                serial.current_location_label = to_label
+
+        if renter_type == 'external' and customer_name:
+            ensure_party(customer_name, party_type='rental', phone=customer_phone)
+
+        recalc_rental_totals(rental.id)
+        db.session.commit()
+        flash(f'Rental {rental.rental_code} updated — '
+              f'{float(rental.total_rented_qty or 0):g} tools, '
+              f'{float(rental.total_pending_tools or 0):g} out, '
+              f'{float(rental.total_pending_amount or 0):,.0f} PKR due.',
+              'success')
+        return redirect(detail_url)
 
     # ------------------ RENTAL DETAIL ------------------
     @app.route('/hdc/tool-rental/<int:rental_id>')

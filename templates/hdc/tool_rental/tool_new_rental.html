@@ -1,6 +1,7 @@
 {% extends "shared/base.html" %}
-{% block title %}New Rental{% endblock %}
-{% block page_heading %}New Rental{% endblock %}
+{% set is_edit = edit_rental is defined and edit_rental %}
+{% block title %}{% if is_edit %}Edit Rental {{ edit_rental.rental_code }}{% else %}New Rental{% endif %}{% endblock %}
+{% block page_heading %}{% if is_edit %}Edit Rental {{ edit_rental.rental_code }}{% else %}New Rental{% endif %}{% endblock %}
 
 {# The rental creation form lives on its own page so the Rentals hub stays a
    simple summary + list. The form reads as one sequence of numbered steps:
@@ -54,18 +55,43 @@
 
 <div class="tool-rental-form-header">
     <div>
-        <h2><i class="fas fa-plus me-2" aria-hidden="true"></i><span id="pageFormHeading">New Rental</span></h2>
-        <div class="tool-rental-form-subtitle">Answer the steps in order: from where → which tools → to whom → rent &amp; terms. Rentals made here appear below.</div>
+        <h2><i class="fas fa-{% if is_edit %}pen{% else %}plus{% endif %} me-2" aria-hidden="true"></i><span id="pageFormHeading">{% if is_edit %}Edit Rental · {{ edit_rental.rental_code }}{% else %}New Rental{% endif %}</span></h2>
+        <div class="tool-rental-form-subtitle">
+            {% if is_edit %}
+                The same form that created {{ edit_rental.rental_code }}, prefilled with what was saved. Change what you need and save.
+            {% else %}
+                Answer the steps in order: from where → which tools → to whom → rent &amp; terms. Rentals made here appear below.
+            {% endif %}
+        </div>
     </div>
+    {% if is_edit %}
+    <a href="{{ url_for('hdc_tool_rental_detail', rental_id=edit_rental.id) }}" class="btn btn-outline-secondary">
+        <i class="fas fa-arrow-left me-1" aria-hidden="true"></i>Back to rental
+    </a>
+    {% else %}
     <a href="{{ url_for('hdc_tool_rental') }}" class="btn btn-outline-secondary">
         <i class="fas fa-arrow-left me-1" aria-hidden="true"></i>Back to rentals
     </a>
+    {% endif %}
 </div>
 
 <div class="card hdc-card mb-3">
-    <div class="card-header hdc-card-header"><h5 class="mb-0"><i class="fas fa-file-contract me-2" aria-hidden="true"></i><span id="rentalFormTitle">Rental details</span></h5></div>
+    <div class="card-header hdc-card-header"><h5 class="mb-0"><i class="fas fa-file-contract me-2" aria-hidden="true"></i><span id="rentalFormTitle">{% if is_edit %}Edit rental details{% else %}Rental details{% endif %}</span></h5></div>
     <div class="card-body">
-        <form method="POST" action="{{ url_for('hdc_tool_rental_create') }}" id="createRentalForm">
+        {% if is_edit and edit_items_locked %}
+        <div class="alert alert-warning py-2 small">
+            <i class="fas fa-lock me-1" aria-hidden="true"></i>
+            A return or transfer is already recorded on this rental, so its tool lines are locked. You can still correct the details below; use the rental's Return / Transfer forms to move its tools.
+        </div>
+        {% endif %}
+        {% if is_edit and edit_billing_locked %}
+        <div class="alert alert-info py-2 small">
+            <i class="fas fa-info-circle me-1" aria-hidden="true"></i>
+            Money has already been received (or a discount granted) on this
+            rental, so its rent type stays as saved.
+        </div>
+        {% endif %}
+        <form method="POST" action="{% if is_edit %}{{ url_for('hdc_tool_rental_update', rental_id=edit_rental.id) }}{% else %}{{ url_for('hdc_tool_rental_create') }}{% endif %}" id="createRentalForm">
             <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
             <div class="row g-3">
                 {# ── One form, one reading order.  The steps below follow the
@@ -144,8 +170,9 @@
                     <h6 class="txn-step-heading mb-2"><i class="fas fa-toolbox me-1" aria-hidden="true"></i>2 · Which tools are moving?</h6>
                 </div>
                 <div class="col-12" id="newRentalTools" data-txn-modes="new_rental">
-                    <label class="form-label fw-semibold">Tools to rent</label>
+                    <label class="form-label fw-semibold">{% if is_edit %}Tools on this rental{% else %}Tools to rent{% endif %}</label>
 
+                    {% if not is_edit %}
                     <!-- Mode toggle: quantity-based or serial-based -->
                     <div class="d-flex flex-wrap gap-3 mb-3">
                         <label class="form-label small mb-0 fw-semibold" style="margin-bottom:0">Select by:</label>
@@ -166,6 +193,7 @@
                         Click on a serial to see its status, or tick multiple serials to add them to the rental.
                         You can also search/filter serials within a tool.
                     </div>
+                    {% endif %}
 
                     {% if tools %}
                     <!-- Quantity & Cascading Category -> Tool No rows -->
@@ -191,7 +219,54 @@
                         </div>
                         {% endif %}
                         <div id="toolItemsContainer">
+                            {% if is_edit and edit_items %}
+                            {# Edit mode: one prefilled row per saved line — the same
+                               fields the create form posts, plus the line's identity
+                               and the Tool No markings currently out for it. #}
+                            {% for line in edit_items %}
+                            {% set row_idx = loop.index0 %}
+                            <div class="row g-2 mb-2 tool-item-row align-items-end border rounded p-2 bg-light-subtle" data-edit-row="1" data-item-id="{{ line.item_id }}">
+                                <input type="hidden" name="rental_item_id[]" value="{{ line.item_id }}">
+                                <div class="col-md-6">
+                                    <label class="form-label small fw-semibold" for="rentalToolSelect{{ row_idx }}Input">Tool Category / Main Tool</label>
+                                    <input type="text" id="rentalToolSelect{{ row_idx }}Input" class="form-control tool-select-search"
+                                           placeholder="Search tool name or code…" autocomplete="off"
+                                           role="combobox" aria-expanded="false" aria-autocomplete="list" aria-label="Tool"
+                                           data-hdc-combo="rentalToolSelect{{ row_idx }}" data-hdc-combo-strict="true" data-hdc-combo-manual="true">
+                                    <select name="tool_id[]" id="rentalToolSelect{{ row_idx }}" class="form-select tool-select d-none" required
+                                            data-hdc-combo-source>
+                                        <option value=""></option>
+                                        {% for t in tools %}
+                                        <option value="{{ t.id }}" data-category-id="{{ t.category_id or '' }}" data-rate="{{ t.rental_rate_per_day }}" data-avail="{{ t.available_qty }}" {% if t.id == line.tool_id %}selected{% endif %}>{{ t.name }} ({{ t.tool_code }}) — {{ "%.0f"|format(t.available_qty) }} in store</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="col-4 col-md-2">
+                                    <label class="form-label small fw-semibold">Quantity</label>
+                                    <input type="number" name="qty[]" class="form-control row-qty-input" value="{{ '%g'|format(line.qty) }}" placeholder="Qty" min="0.1" step="0.1" required>
+                                </div>
+                                <div class="col-6 col-md-3 rental-rate-cell">
+                                    <label class="form-label small rental-rate-label fw-semibold">Rent rate</label>
+                                    <input type="number" name="rate[]" class="form-control rental-rate-input" value="{{ '%g'|format(line.rate) }}" placeholder="Use saved rate" min="0" step="0.01">
+                                </div>
+                                <div class="col-2 col-md-1">
+                                    <button type="button" class="btn btn-outline-danger w-100" aria-label="Remove tool line" title="Remove tool line" onclick="removeToolRow(this)"><i class="fas fa-times" aria-hidden="true"></i></button>
+                                </div>
+                                {% if line.serials %}
+                                <div class="col-12 mt-2">
+                                    <small class="text-muted d-block mb-1"><i class="fas fa-hashtag me-1"></i>Tool No(s) out on this rental — they move with the quantity you save:</small>
+                                    <div class="d-flex flex-wrap gap-1">
+                                        {% for sn in line.serials %}
+                                        <span class="badge bg-warning text-dark border"><i class="fas fa-hashtag me-1"></i>{{ sn }}</span>
+                                        {% endfor %}
+                                    </div>
+                                </div>
+                                {% endif %}
+                            </div>
+                            {% endfor %}
+                            {% else %}
                             <div class="row g-2 mb-2 tool-item-row align-items-end border rounded p-2 bg-light-subtle">
+                                <input type="hidden" name="rental_item_id[]" value="">
                                 <div class="col-md-6">
                                     <label class="form-label small fw-semibold" for="rentalToolSelect0Input">Tool Category / Main Tool (In Store)</label>
                                     <input type="text" id="rentalToolSelect0Input" class="form-control tool-select-search"
@@ -238,6 +313,7 @@
                                     </div>
                                 </div>
                             </div>
+                            {% endif %}
                         </div>
                         <div class="d-flex flex-wrap align-items-center gap-2 mt-1">
                             <button type="button" class="btn btn-sm btn-outline-secondary" onclick="addToolRow()"><i class="fas fa-plus me-1" aria-hidden="true"></i>Add another tool</button>
@@ -245,6 +321,7 @@
                         </div>
                     </div>
 
+                    {% if not is_edit %}
                     <!-- Serial-based tool picker -->
                     <div id="serialToolPicker" class="d-none">
                         <div class="card hdc-card border-mint">
@@ -289,6 +366,7 @@
                             <input type="hidden" name="serial_rental_data" id="serialRentalDataInput" value="">
                         </div>
                     </div>
+                    {% endif %}
                     {% else %}
                     <div class="alert alert-info mb-2">There are no tools in stock yet. Add tools in Inventory before creating a rental.</div>
                     <a href="{{ url_for('hdc_tool_rental_inventory') }}" class="btn btn-outline-primary"><i class="fas fa-warehouse me-1" aria-hidden="true"></i>Open Inventory</a>
@@ -332,18 +410,19 @@
                 <div class="col-md-6" id="renterTypeField" data-txn-modes="new_rental transfer">
                     <label class="form-label" id="whoLabel">Who is renting?</label>
                     <select name="renter_type" id="renterType" class="form-select" required onchange="toggleRenter()">
-                        <option value="internal">Our site</option>
-                        <option value="external">Outside customer</option>
+                        <option value="internal" {% if is_edit and edit_rental.renter_type == 'internal' %}selected{% endif %}>Our site</option>
+                        <option value="external" {% if is_edit and edit_rental.renter_type == 'external' %}selected{% endif %}>Outside customer</option>
                     </select>
                 </div>
 
-                <div class="col-12" id="internalFields" data-txn-modes="new_rental transfer">
+                <div class="col-12{% if is_edit and edit_rental.renter_type == 'external' %} d-none{% endif %}" id="internalFields" data-txn-modes="new_rental transfer">
                     <div class="row g-3">
                         <div class="col-md-6">
                             {{ combo_select('project_id', 'rentalProjectSelect', project_options,
                                label='Site / project', label_id='projectLabel',
                                placeholder='Search site, project code, or client…',
-                               max_items=80) }}
+                               max_items=80,
+                               selected=edit_rental.project_id if is_edit else '') }}
                         </div>
                         <div class="col-md-6">
                             {# Stages are offered for the chosen site / project only. #}
@@ -351,26 +430,28 @@
                                label='Stage (optional)', label_id='stageLabel',
                                placeholder='Search a stage…', max_items=80,
                                depends_on='rentalProjectSelect', depends_key='project-id',
-                               depends_wait='Choose the site / project first', depends_none='No stages on this site yet') }}
+                               depends_wait='Choose the site / project first', depends_none='No stages on this site yet',
+                               selected=(edit_rental.stage_id or '') if is_edit else '') }}
                         </div>
                     </div>
                 </div>
-                <div class="col-12 d-none" id="externalFields" data-txn-modes="new_rental transfer">
+                <div class="col-12{% if not is_edit or edit_rental.renter_type != 'external' %} d-none{% endif %}" id="externalFields" data-txn-modes="new_rental transfer">
                     <div class="row g-3">
                         <div class="col-md-6">
                             {{ combo_field('customer_name', 'rentalCustomerName',
                                known_customers, label='Customer name',
                                placeholder='Search or type a customer…',
                                hint='Choose an existing customer or type a new name.',
-                               max_items=60) }}
+                               max_items=60,
+                               value=edit_rental.customer_name if is_edit else '') }}
                         </div>
                         <div class="col-md-6">
                             <label class="form-label">Phone</label>
-                            <input type="text" name="customer_phone" class="form-control" placeholder="03xx-xxxxxxx">
+                            <input type="text" name="customer_phone" class="form-control" placeholder="03xx-xxxxxxx" value="{{ edit_rental.customer_phone if is_edit else '' }}">
                         </div>
                         <div class="col-12">
                             <label class="form-label">Address (optional)</label>
-                            <input type="text" name="customer_address" class="form-control" placeholder="Customer address">
+                            <input type="text" name="customer_address" class="form-control" placeholder="Customer address" value="{{ edit_rental.customer_address if is_edit else '' }}">
                         </div>
                     </div>
                 </div>
@@ -523,23 +604,26 @@
                             <div class="col-md-6" id="billingField" data-txn-modes="new_rental transfer">
                                 <label class="form-label" id="billingLabel">How should rent be charged?</label>
                                 <select name="billing_type" id="billingType" class="form-select" required onchange="syncBilling()">
-                                    <option value="fixed_fee">One rental fee</option>
-                                    <option value="per_day">Per day</option>
-                                    <option value="no_charge">No charge (included in contract)</option>
+                                    <option value="fixed_fee" {% if is_edit and edit_rental.billing_type == 'fixed_fee' %}selected{% endif %}>One rental fee</option>
+                                    <option value="per_day" {% if is_edit and edit_rental.billing_type == 'per_day' %}selected{% endif %}>Per day</option>
+                                    {% if is_edit and edit_rental.billing_type == 'per_hour' %}
+                                    <option value="per_hour" selected>Per hour</option>
+                                    {% endif %}
+                                    <option value="no_charge" {% if is_edit and edit_rental.billing_type == 'no_charge' %}selected{% endif %}>No charge (included in contract)</option>
                                 </select>
                                 <small id="billingSelectionHint" class="text-muted d-block"></small>
                             </div>
                             <div class="col-md-6" data-txn-modes="new_rental transfer">
                                 <label class="form-label" id="dateLabel">Rental date</label>
-                                <input type="date" name="rental_date" value="{{ today }}" class="form-control" required>
+                                <input type="date" name="rental_date" value="{% if is_edit %}{{ edit_rental.rental_date.isoformat() }}{% else %}{{ today }}{% endif %}" class="form-control" required>
                             </div>
                             <div class="col-md-6" data-txn-modes="new_rental transfer">
                                 <label class="form-label">Expected return date (optional)</label>
-                                <input type="date" name="expected_return_date" class="form-control">
+                                <input type="date" name="expected_return_date" value="{% if is_edit and edit_rental.expected_return_date %}{{ edit_rental.expected_return_date.isoformat() }}{% endif %}" class="form-control">
                             </div>
                             <div class="col-12" data-txn-modes="new_rental transfer">
                                 <label class="form-label">Notes or agreement details (optional)</label>
-                                <textarea name="notes" class="form-control" rows="2" placeholder="Add any rental terms or agreement reference"></textarea>
+                                <textarea name="notes" class="form-control" rows="2" placeholder="Add any rental terms or agreement reference">{% if is_edit %}{{ edit_rental.notes or '' }}{% endif %}</textarea>
                             </div>
 
                             <div class="col-12 d-none" id="transferSettlementFields" data-txn-modes="transfer">
@@ -584,8 +668,8 @@
                 <!-- submit — always present: a return or a payment needs it even
                      when the store is empty, and the row is mode-gated anyway -->
                 <div class="col-12" id="rentalSubmitRow" data-txn-modes="new_rental transfer return payment">
-                    <button type="submit" id="rentalSubmitButton" class="btn btn-success"><i class="fas fa-check me-1" aria-hidden="true"></i><span>Create Rental</span></button>
-                    <a href="{{ url_for('hdc_tool_rental') }}" class="btn btn-outline-secondary ms-1">Cancel</a>
+                    <button type="submit" id="rentalSubmitButton" class="btn {% if is_edit %}btn-primary{% else %}btn-success{% endif %}"><i class="fas fa-check me-1" aria-hidden="true"></i><span>{% if is_edit %}Save Changes{% else %}Create Rental{% endif %}</span></button>
+                    <a href="{% if is_edit %}{{ url_for('hdc_tool_rental_detail', rental_id=edit_rental.id) }}{% else %}{{ url_for('hdc_tool_rental') }}{% endif %}" class="btn btn-outline-secondary ms-1">Cancel</a>
                 </div>
             </div>
         </form>
@@ -594,7 +678,9 @@
 
 {# ── Rentals made here, *below* the form ───────────────────────────────────
    Newest first, so the rental the operator just created is the top row and
-   tinted with a "New" tag.  The full searchable list stays on the Rentals hub. #}
+   tinted with a "New" tag.  The full searchable list stays on the Rentals hub.
+   The edit page keeps the focus on the one rental being edited. #}
+{% if not is_edit %}
 <div class="card hdc-card" id="recentRentals">
     <div class="card-header hdc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
         <span><i class="fas fa-list-check me-2" aria-hidden="true"></i>Rentals</span>
@@ -664,7 +750,12 @@
                         {% elif r.payment_status=='paid' %}<div class="mt-1"><span class="badge bg-success">Paid</span></div>
                         {% elif r.payment_status=='no_charge' %}<div class="mt-1"><span class="badge bg-secondary">No charge</span></div>{% endif %}
                     </td>
-                    <td><a href="{{ url_for('hdc_tool_rental_detail', rental_id=r.id) }}" class="btn btn-sm btn-outline-primary" aria-label="Open rental {{ r.rental_code }}">Open</a></td>
+                    <td class="text-nowrap">
+                        {% if not r.is_void and r.status not in ('returned', 'closed') %}
+                        <a href="{{ url_for('hdc_tool_rental_edit', rental_id=r.id) }}" class="btn btn-sm btn-outline-secondary" aria-label="Edit rental {{ r.rental_code }}" title="Edit on the same form that created it"><i class="fas fa-pen"></i></a>
+                        {% endif %}
+                        <a href="{{ url_for('hdc_tool_rental_detail', rental_id=r.id) }}" class="btn btn-sm btn-outline-primary" aria-label="Open rental {{ r.rental_code }}">Open</a>
+                    </td>
                 </tr>
             {% else %}
                 <tr><td colspan="7" class="text-center text-muted py-4">
@@ -681,11 +772,19 @@
     </div>
     {% endif %}
 </div>
+{% endif %}
 
 {% endblock %}
 
 {% block extra_js %}
 <script>
+// Edit mode reuses this very page: the form posts to the update endpoint and
+// keeps its saved values, so the script must not re-point the form at the
+// create endpoint or overwrite the edit wording. ``EDIT_RENTAL_ID`` is that
+// switch (0 = creating a new rental).
+const EDIT_RENTAL_ID = {% if is_edit %}{{ edit_rental.id }}{% else %}0{% endif %};
+const IS_EDIT = EDIT_RENTAL_ID > 0;
+
 // The stage list follows the chosen site through the combo_select
 // depends_on contract (core/combo.js) — no page code needed here.
 
@@ -1363,25 +1462,28 @@ function toggleTxnType(){
 
     // Headings, submit button and help text come from the transaction
     // registry (NEW_RENTAL_TXN_TYPES), so a type's wording lives in one place.
+    // The edit page keeps its own wording and its update endpoint.
     const entry = txnEntry(txn.value);
-    const pageHeading = document.getElementById('pageFormHeading');
-    if(pageHeading && entry) pageHeading.textContent = entry.label;
-    const formTitle = document.getElementById('rentalFormTitle');
-    if(formTitle && entry) formTitle.textContent = transfer ? 'Transfer details' : entry.label + ' details';
-    const dateLabel = document.getElementById('dateLabel');
-    if(dateLabel) dateLabel.textContent = transfer ? 'Transfer date' : 'Rental date';
-    const help = document.getElementById('txnTypeHelp');
-    if(help && entry) help.textContent = entry.help;
-    const submitButton = document.getElementById('rentalSubmitButton');
-    if(submitButton && entry){
-        ['btn-success', 'btn-warning', 'btn-primary'].forEach(function(cls){ submitButton.classList.remove(cls); });
-        submitButton.classList.add(entry.submit_class);
-        const caption = submitButton.querySelector('span');
-        if(caption) caption.textContent = entry.submit_label;
-    }
-    if(entry && !entry.needs_rental){
-        const form = document.getElementById('createRentalForm');
-        if(form) form.action = entry.action;
+    if(!IS_EDIT){
+        const pageHeading = document.getElementById('pageFormHeading');
+        if(pageHeading && entry) pageHeading.textContent = entry.label;
+        const formTitle = document.getElementById('rentalFormTitle');
+        if(formTitle && entry) formTitle.textContent = transfer ? 'Transfer details' : entry.label + ' details';
+        const dateLabel = document.getElementById('dateLabel');
+        if(dateLabel) dateLabel.textContent = transfer ? 'Transfer date' : 'Rental date';
+        const help = document.getElementById('txnTypeHelp');
+        if(help && entry) help.textContent = entry.help;
+        const submitButton = document.getElementById('rentalSubmitButton');
+        if(submitButton && entry){
+            ['btn-success', 'btn-warning', 'btn-primary'].forEach(function(cls){ submitButton.classList.remove(cls); });
+            submitButton.classList.add(entry.submit_class);
+            const caption = submitButton.querySelector('span');
+            if(caption) caption.textContent = entry.submit_label;
+        }
+        if(entry && !entry.needs_rental){
+            const form = document.getElementById('createRentalForm');
+            if(form) form.action = entry.action;
+        }
     }
 
     toggleRenter();
@@ -1449,6 +1551,9 @@ function syncRowSerialBadgesUI(row, selectedIds){
 }
 
 function renderRowSerialPicker(row){
+    // A saved line keeps its own out-of-store Tool Nos; the in-store picker
+    // only applies to fresh lines, so edit rows never touch their serials here.
+    if(row.dataset && row.dataset.editRow) return;
     const sel = row.querySelector('select.tool-select');
     const wrap = row.querySelector('.row-serial-picker-wrap');
     const badgesContainer = row.querySelector('.row-serial-badges');
@@ -1579,6 +1684,9 @@ function wireToolRow(row){
     });
     if(qty){
         qty.addEventListener('input', function(){
+            // Saved lines reconcile their Tool Nos on the server when the
+            // quantity changes — no in-store auto-pick for them.
+            if(row.dataset && row.dataset.editRow) return;
             const toolId = String(sel.value || '');
             const toolInfo = IN_STORE_TOOLS_BY_ID.get(toolId);
             if(!toolInfo || !Array.isArray(toolInfo.serials)) return;
@@ -1747,8 +1855,9 @@ document.getElementById('paymentRentalSelect')?.addEventListener('change', funct
 
 // Post the form to the endpoint of the chosen transaction. Rental-bound
 // types take the rental id from their picker; create/transfer keep the
-// create endpoint.
+// create endpoint. The edit page always keeps its update endpoint.
 document.getElementById('createRentalForm')?.addEventListener('submit', function(event){
+    if(IS_EDIT) return;
     const mode = currentTxnMode();
     const entry = txnEntry(mode);
     if(!entry) return;
@@ -1768,7 +1877,9 @@ document.getElementById('createRentalForm')?.addEventListener('submit', function
 // Reflect the defaults as soon as the page loads.
 toggleTxnType();
 
-let nextToolComboIndex = 1;
+// Server-rendered rows (one per saved line in edit mode) already use combo
+// indexes 0..N-1, so dynamically added rows continue after them.
+let nextToolComboIndex = {% if is_edit %}{{ edit_items|length + 1 }}{% else %}1{% endif %};
 
 function addToolRow(){
     const container = document.getElementById('toolItemsContainer');
@@ -1778,6 +1889,7 @@ function addToolRow(){
     const row = document.createElement('div');
     row.className = 'row g-2 mb-2 tool-item-row align-items-end border rounded p-2 bg-light-subtle';
     row.innerHTML = `
+        <input type="hidden" name="rental_item_id[]" value="">
         <div class="col-md-6">
             <label class="form-label small fw-semibold" for="${inputId}">Tool Category / Main Tool (In Store)</label>
             <input type="text" id="${inputId}" class="form-control tool-select-search"
