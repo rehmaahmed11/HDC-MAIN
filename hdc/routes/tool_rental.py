@@ -20,7 +20,13 @@ from hdc.models.tool_rental import (
 )
 from hdc.services.cashflow_register import ensure_party
 from hdc.services.tool_txn_types import (
-    TOOL_TXN_TYPES, rental_eligible,
+    TOOL_TXN_TYPES, UNIFORM_TXN_TYPES, KIND_ADJUSTMENT, KIND_CREATE, KIND_DAMAGE_LOSS,
+    KIND_MAINTENANCE_IN, KIND_MAINTENANCE_OUT, KIND_PAYMENT, KIND_RETURN, KIND_TRANSFER,
+    rental_eligible,
+)
+from hdc.services.tool_txn_entry import (
+    MAINTENANCE_LABEL, record_damage_loss, return_from_maintenance, send_to_maintenance,
+    stamp_reference, txn_form_context, txn_reference_seen,
 )
 from hdc.services.tool_rental import (
     _ensure_tool_category, _next_rental_code, _next_tool_code,
@@ -124,6 +130,155 @@ def _tool_txn_type_context():
         row['action'] = url.replace('/0/', '/__RENTAL_ID__/', 1) if entry['needs_rental'] else url
         rows.append(row)
     return rows
+
+
+def _uniform_txn_type_context():
+    """The uniform registry with the URL each transaction posts to.
+
+    Same contract as :func:`_tool_txn_type_context`, widened to every equipment
+    transaction: rental-bound entries carry ``__RENTAL_ID__`` for the page to
+    fill from its rental picker, everything else posts to a fixed endpoint.
+    """
+    rows = []
+    for entry in UNIFORM_TXN_TYPES:
+        row = dict(entry)
+        row['panels'] = list(entry['panels'])
+        endpoint = entry['endpoint']
+        if entry['needs_rental']:
+            url = url_for(endpoint, rental_id=0)
+            row['action'] = url.replace('/0/', '/__RENTAL_ID__/', 1)
+        else:
+            row['action'] = url_for(endpoint)
+        rows.append(row)
+    return rows
+
+
+def _uniform_txn_config(context, types):
+    """The JSON block the uniform form's page script reads.
+
+    Everything here is *data*: which panels a transaction shows, the store's
+    issuable tools with their serial markings, the holders tools are currently
+    out with, and the pieces waiting at the workshop.  The static script in
+    ``static/hdc/js/pages/tool_txn.js`` renders from this and nothing else, so
+    the server stays the single source of truth for what can be posted.
+    """
+    tools = [{
+        'id': t['id'],
+        'name': t['name'],
+        'code': t['code'],
+        'categoryId': t['category_id'],
+        'categoryName': t['category_name'],
+        'unit': t['unit'],
+        'rate': t['rate'],
+        'availableQty': t['available_qty'],
+        'ownedQty': t['owned_qty'],
+        'serials': t['serials'],
+    } for t in context['in_store_tools']]
+
+    sources = [{
+        'key': s['key'],
+        'rentalId': s['rental_id'],
+        'rentalCode': s['rental_code'],
+        'locationKey': s['location_key'],
+        'holder': s['holder'],
+        'locType': s['loc_type'],
+        'pending': s['pending'],
+        'billingType': s['billing_type'],
+        'lines': [{
+            'itemId': line['item_id'],
+            'toolId': line['tool_id'],
+            'name': line['name'],
+            'code': line['code'],
+            'unit': line['unit'],
+            'qty': line['qty'],
+            'rate': line['rate'],
+            'dailyRate': line['daily_rate'],
+            'serials': line['serials'],
+        } for line in s['lines']],
+    } for s in context['transfer_sources']]
+
+    def _reason_rows(rows):
+        return [{'key': key, 'label': label} for key, label in rows]
+
+    return {
+        'types': types,
+        'today': context['today'],
+        'txnReference': context['txn_reference'],
+        'storeLabel': context['store_label'],
+        'maintenanceLabel': context['maintenance_label'],
+        'tools': tools,
+        'transferSources': sources,
+        'maintenancePieces': [{
+            'serialId': row['serial_id'],
+            'serialNumber': row['serial_number'],
+            'toolId': row['tool_id'],
+            'toolName': row['tool_name'],
+            'toolCode': row['tool_code'],
+            'unit': row['unit'],
+            'since': row['since'],
+        } for row in context['maintenance_pieces']],
+        'damageReasons': _reason_rows(context['damage_reasons']),
+        'adjustmentReasons': _reason_rows(context['adjustment_reasons']),
+    }
+
+
+def _uniform_note_text(default=''):
+    """Fold the uniform form's reference (and responsible person) into notes.
+
+    The record a transaction creates *is* its audit trail, so the reference on
+    the printed form has to live on that record — and it must get there from
+    the server, not from the page script, so a no-JS post is covered too.
+    Posts from the older pages carry no ``txn_reference`` and are unchanged.
+    """
+    reference = (request.form.get('txn_reference') or '').strip()
+    if not reference:
+        return default
+    return stamp_reference(default, reference,
+                           responsible=(request.form.get('responsible_person') or '').strip())
+
+
+def _uniform_billing_notes(default=''):
+    """Billing terms, with the agreement / rental reference folded in."""
+    terms = (request.form.get('billing_notes') or '').strip()
+    agreement = (request.form.get('rental_reference') or '').strip()
+    if agreement:
+        terms = (terms + ' | ' if terms else '') + f'Agreement: {agreement}'
+    return (terms or default).strip()[:300]
+
+
+def _uniform_return_url(default_url):
+    """Where a post goes once its handler has finished.
+
+    The uniform page is one form for every transaction, but each transaction is
+    handled by the route that already implements it.  A post that came from the
+    uniform form must land back on that page (with its success or error flash)
+    instead of being thrown onto the page of whichever legacy route handled it.
+    Posts from the older pages carry no ``txn_source`` and are unaffected.
+    """
+    if (request.form.get('txn_source') or '').strip() == 'uniform':
+        return url_for('hdc_tool_txn')
+    return default_url
+
+
+def _txn_reference_blocked(default_redirect):
+    """Refuse a re-posted uniform transaction.
+
+    The uniform form carries one generated ``txn_reference``.  That reference is
+    written onto the record the transaction produces, so if it is already in the
+    database the post in hand is a duplicate (double click, browser resend,
+    back-and-resubmit) and must not move tools or money a second time.
+
+    Returns a response when the post is a duplicate, else ``None``.  Posts from
+    the older pages carry no reference and are unaffected.
+    """
+    reference = (request.form.get('txn_reference') or '').strip()
+    if not reference or not txn_reference_seen(reference):
+        return None
+    flash(f'Transaction {reference} was already recorded. This submission was '
+          f'ignored, so nothing was posted twice.', 'warning')
+    from_uniform_form = (request.form.get('txn_source') or '').strip() == 'uniform'
+    return redirect(url_for('hdc_tool_txn') if from_uniform_form else default_redirect)
+
 
 
 def _tool_txn_rental_options(eligible_for, limit=300):
@@ -597,6 +752,10 @@ def register(app):
     def _do_tool_scrap(tool_id):
         """Throw away broken / lost tools: -qty, audit row, movement log."""
         tool = Tool.query.get_or_404(tool_id)
+        duplicate = _txn_reference_blocked(
+            url_for('hdc_tool_rental_inventory', q=tool.tool_code))
+        if duplicate:
+            return duplicate
         serial_ids = (
             request.form.getlist('scrap_serial_ids[]')
             or request.form.getlist('scrap_serial_ids')
@@ -611,25 +770,26 @@ def register(app):
                 qty = float(len([x for x in serial_ids if str(x).strip()]))
         if qty <= 0:
             flash('Scrap quantity must be greater than 0.', 'danger')
-            return redirect(url_for('hdc_tool_rental_inventory', q=tool.tool_code))
+            return redirect(_uniform_return_url(url_for('hdc_tool_rental_inventory', q=tool.tool_code)))
 
         ok, msg, scrap = record_tool_scrap(
             tool_id=tool.id,
             qty=qty,
             reason=(request.form.get('reason') or 'damaged').strip(),
             scrap_date=(request.form.get('scrap_date') or '').strip() or None,
-            reference=(request.form.get('reference') or '').strip(),
-            notes=(request.form.get('notes') or '').strip(),
+            reference=((request.form.get('reference') or '').strip()
+                       or (request.form.get('txn_reference') or '').strip()),
+            notes=_uniform_note_text((request.form.get('notes') or '').strip()),
             created_by=current_user.id if hasattr(current_user, 'id') else None,
             serial_ids=serial_ids,
         )
         if not ok:
             flash(msg or 'Could not record scrap.', 'danger')
-            return redirect(url_for('hdc_tool_rental_inventory', q=tool.tool_code))
+            return redirect(_uniform_return_url(url_for('hdc_tool_rental_inventory', q=tool.tool_code)))
         flash(f'Scrapped {scrap.qty:g} {tool.unit} of {tool.name} ({scrap.scrap_code}, '
               f'{scrap.reason_label}) — written off {scrap.value_written_off:,.0f}. '
               f'{tool.total_quantity:g} {tool.unit} left.', 'warning')
-        return redirect(url_for('hdc_tool_rental_inventory', q=tool.tool_code))
+        return redirect(_uniform_return_url(url_for('hdc_tool_rental_inventory', q=tool.tool_code)))
 
     @app.route('/hdc/tool-rental/inventory/scrap', methods=['POST'])
     @login_required
@@ -951,6 +1111,119 @@ def register(app):
             today=_pkt_today().isoformat(),
         )
 
+    # ------------------ UNIFORM TOOL TRANSACTION (one form, every transaction) ------------------
+    def _can_manage_tools():
+        """Same write gate the New Rental page uses for its form."""
+        role = (current_user.role or '').strip().lower()
+        write_access = may_access_path(current_user, '/hdc/tool-rental/new', 'write')
+        return (write_access if write_access is not None else role in ('admin', 'accountant'))
+
+    @app.route('/hdc/tool-rental/transaction')
+    @login_required
+    def hdc_tool_txn():
+        """The central HDC Tool Transaction form.
+
+        One page, one transaction-type selector: rent out, issue to an own
+        site, transfer between sites or customers, partial / full / store
+        returns, rent payments, credit adjustments, damage & loss, and the two
+        maintenance legs.  Every type posts to the endpoint that already
+        implements it (or to the three thin handlers below), so the business
+        rules stay in one place.
+        """
+        if not _can_manage_tools():
+            flash('You do not have permission to record tool transactions.', 'danger')
+            return redirect(url_for('hdc_tool_rental'))
+
+        context = txn_form_context()
+        types = _uniform_txn_type_context()
+        context['txn_types'] = types
+        context['transfer_source_options'] = [
+            (s['key'], f"{s['holder']} · {s['rental_code']} — {s['pending']:g} out")
+            for s in context['transfer_sources']
+        ]
+        context['tool_options'] = [
+            (t['id'], f"{t['name']} ({t['code']}) — {t['available_qty']:g} available"
+             if t['code'] else f"{t['name']} — {t['available_qty']:g} available")
+            for t in context['in_store_tools']
+        ]
+        context['txn_config'] = _uniform_txn_config(context, types)
+        return render_template('tool_rental/tool_txn.html', **context)
+
+    @app.route('/hdc/tool-rental/transaction/damage-loss', methods=['POST'])
+    @login_required
+    @_money_write_required()
+    def hdc_tool_txn_damage_loss():
+        """Record damage or loss — from the store or from a holder.
+
+        In the store this writes off through the existing scrap register.  When
+        the pieces are still out on a rental the transaction returns them off
+        the rental line and writes them off in the same database transaction,
+        so owned stock and 'out' drop together and the ledger balance holds.
+        """
+        duplicate = _txn_reference_blocked(url_for('hdc_tool_txn'))
+        if duplicate:
+            return duplicate
+        reference = (request.form.get('txn_reference') or '').strip()
+        source = (request.form.get('damage_source') or 'store').strip().lower()
+        ok, message, _summary = record_damage_loss(
+            actor_id=current_user.id if hasattr(current_user, 'id') else None,
+            source=source,
+            tool_id=request.form.get('tool_id', type=int),
+            qty=_flt(request.form.get('qty')),
+            serial_ids=(request.form.getlist('damage_serial_ids[]')
+                        or request.form.get('damage_serial_ids_csv')),
+            reason=(request.form.get('damage_reason') or 'damaged').strip().lower(),
+            txn_date=(request.form.get('transaction_date') or '').strip(),
+            reference=reference,
+            notes=(request.form.get('notes') or '').strip(),
+            rental_id=request.form.get('rental_id', type=int),
+            rental_item_id=request.form.get('rental_item_id', type=int),
+        )
+        flash(message, 'success' if ok else 'danger')
+        return redirect(url_for('hdc_tool_txn'))
+
+    @app.route('/hdc/tool-rental/transaction/maintenance', methods=['POST'])
+    @login_required
+    @_money_write_required()
+    def hdc_tool_txn_maintenance():
+        """Send store pieces for maintenance (owned, traceable, not rentable)."""
+        duplicate = _txn_reference_blocked(url_for('hdc_tool_txn'))
+        if duplicate:
+            return duplicate
+        ok, message, _summary = send_to_maintenance(
+            actor_id=current_user.id if hasattr(current_user, 'id') else None,
+            serial_ids=(request.form.getlist('maintenance_serial_ids[]')
+                        or request.form.get('maintenance_serial_ids_csv')),
+            txn_date=(request.form.get('transaction_date') or '').strip(),
+            reference=(request.form.get('txn_reference') or '').strip(),
+            notes=(request.form.get('notes') or '').strip(),
+            reason=(request.form.get('maintenance_reason') or '').strip(),
+            tool_id=request.form.get('tool_id', type=int),
+            qty=_flt(request.form.get('qty')),
+        )
+        flash(message, 'success' if ok else 'danger')
+        return redirect(url_for('hdc_tool_txn'))
+
+    @app.route('/hdc/tool-rental/transaction/maintenance-return', methods=['POST'])
+    @login_required
+    @_money_write_required()
+    def hdc_tool_txn_maintenance_return():
+        """Take pieces back from maintenance: repaired, or written off."""
+        duplicate = _txn_reference_blocked(url_for('hdc_tool_txn'))
+        if duplicate:
+            return duplicate
+        ok, message, _summary = return_from_maintenance(
+            actor_id=current_user.id if hasattr(current_user, 'id') else None,
+            serial_ids=(request.form.getlist('maintenance_serial_ids[]')
+                        or request.form.get('maintenance_serial_ids_csv')),
+            condition=(request.form.get('maintenance_condition') or 'good').strip().lower(),
+            txn_date=(request.form.get('transaction_date') or '').strip(),
+            reference=(request.form.get('txn_reference') or '').strip(),
+            notes=(request.form.get('notes') or '').strip(),
+        )
+        flash(message, 'success' if ok else 'danger')
+        return redirect(url_for('hdc_tool_txn'))
+
     # ------------------ TRANSFER RENTAL (settle old holder(s), start new cycle) ------------------
     def _transfer_from_parts(rental, location):
         """Where one source rental's tools are physically leaving from.
@@ -990,7 +1263,7 @@ def register(app):
                 rental.customer_name if rental.renter_type == 'external' else None,
                 label)
 
-    def _create_transfer_rental():
+    def _create_transfer_rental(force_renter_type=None):
         """Transfer selected tools from one or more holders into a new rental.
 
         A site can hold tools under more than one active rental (holder), so the
@@ -1000,6 +1273,10 @@ def register(app):
         recorded as per-tool transfers and receive the destination rate entered
         on the form. Every contributing rental is settled, and ONE new rental
         is opened for the destination with all the moved lines.
+
+        ``force_renter_type`` lets the uniform form's explicit transfer types
+        (transfer_site / transfer_customer) state the destination type without
+        posting a second renter-type control that could contradict them.
         """
         ensure_all_tools_serials(commit=False)
 
@@ -1049,7 +1326,7 @@ def register(app):
             sources.append((rental, location))
         if not sources:
             flash('Select the rental you are transferring from.', 'danger')
-            return redirect(url_for('hdc_tool_rental_new'))
+            return redirect(_uniform_return_url(url_for('hdc_tool_rental_new')))
         closed = [rental.rental_code for rental, _ in sources
                   if rental.status in ('returned', 'closed')]
         if closed:
@@ -1059,7 +1336,7 @@ def register(app):
             else:
                 flash(f"{', '.join(closed)} are already closed — nothing left "
                       f'to transfer.', 'warning')
-            return redirect(url_for('hdc_tool_rental_new'))
+            return redirect(_uniform_return_url(url_for('hdc_tool_rental_new')))
 
         # One ledger pass powers the availability check for every source: a
         # rental split across sites by an earlier move may only offer what
@@ -1101,7 +1378,7 @@ def register(app):
             else:
                 flash('The selected holders have no tools still out to transfer.',
                       'warning')
-            return redirect(url_for('hdc_tool_rental_new'))
+            return redirect(_uniform_return_url(url_for('hdc_tool_rental_new')))
 
         # The new form posts an explicit marker, so an empty checkbox selection
         # can never silently move every tool. An unmarked legacy post keeps its
@@ -1131,19 +1408,19 @@ def register(app):
         if explicit_selection:
             if not raw_item_ids:
                 flash('Select at least one tool to transfer.', 'danger')
-                return redirect(url_for('hdc_tool_rental_new'))
+                return redirect(_uniform_return_url(url_for('hdc_tool_rental_new')))
             try:
                 selected_ids = [int(raw_id) for raw_id in raw_item_ids]
             except (TypeError, ValueError):
                 flash('The selected tools are invalid. Please choose them again.', 'danger')
-                return redirect(url_for('hdc_tool_rental_new'))
+                return redirect(_uniform_return_url(url_for('hdc_tool_rental_new')))
             if len(selected_ids) != len(set(selected_ids)):
                 flash('A tool line was selected more than once. Please choose the tools again.', 'danger')
-                return redirect(url_for('hdc_tool_rental_new'))
+                return redirect(_uniform_return_url(url_for('hdc_tool_rental_new')))
             if any(item_id not in pending_by_id or available_by_item.get(item_id, 0) <= 0.001
                    for item_id in selected_ids):
                 flash('One of the selected tools is no longer available at this holder. Please refresh and try again.', 'danger')
-                return redirect(url_for('hdc_tool_rental_new'))
+                return redirect(_uniform_return_url(url_for('hdc_tool_rental_new')))
             selected_items = [(pending_by_id[item_id], available_by_item[item_id])
                               for item_id in selected_ids]
         else:
@@ -1159,7 +1436,8 @@ def register(app):
             billing_type = 'fixed_fee'
 
         # ---- destination (the "to" holder) ----
-        to_type = (request.form.get('renter_type') or 'internal').strip().lower()
+        to_type = ((force_renter_type or request.form.get('renter_type') or 'internal')
+                   .strip().lower())
         if to_type not in ('internal', 'external'):
             to_type = 'internal'
         to_project_id = request.form.get('project_id', type=int) if to_type == 'internal' else None
@@ -1170,18 +1448,18 @@ def register(app):
 
         if to_type == 'internal' and not to_project_id:
             flash('Select the destination site/project for the transfer.', 'danger')
-            return redirect(url_for('hdc_tool_rental_new'))
+            return redirect(_uniform_return_url(url_for('hdc_tool_rental_new')))
         if to_type == 'internal' and not db.session.get(Project, to_project_id):
             flash('The destination site/project could not be found. Please choose it again.', 'danger')
-            return redirect(url_for('hdc_tool_rental_new'))
+            return redirect(_uniform_return_url(url_for('hdc_tool_rental_new')))
         if to_type == 'external' and not to_customer_name:
             flash('Enter the destination customer name for the transfer.', 'danger')
-            return redirect(url_for('hdc_tool_rental_new'))
+            return redirect(_uniform_return_url(url_for('hdc_tool_rental_new')))
         if to_type == 'internal' and to_stage_id:
             st = db.session.get(Stage, to_stage_id)
             if not st or st.project_id != to_project_id:
                 flash('Selected stage does not belong to the destination site.', 'danger')
-                return redirect(url_for('hdc_tool_rental_new'))
+                return redirect(_uniform_return_url(url_for('hdc_tool_rental_new')))
 
         date_raw = (request.form.get('rental_date') or '').strip()
         try:
@@ -1193,7 +1471,7 @@ def register(app):
             exp_date = datetime.strptime(exp_raw, '%Y-%m-%d').date() if exp_raw else None
         except Exception:
             exp_date = None
-        operator_notes = (request.form.get('notes') or '').strip()
+        operator_notes = _uniform_note_text((request.form.get('notes') or '').strip())
 
         # Snapshot the chosen lines, out-of-store serial markings, and destination
         # rates before touching the source rentals.
@@ -1234,13 +1512,13 @@ def register(app):
                     s_obj = db.session.get(ToolSerial, sid)
                     if not s_obj or s_obj.tool_id != item.tool_id or getattr(s_obj, 'is_scrapped', False):
                         flash(f'Invalid tool serial selected for {item.tool.name if item.tool else "tool"}.', 'danger')
-                        return redirect(url_for('hdc_tool_rental_new'))
+                        return redirect(_uniform_return_url(url_for('hdc_tool_rental_new')))
                     if s_obj.is_in_store:
                         flash(f'{s_obj.serial_number} is currently in store — only tools out at a site/customer can be transferred.', 'danger')
-                        return redirect(url_for('hdc_tool_rental_new'))
+                        return redirect(_uniform_return_url(url_for('hdc_tool_rental_new')))
                     if s_obj.current_rental_id and int(s_obj.current_rental_id) != int(item.rental_id):
                         flash(f'{s_obj.serial_number} belongs to a different rental.', 'danger')
-                        return redirect(url_for('hdc_tool_rental_new'))
+                        return redirect(_uniform_return_url(url_for('hdc_tool_rental_new')))
                     if sid not in claimed_serial_ids:
                         chosen_serials.append(s_obj)
                         claimed_serial_ids.add(sid)
@@ -1293,7 +1571,7 @@ def register(app):
             })
         if not moved:
             flash('Select at least one tool with a quantity still out to transfer.', 'danger')
-            return redirect(url_for('hdc_tool_rental_new'))
+            return redirect(_uniform_return_url(url_for('hdc_tool_rental_new')))
         moved_qty = sum(line['qty'] for line in moved)
         new_amount = sum(line['amount'] for line in moved)
 
@@ -1349,7 +1627,7 @@ def register(app):
                 if not candidate:
                     db.session.rollback()
                     flash('Choose a Cash/Bank account to receive the finalised rent before transferring.', 'danger')
-                    return redirect(url_for('hdc_tool_rental_new'))
+                    return redirect(_uniform_return_url(url_for('hdc_tool_rental_new')))
                 recv_acc = candidate
             payment = ToolRentalPayment(
                 rental_id=rental.id, return_id=None, payment_date=txn_date,
@@ -1367,7 +1645,7 @@ def register(app):
             if not ok_acc:
                 db.session.rollback()
                 flash(msg_acc or 'Unable to post the finalised rent to the party ledger.', 'danger')
-                return redirect(url_for('hdc_tool_rental_new'))
+                return redirect(_uniform_return_url(url_for('hdc_tool_rental_new')))
             finalized_amount += outstanding
 
         # ---- record the hand-overs, including their per-tool splits ----
@@ -1523,7 +1801,7 @@ def register(app):
         flash(f'Transfer complete: {source_codes} → {new_code} for {to_label} '
               f'({moved_qty:g} tools: {moved_desc}).{settle_txt} '
               f'Chain: {chain_str}. New rental shown below.', 'success')
-        return redirect(url_for('hdc_tool_rental_new', created=new_rental.id))
+        return redirect(_uniform_return_url(url_for('hdc_tool_rental_new', created=new_rental.id)))
 
 
     # ------------------ CREATE RENTAL ------------------
@@ -1533,11 +1811,23 @@ def register(app):
     def hdc_tool_rental_create():
         # One form, two jobs: a brand-new rental, or a transfer that settles the
         # previous holder and starts a fresh cycle for the destination.
+        duplicate = _txn_reference_blocked(url_for('hdc_tool_rental_new'))
+        if duplicate:
+            return duplicate
         txn_type = (request.form.get('txn_type') or 'new_rental').strip().lower()
-        if txn_type == 'transfer':
-            return _create_transfer_rental()
+        # The uniform form names the four create/transfer flows directly
+        # (rent_out_customer, issue_own_site, transfer_site,
+        # transfer_customer); the older page posts 'new_rental' / 'transfer'.
+        # Both are first-class here, and the uniform keys decide the renter
+        # type so the destination panel cannot disagree with the transaction.
+        if txn_type.startswith('transfer'):
+            forced_renter = {'transfer_site': 'internal',
+                             'transfer_customer': 'external'}.get(txn_type)
+            return _create_transfer_rental(force_renter_type=forced_renter)
 
-        renter_type = (request.form.get('renter_type') or 'internal').strip().lower()
+        forced_renter = {'rent_out_customer': 'external',
+                         'issue_own_site': 'internal'}.get(txn_type)
+        renter_type = (forced_renter or request.form.get('renter_type') or 'internal').strip().lower()
         if renter_type not in ('internal','external'):
             renter_type = 'internal'
         project_id = request.form.get('project_id', type=int) if renter_type=='internal' else None
@@ -1548,15 +1838,15 @@ def register(app):
 
         if renter_type=='internal' and not project_id:
             flash('Select a project/site for internal rental.', 'danger')
-            return redirect(url_for('hdc_tool_rental_new'))
+            return redirect(_uniform_return_url(url_for('hdc_tool_rental_new')))
         if renter_type=='external' and not customer_name:
             flash('Customer name required for external rental.', 'danger')
-            return redirect(url_for('hdc_tool_rental_new'))
+            return redirect(_uniform_return_url(url_for('hdc_tool_rental_new')))
         if renter_type == 'internal' and stage_id:
             stage = db.session.get(Stage, stage_id)
             if not stage or stage.project_id != project_id:
                 flash('Selected stage does not belong to the selected project/site.', 'danger')
-                return redirect(url_for('hdc_tool_rental_new'))
+                return redirect(_uniform_return_url(url_for('hdc_tool_rental_new')))
 
         billing_type = (request.form.get('billing_type') or 'fixed_fee').strip().lower()
         if billing_type not in ('no_charge','fixed_fee','per_day','per_hour'):
@@ -1599,10 +1889,10 @@ def register(app):
                 s_obj = db.session.get(ToolSerial, sid)
                 if not s_obj or getattr(s_obj, 'is_scrapped', False):
                     flash('One of the selected tool serials is invalid.', 'danger')
-                    return redirect(url_for('hdc_tool_rental_new'))
+                    return redirect(_uniform_return_url(url_for('hdc_tool_rental_new')))
                 if not s_obj.is_in_store:
                     flash(f'{s_obj.serial_number} is not available in store (currently at {s_obj.current_location_label}).', 'danger')
-                    return redirect(url_for('hdc_tool_rental_new'))
+                    return redirect(_uniform_return_url(url_for('hdc_tool_rental_new')))
                 grouped_by_tid.setdefault(int(s_obj.tool_id), []).append(sid)
             tool_ids = [str(tid) for tid in grouped_by_tid.keys()]
             qtys = [str(len(sids)) for sids in grouped_by_tid.values()]
@@ -1612,7 +1902,7 @@ def register(app):
 
         if not tool_ids or len(tool_ids)!=len(qtys):
             flash('Add at least one tool item.', 'danger')
-            return redirect(url_for('hdc_tool_rental_new'))
+            return redirect(_uniform_return_url(url_for('hdc_tool_rental_new')))
 
         parsed_items = []
         requested_by_tool = {}
@@ -1627,11 +1917,11 @@ def register(app):
                 tid = int(tid_raw)
             except:
                 flash(f'Invalid tool at row {idx+1}.', 'danger')
-                return redirect(url_for('hdc_tool_rental_new'))
+                return redirect(_uniform_return_url(url_for('hdc_tool_rental_new')))
             tool = Tool.query.get(tid)
             if not tool or tool.is_void:
                 flash(f'Tool not found at row {idx+1}.', 'danger')
-                return redirect(url_for('hdc_tool_rental_new'))
+                return redirect(_uniform_return_url(url_for('hdc_tool_rental_new')))
 
             ensure_tool_serials(tool=tool, commit=False)
 
@@ -1651,13 +1941,13 @@ def register(app):
                     s_obj = db.session.get(ToolSerial, sid)
                     if not s_obj or s_obj.tool_id != tool.id or getattr(s_obj, 'is_scrapped', False):
                         flash(f'Invalid serial number selected for {tool.name} at row {idx+1}.', 'danger')
-                        return redirect(url_for('hdc_tool_rental_new'))
+                        return redirect(_uniform_return_url(url_for('hdc_tool_rental_new')))
                     if not s_obj.is_in_store:
                         flash(f'{s_obj.serial_number} is not available in store (currently out at {s_obj.current_location_label}).', 'danger')
-                        return redirect(url_for('hdc_tool_rental_new'))
+                        return redirect(_uniform_return_url(url_for('hdc_tool_rental_new')))
                     if sid in claimed_serial_ids:
                         flash(f'{s_obj.serial_number} was selected more than once.', 'danger')
-                        return redirect(url_for('hdc_tool_rental_new'))
+                        return redirect(_uniform_return_url(url_for('hdc_tool_rental_new')))
                     claimed_serial_ids.add(sid)
                     row_serials.append(s_obj)
                 qty = float(len(row_serials))
@@ -1665,7 +1955,7 @@ def register(app):
                 qty = max(0.0, _flt(qty_raw))
                 if qty <= 0:
                     flash(f'Quantity must be >0 at row {idx+1}.', 'danger')
-                    return redirect(url_for('hdc_tool_rental_new'))
+                    return redirect(_uniform_return_url(url_for('hdc_tool_rental_new')))
                 # Auto-assign the first `qty` available in-store serial markings
                 in_store_candidates = [s for s in tool.in_store_serials if s.id not in claimed_serial_ids]
                 need_cnt = max(0, int(round(qty)))
@@ -1677,7 +1967,7 @@ def register(app):
             requested_by_tool[tid] = requested_by_tool.get(tid, 0) + qty
             if requested_by_tool[tid] > available + 0.001:
                 flash(integrity_message('Not enough available tool stock.', f'Not enough stock for {tool.name}: available {available}, requested {qty}.'), 'danger')
-                return redirect(url_for('hdc_tool_rental_new'))
+                return redirect(_uniform_return_url(url_for('hdc_tool_rental_new')))
             rate_raw = rates[idx] if idx < len(rates) else tool.rental_rate_per_day
             rate = max(0.0, _flt(rate_raw, tool.rental_rate_per_day))
             if billing_type == 'no_charge':
@@ -1694,7 +1984,7 @@ def register(app):
 
         if not parsed_items:
             flash('Add at least one tool item.', 'danger')
-            return redirect(url_for('hdc_tool_rental_new'))
+            return redirect(_uniform_return_url(url_for('hdc_tool_rental_new')))
 
         rental_code = _next_rental_code()
         rental = ToolRental(
@@ -1708,14 +1998,14 @@ def register(app):
             rental_date=rental_date,
             expected_return_date=expected_date,
             billing_type=billing_type,
-            billing_notes=(request.form.get('billing_notes') or '').strip(),
+            billing_notes=_uniform_billing_notes(),
             total_rented_qty=total_rented_qty,
             total_amount=total_amount if billing_type!='no_charge' else 0.0,
             total_paid=0.0,
             total_returned_qty=0.0,
             status='active',
             payment_status='no_charge' if billing_type=='no_charge' else 'unpaid',
-            notes=(request.form.get('notes') or '').strip(),
+            notes=_uniform_note_text((request.form.get('notes') or '').strip()),
             created_by=current_user.id if hasattr(current_user,'id') else None
         )
         db.session.add(rental)
@@ -1776,7 +2066,7 @@ def register(app):
         qty_word = 'tool' if abs(total_rented_qty - 1.0) < 0.001 else 'tools'
         flash(f'Rental {rental_code} created — {total_rented_qty:g} {qty_word} '
               f'shown in the list below.', 'success')
-        return redirect(url_for('hdc_tool_rental_new', created=rental.id))
+        return redirect(_uniform_return_url(url_for('hdc_tool_rental_new', created=rental.id)))
 
     # ------------------ RENTAL DETAIL ------------------
     @app.route('/hdc/tool-rental/<int:rental_id>')
@@ -1890,7 +2180,11 @@ def register(app):
         rental = ToolRental.query.get_or_404(rental_id)
         if rental.is_void:
             flash('Rental is voided.', 'danger')
-            return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+            return redirect(_uniform_return_url(url_for('hdc_tool_rental_detail', rental_id=rental.id)))
+        duplicate = _txn_reference_blocked(
+            url_for('hdc_tool_rental_detail', rental_id=rental.id))
+        if duplicate:
+            return duplicate
 
         for it in rental.items:
             if it.tool:
@@ -1921,7 +2215,7 @@ def register(app):
         else:
             if not rental_item_ids or len(rental_item_ids)!=len(qty_returned_list):
                 flash('For partial return, specify qty for each tool.', 'danger')
-                return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+                return redirect(_uniform_return_url(url_for('hdc_tool_rental_detail', rental_id=rental.id)))
 
         total_tools_returned = 0.0
         parsed_returns = []
@@ -1934,7 +2228,7 @@ def register(app):
             r_item = ToolRentalItem.query.get(ri_id)
             if not r_item or int(r_item.rental_id)!=int(rental.id):
                 flash(f'Invalid rental item {ri_id_raw}.', 'danger')
-                return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+                return redirect(_uniform_return_url(url_for('hdc_tool_rental_detail', rental_id=rental.id)))
 
             # Check if specific out-of-store serial markings were selected for return
             raw_ret_serials = (
@@ -1975,7 +2269,7 @@ def register(app):
                 continue
             if qty_ret > float(r_item.qty_pending or 0) + 0.001:
                 flash(f'Return qty {qty_ret} exceeds pending {r_item.qty_pending} for {r_item.tool.name}.', 'danger')
-                return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+                return redirect(_uniform_return_url(url_for('hdc_tool_rental_detail', rental_id=rental.id)))
             cond_note = (condition_notes_list[idx] if idx < len(condition_notes_list) else '').strip()
             if item_return_serials:
                 sn_str = ', '.join(s.serial_number for s in item_return_serials)
@@ -1986,7 +2280,7 @@ def register(app):
 
         if total_tools_returned <= 0:
             flash('No tools marked for return.', 'warning')
-            return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+            return redirect(_uniform_return_url(url_for('hdc_tool_rental_detail', rental_id=rental.id)))
 
         amount_paid_raw = (request.form.get('amount_paid') or '0').strip()
         amount_paid = max(0.0, _flt(amount_paid_raw))
@@ -2009,12 +2303,12 @@ def register(app):
                 recv_acc = Account.query.get(int(received_to_account_id))
             if (not recv_acc) or recv_acc.is_void or str(recv_acc.status or 'active').lower() != 'active' or str(recv_acc.type or '').lower() not in ('company','cash','bank'):
                 flash('Select a valid Cash/Bank receiving account for payment.', 'danger')
-                return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+                return redirect(_uniform_return_url(url_for('hdc_tool_rental_detail', rental_id=rental.id)))
 
         # duplicate guard
         if _has_recent_duplicate(ToolRentalReturn, rental_id=rental.id, total_tools_returned=total_tools_returned, amount_paid=amount_paid, return_date=return_date):
             flash('Duplicate return prevented (same values submitted too quickly).', 'warning')
-            return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+            return redirect(_uniform_return_url(url_for('hdc_tool_rental_detail', rental_id=rental.id)))
 
         ret_rec = ToolRentalReturn(
             rental_id=rental.id,
@@ -2023,7 +2317,7 @@ def register(app):
             payment_type=payment_type,
             total_tools_returned=total_tools_returned,
             amount_paid=amount_paid if rental.billing_type!='no_charge' else 0.0,
-            notes=(request.form.get('notes') or '').strip(),
+            notes=_uniform_note_text((request.form.get('notes') or '').strip()),
             created_by=current_user.id if hasattr(current_user,'id') else None
         )
         db.session.add(ret_rec)
@@ -2089,7 +2383,7 @@ def register(app):
                 if not ok_acc:
                     db.session.rollback()
                     flash(msg_acc or 'Unable to post rental payment in accounts.', 'danger')
-                    return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+                    return redirect(_uniform_return_url(url_for('hdc_tool_rental_detail', rental_id=rental.id)))
             # ...and the discount leg, so the receivable shrinks by both
             if discount_amt > 0:
                 _drow, ok_disc, msg_disc = record_tool_rental_discount(
@@ -2101,7 +2395,7 @@ def register(app):
                 if not ok_disc:
                     db.session.rollback()
                     flash(msg_disc or 'Unable to post rental discount.', 'danger')
-                    return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+                    return redirect(_uniform_return_url(url_for('hdc_tool_rental_detail', rental_id=rental.id)))
         elif payment_type=='credit' and rental.billing_type!='no_charge':
             rental.payment_status = 'credit'
 
@@ -2112,7 +2406,7 @@ def register(app):
         db.session.commit()
         recv_name = recv_acc.name if recv_acc else '-'
         flash(f'Return recorded: {total_tools_returned} tools, {amount_paid:.2f} PKR paid to {recv_name}. Pending tools: {rental.total_pending_tools:.0f}, Pending amount: {rental.total_pending_amount:.2f}', 'success')
-        return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+        return redirect(_uniform_return_url(url_for('hdc_tool_rental_detail', rental_id=rental.id)))
 
     # ------------------ ADD PAYMENT WITH ACCOUNTS ------------------
     @app.route('/hdc/tool-rental/<int:rental_id>/payment', methods=['POST'])
@@ -2122,11 +2416,15 @@ def register(app):
         rental = ToolRental.query.get_or_404(rental_id)
         if rental.billing_type=='no_charge':
             flash('This rental is No Charge (contract included) - no payment needed.', 'info')
-            return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+            return redirect(_uniform_return_url(url_for('hdc_tool_rental_detail', rental_id=rental.id)))
+        duplicate = _txn_reference_blocked(
+            url_for('hdc_tool_rental_detail', rental_id=rental.id))
+        if duplicate:
+            return duplicate
         amount = max(0.0, _flt(request.form.get('amount')))
         if amount <=0:
             flash('Payment amount must be >0.', 'danger')
-            return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+            return redirect(_uniform_return_url(url_for('hdc_tool_rental_detail', rental_id=rental.id)))
 
         received_to_account_id = request.form.get('received_to_account_id', type=int)
         recv_acc = None
@@ -2134,7 +2432,7 @@ def register(app):
             recv_acc = Account.query.get(int(received_to_account_id))
         if (not recv_acc) or recv_acc.is_void or str(recv_acc.status or 'active').lower() != 'active' or str(recv_acc.type or '').lower() not in ('company','cash','bank'):
             flash('Select a valid Cash/Bank receiving account (Company/Cash/Bank).', 'danger')
-            return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+            return redirect(_uniform_return_url(url_for('hdc_tool_rental_detail', rental_id=rental.id)))
 
         pay_date_raw = (request.form.get('payment_date') or '').strip()
         try:
@@ -2144,11 +2442,11 @@ def register(app):
 
         if _has_recent_duplicate(ToolRentalPayment, rental_id=rental.id, amount=amount, payment_date=pay_date, received_to_account_id=recv_acc.id):
             flash('Duplicate payment prevented.', 'warning')
-            return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+            return redirect(_uniform_return_url(url_for('hdc_tool_rental_detail', rental_id=rental.id)))
 
         payment_mode = (request.form.get('payment_mode') or 'cash').strip().lower()
         reference = (request.form.get('reference') or '').strip()
-        notes = (request.form.get('notes') or '').strip()
+        notes = _uniform_note_text((request.form.get('notes') or '').strip())
 
         # Optional discount granted in the same settlement: cash + discount
         # together clear the balance, but only the cash reaches an account.
@@ -2161,7 +2459,7 @@ def register(app):
             if discount_amt > max(0.0, outstanding - amount) + 0.001:
                 flash(f'Discount {discount_amt:,.2f} plus this {amount:,.2f} payment exceeds '
                       f'the outstanding {outstanding:,.2f} PKR.', 'danger')
-                return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+                return redirect(_uniform_return_url(url_for('hdc_tool_rental_detail', rental_id=rental.id)))
 
         pay = ToolRentalPayment(
             rental_id=rental.id,
@@ -2181,7 +2479,7 @@ def register(app):
         if not ok_acc:
             db.session.rollback()
             flash(msg_acc or 'Unable to post payment in accounts.', 'danger')
-            return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+            return redirect(_uniform_return_url(url_for('hdc_tool_rental_detail', rental_id=rental.id)))
 
         disc_row = None
         if discount_amt > 0:
@@ -2194,7 +2492,7 @@ def register(app):
             if not ok_disc:
                 db.session.rollback()
                 flash(msg_disc or 'Unable to post discount in accounts.', 'danger')
-                return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+                return redirect(_uniform_return_url(url_for('hdc_tool_rental_detail', rental_id=rental.id)))
 
         recalc_rental_totals(rental.id)
         db.session.commit()
@@ -2203,7 +2501,7 @@ def register(app):
             msg += f' Discount {disc_row.amount:,.2f} PKR granted ({disc_row.reason_label}).'
         msg += f' Pending: {rental.total_pending_amount:.2f}'
         flash(msg, 'success')
-        return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+        return redirect(_uniform_return_url(url_for('hdc_tool_rental_detail', rental_id=rental.id)))
 
     @app.route('/hdc/tool-rental/payment/<int:payment_id>/void', methods=['POST'])
     @login_required
@@ -2212,7 +2510,7 @@ def register(app):
         pay = ToolRentalPayment.query.get_or_404(payment_id)
         if pay.is_void:
             flash('Payment already voided.', 'info')
-            return redirect(url_for('hdc_tool_rental_detail', rental_id=pay.rental_id))
+            return redirect(_uniform_return_url(url_for('hdc_tool_rental_detail', rental_id=pay.rental_id)))
         reason = (request.form.get('void_reason') or '').strip() or 'Voided by user'
         pay.is_void = True
         pay.void_reason = reason
@@ -2227,7 +2525,7 @@ def register(app):
         if voided_discounts:
             msg += f' {voided_discounts} linked discount(s) voided with it.'
         flash(msg, 'warning')
-        return redirect(url_for('hdc_tool_rental_detail', rental_id=pay.rental_id))
+        return redirect(_uniform_return_url(url_for('hdc_tool_rental_detail', rental_id=pay.rental_id)))
 
     @app.route('/hdc/tool-rental/payment/<int:payment_id>/receipt')
     @login_required
@@ -2271,15 +2569,19 @@ def register(app):
         rental = ToolRental.query.get_or_404(rental_id)
         if rental.billing_type == 'no_charge':
             flash('This rental is No Charge (contract included) - there is nothing to discount.', 'info')
-            return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+            return redirect(_uniform_return_url(url_for('hdc_tool_rental_detail', rental_id=rental.id)))
         if rental.is_void:
             flash('Rental is voided.', 'danger')
-            return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+            return redirect(_uniform_return_url(url_for('hdc_tool_rental_detail', rental_id=rental.id)))
+        duplicate = _txn_reference_blocked(
+            url_for('hdc_tool_rental_detail', rental_id=rental.id))
+        if duplicate:
+            return duplicate
 
         amount = max(0.0, _flt(request.form.get('amount')))
         if amount <= 0:
             flash('Discount amount must be greater than zero.', 'danger')
-            return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+            return redirect(_uniform_return_url(url_for('hdc_tool_rental_detail', rental_id=rental.id)))
 
         disc_date_raw = (request.form.get('discount_date') or '').strip()
         try:
@@ -2288,7 +2590,7 @@ def register(app):
             disc_date = _pkt_today()
 
         reason = (request.form.get('reason') or 'goodwill').strip().lower()
-        notes = (request.form.get('notes') or '').strip()
+        notes = _uniform_note_text((request.form.get('notes') or '').strip())
 
         row, ok_disc, msg_disc = record_tool_rental_discount(
             rental.id, amount, discount_date=disc_date, reason=reason, notes=notes,
@@ -2297,13 +2599,13 @@ def register(app):
         if not ok_disc:
             db.session.rollback()
             flash(msg_disc or 'Unable to record discount.', 'danger')
-            return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+            return redirect(_uniform_return_url(url_for('hdc_tool_rental_detail', rental_id=rental.id)))
 
         recalc_rental_totals(rental.id)
         db.session.commit()
         flash(f'Discount {row.amount:,.2f} PKR granted ({row.reason_label}). '
               f'Outstanding is now {rental.total_pending_amount:,.2f} PKR.', 'success')
-        return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+        return redirect(_uniform_return_url(url_for('hdc_tool_rental_detail', rental_id=rental.id)))
 
     @app.route('/hdc/tool-rental/discount/<int:discount_id>/void', methods=['POST'])
     @login_required
@@ -2340,7 +2642,7 @@ def register(app):
         rental = ToolRental.query.get_or_404(rental_id)
         if rental.status in ('returned','closed'):
             flash('Rental already closed, cannot transfer.', 'warning')
-            return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+            return redirect(_uniform_return_url(url_for('hdc_tool_rental_detail', rental_id=rental.id)))
 
         from_label = rental.current_location_label or 'Unknown'
         to_type = (request.form.get('to_type') or 'site').strip().lower()
@@ -2353,15 +2655,15 @@ def register(app):
 
         if to_type=='site' and not to_project_id:
             flash('Select destination project/site.', 'danger')
-            return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+            return redirect(_uniform_return_url(url_for('hdc_tool_rental_detail', rental_id=rental.id)))
         if to_type=='customer' and not to_customer_name:
             flash('Enter destination customer name.', 'danger')
-            return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+            return redirect(_uniform_return_url(url_for('hdc_tool_rental_detail', rental_id=rental.id)))
         if to_type == 'site' and to_stage_id:
             stage = db.session.get(Stage, to_stage_id)
             if not stage or stage.project_id != to_project_id:
                 flash('Selected stage does not belong to the destination project/site.', 'danger')
-                return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+                return redirect(_uniform_return_url(url_for('hdc_tool_rental_detail', rental_id=rental.id)))
 
         if to_type=='site' and to_project_id:
             proj = db.session.get(Project, to_project_id)
@@ -2533,7 +2835,7 @@ def register(app):
         detail = f' — {", ".join(moved_tools)}' if moved_tools else ''
         flash(f'Tools transferred: {from_label} to {to_label} ({moved_desc}{detail}). '
               f'Chain: {chain_str}', 'success')
-        return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+        return redirect(_uniform_return_url(url_for('hdc_tool_rental_detail', rental_id=rental.id)))
 
     # ------------------ GLOBAL TRACKING ------------------
     @app.route('/hdc/tool-rental/tracking')
