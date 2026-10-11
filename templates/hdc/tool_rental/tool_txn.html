@@ -2,88 +2,105 @@
 {% block title %}HDC Tool Transaction{% endblock %}
 {% block page_heading %}HDC Tool Transaction{% endblock %}
 
-{# ── The one uniform equipment transaction form ──────────────────────────────
-   One page records every HDC Tools movement: rent out, issue to an own site,
-   transfer between sites or customers, partial / full / store returns, rent
-   payments, credit adjustments, damage & loss and the two maintenance legs.
+{# ── The one tool transaction form ───────────────────────────────────────────
+   Three groups, and every transaction under one of them:
 
-   The <select id="txnType"> drives everything.  Each block carries
-   data-txn-panels="…" listing the panel groups it belongs to; the page script
-   shows exactly the panels named by the chosen transaction's registry entry
-   (hdc/services/tool_txn_types.py) and disables everything else, so a hidden
-   panel can never leak into a submit.
+       Rent Out      rent out to a customer · issue to an own site ·
+                     transfer to another site / customer ·
+                     receive rent payment · credit (waive-off)
+       Return        partial return · full return · return to store ·
+                     damage or loss
+       Maintenance   send for maintenance · back from maintenance
 
-   The form posts to the endpoint that already implements the transaction
-   (rental create, return, payment, discount) or to the three thin handlers for
-   the movements that had no route before (damage/loss, maintenance out/in).
-   Field names match those routes exactly — the same names the existing pages
-   post — so no business rule is re-implemented here. #}
+   Nothing here is hard-coded per transaction.  The tabs, the dropdown, each
+   option's panels and its submit label all come from TXN_GROUPS
+   (hdc/services/tool_txn_types.py), and the page script switches the panels
+   by the data-txn-panels names the chosen option declares.  A block nobody
+   declares stays hidden *and* disabled, so it can never leak into a submit.
+   Each option posts to the endpoint that already implements it — the same
+   field names the older pages send — so no business rule is re-implemented
+   here. #}
 {% block content %}
 {% set tools_active = 'transaction' %}
+{% set tools_out = 'pending_tools' %}
+{% set amount_due = 'pending_amount' %}
 {% from "shared/_combo_field.html" import combo_field, combo_select %}
 {% include "tool_rental/_tools_nav.html" %}
 
 <style>
-.tool-txn-header { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin:4px 0 14px; flex-wrap:wrap; }
+.tool-txn-header { margin:4px 0 14px; }
 .tool-txn-header h2 { margin:0; font-size:1.3rem; }
 .tool-txn-subtitle { color:var(--text-muted, #64748b); margin-top:3px; max-width:70ch; }
+.tool-txn-groups { display:flex; flex-wrap:wrap; gap:.5rem; margin-bottom:.35rem; }
+.tool-txn-group { border:1px solid var(--card-border, #e2e8f0); border-radius:.5rem; background:var(--card-bg, #fff);
+                  padding:.45rem .9rem; font-weight:600; line-height:1.2; text-align:left; }
+.tool-txn-group .tool-txn-group-help { display:block; font-weight:400; font-size:.75rem;
+                                       color:var(--text-muted, #64748b); max-width:32ch; }
+.tool-txn-group.active { border-color:var(--bs-primary, #0d6efd); box-shadow:0 0 0 .15rem rgba(13,110,253,.15); }
 .tool-txn-panel { border:1px solid var(--card-border, #e2e8f0); border-radius:.5rem; padding:.85rem .95rem; margin-bottom:.85rem; background:var(--card-bg, #fff); }
 .tool-txn-panel > h6 { margin:0 0 .65rem; font-weight:700; }
 .tool-txn-panel .panel-hint { color:var(--text-muted, #64748b); font-size:.82rem; }
 .tool-txn-line { border:1px dashed var(--card-border, #e2e8f0); border-radius:.5rem; padding:.6rem; margin-bottom:.6rem; }
 .tool-txn-mono { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-weight:700; }
-.tool-txn-badge { font-size:.75rem; }
 .tool-txn-summary { background:var(--bs-tertiary-bg, #f8fafc); border-radius:.5rem; padding:.5rem .7rem; font-size:.86rem; }
-@media (max-width:575.98px){ .tool-txn-header { flex-direction:column; } }
 </style>
 
 <div class="tool-txn-header">
-    <div>
-        <h2><i class="fas fa-arrow-right-arrow-left me-2" aria-hidden="true"></i>HDC Tool Transaction</h2>
-        <div class="tool-txn-subtitle">
-            Choose the transaction first. The form then shows only the fields that
-            transaction needs — one form for renting, issuing, transferring,
-            returning, paying, adjusting, damage/loss and maintenance.
-        </div>
-    </div>
-    <div class="d-flex gap-2">
-        <a href="{{ url_for('hdc_tool_rental_dashboard') }}" class="btn btn-outline-secondary">
-            <i class="fas fa-arrow-left me-1" aria-hidden="true"></i>Tools dashboard
-        </a>
+    <h2><i class="fas fa-arrow-right-arrow-left me-2" aria-hidden="true"></i>HDC Tool Transaction</h2>
+    <div class="tool-txn-subtitle">
+        Pick Rent Out, Return or Maintenance, then the transaction under it. The form
+        shows only the fields that transaction needs.
     </div>
 </div>
 
 <div class="card hdc-card mb-3">
     <div class="card-header hdc-card-header">
-        <h5 class="mb-0"><i class="fas fa-file-signature me-2" aria-hidden="true"></i><span id="txnFormTitle">Transaction details</span></h5>
+        <h5 class="mb-0"><i class="fas fa-file-signature me-2" aria-hidden="true"></i><span id="txnFormTitle">Rent Out</span></h5>
     </div>
     <div class="card-body">
-        <form method="POST" action="{{ txn_types[0].action if txn_types else '#' }}" id="toolTxnForm" novalidate>
+        <form method="POST" action="{{ txn_groups[0].options[0].action }}" id="toolTxnForm" novalidate>
             <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
-            <input type="hidden" name="txn_source" value="uniform">
+            <input type="hidden" name="txn_source" value="transaction">
             <input type="hidden" name="txn_reference" id="txnReference" value="{{ txn_reference }}">
 
-            <!-- ── common: type, date, reference, who is responsible ───────── -->
+            <!-- ── what is happening: group tabs + the transaction list ───── -->
             <div class="row g-3" data-txn-panels="common">
+                <div class="col-12">
+                    <label class="form-label fw-semibold">What is happening?</label>
+                    <div class="tool-txn-groups" id="txnGroupTabs" role="tablist">
+                        {% for group in txn_groups %}
+                        <button type="button" role="tab" data-txn-group="{{ group.key }}"
+                                class="tool-txn-group{% if loop.first %} active{% endif %}"
+                                aria-selected="{{ 'true' if loop.first else 'false' }}">
+                            <i class="fas {{ group.icon }} me-1" aria-hidden="true"></i>{{ group.label }}
+                            <span class="tool-txn-group-help">{{ group.help }}</span>
+                        </button>
+                        {% endfor %}
+                    </div>
+                </div>
                 <div class="col-md-6">
-                    <label class="form-label fw-semibold" for="txnType">Transaction type</label>
+                    <label class="form-label" for="txnType">Transaction</label>
                     <select name="txn_type" id="txnType" class="form-select" required>
-                        {% for entry in txn_types %}
-                        <option value="{{ entry.key }}" data-kind="{{ entry.kind }}">{{ entry.label }}</option>
+                        {% for group in txn_groups %}
+                        <optgroup label="{{ group.label }}" data-txn-group="{{ group.key }}">
+                            {% for option in group.options %}
+                            <option value="{{ option.key }}" data-group="{{ group.key }}">{{ option.label }}</option>
+                            {% endfor %}
+                        </optgroup>
                         {% endfor %}
                     </select>
                     <small class="text-muted d-block" id="txnTypeHelp"></small>
                 </div>
                 <div class="col-md-3">
-                    <label class="form-label" for="transaction_date">Transaction date</label>
+                    <label class="form-label" for="transaction_date">Date</label>
                     <input type="date" name="transaction_date" id="transaction_date"
                            class="form-control" value="{{ today }}" required>
                 </div>
                 <div class="col-md-3">
-                    <label class="form-label" for="txnReferenceValue">Transaction reference</label>
+                    <label class="form-label" for="txnReferenceValue">Reference</label>
                     <input type="text" class="form-control tool-txn-mono" id="txnReferenceValue"
                            value="{{ txn_reference }}" readonly tabindex="-1">
-                    <small class="text-muted d-block">Generated for this form. A repeated submission is ignored.</small>
+                    <small class="text-muted d-block">A repeated submission is ignored.</small>
                 </div>
                 <div class="col-md-4">
                     <label class="form-label" for="responsible_person">Responsible person</label>
@@ -97,8 +114,9 @@
                 </div>
             </div>
 
-            <!-- ── destination: outside customer ───────────────────────────── -->
-            <div class="tool-txn-panel d-none" id="destinationCustomerPanel" data-txn-panels="destination">
+            <!-- ── destination: outside customer (rent out / transfer) ────── -->
+            <div class="tool-txn-panel d-none" id="destinationCustomerPanel"
+                 data-txn-panels="destination" data-renter-type="external">
                 <h6><i class="fas fa-user-tie me-1" aria-hidden="true"></i>Customer</h6>
                 {{ combo_field('customer_name', 'txnCustomerName', customer_names,
                                label='Customer name', placeholder='Type a name to search or add',
@@ -116,8 +134,9 @@
                 </div>
             </div>
 
-            <!-- ── destination: own company site ──────────────────────────── -->
-            <div class="tool-txn-panel d-none" id="destinationSitePanel" data-txn-panels="destination">
+            <!-- ── destination: own company site (issue / transfer) ───────── -->
+            <div class="tool-txn-panel d-none" id="destinationSitePanel"
+                 data-txn-panels="destination" data-renter-type="internal">
                 <h6><i class="fas fa-diagram-project me-1" aria-hidden="true"></i>Own site / project</h6>
                 <div class="row g-3">
                     <div class="col-md-6">
@@ -141,9 +160,8 @@
                 </button>
                 <div class="small text-danger mt-2 d-none" id="lineItemsError" role="alert"></div>
                 <div class="small text-muted mt-2">
-                    Each line is checked against the store: a tool cannot be issued for
-                    more than it holds, and an individual piece cannot go out twice in
-                    the same transaction.
+                    Checked against the store: a tool cannot go out for more than it holds,
+                    and one piece cannot go out twice in the same transaction.
                 </div>
             </div>
 
@@ -181,7 +199,7 @@
                 </div>
             </div>
 
-            <!-- ── transfer: where the tools are now ──────────────────────── -->
+            <!-- ── transfer: from the current holder … ───────────────────── -->
             <div class="tool-txn-panel d-none" id="transferSourcePanel" data-txn-panels="transfer_source">
                 <h6><i class="fas fa-location-dot me-1" aria-hidden="true"></i>From — current holder</h6>
                 <input type="hidden" name="transfer_selection_enabled" value="1">
@@ -199,7 +217,7 @@
                 <div class="small text-danger mt-2 d-none" id="transferError" role="alert"></div>
             </div>
 
-            <!-- ── transfer: settlement of the previous holder ────────────── -->
+            <!-- ── transfer: … and what the old holder is owed ────────────── -->
             <div class="tool-txn-panel d-none" id="transferSettlementPanel" data-txn-panels="transfer_source">
                 <h6><i class="fas fa-scale-balanced me-1" aria-hidden="true"></i>Settle the previous holder</h6>
                 <div class="row g-3">
@@ -233,14 +251,14 @@
                 </div>
             </div>
 
-            <!-- ── returns: what is still outstanding, and what came back ─── -->
-            <div class="tool-txn-panel d-none" id="returnPanel" data-txn-panels="return">
+            <!-- ── return: what is still outstanding ──────────────────────── -->
+            <div class="tool-txn-panel d-none" id="returnPanel" data-txn-panels="return" data-rental-picker="return">
                 <h6><i class="fas fa-rotate-left me-1" aria-hidden="true"></i>Return details</h6>
                 <input type="hidden" name="return_condition" id="returnCondition" value="partial">
                 <input type="hidden" name="return_date" id="returnDateHidden" value="{{ today }}">
                 <div class="row g-3">
                     <div class="col-md-8">
-                        {{ combo_select('rental_id', 'returnRentalSelect', return_rental_options,
+                        {{ combo_select('rental_id', 'returnRentalSelect', rental_picker_options[tools_out],
                                         label='Original issue / rental reference',
                                         placeholder='Search rental code or holder') }}
                         <small class="text-muted d-block" id="returnRentalInfo"></small>
@@ -248,7 +266,7 @@
                     <div class="col-md-4">
                         <label class="form-label">Receiving location</label>
                         <input type="text" class="form-control" value="{{ store_label }}" readonly tabindex="-1">
-                        <small class="text-muted d-block">Returned pieces go back to Warehouse / Store.</small>
+                        <small class="text-muted d-block">Returned pieces go back to the store.</small>
                     </div>
                 </div>
                 <div id="returnItemRows" class="mt-3">
@@ -256,7 +274,7 @@
                 </div>
             </div>
 
-            <!-- ── optional collection on a return ────────────────────────── -->
+            <!-- ── return: optional rent collection ───────────────────────── -->
             <div class="tool-txn-panel d-none" id="settlementPanel" data-txn-panels="settlement">
                 <h6><i class="fas fa-hand-holding-dollar me-1" aria-hidden="true"></i>Collect rent with this return (optional)</h6>
                 <div class="row g-3">
@@ -307,13 +325,13 @@
                 </div>
             </div>
 
-            <!-- ── payment ────────────────────────────────────────────────── -->
-            <div class="tool-txn-panel d-none" id="paymentPanel" data-txn-panels="payment">
+            <!-- ── rent receipt ───────────────────────────────────────────── -->
+            <div class="tool-txn-panel d-none" id="paymentPanel" data-txn-panels="payment" data-rental-picker="payment">
                 <h6><i class="fas fa-money-bill-wave me-1" aria-hidden="true"></i>Rent receipt</h6>
                 <input type="hidden" name="payment_date" id="paymentDateHidden" value="{{ today }}">
                 <div class="row g-3">
                     <div class="col-md-8">
-                        {{ combo_select('rental_id', 'paymentRentalSelect', payment_rental_options,
+                        {{ combo_select('rental_id', 'paymentRentalSelect', rental_picker_options[amount_due],
                                         label='Rental / outstanding invoice reference',
                                         placeholder='Search rental code or holder') }}
                         <small class="text-muted d-block" id="paymentRentalInfo"></small>
@@ -346,13 +364,13 @@
                 </div>
             </div>
 
-            <!-- ── credit / outstanding adjustment ───────────────────────── -->
-            <div class="tool-txn-panel d-none" id="adjustmentPanel" data-txn-panels="adjustment">
-                <h6><i class="fas fa-percent me-1" aria-hidden="true"></i>Credit / outstanding adjustment</h6>
+            <!-- ── credit / waive-off ─────────────────────────────────────── -->
+            <div class="tool-txn-panel d-none" id="adjustmentPanel" data-txn-panels="adjustment" data-rental-picker="adjustment">
+                <h6><i class="fas fa-percent me-1" aria-hidden="true"></i>Credit / waive-off</h6>
                 <input type="hidden" name="discount_date" id="discountDateHidden" value="{{ today }}">
                 <div class="row g-3">
                     <div class="col-md-8">
-                        {{ combo_select('rental_id', 'adjustRentalSelect', adjustment_rental_options,
+                        {{ combo_select('rental_id', 'adjustRentalSelect', rental_picker_options[amount_due],
                                         label='Rental / outstanding invoice reference',
                                         placeholder='Search rental code or holder') }}
                         <small class="text-muted d-block" id="adjustRentalInfo"></small>
@@ -371,9 +389,8 @@
                     </div>
                     <div class="col-12">
                         <div class="tool-txn-summary">
-                            This reduces what the customer owes without receiving cash. It needs
-                            the same finance authorization as every other money write, is posted
-                            to Accounts with its reason, and never changes tool quantities.
+                            Reduces what the customer owes without receiving cash. It is posted to
+                            Accounts with its reason and never changes tool quantities.
                         </div>
                     </div>
                 </div>
@@ -399,7 +416,7 @@
                         </select>
                     </div>
                     <div class="col-md-4 d-none" id="damageRentalField">
-                        {{ combo_select('rental_id', 'damageRentalSelect', return_rental_options,
+                        {{ combo_select('rental_id', 'damageRentalSelect', rental_picker_options[tools_out],
                                         label='Rental the pieces are out on') }}
                         <select name="rental_item_id" id="damageRentalItem" class="form-select mt-2 d-none"></select>
                     </div>
@@ -442,12 +459,12 @@
                     <span class="small text-muted">Choose a tool to list the pieces in the store.</span>
                 </div>
                 <div class="small text-muted mt-2">
-                    Pieces stay owned and keep their movement history; they simply stop
-                    being offered for rent until they come back.
+                    Pieces stay owned and keep their movement history; they stop being offered for
+                    rent until they come back.
                 </div>
             </div>
 
-            <!-- ── return from maintenance ────────────────────────────────── -->
+            <!-- ── back from maintenance ──────────────────────────────────── -->
             <div class="tool-txn-panel d-none" id="maintenanceReturnPanel" data-txn-panels="maintenance_return">
                 <h6><i class="fas fa-clipboard-check me-1" aria-hidden="true"></i>Back from maintenance</h6>
                 <div class="row g-3">

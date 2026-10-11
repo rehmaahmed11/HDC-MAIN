@@ -1,8 +1,10 @@
-"""HDC services.tool_txn_entry — the uniform Tool Transaction form's server side.
+"""HDC services.tool_txn_entry — the Tool Transaction page's server side.
 
 The central **HDC Tool Transaction** page (``/hdc/tool-rental/transaction``) is a
-front end over the business logic the Tools section already owns.  This module
-adds *no* parallel bookkeeping: it only
+front end over the business logic the Tools section already owns: three groups
+— **Rent Out**, **Return**, **Maintenance** — whose transactions are declared in
+``hdc/services/tool_txn_types.py``.  This module adds *no* parallel
+bookkeeping: it only
 
 * builds the data the form renders (in-store tools with their serial markings,
   current rental holders for transfers, rentals that still have tools out or
@@ -334,7 +336,7 @@ def location_key_for(loc_type, project_id=None, stage_id=None, customer_name=Non
     ))
 
 
-def rental_picker_rows(eligible_for, pending_field, limit=RENTAL_PICKER_LIMIT):
+def rental_picker_rows(eligible_for, limit=RENTAL_PICKER_LIMIT):
     """Rentals a transaction may pick from, as ``(id, label, data)`` options."""
     from hdc.services.tool_txn_types import rental_eligible
 
@@ -379,25 +381,46 @@ def adjustment_reason_options():
 
 
 def txn_form_context():
-    """Everything the uniform transaction page renders, in one pass."""
+    """Everything the transaction page renders, in one pass.
+
+    The rental pickers are built from the registry itself: every distinct
+    eligibility rule gets its own option list, so a new transaction inherits a
+    picker instead of adding a context key.
+    """
     ensure_all_tools_serials(commit=False)
     from hdc.models.projects import Project, Stage
-    from hdc.services.tool_txn_types import (
-        ELIGIBLE_PENDING_AMOUNT, ELIGIBLE_PENDING_TOOLS,
-    )
+    from hdc.services.tool_txn_types import TXN_OPTIONS
 
     projects = Project.query.order_by(Project.name.asc()).all()
     from sqlalchemy.orm import joinedload
     stages = (Stage.query.options(joinedload(Stage.project))
               .order_by(Stage.name.asc()).all())
+
+    # One set of rental choices per eligibility rule the registry uses, so a
+    # new transaction inherits the picker list instead of inventing a new one.
+    rental_picker_options = {}
+    for option in TXN_OPTIONS:
+        rule = option['eligible_for']
+        if rule and rule not in rental_picker_options:
+            rental_picker_options[rule] = rental_picker_rows(rule)
+
+    in_store = in_store_tool_rows()
+    transfer_sources = transfer_source_rows()
     return {
         'today': _pkt_today().isoformat(),
         'txn_reference': new_txn_reference(),
-        'in_store_tools': in_store_tool_rows(),
-        'transfer_sources': transfer_source_rows(),
-        'return_rental_options': rental_picker_rows(ELIGIBLE_PENDING_TOOLS, 'pending_tools'),
-        'payment_rental_options': rental_picker_rows(ELIGIBLE_PENDING_AMOUNT, 'pending_amount'),
-        'adjustment_rental_options': rental_picker_rows(ELIGIBLE_PENDING_AMOUNT, 'pending_amount'),
+        'in_store_tools': in_store,
+        'tool_options': [
+            (tool['id'], f"{tool['name']} ({tool['code']}) — {tool['available_qty']:g} available"
+             if tool['code'] else f"{tool['name']} — {tool['available_qty']:g} available")
+            for tool in in_store
+        ],
+        'transfer_sources': transfer_sources,
+        'transfer_source_options': [
+            (source['key'], f"{source['holder']} · {source['rental_code']} — {source['pending']:g} out")
+            for source in transfer_sources
+        ],
+        'rental_picker_options': rental_picker_options,
         'maintenance_pieces': maintenance_pieces(),
         'receiving_account_options': account_options(),
         'project_options': [(p.id, f'{p.name} ({p.project_code})' if p.project_code else p.name)
@@ -555,7 +578,7 @@ def _record_rental_damage_loss(*, actor_id, rental_id, rental_item_id, qty,
         reference=reference,
         notes=stamp_reference(
             f'{reason_label} at {from_label} (rental {rental.rental_code}); '
-            f'reported via {reference or "uniform transaction"}. {notes}'.strip(), ''),
+            f'reported via {reference or "tool transaction"}. {notes}'.strip(), ''),
         created_by=actor_id, commit=False,
         serial_ids=[s.id for s in chosen] or None)
     if not ok:

@@ -42,8 +42,8 @@ from hdc.models.tool_rental import (                              # noqa: E402
     Tool, ToolCategory, ToolRental, ToolRentalItem,
 )
 from hdc.services.tool_txn_types import (                         # noqa: E402
-    ELIGIBLE_PENDING_AMOUNT, ELIGIBLE_PENDING_TOOLS, TOOL_TXN_TYPES,
-    rental_eligible, txn_type,
+    ELIGIBLE_PENDING_AMOUNT, ELIGIBLE_PENDING_TOOLS, NEW_RENTAL_TXN_TYPES,
+    new_rental_txn_type, rental_eligible,
 )
 from hdc.utils.dates import _pkt_today                            # noqa: E402
 
@@ -54,17 +54,17 @@ class TxnRegistryTests(unittest.TestCase):
     """Pure data: no app, no database."""
 
     def test_every_transaction_is_registered_once(self):
-        keys = [t['key'] for t in TOOL_TXN_TYPES]
+        keys = [t['key'] for t in NEW_RENTAL_TXN_TYPES]
         self.assertEqual(keys, ['new_rental', 'transfer', 'return', 'payment'])
         self.assertEqual(len(keys), len(set(keys)))
 
     def test_only_create_and_transfer_post_to_the_create_endpoint(self):
-        create = {t['key'] for t in TOOL_TXN_TYPES
+        create = {t['key'] for t in NEW_RENTAL_TXN_TYPES
                   if t['endpoint'] == 'hdc_tool_rental_create'}
         self.assertEqual(create, {'new_rental', 'transfer'})
 
     def test_rental_bound_types_declare_their_picker_rule(self):
-        for entry in TOOL_TXN_TYPES:
+        for entry in NEW_RENTAL_TXN_TYPES:
             if entry['needs_rental']:
                 self.assertIn(entry['eligible_for'],
                               (ELIGIBLE_PENDING_TOOLS, ELIGIBLE_PENDING_AMOUNT))
@@ -72,8 +72,8 @@ class TxnRegistryTests(unittest.TestCase):
                 self.assertIsNone(entry['eligible_for'])
 
     def test_lookup_returns_entry_or_none(self):
-        self.assertEqual(txn_type('return')['endpoint'], 'hdc_tool_rental_return')
-        self.assertIsNone(txn_type('scrap'))
+        self.assertEqual(new_rental_txn_type('return')['endpoint'], 'hdc_tool_rental_return')
+        self.assertIsNone(new_rental_txn_type('scrap'))
 
     def test_eligibility_rules(self):
         self.assertTrue(rental_eligible(ELIGIBLE_PENDING_TOOLS,
@@ -178,9 +178,9 @@ class TxnFormTestCase(unittest.TestCase):
 
     @staticmethod
     def _registry_from_page(html):
-        match = re.search(r'const TOOL_TXN_TYPES = (\[.*?\]);\n', html, re.S)
+        match = re.search(r'const NEW_RENTAL_TXN_TYPES = (\[.*?\]);\n', html, re.S)
         if match is None:
-            raise AssertionError('TOOL_TXN_TYPES not rendered on the page')
+            raise AssertionError('NEW_RENTAL_TXN_TYPES not rendered on the page')
         return json.loads(match.group(1))
 
     @staticmethod
@@ -192,7 +192,7 @@ class TxnFormTestCase(unittest.TestCase):
     # ------------------------------------------------------------ the form
     def test_dropdown_offers_every_transaction_from_the_registry(self):
         html = self._form_html()
-        for entry in TOOL_TXN_TYPES:
+        for entry in NEW_RENTAL_TXN_TYPES:
             self.assertIn(f'<option value="{entry["key"]}"', html)
             self.assertIn(f'>{entry["label"]}</option>', html)
 

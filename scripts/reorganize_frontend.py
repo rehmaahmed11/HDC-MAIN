@@ -21,7 +21,8 @@ ROUTES = os.path.join(BASE, "hdc", "routes")
 STATIC_JS = os.path.join(BASE, "static", "hdc", "js")
 
 DOMAIN_OF = {
-    "shared": ["base.html", "_pagination.html", "_combo_field.html", "forbidden.html"],
+    "shared": ["base.html", "_pagination.html", "_combo_field.html", "forbidden.html",
+               "_result_dialog.html"],
     "auth": ["login.html", "access_home.html"],
     "dashboard": ["dashboard.html", "kpi_detail.html"],
     "projects": ["projects.html", "add_project.html", "edit_project.html",
@@ -101,6 +102,7 @@ DOMAIN_OF = {
                     "tool_new_rental.html", "tool_txn.html",
                     "tool_inventory.html", "tool_tracking.html",
                     "tool_reports.html", "_tools_nav.html",
+                    "tool_serial_tracking.html", "tool_serials_create.html",
                     "_stock_forms.html",
                     # Tools > Audit — the count overview, one sheet, and the
                     # line partial shared by the sheet and the zero-count preview

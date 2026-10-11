@@ -1,11 +1,13 @@
-/* HDC Tool Transaction — the one uniform equipment transaction form.
+/* HDC Tool Transaction — the one tool transaction form.
  *
  * Reads its data from <script id="toolTxnConfig" type="application/json">
  * (rendered by hdc/routes/tool_rental.py from
  * hdc/services/tool_txn_entry.py) and does four jobs:
  *
- *   1. show only the panels the chosen transaction needs, and disable (not
- *      just hide) everything else, so a hidden panel can never post;
+ *   1. show the three groups (Rent Out / Return / Maintenance) and, under the
+ *      chosen one, its transactions — then show only the panels the chosen
+ *      transaction declares, and disable (not just hide) everything else, so a
+ *      hidden panel can never post;
  *   2. build/validate the multi-item lines — against the store's real
  *      availability, not a guess — including per-piece (serial) selection;
  *   3. copy the one visible transaction date into the endpoint's own date
@@ -15,8 +17,13 @@
  *      transactions, so a double click cannot post twice (the server also
  *      refuses a reference it has already recorded).
  *
- * No business rule lives here: quantities, availability, money and locations
- * are all re-checked by the server routes this form posts to.
+ * There is no per-transaction branch here.  Every transaction arrives with its
+ * own contract — its panels, the ``checks`` to run before posting, the
+ * ``picker`` it chooses a rental from — and this script looks each name up in
+ * the CHECKS / COLLECTORS tables below.  Adding a transaction is adding data,
+ * not code.  No business rule lives here either: quantities, availability,
+ * money and locations are all re-checked by the server routes this form posts
+ * to.
  */
 (function () {
     'use strict';
@@ -27,7 +34,14 @@
         try { CONFIG = JSON.parse(configNode.textContent || '{}'); } catch (err) { CONFIG = {}; }
     }
 
-    var TYPES = CONFIG.types || [];
+    var GROUPS = CONFIG.groups || [];
+    var TYPES = [];
+    GROUPS.forEach(function (group) {
+        (group.options || []).forEach(function (option) {
+            option.group = option.group || group.key;
+            TYPES.push(option);
+        });
+    });
     var TOOLS = CONFIG.tools || [];
     var SOURCES = CONFIG.transferSources || [];
     var MAINTENANCE_PIECES = CONFIG.maintenancePieces || [];
@@ -43,6 +57,7 @@
     var submitLabel = document.getElementById('txnSubmitLabel');
     var submitted = false;
     var lineIndex = 0;
+    var activeGroup = GROUPS.length ? GROUPS[0].key : '';
 
     function entryFor(key) {
         for (var i = 0; i < TYPES.length; i++) {
@@ -69,6 +84,47 @@
         });
     }
 
+    /* ── the three groups ───────────────────────────────────────────────── */
+    function groupTabs() {
+        return document.querySelectorAll('#txnGroupTabs [data-txn-group]');
+    }
+
+    function paintGroupTabs() {
+        Array.prototype.forEach.call(groupTabs(), function (tab) {
+            var active = tab.getAttribute('data-txn-group') === activeGroup;
+            tab.classList.toggle('active', active);
+            tab.setAttribute('aria-selected', active ? 'true' : 'false');
+        });
+    }
+
+    /* Show only the chosen group's transactions, so the dropdown stays as
+       short as the tab the operator is looking at. */
+    function filterTypeOptions() {
+        if (!typeSelect) return;
+        Array.prototype.forEach.call(typeSelect.querySelectorAll('option'), function (option) {
+            var wanted = !activeGroup || option.getAttribute('data-group') === activeGroup;
+            option.hidden = !wanted;
+            option.disabled = !wanted;
+        });
+        Array.prototype.forEach.call(typeSelect.querySelectorAll('optgroup'), function (group) {
+            var wanted = !activeGroup || group.getAttribute('data-txn-group') === activeGroup;
+            group.hidden = !wanted;
+            group.disabled = !wanted;
+        });
+    }
+
+    function chooseGroup(groupKey) {
+        var entry = currentEntry();
+        activeGroup = groupKey;
+        if (!entry || entry.group !== groupKey) {
+            var first = TYPES.filter(function (t) { return t.group === groupKey; })[0];
+            if (first && typeSelect) typeSelect.value = first.key;
+        }
+        paintGroupTabs();
+        filterTypeOptions();
+        applyPanels();
+    }
+
     /* ── panels ─────────────────────────────────────────────────────────── */
     function applyPanels() {
         var entry = currentEntry();
@@ -85,7 +141,9 @@
             setEnabled(block, wanted);
         });
         if (entry) {
-            document.getElementById('txnFormTitle').textContent = entry.label;
+            var group = groupFor(entry.group);
+            document.getElementById('txnFormTitle').textContent =
+                group ? group.label + ' · ' + entry.label : entry.label;
             document.getElementById('txnTypeHelp').textContent = entry.help || '';
             if (submitLabel) submitLabel.textContent = entry.submit_label || 'Save';
             if (submitButton) {
@@ -101,34 +159,39 @@
         showError('');
     }
 
+    function groupFor(key) {
+        for (var i = 0; i < GROUPS.length; i++) {
+            if (GROUPS[i].key === key) return GROUPS[i];
+        }
+        return null;
+    }
+
+    /* Which of the two destination blocks applies is data too: the chosen
+       transaction's renter_type decides, and each block says whose it is. */
     function syncDestinationPanels() {
         var entry = currentEntry();
-        if (!entry) return;
-        var customer = document.getElementById('destinationCustomerPanel');
-        var site = document.getElementById('destinationSitePanel');
-        var renterType = entry.renter_type || null;
-        var kind = entry.kind;
-        var needsDestination = (kind === 'create' || kind === 'transfer') && !!renterType;
-        if (customer) customer.classList.toggle('d-none', !needsDestination || renterType !== 'external');
-        if (site) site.classList.toggle('d-none', !needsDestination || renterType !== 'internal');
-        if (customer) setEnabled(customer, needsDestination && renterType === 'external');
-        if (site) setEnabled(site, needsDestination && renterType === 'internal');
+        var renterType = entry ? (entry.renter_type || '') : '';
+        Array.prototype.forEach.call(document.querySelectorAll('[data-renter-type]'), function (block) {
+            var visible = !block.classList.contains('d-none');
+            var wanted = visible && block.getAttribute('data-renter-type') === renterType;
+            block.classList.toggle('d-none', !wanted);
+            setEnabled(block, wanted);
+        });
     }
 
     function syncReturnMode() {
         var entry = currentEntry();
         var hidden = document.getElementById('returnCondition');
         if (entry && entry.return_type && hidden) hidden.value = entry.return_type;
-        if (entry && entry.return_type === 'full') {
-            Array.prototype.forEach.call(document.querySelectorAll('.return-qty-input'), function (input) {
+        var full = !!(entry && entry.return_type === 'full');
+        Array.prototype.forEach.call(document.querySelectorAll('.return-qty-input'), function (input) {
+            if (full) {
                 input.value = input.getAttribute('data-pending') || input.value;
                 input.readOnly = true;
-            });
-        } else {
-            Array.prototype.forEach.call(document.querySelectorAll('.return-qty-input'), function (input) {
+            } else {
                 input.readOnly = false;
-            });
-        }
+            }
+        });
     }
 
     function syncTransferSettlement() {
@@ -164,8 +227,14 @@
             var hidden = document.getElementById(id);
             if (hidden) hidden.value = date.value;
         });
-        var settlement = document.getElementById('returnDateHidden');
-        if (settlement) settlement.value = date.value;
+    }
+
+    /* The rental picker of the chosen transaction, found by the name the
+       registry gave it — never by a hard-coded id. */
+    function pickerSelect() {
+        var entry = currentEntry();
+        if (!entry || !entry.picker) return null;
+        return document.querySelector('[data-rental-picker="' + entry.picker + '"] select[name="rental_id"]');
     }
 
     /* ── tool lines (rent out / issue) ──────────────────────────────────── */
@@ -177,7 +246,6 @@
     function buildLineRow() {
         var row = document.createElement('div');
         row.className = 'tool-txn-line';
-        var id = 'txnLine' + (lineIndex++);
         row.innerHTML =
             '<div class="row g-2 align-items-end">' +
             '  <div class="col-md-5">' +
@@ -319,9 +387,9 @@
     function collectLineFields() {
         var container = document.getElementById('lineItemsContainer');
         if (!container) return;
-        container.querySelectorAll('.txn-line-tool-hidden, .txn-line-qty-hidden, .txn-line-rate-hidden, .txn-line-ids-hidden, .txn-line-note-hidden').forEach(function (node) {
-            node.remove();
-        });
+        Array.prototype.forEach.call(
+            container.querySelectorAll('.txn-line-tool-hidden, .txn-line-qty-hidden, .txn-line-rate-hidden, .txn-line-ids-hidden, .txn-line-note-hidden'),
+            function (node) { node.remove(); });
         var lines = container.querySelectorAll('.tool-txn-line');
         Array.prototype.forEach.call(lines, function (row) {
             var toolSelect = row.querySelector('.txn-line-tool');
@@ -353,8 +421,7 @@
     function addLineRow() {
         var container = document.getElementById('lineItemsContainer');
         if (!container) return;
-        var row = buildLineRow();
-        container.appendChild(row);
+        container.appendChild(buildLineRow());
     }
 
     /* ── transfer: holders and the lines moving out ─────────────────────── */
@@ -367,7 +434,7 @@
         var matching = SOURCES.filter(function (source) { return String(source.key) === String(key); });
         if (!matching.length) {
             list.innerHTML = '<span class="small text-muted">Choose a site / holder above.</span>';
-            renderTransferLines([]);
+            renderTransferLines();
             return;
         }
         matching.forEach(function (source) {
@@ -449,7 +516,7 @@
     function collectTransferFields() {
         var container = document.getElementById('transferLinesContainer');
         if (!container) return;
-        container.querySelectorAll('.transfer-post').forEach(function (node) { node.remove(); });
+        Array.prototype.forEach.call(container.querySelectorAll('.transfer-post'), function (node) { node.remove(); });
         Array.prototype.forEach.call(container.querySelectorAll('.transfer-line-row'), function (row) {
             var qty = parseFloat(row.querySelector('.transfer-qty').value || '0');
             var itemId = row.querySelector('.transfer-item-id').value;
@@ -467,10 +534,10 @@
     }
 
     function validateTransfer() {
-        var rowCount = document.querySelectorAll('#transferLinesContainer .transfer-line-row').length;
-        if (!rowCount) return ['Tick at least one holder and keep at least one tool line to transfer.'];
+        var rows = document.querySelectorAll('#transferLinesContainer .transfer-line-row');
+        if (!rows.length) return ['Tick at least one holder and keep at least one tool line to transfer.'];
         var moving = 0;
-        Array.prototype.forEach.call(document.querySelectorAll('#transferLinesContainer .transfer-line-row'), function (row) {
+        Array.prototype.forEach.call(rows, function (row) {
             if (parseFloat(row.querySelector('.transfer-qty').value || '0') > 0) moving++;
         });
         if (!moving) return ['Enter a quantity for at least one tool to transfer.'];
@@ -508,6 +575,7 @@
     function renderReturnItems(items) {
         var box = document.getElementById('returnItemRows');
         if (!box) return;
+        var picker = pickerSelect();
         box.innerHTML = '';
         if (!items.length) {
             box.innerHTML = '<div class="small text-muted">Nothing is still out on this rental.</div>';
@@ -535,8 +603,9 @@
                 '</div>';
             row.querySelector('.return-item-id').dataset.pending = String(item.qty_pending);
             var serialBox = row.querySelector('.return-serials');
+            var rentalId = picker ? picker.value : '';
             fetch('/hdc/api/tool-rental/serials/out-of-store?tool_id=' + encodeURIComponent(item.tool_id) +
-                  '&rental_id=' + encodeURIComponent(document.getElementById('returnRentalSelect').value),
+                  '&rental_id=' + encodeURIComponent(rentalId),
                   { credentials: 'same-origin' })
                 .then(function (response) { return response.ok ? response.json() : null; })
                 .then(function (data) {
@@ -573,7 +642,7 @@
         });
         var hint = document.createElement('div');
         hint.className = 'small text-muted';
-        hint.textContent = 'Leave a quantity blank for a tool that did not come back. “Full return” takes everything still outstanding.';
+        hint.textContent = 'Leave a quantity blank for a tool that did not come back. “Full Return” takes everything still outstanding.';
         box.appendChild(hint);
         syncReturnMode();
     }
@@ -581,7 +650,7 @@
     function collectReturnFields() {
         var container = document.getElementById('returnItemRows');
         if (!container) return;
-        container.querySelectorAll('.return-post').forEach(function (node) { node.remove(); });
+        Array.prototype.forEach.call(container.querySelectorAll('.return-post'), function (node) { node.remove(); });
         Array.prototype.forEach.call(container.querySelectorAll('.tool-txn-line'), function (row) {
             var itemId = row.querySelector('.return-item-id');
             if (!itemId) return;
@@ -627,9 +696,8 @@
         var toolSelect = document.getElementById('maintenanceToolSelect');
         var box = document.getElementById('maintenanceSendList');
         if (!toolSelect || !box) return;
-        var toolId = toolSelect.value;
         box.innerHTML = '';
-        var tool = TOOLS_BY_ID[String(toolId)];
+        var tool = TOOLS_BY_ID[String(toolSelect.value)];
         if (!tool) {
             box.innerHTML = '<span class="small text-muted">Choose a tool to list the pieces in the store.</span>';
             return;
@@ -689,13 +757,113 @@
             .catch(function () { /* leave the select hidden */ });
     }
 
-    /* ── submit ─────────────────────────────────────────────────────────── */
-    function collectAll() {
-        collectLineFields();
-        collectTransferFields();
-        collectReturnFields();
+    /* ── the checks a transaction declares, by name ─────────────────────── */
+    function textValue(id) {
+        var node = document.getElementById(id);
+        return node ? String(node.value || '').trim() : '';
     }
 
+    function numberValue(id) {
+        var node = document.getElementById(id);
+        return parseFloat((node || {}).value || '0') || 0;
+    }
+
+    function checkCustomer() {
+        var input = document.getElementById('txnCustomerNameInput');
+        return (input && input.value.trim()) ? [] : ['Enter the customer name.'];
+    }
+
+    function checkProject() {
+        return textValue('txnProjectSelect') ? [] : ['Choose the site / project.'];
+    }
+
+    function checkRental() {
+        var picker = pickerSelect();
+        if (picker && picker.value) return [];
+        if (picker) picker.focus();
+        return ['Choose the rental this transaction belongs to.'];
+    }
+
+    function checkLines() {
+        if (!document.querySelector('#lineItemsContainer .tool-txn-line')) {
+            return ['Add at least one tool item.'];
+        }
+        return validateLines();
+    }
+
+    function checkReturnItems() {
+        var entry = currentEntry();
+        if (entry && entry.return_type === 'full') return [];
+        var coming = 0;
+        Array.prototype.forEach.call(document.querySelectorAll('#returnItemRows .return-qty-input'), function (input) {
+            if (parseFloat(input.value || '0') > 0) coming++;
+        });
+        if (!coming) {
+            return ['Enter the quantity coming back — or choose Full Return to close the whole issue.'];
+        }
+        return [];
+    }
+
+    function checkPayment() {
+        var problems = [];
+        if (!(numberValue('amount') > 0)) problems.push('Enter the amount received.');
+        if (!textValue('paymentAccount')) problems.push('Choose the cash / bank account receiving the money.');
+        return problems;
+    }
+
+    function checkAdjustment() {
+        return numberValue('adjust_amount') > 0 ? [] : ['Enter the amount to write off.'];
+    }
+
+    function checkDamage() {
+        var source = textValue('damage_source') || 'store';
+        if (source === 'rental') {
+            if (!textValue('damageRentalSelect')) return ['Choose the rental the damage happened on.'];
+            var item = document.getElementById('damageRentalItem');
+            if (!item || item.classList.contains('d-none') || !item.value) {
+                return ['Choose the tool line the damage happened on.'];
+            }
+            return [];
+        }
+        var problems = [];
+        if (!textValue('damageToolSelect')) problems.push('Choose the tool that was damaged or lost.');
+        var ticked = document.querySelectorAll('#damageSerialList input:checked').length;
+        if (!ticked && !numberValue('damage_qty')) problems.push('Enter a quantity or tick the exact pieces.');
+        return problems;
+    }
+
+    function checkMaintenanceSend() {
+        return document.querySelectorAll('#maintenanceSendList input:checked').length
+            ? [] : ['Tick at least one piece to send for maintenance.'];
+    }
+
+    function checkMaintenanceReturn() {
+        return document.querySelectorAll('#maintenanceReturnList input:checked').length
+            ? [] : ['Tick at least one piece coming back from maintenance.'];
+    }
+
+    var CHECKS = {
+        customer: checkCustomer,
+        project: checkProject,
+        rental: checkRental,
+        lines: checkLines,
+        transfer: validateTransfer,
+        return_items: checkReturnItems,
+        payment: checkPayment,
+        adjustment: checkAdjustment,
+        damage: checkDamage,
+        maintenance_send: checkMaintenanceSend,
+        maintenance_return: checkMaintenanceReturn
+    };
+
+    /* Which section posts what — again by the names the registry declares. */
+    var COLLECTORS = {
+        lines: collectLineFields,
+        transfer: collectTransferFields,
+        return_items: collectReturnFields
+    };
+
+    /* ── submit ─────────────────────────────────────────────────────────── */
     form.addEventListener('submit', function (event) {
         if (submitted) {
             event.preventDefault();
@@ -704,93 +872,31 @@
         var entry = currentEntry();
         if (!entry) return;
         showError('');
-        var problems = [];
-        var rentalId = '';
 
-        if (entry.needs_rental) {
-            var pickerId = entry.kind === 'return' ? 'returnRentalSelect'
-                : (entry.kind === 'payment' ? 'paymentRentalSelect' : 'adjustRentalSelect');
-            var picker = document.getElementById(pickerId);
-            if (!picker || !picker.value) {
-                problems.push('Choose the rental this transaction belongs to.');
-                if (picker) picker.focus();
-            } else {
-                rentalId = picker.value;
-            }
-        }
-        if (entry.kind === 'create' || entry.kind === 'transfer') {
-            if (entry.renter_type === 'external') {
-                var customer = document.getElementById('txnCustomerNameInput');
-                if (!customer || !customer.value.trim()) problems.push('Enter the customer name.');
-            } else if (entry.renter_type === 'internal') {
-                var project = document.getElementById('txnProjectSelect');
-                if (!project || !project.value) problems.push('Choose the site / project.');
-            }
-        }
-        if (entry.kind === 'create') {
-            var lineProblems = validateLines();
-            if (!document.querySelector('#lineItemsContainer .tool-txn-line')) {
-                problems.push('Add at least one tool item.');
-            }
-            problems = problems.concat(lineProblems);
-        }
-        if (entry.kind === 'transfer') {
-            problems = problems.concat(validateTransfer());
-        }
-        if (entry.kind === 'return' && entry.return_type !== 'full') {
-            var anyQty = false;
-            Array.prototype.forEach.call(document.querySelectorAll('#returnItemRows .return-qty-input'), function (input) {
-                if (parseFloat(input.value || '0') > 0) anyQty = true;
-            });
-            if (!anyQty) problems.push('Enter the quantity coming back — or choose Full Return to close the whole issue.');
-        }
-        if (entry.kind === 'damage_loss') {
-            var damageSource = document.getElementById('damage_source').value;
-            if (damageSource === 'rental') {
-                var damageRental = document.getElementById('damageRentalSelect');
-                var damageItem = document.getElementById('damageRentalItem');
-                if (!damageRental || !damageRental.value) problems.push('Choose the rental the damage happened on.');
-                if (damageItem && damageItem.classList.contains('d-none')) {
-                    problems.push('Choose the tool line the damage happened on.');
-                } else if (damageItem && !damageItem.value) {
-                    problems.push('Choose the tool line the damage happened on.');
-                }
-            } else {
-                var damageTool = document.getElementById('damageToolSelect');
-                var tickedPieces = document.querySelectorAll('#damageSerialList input:checked').length;
-                var damageQty = parseFloat((document.getElementById('damage_qty') || {}).value || '0');
-                if (!damageTool || !damageTool.value) problems.push('Choose the tool that was damaged or lost.');
-                if (!tickedPieces && !damageQty) problems.push('Enter a quantity or tick the exact pieces.');
-            }
-        }
-        if (entry.kind === 'maintenance_out') {
-            if (!document.querySelectorAll('#maintenanceSendList input:checked').length) {
-                problems.push('Tick at least one piece to send for maintenance.');
-            }
-        }
-        if (entry.kind === 'maintenance_in') {
-            if (!document.querySelectorAll('#maintenanceReturnList input:checked').length) {
-                problems.push('Tick at least one piece coming back from maintenance.');
-            }
-        }
-        if (entry.kind === 'payment') {
-            var amount = parseFloat((document.getElementById('amount') || {}).value || '0');
-            if (!(amount > 0)) problems.push('Enter the amount received.');
-            var account = document.getElementById('paymentAccount');
-            if (!account || !account.value) problems.push('Choose the cash / bank account receiving the money.');
-        }
+        var problems = [];
+        (entry.checks || []).forEach(function (name) {
+            var check = CHECKS[name];
+            if (check) problems = problems.concat(check() || []);
+        });
         if (problems.length) {
             event.preventDefault();
             showError(problems[0]);
             return;
         }
 
-        if (!entry.needs_rental) {
-            form.action = entry.action;
-        } else {
-            form.action = entry.action.replace('__RENTAL_ID__', encodeURIComponent(rentalId));
+        var rentalId = '';
+        if (entry.picker) {
+            var picker = pickerSelect();
+            rentalId = picker ? picker.value : '';
         }
-        collectAll();
+        form.action = entry.needs_rental
+            ? entry.action.replace('__RENTAL_ID__', encodeURIComponent(rentalId))
+            : entry.action;
+
+        (entry.checks || []).forEach(function (name) {
+            var collector = COLLECTORS[name];
+            if (collector) collector();
+        });
 
         if (entry.confirm && typeof window.confirm === 'function') {
             if (!window.confirm(entry.confirm)) {
@@ -817,7 +923,20 @@
     });
 
     /* ── wire everything ────────────────────────────────────────────────── */
-    if (typeSelect) typeSelect.addEventListener('change', applyPanels);
+    if (typeSelect) {
+        typeSelect.addEventListener('change', function () {
+            var entry = currentEntry();
+            if (entry) activeGroup = entry.group;
+            paintGroupTabs();
+            filterTypeOptions();
+            applyPanels();
+        });
+    }
+    Array.prototype.forEach.call(groupTabs(), function (tab) {
+        tab.addEventListener('click', function () {
+            chooseGroup(tab.getAttribute('data-txn-group'));
+        });
+    });
     var addBtn = document.getElementById('addLineBtn');
     if (addBtn) addBtn.addEventListener('click', addLineRow);
     var transferSelect = document.getElementById('transferSourceSelect');
@@ -870,6 +989,8 @@
         if (amount && option) amount.max = option.getAttribute('data-amount') || '';
     });
 
+    paintGroupTabs();
+    filterTypeOptions();
     applyPanels();
     addLineRow();
     renderMaintenanceReturn();
