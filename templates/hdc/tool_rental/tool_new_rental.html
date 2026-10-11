@@ -3,10 +3,9 @@
 {% block page_heading %}New Rental{% endblock %}
 
 {# The rental creation form lives on its own page so the Rentals hub stays a
-   simple summary + list. The operator chooses the transaction first, and the
-   form then reads as one sequence of numbered steps — the same order the Tools
-   transaction page uses: 1 what is happening → 2 from where → 3 which tools →
-   4 to whom → 5 rent type & terms → 6 settle the previous holder (transfer).
+   simple summary + list. The form reads as one sequence of numbered steps:
+   1 from where → 2 which tools → 3 to whom → 4 rent type & terms →
+   5 settle the previous holder (transfer).
    A new rental takes its tools from the store picker; a transfer finds its
    source site-first or tool-first and lists the holder's tools (with per-tool
    rates) in the same step. The destination site/customer fields adapt to the
@@ -56,7 +55,7 @@
 <div class="tool-rental-form-header">
     <div>
         <h2><i class="fas fa-plus me-2" aria-hidden="true"></i><span id="pageFormHeading">New Rental</span></h2>
-        <div class="tool-rental-form-subtitle">Choose the transaction first, then answer the steps in order: from where → which tools → to whom → rent &amp; terms. Rentals made here appear below.</div>
+        <div class="tool-rental-form-subtitle">Answer the steps in order: from where → which tools → to whom → rent &amp; terms. Rentals made here appear below.</div>
     </div>
     <a href="{{ url_for('hdc_tool_rental') }}" class="btn btn-outline-secondary">
         <i class="fas fa-arrow-left me-1" aria-hidden="true"></i>Back to rentals
@@ -69,28 +68,17 @@
         <form method="POST" action="{{ url_for('hdc_tool_rental_create') }}" id="createRentalForm">
             <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
             <div class="row g-3">
-                {# ── One form, one reading order.  The steps below are the same six
-                   the Tools transaction page uses (see tool_txn.html): what is
-                   happening → from where → which tools → to whom → rent & terms →
+                {# ── One form, one reading order.  The steps below follow the
+                   Tools transaction page layout (see tool_txn.html):
+                   from where → which tools → to whom → rent & terms →
                    settle the previous holder.  Each step heading carries the modes
                    it belongs to, so applyTxnModes() hides whole steps at once. #}
 
-                <!-- 1 · what is happening -->
-                <div class="col-12">
-                    <h6 class="txn-step-heading mb-2"><i class="fas fa-hand-pointer me-1" aria-hidden="true"></i>1 · What is happening?</h6>
-                </div>
-                <div class="col-md-4">
-                    <label class="form-label">Transaction type</label>
-                    <select name="txn_type" id="txnType" class="form-select" required onchange="toggleTxnType()">
-                        {% for t in txn_types %}
-                        <option value="{{ t.key }}" data-needs-rental="{{ '1' if t.needs_rental else '0' }}">{{ t.label }}</option>
-                        {% endfor %}
-                    </select>
-                    <small class="text-muted d-block" id="txnTypeHelp">Choose the transaction first; the next fields follow the selected flow.</small>
-                </div>
+                <!-- transaction type is always new_rental on this page -->
+                <input type="hidden" name="txn_type" id="txnType" value="new_rental">
 
                 <div class="col-12" data-txn-modes="new_rental transfer">
-                    <h6 class="txn-step-heading mb-2"><i class="fas fa-truck-fast me-1" aria-hidden="true"></i>2 · From where are the tools coming?</h6>
+                    <h6 class="txn-step-heading mb-2"><i class="fas fa-truck-fast me-1" aria-hidden="true"></i>1 · From where are the tools coming?</h6>
                 </div>
                 <div class="col-12" data-txn-modes="new_rental">
                     <div class="txn-step-choice">
@@ -153,7 +141,7 @@
                 </div>
 
                 <div class="col-12" data-txn-modes="new_rental transfer">
-                    <h6 class="txn-step-heading mb-2"><i class="fas fa-toolbox me-1" aria-hidden="true"></i>3 · Which tools are moving?</h6>
+                    <h6 class="txn-step-heading mb-2"><i class="fas fa-toolbox me-1" aria-hidden="true"></i>2 · Which tools are moving?</h6>
                 </div>
                 <div class="col-12" id="newRentalTools" data-txn-modes="new_rental">
                     <label class="form-label fw-semibold">Tools to rent</label>
@@ -339,7 +327,7 @@
                 </div>
 
                 <div class="col-12" data-txn-modes="new_rental transfer">
-                    <h6 class="txn-step-heading mb-2"><i class="fas fa-user-check me-1" aria-hidden="true"></i>4 · To — who receives the tools?</h6>
+                    <h6 class="txn-step-heading mb-2"><i class="fas fa-user-check me-1" aria-hidden="true"></i>3 · To — who receives the tools?</h6>
                 </div>
                 <div class="col-md-6" id="renterTypeField" data-txn-modes="new_rental transfer">
                     <label class="form-label" id="whoLabel">Who is renting?</label>
@@ -524,10 +512,10 @@
                     </div>
                 </div>
 
-                <!-- 5 · rent type & terms, then 6 · settling a transfer -->
+                <!-- 4 · rent type & terms, then 5 · settling a transfer -->
                 <div class="col-12" id="otherSettings" data-txn-modes="new_rental transfer">
                     <div class="border rounded p-3">
-                        <h6 class="mb-3"><i class="fas fa-file-invoice-dollar me-1" aria-hidden="true"></i>5 · Rent type &amp; terms</h6>
+                        <h6 class="mb-3"><i class="fas fa-file-invoice-dollar me-1" aria-hidden="true"></i>4 · Rent type &amp; terms</h6>
                         <div class="row g-3">
                             <div class="col-md-6" id="billingField" data-txn-modes="new_rental transfer">
                                 <label class="form-label" id="billingLabel">How should rent be charged?</label>
@@ -553,7 +541,7 @@
 
                             <div class="col-12 d-none" id="transferSettlementFields" data-txn-modes="transfer">
                                 <div class="border rounded p-3">
-                                    <h6 class="mb-3"><i class="fas fa-scale-balanced me-1" aria-hidden="true"></i>6 · Settle the previous holder's rent</h6>
+                                    <h6 class="mb-3"><i class="fas fa-scale-balanced me-1" aria-hidden="true"></i>5 · Settle the previous holder's rent</h6>
                                     <div class="row g-3">
                                         <div class="col-md-6">
                                             <label class="form-label">Settlement choice</label>
