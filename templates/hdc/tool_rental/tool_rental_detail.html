@@ -555,9 +555,12 @@
                                        max_items=80) }}
                                 </div>
                                 <div class="col-6">
+                                    {# Stages are offered for the chosen site / project only. #}
                                     {{ combo_select('to_stage_id', 'transferStageSelect', stage_options,
                                        label='To Stage (Optional)',
-                                       placeholder='Search a stage…', max_items=80) }}
+                                       placeholder='Search a stage…', max_items=80,
+                                       depends_on='transferProjectSelect', depends_key='project-id',
+                                       depends_wait='Choose the site / project first', depends_none='No stages on this site yet') }}
                                 </div>
                             </div>
                         </div>
@@ -732,28 +735,13 @@ function bindDiscountExtras(inputId, extraId){
 bindDiscountExtras('paymentDiscount', 'paymentDiscountExtra');
 bindDiscountExtras('returnDiscountAmount', 'returnDiscountExtra');
 
-function syncTransferStages(){
-    const project = document.getElementById('transferProjectSelect');
-    const stage = document.getElementById('transferStageSelect');
-    if(!project || !stage) return;
-    let selectionCleared = false;
-    Array.from(stage.options).forEach(function(option){
-        const visible = !option.value || !project.value || option.dataset.projectId === project.value;
-        option.hidden = !visible;
-        if(!visible && option.selected){
-            stage.value = '';
-            selectionCleared = true;
-        }
-    });
-    if(selectionCleared) stage.dispatchEvent(new Event('change', {bubbles:true}));
-}
 function toggleToType(){
     const t = document.getElementById('toType').value;
     document.getElementById('toSiteFields').classList.toggle('d-none', t!=='site');
     document.getElementById('toCustomerFields').classList.toggle('d-none', t!=='customer');
 }
-document.getElementById('transferProjectSelect')?.addEventListener('change', syncTransferStages);
-syncTransferStages();
+// The stage list follows the chosen site through the combo_select
+// depends_on contract (core/combo.js).
 
 /* Per-tool transfer split: "All" fills one line, "Move everything" fills all,
    and the total box mirrors what the per-tool boxes add up to so the two can
