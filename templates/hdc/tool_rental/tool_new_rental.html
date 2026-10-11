@@ -346,9 +346,12 @@
                                max_items=80) }}
                         </div>
                         <div class="col-md-6">
+                            {# Stages are offered for the chosen site / project only. #}
                             {{ combo_select('stage_id', 'rentalStageSelect', stage_options,
                                label='Stage (optional)', label_id='stageLabel',
-                               placeholder='Search a stage…', max_items=80) }}
+                               placeholder='Search a stage…', max_items=80,
+                               depends_on='rentalProjectSelect', depends_key='project-id',
+                               depends_wait='Choose the site / project first', depends_none='No stages on this site yet') }}
                         </div>
                     </div>
                 </div>
@@ -683,25 +686,8 @@
 
 {% block extra_js %}
 <script>
-// ── Stage list follows the chosen site ────────────────────────────────────
-function filterStages(projectId, stageId){
-    const stage = document.getElementById(stageId);
-    if(!stage) return;
-    let selectionCleared = false;
-    Array.from(stage.options).forEach(function(option){
-        const visible = !option.value || !projectId || option.dataset.projectId === projectId;
-        option.hidden = !visible;
-        if(!visible && option.selected){
-            stage.value = '';
-            selectionCleared = true;
-        }
-    });
-    if(selectionCleared) stage.dispatchEvent(new Event('change', {bubbles:true}));
-}
-function syncRentalStages(){
-    const project = document.getElementById('rentalProjectSelect');
-    filterStages(project && project.value, 'rentalStageSelect');
-}
+// The stage list follows the chosen site through the combo_select
+// depends_on contract (core/combo.js) — no page code needed here.
 
 function setPanelControlsEnabled(panel, enabled){
     if(!panel) return;
@@ -1612,7 +1598,6 @@ function wireToolRow(row){
     }
 }
 
-document.getElementById('rentalProjectSelect')?.addEventListener('change', syncRentalStages);
 document.getElementById('transferFindTool')?.addEventListener('change', function(){
     clearTransferCombo('transferFromSite', 'transferFromSiteInput');
     clearTransferSourceSelection();
@@ -1782,7 +1767,6 @@ document.getElementById('createRentalForm')?.addEventListener('submit', function
 
 // Reflect the defaults as soon as the page loads.
 toggleTxnType();
-syncRentalStages();
 
 let nextToolComboIndex = 1;
 

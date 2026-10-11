@@ -150,9 +150,13 @@
                     if (!state.items.length) {
                         // No matches.  Rather than an empty box, point at the way
                         // out when the caller offered one.
-                        if (opts.emptyText || hasAddRow()) {
+                        // emptyText may be a function so a dependent picker
+                        // can say "choose the site first" vs "no match".
+                        var emptyText = typeof opts.emptyText === 'function'
+                            ? opts.emptyText() : opts.emptyText;
+                        if (emptyText || hasAddRow()) {
                             var empty = '<div class=\"hdc-combo-empty\">' +
-                                escapeHtml(opts.emptyText || 'No matches found.') + '</div>';
+                                escapeHtml(emptyText || 'No matches found.') + '</div>';
                             var addOnly = hasAddRow()
                                 ? '<div class=\"hdc-combo-add\" role=\"option\" data-idx=\"' + state.items.length +
                                   '\">' + escapeHtml(opts.addLabel || '+ Add new') + '</div>'
@@ -208,7 +212,11 @@
                         }
                         return;
                     }
+                    // Only options the list actually offers can match: a
+                    // hidden option (e.g. a stage of another project in a
+                    // dependent picker) is never a valid choice.
                     var exact = Array.from(select.options).find(function (o) {
+                        if (o.hidden || (o.style && o.style.display === 'none')) return false;
                         return (o.text || '').trim().toLowerCase() === q;
                     });
                     if (exact) {
@@ -352,13 +360,74 @@
                 // option can supply the selected value.
                 strict: input.getAttribute('data-hdc-combo-strict') === 'true',
                 maxItems: parseInt(input.getAttribute('data-hdc-combo-max') || '50', 10),
-                emptyText: input.getAttribute('data-hdc-combo-empty') ||
-                           'No match — keep typing to use a new name.'
+                // Read at render time: a dependent picker rewrites the
+                // attribute as its parent changes (see bindDependent).
+                emptyText: (function (el) {
+                    return function () {
+                        return el.getAttribute('data-hdc-combo-empty') ||
+                               'No match — keep typing to use a new name.';
+                    };
+                })(input)
             };
             var handle = window.HDCComboList.attach(input, select, opts);
             if (handle) input.__hdcCombo = handle;
         }
+        var dependents = (root || document).querySelectorAll('select[data-hdc-depends-on]');
+        for (var j = 0; j < dependents.length; j++) bindDependent(dependents[j]);
     }
+
+    // ── Dependent pickers (data driven) ──────────────────────────────────
+    // A select carrying data-hdc-depends-on="<parent select id>" only offers
+    // the options whose data-<key> (data-hdc-depends-key, default
+    // "parent-id") equals the parent's current value. With no parent value
+    // it offers nothing — e.g. a stage list shows only the stages of the
+    // chosen project, never every stage of every project. A selection that
+    // stops matching is cleared. The server still validates the pair.
+    function bindDependent(select) {
+        if (!select || select.__hdcDependent) return select && select.__hdcDependent;
+        var parentId = select.getAttribute('data-hdc-depends-on');
+        var parent = parentId ? document.getElementById(parentId) : null;
+        if (!parent) return null;
+        var key = 'data-' + (select.getAttribute('data-hdc-depends-key') || 'parent-id');
+        var input = select.id
+            ? document.querySelector('input[data-hdc-combo="' + select.id + '"]') : null;
+        var basePlaceholder = input ? (input.getAttribute('placeholder') || '') : '';
+        var baseEmpty = input ? (input.getAttribute('data-hdc-combo-empty') || '') : '';
+        var waitText = select.getAttribute('data-hdc-depends-wait') || 'Choose the parent first.';
+        var noneText = select.getAttribute('data-hdc-depends-none') || 'Nothing to choose here yet.';
+
+        function apply() {
+            var parentValue = String(parent.value || '');
+            var cleared = false;
+            var offered = 0;
+            Array.prototype.forEach.call(select.options, function (o) {
+                if (!o.value) return;
+                var visible = !!parentValue && o.getAttribute(key) === parentValue;
+                o.hidden = !visible;
+                o.disabled = !visible;
+                if (visible) offered++;
+                else if (o.selected) cleared = true;
+            });
+            if (cleared) {
+                select.value = '';
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            if (input) {
+                input.setAttribute('placeholder', parentValue ? basePlaceholder : waitText);
+                input.setAttribute('data-hdc-combo-empty',
+                    !parentValue ? waitText : (offered ? (baseEmpty || 'No match.') : noneText));
+            }
+        }
+
+        parent.addEventListener('change', apply);
+        if (select.form) {
+            select.form.addEventListener('reset', function () { setTimeout(apply, 0); });
+        }
+        apply();
+        select.__hdcDependent = { refresh: apply };
+        return select.__hdcDependent;
+    }
+    window.HDCComboList.bindDependent = bindDependent;
 
     if (typeof document !== 'undefined' && typeof document.querySelectorAll === 'function') {
         if (document.readyState === 'loading') {

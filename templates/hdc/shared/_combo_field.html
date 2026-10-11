@@ -50,10 +50,18 @@
    The visible input only holds a label from a real option: typing alone does
    not count as a choice. Optional third tuple members render data-* attributes
    on options for dependent pickers (for example stage -> project).
+
+   Dependent pickers are data driven: pass ``depends_on='<parent select id>'``
+   and ``depends_key='project-id'`` (the data-* attribute each option carries)
+   and core/combo.js only offers the options whose key equals the parent's
+   current value — nothing at all until the parent is chosen. ``depends_wait``
+   / ``depends_none`` are the hints shown before a parent is picked / when the
+   parent has no options.
 #}
 {% macro combo_select(name, field_id, options, label='', placeholder='', required=false,
                       hint='', selected='', max_items=60,
-                      empty_text='', label_id='') %}
+                      empty_text='', label_id='', depends_on='',
+                      depends_key='parent-id', depends_wait='', depends_none='') %}
 <div class="hdc-combo-field">
     {% if label %}<label class="form-label"{% if field_id %} for="{{ field_id }}Input"{% endif %}{% if label_id %} id="{{ label_id }}"{% endif %}>{{ label }}</label>{% endif %}
     <input type="text" id="{{ field_id }}Input" class="form-control"
@@ -64,6 +72,9 @@
            {% if empty_text %}data-hdc-combo-empty="{{ empty_text }}"{% endif %}>
     <select id="{{ field_id }}" name="{{ name }}" class="form-select d-none"
             data-hdc-combo-source
+            {% if depends_on %}data-hdc-depends-on="{{ depends_on }}" data-hdc-depends-key="{{ depends_key }}"{% endif %}
+            {% if depends_on and depends_wait %}data-hdc-depends-wait="{{ depends_wait }}"{% endif %}
+            {% if depends_on and depends_none %}data-hdc-depends-none="{{ depends_none }}"{% endif %}
             {% if required %}required{% endif %}>
         <option value=""></option>
         {% for option in options %}

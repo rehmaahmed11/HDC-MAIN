@@ -340,8 +340,11 @@
                                         hint='Internal movements never create outside rental income.') }}
                     </div>
                     <div class="col-md-6">
+                        {# Stages are offered for the chosen site / project only. #}
                         {{ combo_select('stage_id', 'txnStageSelect', stage_options,
-                                        label='Stage (optional)', placeholder='Search stage') }}
+                                        label='Stage (optional)', placeholder='Search stage',
+                                        depends_on='txnProjectSelect', depends_key='project-id',
+                                        depends_wait='Choose the site / project first', depends_none='No stages on this site yet') }}
                     </div>
                 </div>
             </div>
