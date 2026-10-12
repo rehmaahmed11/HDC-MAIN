@@ -3478,7 +3478,8 @@ def _accounts_post_owner_receipt(owner_payment_row, project=None, commit=False):
         'project_id': (owner_payment_row.project_id if owner_payment_row else None),
         'related_entity_type': 'project',
         'related_entity_id': (owner_payment_row.project_id if owner_payment_row else None),
-        'party_name': (project.name if project else 'Owner'),
+        'party_name': ((client_name if (project and (project.client or '').strip()) else None)
+                       or (project.name if project else 'Owner')),
         'category': 'income',
         'note': f'Owner/client receipt #{owner_payment_row.id}',
         'reference_id': f'owner_payment#{owner_payment_row.id}',

@@ -239,7 +239,7 @@ def _project_stats_by_name():
     return stats
 
 
-def sync_project_clients_as_parties():
+def sync_project_clients_as_parties(*, reactivate=False):
     """File every Project.client in the Parties directory as a ``client`` party.
 
     Mirrors ``sync_workers_as_parties``: idempotent, non-destructive, reviving
@@ -259,28 +259,20 @@ def sync_project_clients_as_parties():
     except Exception:
         return 0, 0, 0
 
+    # One pass: first spelling seen per client key, and the projects per key
+    # (for the project count and the latest phone).
     seen_keys = {}
-    created = 0
-    reactivated = 0
-    for p in projects:
-        nm = (getattr(p, 'client', '') or '').strip()
-        if not nm:
-            continue
-        key = party_name_key(nm)
-        if not key or key in seen_keys:
-            continue
-        seen_keys[key] = nm
-
-    # Group projects by client key for counts and phone lookup
     grouped = {}
     for p in projects:
         raw = (getattr(p, 'client', '') or '').strip()
-        if not raw:
-            continue
-        k = party_name_key(raw)
+        k = party_name_key(raw) if raw else ''
         if not k:
             continue
+        seen_keys.setdefault(k, raw)
         grouped.setdefault(k, []).append(p)
+
+    created = 0
+    reactivated = 0
 
     # Now ensure each distinct client name exists as a party
     for key, nm in seen_keys.items():
@@ -301,13 +293,14 @@ def sync_project_clients_as_parties():
                 party_type='client',
                 phone=latest_phone,
                 note=f"Client / Owner — {len(grouped.get(key, []))} project(s)",
+                reactivate=reactivate,
             )
             # Enrich phone if missing
             if not is_new and latest_phone and not (_party.phone or '').strip():
                 _party.phone = latest_phone
             if is_new:
                 created += 1
-            elif was_hidden:
+            elif was_hidden and reactivate:
                 reactivated += 1
         except Exception:
             continue
@@ -365,11 +358,14 @@ def known_client_party_names():
         if name and key not in seen:
             seen.add(key)
             names.append(name)
-    # Also include any project.client that hasn't been synced yet
+    # Also include any project.client that hasn't been synced yet.  Only the
+    # distinct names are loaded, not every project row.
     try:
         from hdc.models.projects import Project
-        for proj in Project.query.all():
-            raw = _normalize_name_ci(getattr(proj, 'client', '') or '')
+        for (client,) in (db.session.query(Project.client)
+                          .filter(Project.client.isnot(None))
+                          .distinct().all()):
+            raw = _normalize_name_ci(client or '')
             k = raw.lower()
             if raw and k not in seen:
                 seen.add(k)
@@ -687,3 +683,41 @@ def type_choice_groups():
          [(value, label) for value, label in PARTY_TYPES
           if value not in BUCKETED_PARTY_TYPES]),
     ]
+
+
+def rename_owner_client(project, old_client, new_client):
+    """Carry an owner's rename through the owner-linked ledger rows (F8).
+
+    Re-points the ``party_name`` of this project's owner rows (owner receipts
+    and own-site tool-rental money) from the old client name to the new one,
+    so the owner's statement keeps its history under the current name.  Only
+    those rows change: amounts, dates, accounts and other parties are left
+    alone.  The old client party is deactivated (not deleted) when no other
+    project still uses that name.  Returns the number of ledger rows re-filed.
+    """
+    from sqlalchemy import or_
+    from hdc.models.projects import Project
+    old_key = party_name_key(old_client)
+    new_name = (new_client or '').strip()[:120]
+    if not old_key or not new_name or old_key == party_name_key(new_name):
+        return 0
+    rows = (AccountTransaction.query
+            .filter(AccountTransaction.project_id == int(project.id),
+                    func.lower(func.trim(func.coalesce(AccountTransaction.party_name, ''))) == old_key,
+                    or_(AccountTransaction.type == 'project_income',
+                        AccountTransaction.related_entity_type == 'tool_rental'))
+            .all())
+    for txn in rows:
+        txn.party_name = new_name
+    still_used = (Project.query
+                  .filter(func.lower(func.trim(func.coalesce(Project.client, ''))) == old_key,
+                          Project.id != int(project.id))
+                  .count())
+    if not still_used:
+        old_party = (CashFlowParty.query
+                     .filter(func.lower(func.trim(CashFlowParty.name)) == old_key,
+                             func.lower(CashFlowParty.party_type) == 'client')
+                     .first())
+        if old_party is not None and old_party.is_active:
+            old_party.is_active = False
+    return len(rows)

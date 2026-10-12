@@ -1433,7 +1433,7 @@ def save_cf_party(name, party_type='other', phone=None, note=None):
     return row, True
 
 
-def ensure_party(name, party_type='other', phone=None, note=None):
+def ensure_party(name, party_type='other', phone=None, note=None, *, reactivate=True):
     """Get-or-create a party for *automatic* syncs (HDC Tools → Parties).
 
     Like :func:`save_cf_party` but never **reclassifies** a party that
@@ -1451,7 +1451,9 @@ def ensure_party(name, party_type='other', phone=None, note=None):
         ptype = 'other'
     row = CashFlowParty.query.filter(func.lower(func.trim(CashFlowParty.name)) == nm.lower()).first()
     if row:
-        if not row.is_active:
+        # A hidden row is revived only by real activity (reactivate=True).
+        # Directory syncs pass reactivate=False so a user's Deactivate sticks.
+        if reactivate and not row.is_active:
             row.is_active = True
         current = (row.party_type or 'other').strip().lower() or 'other'
         if current == 'other' and ptype != 'other':
@@ -1465,7 +1467,7 @@ def ensure_party(name, party_type='other', phone=None, note=None):
     return row, True
 
 
-def sync_workers_as_parties(worker_ids=None, *, only_active=False):
+def sync_workers_as_parties(worker_ids=None, *, only_active=False, reactivate=False):
     """File every Worker in the Parties directory as a ``worker`` party.
 
     Workers were missing from the directory even though advances, payments,
@@ -1510,10 +1512,11 @@ def sync_workers_as_parties(worker_ids=None, *, only_active=False):
         _party, is_new = ensure_party(
             nm, party_type='worker',
             note=(f"Worker {w.worker_code}" + (f" — {w.role_type}" if w.role_type else ""))[:300],
+            reactivate=reactivate,
         )
         if is_new:
             created += 1
-        elif was_hidden:
+        elif was_hidden and reactivate:
             reactivated += 1
     return created, reactivated, len(workers)
 

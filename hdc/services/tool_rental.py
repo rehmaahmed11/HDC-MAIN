@@ -699,13 +699,13 @@ def search_rentals(filters):
         try:
             df = datetime.strptime(filters['date_from'], '%Y-%m-%d').date()
             q = q.filter(ToolRental.rental_date >= df)
-        except:
+        except ValueError:
             pass
     if filters.get('date_to'):
         try:
             dt = datetime.strptime(filters['date_to'], '%Y-%m-%d').date()
             q = q.filter(ToolRental.rental_date <= dt)
-        except:
+        except ValueError:
             pass
     if filters.get('search_text'):
         txt = f"%{filters['search_text'].lower()}%"
@@ -991,6 +991,21 @@ def _get_or_create_customer_account(rental):
     acc = _account_get_or_create(name, acc_type, auto_generated=True, auto_source=auto_source)
     return acc
 
+def rental_party_name(rental):
+    """Party name a rental's money is filed under in the ledger.
+
+    External rentals: the outside customer.  Own-site (internal) rentals: the
+    project's *client* (owner), the same identity the owner's account and the
+    Parties statement use -- not the project name, which no party matches.
+    """
+    if rental.renter_type == 'external':
+        return rental.customer_name
+    if rental.project:
+        owner = _normalize_name_ci(rental.project.client or '')
+        return owner or rental.project.name
+    return 'Internal Site'
+
+
 def post_tool_rental_payment_to_accounts(payment, rental=None, commit=False):
     from hdc.services.accounts import _create_account_transaction, _accounts_default_company_cash
     if not payment or float(payment.amount or 0) <= 0:
@@ -1031,7 +1046,7 @@ def post_tool_rental_payment_to_accounts(payment, rental=None, commit=False):
     mode_raw = payment.payment_mode or ''
     note_txt = (f'Tool Rental Receipt {rental.rental_code} - {note_raw} [{mode_raw}]').strip()[:400]
 
-    party_name = rental.customer_name if rental.renter_type == 'external' else (rental.project.name if rental.project else 'Internal Site')
+    party_name = rental_party_name(rental)
 
     if rental.renter_type == 'external' and (rental.customer_name or '').strip():
         # Every HDC Tools transaction with an outside customer lands in the
@@ -1217,8 +1232,7 @@ def post_tool_rental_discount_to_accounts(discount, rental=None, commit=False):
     disc_date = discount.discount_date or _pkt_today()
     date_str = disc_date.isoformat() if hasattr(disc_date, 'isoformat') else str(disc_date)
 
-    party_name = (rental.customer_name if rental.renter_type == 'external'
-                  else (rental.project.name if rental.project else 'Internal Site'))
+    party_name = rental_party_name(rental)
 
     if rental.renter_type == 'external' and (rental.customer_name or '').strip():
         from hdc.services.cashflow_register import ensure_party
