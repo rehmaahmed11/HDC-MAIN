@@ -96,12 +96,13 @@ DOMAIN_OF = {
                  "personal_expense_void.html"],
     "settings": ["settings.html"],
     # HDC Tools section — position dashboard, rentals hub, inventory,
-    # site-to-site tracking, reports and the shared section sub-nav.
+    # site-to-site tracking, reports, the shared section sub-nav and the
+    # scope-limited banner every number-reporting page includes.
     "tool_rental": ["tool_dashboard.html", "tool_position.html",
                     "tool_rental.html", "tool_rental_detail.html", "tool_glance.html",
                     "tool_new_rental.html", "tool_txn.html",
                     "tool_inventory.html", "tool_tracking.html",
-                    "tool_reports.html", "_tools_nav.html",
+                    "tool_reports.html", "_tools_nav.html", "_scope_note.html",
                     "tool_serial_tracking.html", "tool_serials_create.html",
                     "_stock_forms.html",
                     # Tools > Audit — the count overview, one sheet, and the
