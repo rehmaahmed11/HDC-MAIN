@@ -751,7 +751,7 @@
                         {% elif r.payment_status=='no_charge' %}<div class="mt-1"><span class="badge bg-secondary">No charge</span></div>{% endif %}
                     </td>
                     <td class="text-nowrap">
-                        {% if not r.is_void and r.status not in ('returned', 'closed') %}
+                        {% if not r.is_void %}
                         <a href="{{ url_for('hdc_tool_rental_edit', rental_id=r.id) }}" class="btn btn-sm btn-outline-secondary" aria-label="Edit rental {{ r.rental_code }}" title="Edit on the same form that created it"><i class="fas fa-pen"></i></a>
                         {% endif %}
                         <a href="{{ url_for('hdc_tool_rental_detail', rental_id=r.id) }}" class="btn btn-sm btn-outline-primary" aria-label="Open rental {{ r.rental_code }}">Open</a>

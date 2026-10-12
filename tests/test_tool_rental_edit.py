@@ -553,7 +553,7 @@ class ToolRentalEditTestCase(unittest.TestCase):
         self.assertEqual(rental.customer_phone, '0300-1212121')
         self.assertEqual(float(rental.total_paid), 1000.0)
 
-    def test_closed_rental_cannot_be_edited(self):
+    def test_completed_rental_header_editable_lines_locked(self):
         rental_id = self._create_rental_id({
             'renter_type': 'internal',
             'project_id': str(self.site.id),
@@ -574,23 +574,37 @@ class ToolRentalEditTestCase(unittest.TestCase):
         rental = db.session.get(ToolRental, rental_id)
         self.assertIn(rental.status, ('returned', 'closed'))
 
-        open_edit = self.client.get(f'/hdc/tool-rental/{rental_id}/edit',
-                                    follow_redirects=True)
-        self.assertIn('can no longer be edited', open_edit.get_data(as_text=True))
-        response = self._post_edit(rental_id, {
+        # The Edit form opens for a completed rental, with its lines locked.
+        open_edit = self.client.get(f'/hdc/tool-rental/{rental_id}/edit')
+        self.assertEqual(open_edit.status_code, 200)
+        self.assertIn('Save Changes', open_edit.get_data(as_text=True))
+
+        # Header details save.
+        self._post_edit(rental_id, {
             'renter_type': 'internal',
             'project_id': str(self.site.id),
             'billing_type': 'fixed_fee',
-            'notes': 'should not save',
+            'notes': 'corrected after close',
             'tool_id[]': [str(self.vibrator.id)],
             'qty[]': ['2'],
             'rate[]': ['500'],
             'rental_item_id[]': [str(item_id)],
         })
-        html = response.get_data(as_text=True)
-        self.assertIn('can no longer be edited', html)
         rental = db.session.get(ToolRental, rental_id)
-        self.assertNotEqual(rental.notes, 'should not save')
+        self.assertEqual(rental.notes, 'corrected after close')
+
+        # Tool lines cannot change once a return exists.
+        self._post_edit(rental_id, {
+            'renter_type': 'internal',
+            'project_id': str(self.site.id),
+            'billing_type': 'fixed_fee',
+            'tool_id[]': [str(self.vibrator.id)],
+            'qty[]': ['5'],
+            'rate[]': ['500'],
+            'rental_item_id[]': [str(item_id)],
+        })
+        rental = db.session.get(ToolRental, rental_id)
+        self.assertEqual(float(rental.items[0].qty_rented), 2.0)
 
 
 if __name__ == '__main__':

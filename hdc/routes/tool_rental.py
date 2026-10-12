@@ -1403,10 +1403,9 @@ def register(app):
         if rental.is_void:
             flash('This rental is voided — it cannot be edited.', 'danger')
             return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
-        if rental.status in ('returned', 'closed'):
-            flash(f'{rental.rental_code} is closed — it can no longer be edited.',
-                  'warning')
-            return redirect(url_for('hdc_tool_rental_detail', rental_id=rental.id))
+        # Completed (returned / closed) rentals stay editable: their header
+        # details can be corrected, while the tool lines and rent type lock
+        # automatically once a return or payment exists.
         context = _new_rental_page_context(edit_rental=rental)
         return render_template('tool_rental/tool_new_rental.html',
                                created_rental=None, **context)
@@ -2387,10 +2386,6 @@ def register(app):
         detail_url = url_for('hdc_tool_rental_detail', rental_id=rental.id)
         if rental.is_void:
             flash('This rental is voided — it cannot be edited.', 'danger')
-            return redirect(detail_url)
-        if rental.status in ('returned', 'closed'):
-            flash(f'{rental.rental_code} is closed — it can no longer be edited.',
-                  'warning')
             return redirect(detail_url)
 
         # ---- destination (same rules as the create form) ----
