@@ -125,16 +125,31 @@ posting. Access is its own page permission (`tool_audit`). **Healthy.**
 
 ## 4. Permissions & money gate
 
+> **Corrected 2026-10-12** after a live permission-matrix probe — the first two
+> bullets below were wrong as originally written. Evidence and the full matrix
+> are in `TOOLS_SECTION_CRUD_HEALTH_AUDIT.md` §2.1.
+
 - `_money_write_required()` blocks writes for non-finance roles and serialises
-  SQLite writes. Admin/accountant/manager pass.
-- Section nav: Dashboard/Rentals/Inventory for everyone; **Tracking / Track by
-  Serial / Reports** are admin-only in the sub-nav; **Audit** shows for admin,
-  accountant, or any role explicitly granted `tool_audit` read.
+  SQLite writes. **Only admin and accountant pass.** A manager or staff user is
+  redirected (302) on every write and creates **zero rows** — reads still return
+  200. This was verified per-role against a live app, not read off the decorator.
+- Section nav: **no longer role-based.** `_tools_nav.html` renders a tab exactly
+  when `hdc_page_allowed(page_id, 'read')` says the page behind it is readable,
+  using the same page map the routes enforce (`tools`, `tool_inventory`,
+  `tool_tracking`, `tool_audit`). The old role checks both hid Tracking /
+  Reports / Glance / Track by Serial from a manager who may read them and showed
+  Inventory-linked tabs to a user granted only `tool_inventory`, who then
+  collected 403s. Covered by
+  `tests/test_tool_crud_gaps.py::test_inventory_only_user_gets_no_dead_nav_links`.
 - Observation: the *route* for Track by Serial is `@login_required` only, so a
   non-admin who knows the URL can technically view it (no page-level deny,
   because the path has no explicit access rule → `may_access_path` returns
   `None` → allowed). This matches Tracking/Reports' existing pattern, but if
   serial visibility should be tighter, add a `tool_serials` rule. Low risk.
+- Added since: a record-scoped viewer (allowed projects/stages) sees filtered
+  rentals against the unfiltered tool list, so the ledger totals now carry
+  `scope_limited` and suppress `reconciled` / `balanced`, and every tools page
+  that reports numbers includes `tool_rental/_scope_note.html` to say so.
 
 ---
 
