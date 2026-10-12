@@ -594,6 +594,23 @@ def _posted_text(key, current, default=''):
     return str(raw).strip()
 
 
+
+def _strict_form_date(raw, label):
+    """Parse an optional YYYY-MM-DD form field without guessing.
+
+    Blank means "today" (the form's own default).  A value that is present but
+    unparseable returns ``(None, message)`` so the caller can refuse the save
+    instead of silently posting on today's date.
+    """
+    raw = (raw or '').strip()
+    if not raw:
+        return _pkt_today(), None
+    try:
+        return datetime.strptime(raw, '%Y-%m-%d').date(), None
+    except ValueError:
+        return None, f'{label} "{raw}" is not a valid date. Use the date picker (YYYY-MM-DD).'
+
+
 def register(app):
 
     # Every tools page can tell the reader when the numbers are a filtered slice
@@ -2291,15 +2308,15 @@ def register(app):
         if billing_type not in ('no_charge','fixed_fee','per_day','per_hour'):
             billing_type = 'fixed_fee'
 
-        rental_date_raw = (request.form.get('rental_date') or '').strip()
-        try:
-            rental_date = datetime.strptime(rental_date_raw, '%Y-%m-%d').date() if rental_date_raw else _pkt_today()
-        except:
-            rental_date = _pkt_today()
-        expected_raw = (request.form.get('expected_return_date') or '').strip()
-        try:
-            expected_date = datetime.strptime(expected_raw, '%Y-%m-%d').date() if expected_raw else None
-        except:
+        rental_date, _date_err = _strict_form_date(request.form.get('rental_date'), 'Rental date')
+        if _date_err:
+            flash(_date_err, 'danger')
+            return redirect(request.referrer or url_for('hdc_tool_rental'))
+        expected_date, _date_err = _strict_form_date(request.form.get('expected_return_date'), 'Expected return date')
+        if _date_err:
+            flash(_date_err, 'danger')
+            return redirect(request.referrer or url_for('hdc_tool_rental'))
+        if not (request.form.get('expected_return_date') or '').strip():
             expected_date = None
 
         tool_ids = request.form.getlist('tool_id[]') or request.form.getlist('tool_id')
@@ -2354,7 +2371,7 @@ def register(app):
                 continue
             try:
                 tid = int(tid_raw)
-            except:
+            except (TypeError, ValueError):
                 flash(f'Invalid tool at row {idx+1}.', 'danger')
                 return redirect(_txn_return_url(url_for('hdc_tool_rental_new')))
             tool = Tool.query.get(tid)
@@ -2841,11 +2858,10 @@ def register(app):
             if it.tool:
                 ensure_tool_serials(tool=it.tool, commit=False)
 
-        return_date_raw = (request.form.get('return_date') or '').strip()
-        try:
-            return_date = datetime.strptime(return_date_raw, '%Y-%m-%d').date() if return_date_raw else _pkt_today()
-        except:
-            return_date = _pkt_today()
+        return_date, _date_err = _strict_form_date(request.form.get('return_date'), 'Return date')
+        if _date_err:
+            flash(_date_err, 'danger')
+            return redirect(request.referrer or url_for('hdc_tool_rental'))
 
         return_type = (request.form.get('return_condition') or request.form.get('return_type') or 'partial').strip().lower()
         if return_type not in ('full','partial'):
@@ -2877,7 +2893,7 @@ def register(app):
         for idx, (ri_id_raw, qty_raw) in enumerate(zip(rental_item_ids, qty_returned_list)):
             try:
                 ri_id = int(ri_id_raw)
-            except:
+            except (TypeError, ValueError):
                 continue
             r_item = ToolRentalItem.query.get(ri_id)
             if not r_item or int(r_item.rental_id)!=int(rental.id):
@@ -3109,11 +3125,10 @@ def register(app):
             flash('Select a valid Cash/Bank receiving account (Company/Cash/Bank).', 'danger')
             return redirect(_txn_return_url(url_for('hdc_tool_rental_detail', rental_id=rental.id)))
 
-        pay_date_raw = (request.form.get('payment_date') or '').strip()
-        try:
-            pay_date = datetime.strptime(pay_date_raw, '%Y-%m-%d').date() if pay_date_raw else _pkt_today()
-        except:
-            pay_date = _pkt_today()
+        pay_date, _date_err = _strict_form_date(request.form.get('payment_date'), 'Payment date')
+        if _date_err:
+            flash(_date_err, 'danger')
+            return redirect(request.referrer or url_for('hdc_tool_rental'))
 
         if _has_recent_duplicate(ToolRentalPayment, rental_id=rental.id, amount=amount, payment_date=pay_date, received_to_account_id=recv_acc.id):
             flash('Duplicate payment prevented.', 'warning')
@@ -3259,11 +3274,10 @@ def register(app):
             flash('Discount amount must be greater than zero.', 'danger')
             return redirect(_txn_return_url(url_for('hdc_tool_rental_detail', rental_id=rental.id)))
 
-        disc_date_raw = (request.form.get('discount_date') or '').strip()
-        try:
-            disc_date = datetime.strptime(disc_date_raw, '%Y-%m-%d').date() if disc_date_raw else _pkt_today()
-        except Exception:
-            disc_date = _pkt_today()
+        disc_date, _date_err = _strict_form_date(request.form.get('discount_date'), 'Discount date')
+        if _date_err:
+            flash(_date_err, 'danger')
+            return redirect(request.referrer or url_for('hdc_tool_rental'))
 
         reason = (request.form.get('reason') or 'goodwill').strip().lower()
         notes = _txn_note_text((request.form.get('notes') or '').strip())
@@ -3396,11 +3410,10 @@ def register(app):
         if qty_transferred <=0:
             qty_transferred = float(rental.total_pending_tools or 0)
 
-        transfer_date_raw = (request.form.get('transfer_date') or '').strip()
-        try:
-            transfer_date = datetime.strptime(transfer_date_raw, '%Y-%m-%d').date() if transfer_date_raw else _pkt_today()
-        except:
-            transfer_date = _pkt_today()
+        transfer_date, _date_err = _strict_form_date(request.form.get('transfer_date'), 'Transfer date')
+        if _date_err:
+            flash(_date_err, 'danger')
+            return redirect(request.referrer or url_for('hdc_tool_rental'))
 
         from_project_id = None
         from_stage_id = None

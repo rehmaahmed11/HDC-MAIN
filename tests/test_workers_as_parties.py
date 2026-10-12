@@ -145,7 +145,8 @@ class WorkersAsPartiesTestCase(unittest.TestCase):
         self.assertEqual(total, 1)
         self.assertEqual(CashFlowParty.query.filter_by(name='Rashid Khan').count(), 1)
 
-    def test_sync_revives_a_hidden_party(self):
+    def test_sync_does_not_revive_a_hidden_party(self):
+        """A user's Deactivate survives the directory sync (audit F2)."""
         sync_workers_as_parties()
         db.session.commit()
         party = self._party('Rashid Khan')
@@ -153,7 +154,19 @@ class WorkersAsPartiesTestCase(unittest.TestCase):
         db.session.commit()
         _created, reactivated, _total = sync_workers_as_parties()
         db.session.commit()
-        self.assertEqual(reactivated, 1)
+        self.assertEqual(reactivated, 0)
+        self.assertFalse(self._party('Rashid Khan').is_active)
+
+    def test_worker_activity_still_revives_a_hidden_party(self):
+        """Real activity (ensure_party default) still reactivates the row."""
+        from hdc.services.cashflow_register import ensure_party
+        sync_workers_as_parties()
+        db.session.commit()
+        party = self._party('Rashid Khan')
+        party.is_active = False
+        db.session.commit()
+        ensure_party('Rashid Khan', party_type='worker')
+        db.session.commit()
         self.assertTrue(self._party('Rashid Khan').is_active)
 
     def test_sync_never_reclassifies_an_existing_type(self):

@@ -32,6 +32,29 @@ from hdc.services.timekeeping import _has_recent_duplicate
 from hdc.utils.dates import _pkt_now_naive, _pkt_today
 from hdc.utils.format import _activity_at_for, _amount_to_words, _flt, _is_pdf_upload, _parse_date
 
+def _link_client_party(project, client_name):
+    """Ensure the project's client exists in Parties. Returns True on success.
+
+    Runs in a savepoint so a failure undoes only the party row, never the
+    project being saved; the failure is logged, not hidden.
+    """
+    from flask import current_app
+    from hdc.services.cashflow_register import ensure_party
+    try:
+        with db.session.begin_nested():
+            ensure_party(
+                client_name,
+                party_type='client',
+                phone=(project.client_phone or '').strip() or None,
+                note=f"Client / Owner of project {project.project_code} — {project.name}"[:300],
+            )
+        return True
+    except Exception:
+        current_app.logger.exception('Could not link client %r to Parties for project %s',
+                                     client_name, project.project_code)
+        return False
+
+
 def register(app):
     """Register Projects, stages, drawings, stage library, owner payments."""
     def drawing_return_url(drawing):
@@ -132,19 +155,15 @@ def register(app):
             db.session.flush()
             # ── Integrate with Parties: ensure client exists as a party ──────
             client_name = (p.client or '').strip()
-            if client_name:
-                try:
-                    from hdc.services.cashflow_register import ensure_party
-                    ensure_party(
-                        client_name,
-                        party_type='client',
-                        phone=(p.client_phone or '').strip() or None,
-                        note=f"Client / Owner of project {p.project_code} — {p.name}"[:300]
-                    )
-                except Exception:
-                    pass
+            linked = _link_client_party(p, client_name) if client_name else True
             db.session.commit()
-            flash(f'Project "{p.name}" added. Client "{client_name}" linked to Parties.', 'success')
+            if client_name and linked:
+                flash(f'Project "{p.name}" added. Client "{client_name}" linked to Parties.', 'success')
+            elif client_name:
+                flash(f'Project "{p.name}" added, but client "{client_name}" could not be linked to '
+                      f'Parties. Check the server log and re-save the project.', 'warning')
+            else:
+                flash(f'Project "{p.name}" added.', 'success')
             return redirect(url_for('hdc_project_detail', pid=p.id))
         client_options = known_client_party_names()
         initial_client = (request.args.get('client') or '').strip()
@@ -283,6 +302,12 @@ def register(app):
             if financial_fields.intersection(request.form) and permission_for(current_user, 'project_financials', 'write') is False:
                 abort(403)
             old_client = (p.client or '').strip()
+            # The client decides whose ledger the project's money lands in, so
+            # changing it needs the same write right as the contract figures.
+            if ('client' in request.form
+                    and request.form.get('client', '').strip() != old_client
+                    and permission_for(current_user, 'project_financials', 'write') is False):
+                abort(403)
             for field in ('name', 'client', 'client_phone', 'location', 'status'):
                 if field in request.form:
                     setattr(p, field, request.form.get(field, '').strip())
@@ -297,19 +322,15 @@ def register(app):
                 p.planned_end = _parse_date(request.form.get('planned_end')) if request.form.get('planned_end') else None
             # ── Keep Parties in sync when client name changes ────────────
             new_client = (p.client or '').strip()
+            linked = True
             if new_client and new_client.lower() != old_client.lower():
-                try:
-                    from hdc.services.cashflow_register import ensure_party
-                    ensure_party(
-                        new_client,
-                        party_type='client',
-                        phone=(p.client_phone or '').strip() or None,
-                        note=f"Client / Owner of project {p.project_code} — {p.name}"[:300]
-                    )
-                except Exception:
-                    pass
+                linked = _link_client_party(p, new_client)
             db.session.commit()
-            flash('Project updated.', 'success')
+            if linked:
+                flash('Project updated.', 'success')
+            else:
+                flash(f'Project updated, but client "{new_client}" could not be linked to Parties. '
+                      f'Check the server log and re-save the project.', 'warning')
             return redirect(url_for('hdc_project_detail', pid=pid))
         client_options = known_client_party_names()
         return render_template('projects/edit_project.html', p=p, client_options=client_options)
