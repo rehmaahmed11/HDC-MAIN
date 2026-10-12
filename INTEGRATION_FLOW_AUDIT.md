@@ -165,9 +165,9 @@ Severity: **High** = wrong money/party state visible to users; **Medium** = sile
 | F5 | Failed party link swallowed; success still shown | **Fixed** | `_link_client_party()` uses a savepoint, logs the error, and shows a warning instead of "linked". |
 | F6 | Client change skips permission check | **Fixed** | Changing `client` now requires `project_financials` write. |
 | F7 | Sync cost on every load | **Partly fixed** | Duplicate loop removed; project-form client list is a `DISTINCT` query. The directory still *creates* missing parties on GET (idempotent); it no longer writes reactivations. |
-| F8 | Renames don't propagate | **Not fixed (deliberate)** | Needs a `Project.client_party_id` foreign key and a migration. Left for a planned schema change. |
-| F9 | Money POST routes rely on layered guards | **Not fixed (partly covered)** | Guards were verified by reading, not by a new test. A matrix test for all money routes is still to do. |
-| F10 | Bare `except:` in tools | **Fixed** | Narrowed to `(TypeError, ValueError)`. Filter date parsers in `services/tool_rental.py` now ignore only `ValueError`, and still ignore bad filter dates silently. |
+| F8 | Renames don't propagate | **Not fixed (decision needed)** | Needs a `Project.client_party_id` foreign key and a migration. Ledger rows keep the old name as history, so the fix must choose how old statements are re-linked. |
+| F9 | Money POST routes rely on layered guards | **Partly fixed** | `test_non_finance_role_cannot_post_money` checks a staff user cannot post an owner receipt or a new transaction. Other money routes (tool payments, account edits, Money Center quick-post) are not yet in the matrix. |
+| F10 | Bare `except:` in tools; silent filter dates | **Fixed** | Bare excepts narrowed to `(TypeError, ValueError)`. Bad filter dates on the Reports and register pages now show a warning instead of being dropped. |
 
 **Behaviour change to note:** owner receipts and own-site tool money now show the owner's name in the Accounts "party" column instead of the project name. Project and rental identity still live in `project_id` and `related_entity_id`.
 
@@ -176,3 +176,5 @@ Severity: **High** = wrong money/party state visible to users; **Medium** = sile
 **Existing test changed:** `tests/test_workers_as_parties.py::test_sync_revives_a_hidden_party` asserted the F2 bug (a sync revives a hidden worker). It is now `test_sync_does_not_revive_a_hidden_party`, with a companion test that real worker activity still revives.
 
 **Full suite after the fixes:** 978 tests run, 5 skipped, the one failure above (now fixed). Re-run the full suite before merging.
+
+**Follow-up (second pass):** `tests/test_integration_flow_fixes.py` now has 8 cases, including the backfill re-filing a legacy row only, and the staff-role permission check. The earlier permission test was run on the admin session by mistake; it now uses a fresh client.

@@ -3991,6 +3991,14 @@ def register(app):
             'date_to': (request.args.get('date_to') or '').strip() or None,
             'search_text': (request.args.get('q') or '').strip() or None,
         }
+        for key in ('date_from', 'date_to'):
+            raw = filters.get(key)
+            if raw:
+                try:
+                    datetime.strptime(raw, '%Y-%m-%d')
+                except ValueError:
+                    flash(f'Ignored {key.replace("_", " ")} "{raw}": use YYYY-MM-DD.', 'warning')
+                    filters[key] = None
         rentals = search_rentals(filters)
         total_rented = sum(float(r.total_rented_qty or 0) for r in rentals)
         total_returned = sum(float(r.total_returned_qty or 0) for r in rentals)
@@ -4094,7 +4102,8 @@ def register(app):
                 continue
             try:
                 parsed = datetime.strptime(raw, '%Y-%m-%d').date()
-            except Exception:
+            except ValueError:
+                flash(f'Ignored {key.replace("_", " ")} "{raw}": use YYYY-MM-DD.', 'warning')
                 continue
             if key == 'date_from':
                 date_from = parsed

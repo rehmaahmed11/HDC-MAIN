@@ -148,5 +148,78 @@ class IntegrationFlowFixesTestCase(unittest.TestCase):
             self.assertIsNotNone(Project.query.filter_by(name='Tower F5').first())
 
 
+    # F9 ---------------------------------------------------------------------
+    def _login_as(self, username, role):
+        from werkzeug.security import generate_password_hash
+        from hdc.models.auth import HDCUser
+        with self.app.app_context():
+            if not HDCUser.query.filter_by(username=username).first():
+                db.session.add(HDCUser(username=username, role=role,
+                                       password_hash=generate_password_hash('Staff@1234')))
+                db.session.commit()
+        # Fresh client: a GET to /hdc/logout does not end the session, so
+        # reusing self.client would keep the admin session (a false pass).
+        self.client = self.app.test_client()
+        self.client.get('/hdc/login')
+        resp = self.client.post('/hdc/login', data={
+            'username': username, 'password': 'Staff@1234', '_csrf_token': self._token()})
+        self.assertEqual(resp.status_code, 302)
+
+    def test_non_finance_role_cannot_post_money(self):
+        pid = self._add_project('PF9', 'Site F9', 'Owner Bee')
+        with self.app.app_context():
+            acc_id = _accounts_default_company_cash().id
+            before_txn = AccountTransaction.query.count()
+            from hdc.models.accounts import OwnerPayment
+            before_op = OwnerPayment.query.count()
+        self._login_as('f9-staff', 'staff')
+        resp = self.client.post(f'/hdc/projects/{pid}/owner_payment', data={
+            'amount': '999', 'date': date.today().isoformat(),
+            'received_to_account_id': str(acc_id), '_csrf_token': self._token()})
+        self.assertIn(resp.status_code, (302, 403))
+        resp = self.client.post('/hdc/accounts/new-transaction', data={
+            'amount': '500', 'category': 'income', '_csrf_token': self._token()})
+        self.assertIn(resp.status_code, (302, 403))
+        with self.app.app_context():
+            from hdc.models.accounts import OwnerPayment
+            self.assertEqual(OwnerPayment.query.count(), before_op)
+            self.assertEqual(AccountTransaction.query.count(), before_txn)
+
+    # Backfill script (F1/F3 legacy rows) ------------------------------------
+    def test_backfill_refiles_legacy_owner_rows_only(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            'backfill_owner_party_names',
+            os.path.join(os.path.dirname(__file__), '..', 'scripts', 'backfill_owner_party_names.py'))
+        backfill = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(backfill)
+
+        pid = self._add_project('PB1', 'Villa Legacy', 'Owner Bee')
+        with self.app.app_context():
+            acc_id = _accounts_default_company_cash().id
+        self.client.get('/hdc/parties')
+        self.client.post(f'/hdc/projects/{pid}/owner_payment', data={
+            'amount': '10000', 'date': date.today().isoformat(),
+            'received_to_account_id': str(acc_id), '_csrf_token': self._token()})
+        with self.app.app_context():
+            txn = AccountTransaction.query.filter_by(type='project_income').one()
+            txn.party_name = 'Villa Legacy'          # simulate a pre-fix row
+            db.session.commit()
+            txn_id = txn.id
+            changes = list(backfill._planned_changes())
+            self.assertEqual([(t.id, new) for t, new in changes], [(txn_id, 'Owner Bee')])
+            for t, new in changes:
+                t.party_name = new
+            db.session.commit()
+            self.assertEqual(list(backfill._planned_changes()), [])
+            self.assertEqual(db.session.get(AccountTransaction, txn_id).party_name, 'Owner Bee')
+
+    # Filter dates (F10) ------------------------------------------------------
+    def test_bad_filter_date_warns_instead_of_silently_dropping(self):
+        resp = self.client.get('/hdc/tool-rental/reports?date_from=31-12-2026', follow_redirects=True)
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn('Ignored date from', resp.get_data(as_text=True))
+
+
 if __name__ == '__main__':
     unittest.main()
