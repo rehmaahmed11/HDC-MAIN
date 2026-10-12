@@ -19,7 +19,7 @@ from hdc.services.cashflow_register import (
 )
 from hdc.services.parties import (
     PARTY_CATEGORIES, build_party_directory, category_label, party_category,
-    party_ledger, type_choice_groups,
+    party_ledger, sync_project_clients_as_parties, type_choice_groups,
 )
 
 
@@ -60,6 +60,16 @@ def register(app):
                     else:
                         flash(f'All {total} workers are already in the directory.', 'info')
 
+                elif action == 'sync_clients':
+                    created, reactivated, total = sync_project_clients_as_parties()
+                    db.session.commit()
+                    if created or reactivated:
+                        flash(f'Project clients synced: {created} added, {reactivated} '
+                              f're-activated, out of {total} distinct clients on the books.',
+                              'success')
+                    else:
+                        flash(f'All {total} project clients are already in the directory.', 'info')
+
                 elif action == 'toggle_party':
                     party = db.session.get(
                         CashFlowParty, request.form.get('party_id', type=int) or 0)
@@ -90,13 +100,17 @@ def register(app):
         party_id = request.args.get('party_id', type=int)
 
         auto_added, auto_revived, worker_total = sync_workers_as_parties()
-        if auto_added or auto_revived:
+        c_added, c_revived, client_total = sync_project_clients_as_parties()
+        if auto_added or auto_revived or c_added or c_revived:
             db.session.commit()
 
         directory = build_party_directory(
             search=search, category=category, party_id=party_id, status=status)
         directory['counts']['worker_total'] = worker_total
         directory['counts']['auto_added'] = auto_added
+        directory['counts']['client_total'] = client_total
+        directory['counts']['client_auto_added'] = c_added
+        directory['counts']['client_auto_revived'] = c_revived
 
         return render_template(
             'parties/parties_directory.html',
@@ -104,6 +118,7 @@ def register(app):
             counts=directory['counts'],
             party_options=directory['party_options'],
             name_options=directory['name_options'],
+            client_name_options=directory.get('client_name_options') or [],
             type_choices=type_choice_groups(),
             categories=PARTY_CATEGORIES,
             search=search,

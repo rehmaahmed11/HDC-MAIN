@@ -6,8 +6,52 @@
 {% block content %}
 <div class="card hdc-card mt-2">
     <div class="card-body d-flex justify-content-between align-items-start gap-3 flex-wrap">
-        <div><strong>{{ p.name }}</strong><div class="small text-muted">{{ p.client or 'No client set' }}{% if p.client_phone %} · {{ p.client_phone }}{% endif %}{% if p.location %} · {{ p.location }}{% endif %}</div></div>
-        <div class="d-flex align-items-center gap-2"><span class="badge bg-secondary">{{ p.status }}</span>
+        <div>
+            <strong>{{ p.name }}</strong>
+            <div class="small text-muted">
+                {% if p.client %}
+                    {% if client_party_id %}
+                        <a href="{{ url_for('hdc_party_ledger', party_id=client_party_id) }}" class="fw-semibold text-decoration-none" title="Open Party ledger for this client">
+                            <i class="fas fa-user-tie me-1"></i>{{ p.client }}
+                        </a>
+                        <span class="badge bg-light text-dark border ms-1">Client / Owner linked to Parties</span>
+                    {% else %}
+                        <span class="fw-semibold"><i class="fas fa-user-tie me-1"></i>{{ p.client }}</span>
+                        <span class="badge bg-warning text-dark ms-1">Not yet in Parties — will auto-create</span>
+                    {% endif %}
+                {% else %}
+                    No client set
+                {% endif %}
+                {% if p.client_phone %} · {{ p.client_phone }}{% endif %}{% if p.location %} · {{ p.location }}{% endif %}
+            </div>
+            {% if client_party %}
+            <div class="small mt-1 d-flex flex-wrap gap-1 align-items-center">
+                <a href="{{ url_for('hdc_party_ledger', party_id=client_party.id) }}" class="btn btn-xs btn-outline-primary btn-sm">
+                    <i class="fas fa-book-open me-1"></i>Open Party Ledger ({{ client_party.name }})
+                </a>
+                <a href="{{ url_for('hdc_parties', category='client', party_id=client_party.id) }}" class="btn btn-xs btn-outline-secondary btn-sm">
+                    <i class="fas fa-address-book me-1"></i>View in Parties Directory
+                </a>
+                {% if client_statement %}
+                    {% if client_statement.rentals_count %}<span class="badge bg-warning text-dark"><i class="fas fa-screwdriver-wrench me-1"></i>{{ client_statement.rentals_count }} rental(s) {% if client_statement.rental_due %}· {{ "{:,.0f}".format(client_statement.rental_due) }} due{% endif %}</span>{% endif %}
+                    {% if client_statement.loans_count %}<span class="badge bg-primary"><i class="fas fa-money-bill-transfer me-1"></i>{{ client_statement.loans_count }} loan(s) {% if client_statement.loan_outstanding %}· {{ "{:,.0f}".format(client_statement.loan_outstanding) }} outstanding{% endif %}</span>{% endif %}
+                    {% if client_statement.projects_count > 1 %}<span class="badge bg-indigo" style="background:#4f46e5"><i class="fas fa-project-diagram me-1"></i>{{ client_statement.projects_count }} project(s) owned</span>{% endif %}
+                {% endif %}
+            </div>
+            {% if client_statement and (client_statement.rentals_all or client_statement.loans_all) %}
+            <div class="alert alert-light border small py-2 mt-2 mb-0">
+                <i class="fas fa-circle-info me-1 text-primary"></i><strong>{{ client_party.name }}</strong> unified ledger:
+                {% if client_statement.rentals_count %} rents tools ({{ client_statement.rentals_external|length }} external as customer, {{ client_statement.rentals_internal|length }} internal via owned projects){% endif %}
+                {% if client_statement.loans_count %}{% if client_statement.rentals_count %} · {% endif %}has {{ client_statement.loans_count }} loan record(s){% endif %}
+                — open full ledger to see all rent payments, loan movements and project receipts together.
+                <a href="{{ url_for('hdc_party_ledger', party_id=client_party.id) }}#linked-rentals" class="ms-1">View rentals</a>
+                <a href="{{ url_for('hdc_party_ledger', party_id=client_party.id) }}#linked-loans" class="ms-1">View loans</a>
+            </div>
+            {% endif %}
+            {% endif %}
+        </div>
+        <div class="d-flex align-items-center gap-2">
+            <span class="badge bg-secondary">{{ p.status }}</span>
             {% if hdc_page_allowed('project_detail', 'write') and hdc_record_allowed('hdc_project', p.id, 'write') %}<a class="btn btn-sm btn-outline-primary" href="{{ url_for('hdc_edit_project', pid=p.id) }}">Edit project</a>{% endif %}
         </div>
     </div>

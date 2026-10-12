@@ -9,6 +9,7 @@
             <span class="badge bg-light text-dark border">{{ type_label }}</span>
             <span class="ms-1">{{ category_label }}</span>
             {% if not party.is_active %}<span class="badge bg-secondary ms-1">Hidden</span>{% endif %}
+            {% if category == 'client' %}<span class="badge bg-indigo ms-1" style="background:#4f46e5"><i class="fas fa-link me-1"></i>Project Owner — unified ledger</span>{% endif %}
         </div>
         {% if party.phone %}<div class="small text-muted mt-1"><i class="fas fa-phone me-1"></i>{{ party.phone }}</div>{% endif %}
         {% if party.note %}<div class="small text-muted">{{ party.note }}</div>{% endif %}
@@ -27,6 +28,26 @@
             <i class="fas fa-hard-hat me-1"></i>Worker Ledger
         </a>
         {% endif %}
+        {% if statement.projects_count %}
+        <a href="#linked-projects" class="btn btn-sm btn-outline-indigo" style="border-color:#4f46e5;color:#4f46e5">
+            <i class="fas fa-project-diagram me-1"></i>{{ statement.projects_count }} Project(s)
+        </a>
+        {% endif %}
+        {% if statement.rentals_count %}
+        <a href="#linked-rentals" class="btn btn-sm btn-outline-orange" style="border-color:#ea580c;color:#ea580c">
+            <i class="fas fa-screwdriver-wrench me-1"></i>{{ statement.rentals_count }} Rental(s)
+        </a>
+        {% endif %}
+        {% if statement.loans_count %}
+        <a href="#linked-loans" class="btn btn-sm btn-outline-primary">
+            <i class="fas fa-money-bill-transfer me-1"></i>{{ statement.loans_count }} Loan(s)
+        </a>
+        {% endif %}
+        {% if category == 'client' %}
+        <a href="{{ url_for('hdc_add_project', client=party.name) }}" class="btn btn-sm btn-mint">
+            <i class="fas fa-plus me-1"></i>New Project for this Client
+        </a>
+        {% endif %}
         <a href="{{ url_for('hdc_parties', category=category) }}" class="btn btn-sm btn-outline-secondary">
             <i class="fas fa-arrow-left me-1"></i>Back to Parties
         </a>
@@ -34,53 +55,211 @@
 </div>
 
 <div class="row g-3 mb-3">
-    <div class="col-6 col-md-3">
+    <div class="col-6 col-md-2">
         <div class="kpi-card kpi-green h-100">
             <div class="kpi-label">Money In</div>
             <div class="kpi-value small">{{ "{:,.0f}".format(statement.total_in) }}</div>
             <div class="kpi-sub">Received from this party</div>
         </div>
     </div>
-    <div class="col-6 col-md-3">
+    <div class="col-6 col-md-2">
         <div class="kpi-card kpi-red h-100">
             <div class="kpi-label">Money Out</div>
             <div class="kpi-value small">{{ "{:,.0f}".format(statement.total_out) }}</div>
             <div class="kpi-sub">Paid to this party</div>
         </div>
     </div>
-    <div class="col-6 col-md-3">
+    <div class="col-6 col-md-2">
         <div class="kpi-card {% if statement.balance >= 0 %}kpi-teal{% else %}kpi-orange{% endif %} h-100">
             <div class="kpi-label">Balance</div>
             <div class="kpi-value small">{{ "{:,.0f}".format(statement.balance) }}</div>
             <div class="kpi-sub">{% if statement.balance >= 0 %}Net received{% else %}Net paid out{% endif %}</div>
         </div>
     </div>
-    <div class="col-6 col-md-3">
+    <div class="col-6 col-md-2">
         <div class="kpi-card kpi-blue h-100">
             <div class="kpi-label">Posted Entries</div>
             <div class="kpi-value">{{ statement.entry_count }}</div>
             <div class="kpi-sub">Same rows as Accounts → All Entries</div>
         </div>
     </div>
+    <div class="col-6 col-md-2">
+        <div class="kpi-card kpi-indigo h-100" style="border-left-color:#4f46e5">
+            <div class="kpi-label">Projects Owned</div>
+            <div class="kpi-value">{{ statement.projects_count }}</div>
+            <div class="kpi-sub">{{ "{:,.0f}".format(statement.projects_contract) }} contract · {{ "{:,.0f}".format(statement.projects_receivable) }} receivable</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-2">
+        <div class="kpi-card kpi-orange h-100" style="border-left-color:#ea580c">
+            <div class="kpi-label">Rentals</div>
+            <div class="kpi-value">{{ statement.rentals_count }}</div>
+            <div class="kpi-sub">{% if statement.rental_due %}{{ "{:,.0f}".format(statement.rental_due) }} PKR due{% else %}No due{% endif %}</div>
+        </div>
+    </div>
 </div>
 
-{% if statement.rental_due or statement.worker or statement.loan_outstanding %}
+{% if statement.rental_due or statement.worker or statement.loan_outstanding or statement.projects_count or statement.loans_count or statement.rentals_count %}
 <div class="alert alert-info py-2 small mb-3">
-    {% if statement.rental_due %}
-    <div><i class="fas fa-screwdriver-wrench me-1"></i>HDC Tools still due: <strong>{{ "{:,.0f}".format(statement.rental_due) }} PKR</strong> across {{ statement.rentals }} rental(s).</div>
+    {% if statement.projects_count %}
+    <div><i class="fas fa-project-diagram me-1"></i>Owns <strong>{{ statement.projects_count }} project(s)</strong> — contract {{ "{:,.0f}".format(statement.projects_contract) }} PKR, received {{ "{:,.0f}".format(statement.projects_received) }} PKR, receivable {{ "{:,.0f}".format(statement.projects_receivable) }} PKR. <a href="#linked-projects">View projects</a>.</div>
+    {% endif %}
+    {% if statement.rentals_count %}
+    <div><i class="fas fa-screwdriver-wrench me-1"></i>HDC Tools rentals: <strong>{{ statement.rentals_count }}</strong> ({{ statement.rentals_external|length }} external as customer, {{ statement.rentals_internal|length }} internal via owned projects). Still due: <strong>{{ "{:,.0f}".format(statement.rental_due) }} PKR</strong>. <a href="#linked-rentals">View rentals</a>.</div>
     {% endif %}
     {% if statement.worker and statement.worker.balance %}
     <div><i class="fas fa-hard-hat me-1"></i>Worker balance due: <strong>{{ "{:,.0f}".format(statement.worker.balance) }} PKR</strong>.</div>
     {% endif %}
     {% if statement.loan_outstanding %}
-    <div><i class="fas fa-money-bill-transfer me-1"></i>Open loan principal: <strong>{{ "{:,.0f}".format(statement.loan_outstanding) }} PKR</strong> ({{ statement.open_loans }} loan(s)).</div>
+    <div><i class="fas fa-money-bill-transfer me-1"></i>Open loan principal: <strong>{{ "{:,.0f}".format(statement.loan_outstanding) }} PKR</strong> ({{ statement.open_loans }} loan(s)). <a href="#linked-loans">View loans</a>.</div>
     {% endif %}
+    <div class="mt-1"><i class="fas fa-circle-info me-1"></i>This is the <strong>unified owner ledger</strong>: project receipts, tool rental payments (external customer = same name, or internal rentals for owned projects), loan movements, and any other money tagged with this name all appear in one chronological statement below. So you can check if an owner also rents tools or has loans.</div>
+</div>
+{% endif %}
+
+{# ── Linked Projects ── #}
+{% if statement.projects %}
+<div class="card hdc-card mb-3" id="linked-projects">
+    <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+        <span><i class="fas fa-project-diagram me-2"></i>Projects owned by {{ party.name }} <span class="badge bg-secondary ms-1">{{ statement.projects|length }}</span></span>
+        <div class="d-flex gap-2">
+            <a href="{{ url_for('hdc_add_project', client=party.name) }}" class="btn btn-sm btn-mint"><i class="fas fa-plus me-1"></i>New Project</a>
+            <a href="{{ url_for('hdc_projects') }}" class="btn btn-sm btn-outline-secondary">All Projects</a>
+        </div>
+    </div>
+    <div class="table-responsive">
+        <table class="table hdc-table table-sm mb-0 align-middle">
+            <thead>
+                <tr>
+                    <th>Code</th>
+                    <th>Project</th>
+                    <th>Location</th>
+                    <th>Status</th>
+                    <th class="text-end">Contract</th>
+                    <th class="text-end">Received</th>
+                    <th class="text-end">Receivable</th>
+                    <th class="text-end">Profit</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for p in statement.projects %}
+                <tr {{ p|hdc_row_attrs }}>
+                    <td><span class="badge bg-secondary">{{ p.project_code }}</span></td>
+                    <td><a href="{{ url_for('hdc_project_detail', pid=p.id) }}" class="fw-bold text-decoration-none">{{ p.name }}</a></td>
+                    <td class="small text-muted">{{ p.location or '—' }}</td>
+                    <td><span class="badge {% if (p.status or '')|lower == 'active' %}bg-success{% else %}bg-secondary{% endif %}">{{ p.status }}</span></td>
+                    <td class="text-end">{{ "{:,.0f}".format(p.owner_contract_value or 0) }}</td>
+                    <td class="text-end text-success">{{ "{:,.0f}".format(p.total_received or 0) }}</td>
+                    <td class="text-end text-warning">{{ "{:,.0f}".format(p.remaining_receivable or 0) }}</td>
+                    <td class="text-end {% if (p.net_profit or 0) >=0 %}text-success{% else %}text-danger{% endif %}">{{ "{:,.0f}".format(p.net_profit or 0) }}</td>
+                    <td class="text-end"><a href="{{ url_for('hdc_project_detail', pid=p.id) }}" class="btn btn-sm btn-outline-primary"><i class="fas fa-eye"></i></a></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+            <tfoot class="table-light fw-bold">
+                <tr>
+                    <td colspan="4" class="text-end">Totals</td>
+                    <td class="text-end">{{ "{:,.0f}".format(statement.projects_contract) }}</td>
+                    <td class="text-end">{{ "{:,.0f}".format(statement.projects_received) }}</td>
+                    <td class="text-end">{{ "{:,.0f}".format(statement.projects_receivable) }}</td>
+                    <td></td>
+                    <td></td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+{# ── Linked Rentals — does this owner also rent tools? ── #}
+{% if statement.rentals_all %}
+<div class="card hdc-card mb-3" id="linked-rentals">
+    <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+        <span><i class="fas fa-screwdriver-wrench me-2"></i>Tool Rentals for {{ party.name }} <span class="badge bg-secondary ms-1">{{ statement.rentals_all|length }}</span>
+            <small class="text-muted ms-2">{{ statement.rentals_external|length }} external · {{ statement.rentals_internal|length }} internal via owned projects</small>
+        </span>
+        <a href="{{ url_for('hdc_tool_rental') }}" class="btn btn-sm btn-outline-secondary">HDC Tools</a>
+    </div>
+    <div class="table-responsive">
+        <table class="table hdc-table table-sm mb-0 align-middle">
+            <thead>
+                <tr>
+                    <th>Rental Code</th>
+                    <th>Type</th>
+                    <th>Project / Customer</th>
+                    <th>Date</th>
+                    <th class="text-end">Total</th>
+                    <th class="text-end">Paid</th>
+                    <th class="text-end">Due</th>
+                    <th>Status</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in statement.rentals_all %}
+                <tr>
+                    <td><span class="badge bg-secondary">{{ r.rental_code }}</span></td>
+                    <td><span class="badge {% if r.renter_type == 'external' %}bg-warning text-dark{% else %}bg-info text-dark{% endif %}">{{ r.renter_type }}</span></td>
+                    <td class="small">
+                        {% if r.renter_type == 'external' %}{{ r.customer_name }}{% else %}{{ r.project.name if r.project else '—' }}<div class="text-muted">{{ r.customer_name or '' }}</div>{% endif %}
+                    </td>
+                    <td class="small">{{ r.rental_date or '' }}</td>
+                    <td class="text-end">{{ "{:,.0f}".format(r.total_amount or 0) }}</td>
+                    <td class="text-end text-success">{{ "{:,.0f}".format(r.total_paid or 0) }}</td>
+                    <td class="text-end {% if (r.total_amount or 0) - (r.total_paid or 0) - (r.total_discount or 0) > 0 %}text-danger fw-bold{% endif %}">
+                        {{ "{:,.0f}".format((r.total_amount or 0) - (r.total_paid or 0) - (r.total_discount or 0)) }}
+                    </td>
+                    <td><span class="badge {% if r.is_void %}bg-secondary{% elif (r.total_amount or 0) - (r.total_paid or 0) - (r.total_discount or 0) <= 0 %}bg-success{% else %}bg-warning text-dark{% endif %}">{% if r.is_void %}Void{% elif (r.total_amount or 0) - (r.total_paid or 0) - (r.total_discount or 0) <= 0 %}Paid{% else %}Due{% endif %}</span></td>
+                    <td class="text-end"><a href="{{ url_for('hdc_tool_rental_detail', rental_id=r.id) }}" class="btn btn-sm btn-outline-primary"><i class="fas fa-eye"></i></a></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+{# ── Linked Loans — does this owner have loans? ── #}
+{% if statement.loans_all %}
+<div class="card hdc-card mb-3" id="linked-loans">
+    <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+        <span><i class="fas fa-money-bill-transfer me-2"></i>Loans for {{ party.name }} <span class="badge bg-secondary ms-1">{{ statement.loans_all|length }}</span>
+            <small class="text-muted ms-2">{{ statement.loans_open|length }} open · {{ statement.loans_closed|length }} closed</small>
+        </span>
+    </div>
+    <div class="table-responsive">
+        <table class="table hdc-table table-sm mb-0 align-middle">
+            <thead>
+                <tr>
+                    <th>Loan</th>
+                    <th>Type</th>
+                    <th>Status</th>
+                    <th class="text-end">Principal</th>
+                    <th class="text-end">Outstanding</th>
+                    <th>Date</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for ln in statement.loans_all %}
+                <tr>
+                    <td class="small">{{ ln.party_name }}<div class="text-muted">#{{ ln.id }}</div></td>
+                    <td><span class="badge bg-light text-dark border">{{ ln.party_type or ln.type or '—' }}</span></td>
+                    <td><span class="badge {% if (ln.status or '') == 'open' %}bg-success{% else %}bg-secondary{% endif %}">{{ ln.status }}</span></td>
+                    <td class="text-end">{{ "{:,.0f}".format((ln.principal_minor or 0)/100.0) }}</td>
+                    <td class="text-end {% if (ln.outstanding_minor or 0) > 0 %}text-danger fw-bold{% else %}text-success{% endif %}">{{ "{:,.0f}".format((ln.outstanding_minor or 0)/100.0) }}</td>
+                    <td class="small">{{ ln.created_at or '' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
 </div>
 {% endif %}
 
 <div class="card hdc-card">
     <div class="card-header hdc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-        <span><i class="fas fa-book me-2"></i>Financials — by date &amp; time</span>
+        <span><i class="fas fa-book me-2"></i>Financials — by date &amp; time (unified ledger)</span>
         <div class="d-flex gap-2">
             {% if include_void %}
             <a href="{{ url_for('hdc_party_ledger', party_id=party.id) }}" class="btn btn-sm btn-outline-dark">Hide voided</a>
@@ -134,7 +313,9 @@
                 {% else %}
                 <tr>
                     <td colspan="8" class="text-center text-muted py-4">
-                        No posted entries for this party yet. Record money (New Transaction, CF Register, HDC Tools payment, worker payment) and it lands here and in All Entries together.
+                        No posted entries for this party yet.<br>
+                        <span class="small">Record money (New Transaction, CF Register, HDC Tools payment, worker payment, owner receipt) and it lands here and in All Entries together.<br>
+                        For a project owner, owner receipts (project payments) + tool rental receipts (if same name rents tools externally) + loan movements all share this one ledger.</span>
                     </td>
                 </tr>
                 {% endfor %}
