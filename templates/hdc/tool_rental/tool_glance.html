@@ -5,6 +5,7 @@
 {% block content %}
 {% set tools_active = 'glance' %}
 {% include "tool_rental/_tools_nav.html" %}
+{% include "tool_rental/_scope_note.html" %}
 
 <div class="row g-3 mt-1">
     <div class="col-6 col-md-3"><div class="kpi-card kpi-blue"><div class="kpi-icon"><i class="fas fa-barcode"></i></div><div class="kpi-value">{{ "%.0f"|format(kpis.pieces) }}</div><div class="kpi-label">Pieces (Tool + Serial)</div></div></div>
@@ -162,5 +163,6 @@
             </tbody>
         </table>
     </div>
+    {% include 'shared/_pagination.html' %}
 </div>
 {% endblock %}

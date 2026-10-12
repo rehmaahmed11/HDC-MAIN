@@ -657,6 +657,56 @@
         </div>
     </div>
 </div>
+{% if can_write_tools %}
+<div class="card hdc-card mt-3 {% if rental.is_void %}border-danger{% endif %}">
+    <div class="card-header hdc-card-header">
+        <i class="fas fa-ban me-2"></i>{% if rental.is_void %}Cancelled rental{% else %}Cancel this rental{% endif %}
+    </div>
+    <div class="card-body">
+        {% if rental.is_void %}
+            <p class="mb-2">
+                <span class="badge bg-danger">Cancelled</span>
+                {{ rental.void_reason or 'No reason recorded' }}
+                {% if rental.voided_at %}<span class="text-muted">— {{ rental.voided_at.strftime('%d-%b-%Y %H:%M') }}{% endif %}
+            </p>
+            <p class="text-muted small mb-3">A cancelled rental holds no stock and is hidden from the lists,
+                the dashboard and the reports. Reinstate it if it was cancelled by mistake — its pieces go
+                back out to {{ rental.current_location_label or 'the recorded location' }}.</p>
+            <form method="post" action="{{ url_for('hdc_tool_rental_restore', rental_id=rental.id) }}">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+                <button type="submit" class="btn btn-mint"><i class="fas fa-rotate-left me-1"></i>Reinstate rental</button>
+            </form>
+        {% else %}
+            <p class="text-muted small mb-2">
+                Cancelling returns every piece still out to the warehouse and removes the rental from the
+                books. Money is never reversed here:
+                {% if live_money_rows %}
+                    <strong class="text-danger">void the {{ live_money_rows }} live payment/discount row(s) first</strong>.
+                {% else %}
+                    there is no live payment or discount on this rental, so it can be cancelled now.
+                {% endif %}
+            </p>
+            <form method="post" action="{{ url_for('hdc_tool_rental_void', rental_id=rental.id) }}"
+                  onsubmit="return confirm('Cancel rental {{ rental.rental_code }}? Its pieces go back to the warehouse.');">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+                <div class="row g-2 align-items-end">
+                    <div class="col-md-8">
+                        <label class="form-label" for="voidReason">Reason (required)</label>
+                        <input type="text" class="form-control" id="voidReason" name="void_reason" maxlength="200"
+                               placeholder="e.g. created in error — duplicate of RENT-00042" required>
+                    </div>
+                    <div class="col-md-4">
+                        <button type="submit" class="btn btn-outline-danger w-100"
+                                {% if live_money_rows %}disabled title="Void the live payments/discounts first"{% endif %}>
+                            <i class="fas fa-ban me-1"></i>Cancel rental
+                        </button>
+                    </div>
+                </div>
+            </form>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
 {% endblock %}
 
 {% block extra_js %}

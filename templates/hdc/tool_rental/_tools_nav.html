@@ -1,16 +1,27 @@
 {# Section navigation for the HDC Tools area — included at the top of every
    tool page so the user can jump between the main pages without hunting
    through the sidebar.  `tools_active` (string) marks the current tab.
-   Kept simple on purpose: everyone sees Dashboard / Rentals / Inventory;
-   the audit-style pages (Tracking, Reports, Audit) are shown to admin only,
-   except that a count sheet is a finance-managed record too, so an accountant
-   (or anyone explicitly granted the Audit page) sees it as well. #}
+
+   Gating rule: a tab is shown exactly when the page behind it is readable by
+   this user, using the same permission map the routes enforce
+   (`may_access_path` -> page id).  Role checks live nowhere here any more:
+   they used to hide Tracking / Reports / Glance / Serials from a manager who
+   may read them, and to show Inventory-linked tabs to a user granted only
+   `tool_inventory`, who then collected 403s.
+
+   Page ids (hdc/services/permissions.py):
+     tools          -> dashboard, rentals hub, rental detail, new transaction,
+                       glance, track-by-serial, tool position, APIs
+     tool_inventory -> inventory + categories
+     tool_tracking  -> tracking + reports
+     tool_audit     -> physical audit pages #}
 {% set tools_active = tools_active|default('') %}
-{% set tools_is_admin = (current_user.role or '')|trim|lower == 'admin' %}
-{% set tools_is_accountant = (current_user.role or '')|trim|lower == 'accountant' %}
-{% set tools_can_audit = tools_is_admin or tools_is_accountant
-                         or (current_user.permissions_json and hdc_page_allowed('tool_audit', 'read')) %}
+{% set nav_tools = hdc_page_allowed('tools', 'read') %}
+{% set nav_inventory = hdc_page_allowed('tool_inventory', 'read') %}
+{% set nav_tracking = hdc_page_allowed('tool_tracking', 'read') %}
+{% set nav_audit = hdc_page_allowed('tool_audit', 'read') %}
 <div class="tools-subnav mb-3">
+    {% if nav_tools %}
     <a href="{{ url_for('hdc_tool_rental_dashboard') }}"
        class="tools-subnav-link {% if tools_active == 'dashboard' %}active{% endif %}">
         <i class="fas fa-gauge-high me-1"></i>Dashboard
@@ -20,35 +31,40 @@
         <i class="fas fa-file-contract me-1"></i>Rentals
     </a>
     {# The one tool transaction form (Rent Out / Return / Maintenance).
-       Everyone who can see the Tools section sees the tab; the page itself
-       gates who may record. #}
+       Everyone who may read the section sees the tab; the page itself and the
+       money-write gate decide who may record. #}
     <a href="{{ url_for('hdc_tool_txn') }}"
        class="tools-subnav-link {% if tools_active == 'transaction' %}active{% endif %}">
         <i class="fas fa-arrow-right-arrow-left me-1"></i>New Transaction
     </a>
+    {% endif %}
+    {% if nav_inventory %}
     <a href="{{ url_for('hdc_tool_rental_inventory') }}"
        class="tools-subnav-link {% if tools_active == 'inventory' %}active{% endif %}">
         <i class="fas fa-warehouse me-1"></i>Inventory
     </a>
-    {% if tools_can_audit %}
+    {% endif %}
+    {% if nav_audit %}
     <a href="{{ url_for('hdc_tool_rental_audit') }}"
        class="tools-subnav-link {% if tools_active == 'audit' %}active{% endif %}">
         <i class="fas fa-clipboard-check me-1"></i>Audit
         {% if audit_open_count %}<span class="tools-nav-count">{{ audit_open_count }}</span>{% endif %}
     </a>
     {% endif %}
-    {% if tools_is_admin %}
+    {% if nav_tools %}
     <a href="{{ url_for('hdc_tool_rental_glance') }}"
        class="tools-subnav-link {% if tools_active == 'glance' %}active{% endif %}">
         <i class="fas fa-eye me-1"></i>Glance
     </a>
-    <a href="{{ url_for('hdc_tool_rental_tracking') }}"
-       class="tools-subnav-link {% if tools_active == 'tracking' %}active{% endif %}">
-        <i class="fas fa-map-location-dot me-1"></i>Tracking
-    </a>
     <a href="{{ url_for('hdc_tool_rental_serials') }}"
        class="tools-subnav-link {% if tools_active == 'serials' %}active{% endif %}">
         <i class="fas fa-barcode me-1"></i>Track by Serial
+    </a>
+    {% endif %}
+    {% if nav_tracking %}
+    <a href="{{ url_for('hdc_tool_rental_tracking') }}"
+       class="tools-subnav-link {% if tools_active == 'tracking' %}active{% endif %}">
+        <i class="fas fa-map-location-dot me-1"></i>Tracking
     </a>
     <a href="{{ url_for('hdc_tool_rental_reports') }}"
        class="tools-subnav-link {% if tools_active == 'reports' %}active{% endif %}">

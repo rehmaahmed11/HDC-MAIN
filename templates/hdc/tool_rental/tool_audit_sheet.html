@@ -474,6 +474,18 @@
 </div>
 {% endif %}
 
+{% if audit and audit.is_void %}
+<div class="alert alert-warning mt-3 mb-0">
+    <i class="fas fa-ban me-1" aria-hidden="true"></i>
+    <strong>Cancelled count.</strong> {{ audit.void_reason or 'No reason recorded' }}
+    {% if posted_adjustments %}
+        It still has {{ posted_adjustments }} adjustment(s) posted in the stock books — re-opening is
+        blocked for a cancelled sheet, so correct the tool from Inventory if that was a mistake.
+    {% else %}
+        Nothing from this sheet was written to stock.
+    {% endif %}
+</div>
+{% endif %}
 {% if audit and can_adjust and audit.is_open %}
 <div class="d-flex justify-content-between flex-wrap gap-2 mt-3">
     <small class="text-muted">
@@ -482,17 +494,32 @@
         rental's own page, where payments and discounts live.
     </small>
     <form method="POST" action="{{ url_for('hdc_tool_rental_audit_void', audit_id=audit.id) }}"
-          class="d-flex gap-2 align-items-center"
-          onsubmit="return confirm('Cancel this count sheet? Stock already adjusted is not reversed.');">
+          class="d-flex gap-2 align-items-center flex-wrap"
+          onsubmit="return confirm('Cancel this count sheet?{% if posted_adjustments %} Tick the reverse box if the stock it posted should come back too.{% endif %}');">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
         <input type="text" name="void_reason" class="form-control form-control-sm" placeholder="why cancelled">
+        {% if posted_adjustments %}
+        <label class="form-check-label small text-nowrap" for="voidReverse{{ audit.id }}">
+            <input type="checkbox" class="form-check-input" id="voidReverse{{ audit.id }}"
+                   name="reverse_adjustments" value="1">
+            reverse the {{ posted_adjustments }} posted adjustment(s)
+        </label>
+        {% endif %}
         <button type="submit" class="btn btn-sm btn-outline-danger">Cancel this count</button>
     </form>
 </div>
 {% endif %}
 {% if audit and not audit.is_open and can_adjust %}
-<form method="POST" action="{{ url_for('hdc_tool_rental_audit_reopen', audit_id=audit.id) }}" class="mt-2">
+<form method="POST" action="{{ url_for('hdc_tool_rental_audit_reopen', audit_id=audit.id) }}"
+      class="mt-2 d-flex gap-2 align-items-center flex-wrap">
     <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+    {% if posted_adjustments %}
+    <label class="form-check-label small" for="reopenReverse{{ audit.id }}">
+        <input type="checkbox" class="form-check-input" id="reopenReverse{{ audit.id }}"
+               name="reverse_adjustments" value="1">
+        reverse the {{ posted_adjustments }} adjustment(s) this sheet posted
+    </label>
+    {% endif %}
     <button type="submit" class="btn btn-sm btn-outline-secondary">
         <i class="fas fa-rotate-left me-1" aria-hidden="true"></i>Re-open this sheet for correcting the count
     </button>

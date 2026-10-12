@@ -6,6 +6,7 @@
 {% set tools_active = 'tracking' %}
 {% from "shared/_combo_field.html" import combo_select %}
 {% include "tool_rental/_tools_nav.html" %}
+{% include "tool_rental/_scope_note.html" %}
 
 <div class="row g-3 mt-1">
     <div class="col-6 col-md-3"><div class="kpi-card kpi-blue"><div class="kpi-icon"><i class="fas fa-tools"></i></div><div class="kpi-value">{{ "%.0f"|format(kpis.total_tools) }}</div><div class="kpi-label">Total Owned</div></div></div>
