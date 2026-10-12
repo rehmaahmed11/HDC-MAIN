@@ -34,12 +34,15 @@ from sqlalchemy import func
 from hdc.extensions import db
 from hdc.models.projects import Project, Stage
 from hdc.models.tool_rental import (
-    MOVEMENT_AUDIT_ADJUST, TOOL_AUDIT_LOSS_REASONS, TOOL_SCRAP_REASONS, Tool,
-    ToolAudit, ToolAuditLine, ToolMovementLog, ToolRental, ToolRentalItem, ToolScrap,
+    MOVEMENT_AUDIT_ADJUST, MOVEMENT_SCRAP_OUT, TOOL_AUDIT_LOSS_REASONS,
+    TOOL_SCRAP_REASONS, Tool, ToolAudit, ToolAuditLine, ToolMovementLog,
+    ToolPurchase, ToolRental, ToolRentalItem, ToolScrap, ToolSerial,
+    ToolSerialMovement,
 )
 from hdc.services.record_permissions import record_code_query
 from hdc.services.tool_rental import (
-    STORE_LABEL, create_movement_log, record_tool_scrap, recalc_rental_totals,
+    STORE_LABEL, SUPPLIER_LABEL, assign_serials_to_rental, create_movement_log,
+    record_tool_purchase, record_tool_scrap, recalc_rental_totals,
     tool_available_for_integrity,
 )
 from hdc.services.tool_tracking import (
@@ -1104,21 +1107,61 @@ def _lift_pending(audit, entry, user_id):
     return lifted
 
 
-def _grant_gain(audit, entry, user_id, note_tail):
-    """Add pieces the book did not know about: found tools are HDC's tools."""
+def _grant_gain(audit, entry, user_id, note_tail, when=None):
+    """Add pieces the book did not know about: found tools are HDC's tools.
+
+    The overage is posted as a **stock-in row** (valued at the tool's book cost)
+    instead of a bare ``total_quantity`` bump.  Without the purchase row the
+    identity ``owned == purchased - scrapped`` broke on every audit gain: a count
+    that found 6 extra pieces left the tool showing 14 owned against 8 purchased,
+    and every stock report disagreed with the inventory list from then on.
+    """
     tool = db.session.get(Tool, int(entry['tool'].id))
     if tool is None:
         return
     qty = _q2(entry['qty'])
-    tool.total_quantity = _q2(_q2(tool.total_quantity) + qty)
-    tool.updated_at = _pkt_now_naive()
     parked = entry.get('target')
+    last_serial_id = int(db.session.query(func.coalesce(func.max(ToolSerial.id), 0))
+                         .filter(ToolSerial.tool_id == tool.id).scalar() or 0)
+
+    ok, message, purchase = record_tool_purchase(
+        tool_id=int(tool.id), qty=qty, unit_cost=tool.purchase_cost,
+        supplier='Physical count', purchase_date=when,
+        reference=(audit.audit_code or '')[:120],
+        notes=(f'{audit.audit_code} count at {audit.location_label}: {qty:g} '
+               f'{tool.unit or "pcs"} of {tool.name} found, added to stock. '
+               f'{note_tail}'.strip())[:300],
+        update_cost=False, created_by=user_id, commit=False)
+    if not ok:
+        entry['message'] = message or 'Could not post the overage to stock.'
+        entry['blocked'] = True
+        return
+
     if parked is not None:
         parked.qty_rented = _q2(_q2(parked.qty_rented) + qty)
         parked.qty_pending = _q2(_q2(parked.qty_pending) + qty)
         parked.notes = (f'{parked.notes or ""} | {audit.audit_code}: +{qty:g} found '
                         f'(audit)').strip(' |')[:300]
         recalc_rental_totals(int(parked.rental_id))
+        # The pieces were counted *at that place*, so their markings go out to
+        # the holder too -- otherwise serials say "in store" while the rental
+        # says "out", and Track by Serial contradicts the rental page.
+        fresh = (ToolSerial.query
+                 .filter(ToolSerial.tool_id == tool.id,
+                         ToolSerial.id > last_serial_id,
+                         ToolSerial.is_in_store == True,  # noqa: E712
+                         ToolSerial.current_rental_id.is_(None))
+                 .order_by(ToolSerial.id.asc())
+                 .limit(int(round(qty)))
+                 .all())
+        if fresh:
+            assign_serials_to_rental(
+                int(parked.rental_id), [int(x.id) for x in fresh],
+                rental_item_id=int(parked.id),
+                location_label=(audit.location_label or None),
+                notes=f'{audit.audit_code}: found at count, parked on this rental',
+                created_by=user_id, commit=False)
+
     create_movement_log(
         tool_id=int(tool.id),
         rental_id=int(parked.rental_id) if parked is not None else None,
@@ -1128,7 +1171,8 @@ def _grant_gain(audit, entry, user_id, note_tail):
         qty=qty,
         notes=f'{audit.audit_code} audit at {audit.location_label}: {qty:g} '
               f'{tool.unit or "pcs"} of {tool.name} found, added to stock'
-              f'{f" under {parked.rental.rental_code}" if parked is not None and parked.rental else ""}. '
+              f'{f" under {parked.rental.rental_code}" if parked is not None and parked.rental else ""}'
+              f'{f" ({purchase.purchase_code})" if purchase is not None else ""}. '
               f'{note_tail}'[:500])
 
 
@@ -1208,7 +1252,7 @@ def post_adjustments(audit, mode='losses', reason='lost', audit_date=None,
             if entry.get('partial'):
                 remarks.append(entry.get('message') or '')
         else:
-            _grant_gain(audit, entry, user_id, note_tail)
+            _grant_gain(audit, entry, user_id, note_tail, when=when)
             line.adjusted_qty = _q2(entry['qty'])
             line.adjust_reason = 'found_extra'
             found_qty += entry['qty']
@@ -1252,44 +1296,257 @@ def close_audit(audit, note='', user_id=None):
     if pending:
         return False, (f'{len(pending)} tool line(s) have no counted number yet. '
                        f'Type 0 for "nothing here", or leave the sheet open.')
-    if (note or '').strip():
-        audit.notes = f'{audit.notes or ""} | Closed: {note.strip()[:200]}'.strip(' |')
+    # Closing never writes to stock, so an unposted discrepancy stays open on
+    # the sheet: say so instead of claiming the count matched the book.
+    remaining = [line for line in lines_of(audit) if (line.status or '') in ('short', 'extra')]
+    short_qty = _q2(sum(abs(_q2(line.variance)) for line in remaining
+                        if _q2(line.variance) < 0))
+    extra_qty = _q2(sum(_q2(line.variance) for line in remaining
+                        if _q2(line.variance) > 0))
+    tail = (note or '').strip()
+    if remaining:
+        tail = (f'{tail} | ' if tail else '') + (
+            f'Closed with {len(remaining)} unposted discrepancy line(s): '
+            f'{short_qty:g} short, {extra_qty:g} extra — stock NOT adjusted')
+    if tail:
+        audit.notes = f'{audit.notes or ""} | Closed: {tail[:200]}'.strip(' |')
     recompute_audit_totals(audit, refresh_status=False)
     audit.status = 'adjusted'
     audit.adjusted_at = _pkt_now_naive()
     audit.updated_at = _pkt_now_naive()
     db.session.commit()
+    if remaining:
+        return True, (f'Audit closed with {len(remaining)} discrepancy line(s) still '
+                      f'unposted ({short_qty:g} short, {extra_qty:g} extra). Nothing was '
+                      f'written to stock — re-open and use Adjust to post them.')
     return True, 'Audit closed — the count matched the book.'
 
 
-def reopen_audit(audit):
-    """Re-open a closed sheet when someone notices the count itself was wrong."""
+def posted_adjustment_lines(audit):
+    """Lines this sheet already wrote into the books (``adjusted_qty != 0``)."""
+    if audit is None:
+        return []
+    return [line for line in lines_of(audit) if abs(_q2(line.adjusted_qty)) > EPS]
+
+
+def reverse_audit_adjustments(audit, user_id=None, commit=False):
+    """Undo everything an *Adjust* posted for this count.
+
+    Write-offs come back (the scrap row is removed and the pieces return to
+    stock and to the rental line that was holding them); overages go away (the
+    stock-in row the gain created is removed, together with the markings it
+    generated and the qty it parked on a rental).  Without this, cancelling or
+    re-opening a count left the stock permanently changed by a sheet that said
+    it no longer counted.
+
+    Returns ``(ok, message, {'reversed': n, 'remarks': [...]})``.
+    """
+    if audit is None:
+        return False, 'Audit not found.', {'reversed': 0, 'remarks': []}
+    lines = posted_adjustment_lines(audit)
+    if not lines:
+        return True, 'Nothing was posted by this count.', {'reversed': 0, 'remarks': []}
+
+    remarks = []
+    reversed_count = 0
+    touched_rentals = set()
+    for line in lines:
+        adj = _q2(line.adjusted_qty)
+        tool = db.session.get(Tool, int(line.tool_id or 0))
+        if tool is None:
+            remarks.append(f'{line.tool_name or "Tool"}: tool no longer exists.')
+            continue
+        # A savepoint per line, so a line that cannot be reversed rolls back
+        # only itself instead of discarding the lines already undone.
+        savepoint = db.session.begin_nested()
+        try:
+            if adj < 0:
+                qty = abs(adj)
+                scrap = db.session.get(ToolScrap, int(line.scrap_id)) if line.scrap_id else None
+                scrap_code = scrap.scrap_code if scrap is not None else None
+                if scrap is not None:
+                    # The line points at this scrap row. Clearing the reference
+                    # first is not cosmetic: the movement log below flushes, and
+                    # a DELETE of a parent row still referenced by
+                    # hdc_tool_audit_line.scrap_id fails the foreign key and
+                    # rolls the whole reversal back — the count then said
+                    # "cancelled" while the stock stayed written off.
+                    line.scrap_id = None
+                    db.session.flush()
+                    db.session.delete(scrap)
+                    db.session.flush()
+                tool.total_quantity = _q2(_q2(tool.total_quantity) + qty)
+                create_movement_log(
+                    tool_id=int(tool.id), rental_id=None,
+                    movement_type=MOVEMENT_AUDIT_ADJUST,
+                    from_label=AUDIT_LOSS_LABEL, to_label=STORE_LABEL, qty=qty,
+                    notes=(f'Reversal of {audit.audit_code} write-off: {qty:g} '
+                           f'{tool.unit or "pcs"} of {tool.name} back in stock'
+                           f'{f" (scrap {scrap_code} removed)" if scrap_code else ""}')[:500])
+                # give the pieces back to the rental line the write-off lifted
+                logs = (ToolMovementLog.query
+                        .filter(ToolMovementLog.tool_id == tool.id,
+                                ToolMovementLog.rental_id.isnot(None),
+                                ToolMovementLog.movement_type == MOVEMENT_AUDIT_ADJUST,
+                                ToolMovementLog.to_location_label == AUDIT_LOSS_LABEL,
+                                ToolMovementLog.notes.like(f'%{audit.audit_code}%'))
+                        .all())
+                for log in logs:
+                    item = (ToolRentalItem.query
+                            .filter(ToolRentalItem.rental_id == int(log.rental_id),
+                                    ToolRentalItem.tool_id == int(tool.id))
+                            .order_by(ToolRentalItem.id.asc()).first())
+                    if item is None:
+                        continue
+                    back = _q2(min(abs(_q2(log.qty)), qty))
+                    if back <= EPS:
+                        continue
+                    item.qty_rented = _q2(_q2(item.qty_rented) + back)
+                    item.qty_pending = _q2(_q2(item.qty_pending) + back)
+                    touched_rentals.add(int(item.rental_id))
+                if not logs:
+                    remarks.append(f'{tool.name}: {qty:g} piece(s) returned to stock; the '
+                                   f'rental line they were lifted from could not be '
+                                   f'identified — check it on the rental page.')
+            else:
+                qty = adj
+                purchase = (ToolPurchase.query
+                            .filter(ToolPurchase.tool_id == tool.id,
+                                    ToolPurchase.reference == (audit.audit_code or ''))
+                            .order_by(ToolPurchase.id.desc()).first())
+                marked = []
+                if purchase is not None:
+                    marked = [int(m.serial_id) for m in ToolSerialMovement.query.filter(
+                        ToolSerialMovement.notes.like(f'%{purchase.purchase_code}%')).all()]
+                    db.session.delete(purchase)
+                tool.total_quantity = _q2(max(0.0, _q2(_q2(tool.total_quantity) - qty)))
+                for sid in marked:
+                    serial = db.session.get(ToolSerial, int(sid))
+                    if serial is None or serial.tool_id != tool.id:
+                        continue
+                    if not serial.is_in_store or serial.current_rental_id:
+                        remarks.append(f'{tool.name}: marking {serial.serial_number} is in use '
+                                       f'and was left alone.')
+                        continue
+                    ToolSerialMovement.query.filter_by(serial_id=serial.id).delete()
+                    db.session.delete(serial)
+                parked = (ToolRentalItem.query
+                          .filter(ToolRentalItem.tool_id == tool.id,
+                                  ToolRentalItem.notes.like(f'%{audit.audit_code}%'))
+                          .all())
+                left = qty
+                for item in parked:
+                    if left <= EPS:
+                        break
+                    take = _q2(min(left, _q2(item.qty_pending)))
+                    if take <= EPS:
+                        continue
+                    item.qty_rented = _q2(max(0.0, _q2(_q2(item.qty_rented) - take)))
+                    item.qty_returned = _q2(min(_q2(item.qty_returned), _q2(item.qty_rented)))
+                    item.qty_pending = _q2(max(0.0, _q2(_q2(item.qty_rented) - _q2(item.qty_returned))))
+                    left = _q2(left - take)
+                    touched_rentals.add(int(item.rental_id))
+                create_movement_log(
+                    tool_id=int(tool.id), rental_id=None,
+                    movement_type=MOVEMENT_AUDIT_ADJUST,
+                    from_label=STORE_LABEL, to_label=AUDIT_GAIN_LABEL, qty=qty,
+                    notes=(f'Reversal of {audit.audit_code} overage: {qty:g} '
+                           f'{tool.unit or "pcs"} of {tool.name} removed from stock'
+                           f'{f" (stock-in {purchase.purchase_code} removed)" if purchase is not None else ""}')[:500])
+            line.adjusted_qty = 0.0
+            line.scrap_id = None
+            line.adjust_reason = None
+            line.adjusted_at = None
+            line.status = 'short' if adj < 0 else 'extra'
+            line.updated_at = _pkt_now_naive()
+            savepoint.commit()
+            reversed_count += 1
+        except Exception as exc:  # keep going: one bad line must not strand the rest
+            savepoint.rollback()
+            remarks.append(f'{line.tool_name or "Tool"}: reversal failed ({exc}).')
+
+    for rental_id in touched_rentals:
+        recalc_rental_totals(int(rental_id))
+    recompute_audit_totals(audit, refresh_status=False)
+    if audit.status == 'adjusted' and not posted_adjustment_lines(audit):
+        audit.status = 'counted'
+    audit.updated_at = _pkt_now_naive()
+    if commit:
+        db.session.commit()
+    message = (f'{reversed_count} posted adjustment(s) reversed.'
+               if reversed_count else 'No posted adjustment could be reversed.')
+    return reversed_count > 0, message, {'reversed': reversed_count, 'remarks': remarks}
+
+
+def reopen_audit(audit, reverse=False, user_id=None):
+    """Re-open a closed sheet when someone notices the count itself was wrong.
+
+    ``reverse=True`` also unwinds whatever *Adjust* posted, so the sheet can be
+    corrected against the stock position it started from.
+    """
     if audit is None:
         return False, 'Audit not found.'
     if audit.is_void:
         return False, 'A cancelled count cannot be re-opened.'
+    remarks = []
+    reversal_failed = False
+    if reverse:
+        ok_rev, rev_msg, info = reverse_audit_adjustments(audit, user_id=user_id, commit=False)
+        remarks.append(rev_msg)
+        remarks.extend(info.get('remarks') or [])
+        reversal_failed = not ok_rev
     audit.status = 'counted'
     recompute_audit_totals(audit, refresh_status=False)
     audit.status = 'counted'
     audit.updated_at = _pkt_now_naive()
     db.session.commit()
-    return True, 'Audit re-opened. Adjustments already posted are not undone — ' \
-                 'void them from the tool page if the count was wrong.'
+    if remarks:
+        message = 'Audit re-opened. ' + ' '.join(remarks)
+        if reversal_failed:
+            message += (' The adjustments already posted are STILL in the stock '
+                        'books — correct the tool from Inventory.')
+        return True, message
+    if posted_adjustment_lines(audit):
+        return True, ('Audit re-opened. Adjustments already posted are still in the '
+                      'books — tick "reverse posted adjustments" to unwind them.')
+    return True, 'Audit re-opened.'
 
 
-def void_audit(audit, reason=''):
-    """Cancel a sheet.  Stock already adjusted is deliberately *not* reversed."""
+def void_audit(audit, reason='', reverse=False, user_id=None):
+    """Cancel a sheet.
+
+    ``reverse=False`` (the default) keeps whatever *Adjust* wrote and says so
+    loudly; ``reverse=True`` unwinds it first, so a cancelled count never leaves
+    stock changed by a sheet that no longer counts.
+    """
     if audit is None:
         return False, 'Audit not found.'
     if audit.is_void:
         return False, 'This count is already cancelled.'
+    posted = posted_adjustment_lines(audit)
+    remarks = []
+    reversal_failed = False
+    if posted and reverse:
+        ok_rev, rev_msg, info = reverse_audit_adjustments(audit, user_id=user_id, commit=False)
+        remarks.append(rev_msg)
+        remarks.extend(info.get('remarks') or [])
+        reversal_failed = not ok_rev
     audit.is_void = True
     audit.status = 'void'
     audit.void_reason = (reason or 'Cancelled')[:250]
     audit.updated_at = _pkt_now_naive()
     db.session.commit()
-    return True, ('Count cancelled. Anything already adjusted stays adjusted — '
-                  'void that write-off from the tool page if it was a mistake.')
+    if remarks:
+        message = 'Count cancelled. ' + ' '.join(remarks)
+        if reversal_failed:
+            message += (' The adjustments this count posted are STILL in the stock '
+                        'books — correct the tool from Inventory.')
+        return True, message
+    if posted:
+        return True, (f'Count cancelled — but {len(posted)} adjustment(s) it posted are '
+                      f'still in the stock books. Cancel it again with "reverse posted '
+                      f'adjustments" (or fix the tool from Inventory) if the count was wrong.')
+    return True, 'Count cancelled — nothing had been posted to stock.' 
 
 
 def open_audit_count():
