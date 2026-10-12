@@ -22,6 +22,7 @@ from hdc.models.workforce import TimeEntry, Worker
 from hdc.services.accounts import _ACCOUNT_COMPANY_TYPES, _accounts_post_owner_receipt, _accounts_set_void_by_source
 from hdc.services.aggregation import _apply_aggregated_project_costs, _apply_aggregated_stage_costs, _running_projects_receivable_rows
 from hdc.services.lookups import _next_project_code
+from hdc.services.parties import known_client_party_names, party_name_key
 from hdc.services.permissions import may_access_path, permission_for, permission_landing_url
 from hdc.services.record_permissions import record_allowed
 from hdc.services.receipts import _owner_payment_recent_entries, _receipt_company_profile
@@ -127,10 +128,29 @@ def register(app):
                 status=request.form.get('status','active'),
                 planned_start=_parse_date(request.form.get('start_date')),
                 planned_end=_parse_date(request.form.get('planned_end')) if request.form.get('planned_end') else None)
-            db.session.add(p); db.session.commit()
-            flash(f'Project "{p.name}" added.', 'success')
+            db.session.add(p)
+            db.session.flush()
+            # ── Integrate with Parties: ensure client exists as a party ──────
+            client_name = (p.client or '').strip()
+            if client_name:
+                try:
+                    from hdc.services.cashflow_register import ensure_party
+                    ensure_party(
+                        client_name,
+                        party_type='client',
+                        phone=(p.client_phone or '').strip() or None,
+                        note=f"Client / Owner of project {p.project_code} — {p.name}"[:300]
+                    )
+                except Exception:
+                    pass
+            db.session.commit()
+            flash(f'Project "{p.name}" added. Client "{client_name}" linked to Parties.', 'success')
             return redirect(url_for('hdc_project_detail', pid=p.id))
-        return render_template('projects/add_project.html', today=_pkt_today().isoformat())
+        client_options = known_client_party_names()
+        initial_client = (request.args.get('client') or '').strip()
+        return render_template('projects/add_project.html', today=_pkt_today().isoformat(),
+                               client_options=client_options,
+                               initial_client=initial_client)
 
 
     @app.route('/hdc/projects/<int:pid>')
@@ -182,6 +202,29 @@ def register(app):
                               .order_by(Account.name.asc(), Account.id.asc())
                               .all()) if permission_for(current_user, 'project_receipts', 'write') is not False else []
         project_receivable_rows = _running_projects_receivable_rows() if permission_for(current_user, 'project_receipts') is not False else []
+        # ── Resolve linked party for this project's client ─────────────────
+        client_party = None
+        client_party_id = None
+        client_statement = None
+        try:
+            from hdc.models.cashflow import CashFlowParty
+            from hdc.services.parties import party_ledger as _party_ledger
+            ckey = party_name_key(p.client or '')
+            if ckey:
+                client_party = (CashFlowParty.query
+                                .filter(func.lower(func.trim(func.coalesce(CashFlowParty.name, ''))) == ckey)
+                                .order_by(CashFlowParty.is_active.desc(), CashFlowParty.id.asc())
+                                .first())
+                if client_party:
+                    client_party_id = int(client_party.id)
+                    try:
+                        client_statement = _party_ledger(client_party, include_void=False)
+                    except Exception:
+                        client_statement = None
+        except Exception:
+            client_party = None
+            client_statement = None
+
         return render_template('projects/project_detail.html',
             p=p, workers=workers, stages=stages,
             stage_defs=stage_defs, materials=materials,
@@ -198,7 +241,10 @@ def register(app):
             cost_per_sqft=cost_per_sqft,
             profit_per_sqft=profit_per_sqft,
             show_cost_split=(request.args.get('show_cost_split') == '1'),
-            today=_pkt_today().isoformat())
+            today=_pkt_today().isoformat(),
+            client_party=client_party,
+            client_party_id=client_party_id,
+            client_statement=client_statement)
 
 
     @app.route('/hdc/stage/<int:sid>/ledger')
@@ -236,6 +282,7 @@ def register(app):
             financial_fields = {'total_sqft', 'owner_rate', 'lump_sum', 'contract_type'}
             if financial_fields.intersection(request.form) and permission_for(current_user, 'project_financials', 'write') is False:
                 abort(403)
+            old_client = (p.client or '').strip()
             for field in ('name', 'client', 'client_phone', 'location', 'status'):
                 if field in request.form:
                     setattr(p, field, request.form.get(field, '').strip())
@@ -248,10 +295,24 @@ def register(app):
                     p.contract_type = request.form['contract_type']
             if 'planned_end' in request.form:
                 p.planned_end = _parse_date(request.form.get('planned_end')) if request.form.get('planned_end') else None
+            # ── Keep Parties in sync when client name changes ────────────
+            new_client = (p.client or '').strip()
+            if new_client and new_client.lower() != old_client.lower():
+                try:
+                    from hdc.services.cashflow_register import ensure_party
+                    ensure_party(
+                        new_client,
+                        party_type='client',
+                        phone=(p.client_phone or '').strip() or None,
+                        note=f"Client / Owner of project {p.project_code} — {p.name}"[:300]
+                    )
+                except Exception:
+                    pass
             db.session.commit()
             flash('Project updated.', 'success')
             return redirect(url_for('hdc_project_detail', pid=pid))
-        return render_template('projects/edit_project.html', p=p)
+        client_options = known_client_party_names()
+        return render_template('projects/edit_project.html', p=p, client_options=client_options)
 
 
     @app.route('/hdc/projects/<int:pid>/owner_payment', methods=['POST'])

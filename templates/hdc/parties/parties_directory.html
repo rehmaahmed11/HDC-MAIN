@@ -63,6 +63,7 @@
                         <div class="hdc-field-hint">
                             Loan Parties feed loan Money In / Out; External Customers feed HDC Tools.
                             The type you pick also decides which category card this party is filed under.
+                            <strong>Client / Owner</strong> is now linked to Projects — a project client auto-creates a party here.
                         </div>
                     </div>
                     <div class="mb-2">
@@ -84,20 +85,33 @@
 
         <div class="card hdc-card mt-3">
             <div class="card-header hdc-card-header">
-                <i class="fas fa-rotate me-2" aria-hidden="true"></i>Worker sync
+                <i class="fas fa-rotate me-2" aria-hidden="true"></i>Sync helpers
             </div>
             <div class="card-body">
                 <p class="small text-muted mb-2">
-                    {{ counts.worker }} worker parties / {{ counts.worker_total }} on the books.
-                    Sync adds any worker that is missing from this directory.
+                    <strong>Workers:</strong> {{ counts.worker }} worker parties / {{ counts.worker_total }} on the books.
                 </p>
-                <form method="post" action="{{ url_for('hdc_parties') }}">
+                <form method="post" action="{{ url_for('hdc_parties') }}" class="mb-2">
                     <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
                     <input type="hidden" name="action" value="sync_workers">
                     <button type="submit" class="btn btn-sm btn-outline-primary w-100">
                         <i class="fas fa-hard-hat me-1" aria-hidden="true"></i>Sync Workers
                     </button>
                 </form>
+                <p class="small text-muted mb-2">
+                    <strong>Project Clients:</strong> {{ counts.client }} client parties / {{ counts.client_total or 0 }} distinct clients from Projects.
+                    {% if counts.client_auto_added %}Auto-added {{ counts.client_auto_added }} just now.{% endif %}
+                </p>
+                <form method="post" action="{{ url_for('hdc_parties') }}">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+                    <input type="hidden" name="action" value="sync_clients">
+                    <button type="submit" class="btn btn-sm btn-outline-success w-100">
+                        <i class="fas fa-building me-1" aria-hidden="true"></i>Sync Project Clients
+                    </button>
+                </form>
+                <div class="alert alert-info py-2 small mt-3 mb-0">
+                    <i class="fas fa-link me-1"></i><strong>Projects ↔ Parties:</strong> When you create a Project with a Client name, a Party of type <em>Client / Owner</em> is auto-created. That Party then shows all projects owned by that person and their combined receivable.
+                </div>
             </div>
         </div>
     </div>
@@ -158,7 +172,7 @@
                     <i class="fas fa-book me-2" aria-hidden="true"></i>{{ category_label }}
                     <span class="badge bg-secondary ms-1">{{ rows|length }} shown</span>
                 </span>
-                <span class="small text-muted">Open a row for the dated transaction list</span>
+                <span class="small text-muted">Open a row for the dated transaction list + linked projects</span>
             </div>
             <div class="table-responsive">
                 <table class="table hdc-table table-sm mb-0 align-middle party-directory-table">
@@ -170,6 +184,7 @@
                             <th class="text-end">Money In</th>
                             <th class="text-end">Money Out</th>
                             <th class="text-end">Balance</th>
+                            <th class="text-center">Projects</th>
                             <th class="text-center">Status</th>
                             <th class="text-end">Open</th>
                         </tr>
@@ -177,7 +192,7 @@
                     <tbody>
                         {% if not rows %}
                         <tr>
-                            <td colspan="8" class="text-muted text-center py-4">
+                            <td colspan="9" class="text-muted text-center py-4">
                                 {% if search or selected_party_id %}
                                 No parties match these filters.
                                 {% elif category == 'loan' %}
@@ -186,6 +201,7 @@
                                 No external customers yet — add one, or create an external HDC Tools rental.
                                 {% elif category == 'client' %}
                                 No clients / owners yet — add a project owner, or pick Client / Owner when adding a party.
+                                Create a Project and its client auto-appears here.
                                 {% elif category == 'supplier' %}
                                 No suppliers yet — add a material, tool or service vendor as Supplier / Vendor.
                                 {% else %}
@@ -210,6 +226,12 @@
                                     <a class="small ms-1" href="{{ url_for('hdc_worker_ledger', wid=row.worker.worker.id) }}">Ledger</a>
                                 </div>
                                 {% endif %}
+                                {% if row.projects_count %}
+                                <div class="mt-1 small">
+                                    <span class="badge bg-indigo text-white" style="background:#4f46e5"><i class="fas fa-project-diagram me-1"></i>{{ row.projects_count }} project(s)</span>
+                                    {% if row.projects_contract %}<span class="text-muted ms-1">{{ "{:,.0f}".format(row.projects_contract) }} contract</span>{% endif %}
+                                </div>
+                                {% endif %}
                             </td>
                             <td>{{ row.category_label }}</td>
                             <td class="text-center">{{ row.entries }}</td>
@@ -221,6 +243,12 @@
                             </td>
                             <td class="text-end fw-semibold {% if row.balance > 0 %}text-success{% elif row.balance < 0 %}text-danger{% endif %}">
                                 {{ '{:,.0f}'.format(row.balance) }}
+                            </td>
+                            <td class="text-center">
+                                {% if row.projects_count %}
+                                <span class="badge bg-primary">{{ row.projects_count }}</span>
+                                <div class="small text-muted">{{ "{:,.0f}".format(row.projects_receivable) }} receivable</div>
+                                {% else %}–{% endif %}
                             </td>
                             <td class="text-center">
                                 {% if row.party.is_active %}

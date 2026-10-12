@@ -12,7 +12,7 @@
 <div class="table-responsive">
 <table class="table hdc-table">
     <thead><tr>
-        <th>Code</th><th>Name</th><th>Location</th><th>Type</th>
+        <th>Code</th><th>Name</th><th>Client / Owner</th><th>Location</th><th>Type</th>
         {% if hdc_page_allowed('project_financials') %}<th>Contract Value</th><th>Received</th><th>Net Profit</th>{% endif %}<th>Status</th><th></th>
     </tr></thead>
     <tbody>
@@ -20,6 +20,12 @@
     <tr {{ p|hdc_row_attrs }}>
         <td><span class="badge bg-secondary">{{ p.project_code }}</span></td>
         <td><strong><a href="{{ url_for('hdc_project_detail', pid=p.id) }}" class="text-decoration-none hdc-name-link" title="Open project detail">{{ p.name }}</a></strong></td>
+        <td class="small">
+            {% if p.client %}
+            <span class="fw-semibold"><i class="fas fa-user-tie me-1 text-muted"></i>{{ p.client }}</span>
+            {% if p.client_phone %}<div class="text-muted">{{ p.client_phone }}</div>{% endif %}
+            {% else %}<span class="text-muted">—</span>{% endif %}
+        </td>
         <td class="text-muted small">{{ p.location or '—' }}</td>
         <td><span class="badge bg-info text-dark">{{ p.contract_type }}</span></td>
         {% if hdc_page_allowed('project_financials') %}<td>{{ "{:,.0f}".format(p.owner_contract_value) }}</td>
@@ -35,11 +41,14 @@
         </td>
     </tr>
     {% else %}
-    <tr {{ p|hdc_row_attrs }}><td colspan="9" class="text-center text-muted py-4">No accessible projects. {% if hdc_page_allowed('project_create', 'write') and hdc_record_allowed('hdc_project', none, 'create') %}<a href="{{ url_for('hdc_add_project') }}">Add one</a>{% endif %}</td></tr>
+    <tr {{ p|hdc_row_attrs }}><td colspan="10" class="text-center text-muted py-4">No accessible projects. {% if hdc_page_allowed('project_create', 'write') and hdc_record_allowed('hdc_project', none, 'create') %}<a href="{{ url_for('hdc_add_project') }}">Add one</a>{% endif %}</td></tr>
     {% endfor %}
     </tbody>
 </table>
 </div>
 {% include 'shared/_pagination.html' %}
+</div>
+<div class="alert alert-info small mt-3">
+    <i class="fas fa-link me-1"></i><strong>Projects ↔ Parties integration:</strong> Each project's Client / Owner is auto-linked to <a href="{{ url_for('hdc_parties', category='client') }}">Parties → Clients / Owners</a>. Creating a project creates the Party if missing, and the Party page shows all projects + combined receivable. Use <a href="{{ url_for('hdc_parties') }}">Sync Project Clients</a> to backfill old projects.
 </div>
 {% endblock %}
