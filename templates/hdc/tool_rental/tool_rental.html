@@ -104,6 +104,14 @@
                     <option value="closed" {% if filters.status=='closed' %}selected{% endif %}>Closed</option>
                 </select>
             </div>
+            <div class="col-md-4">
+                <label class="form-label">Tools went</label>
+                <select name="outcome" class="form-select">
+                    <option value="">Anywhere</option>
+                    <option value="returned_to_store" {% if filters.outcome=='returned_to_store' %}selected{% endif %}>Returned to store</option>
+                    <option value="transferred" {% if filters.outcome=='transferred' %}selected{% endif %}>Transferred to next site / customer</option>
+                </select>
+            </div>
             <div class="col-12 d-flex gap-2">
                 <button type="submit" class="btn btn-success"><i class="fas fa-search me-1" aria-hidden="true"></i>Search</button>
                 <a href="{{ url_for('hdc_tool_rental') }}" class="btn btn-outline-secondary">Reset</a>
@@ -145,6 +153,13 @@
                             <strong>{{ r.customer_name or 'Outside customer' }}</strong>
                             {% if r.customer_phone %}<div class="small text-muted">{{ r.customer_phone }}</div>{% endif %}
                         {% endif %}
+                        {% set oc = outcomes.get(r.id) if outcomes else none %}
+                        {% if oc and oc.prev %}
+                            <div class="small text-muted mt-1 rental-from-prev">
+                                <i class="fas fa-sign-in-alt me-1" aria-hidden="true"></i>From
+                                {% for p in oc.prev %}{% if p.rental_code %}<a href="{{ url_for('hdc_tool_rental_detail', rental_id=p.rental_id) }}">{{ p.label }}</a> ({{ p.rental_code }}){% else %}{{ p.label }}{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}
+                            </div>
+                        {% endif %}
                     </td>
                     <td>
                         <strong>{{ "%.0f"|format(r.total_rented_qty or 0) }} rented</strong>
@@ -162,18 +177,41 @@
                             <span class="badge bg-success">Paid</span>
                         {% endif %}
                     </td>
-                    <td>
+                    <td class="rental-outcome">
+                        {% set oc = outcomes.get(r.id) if outcomes else none %}
                         {% if r.total_pending_tools > 0 %}
                             <span class="badge bg-warning text-dark">{{ "%.0f"|format(r.total_pending_tools) }} still out</span>
+                        {% elif oc and oc.transferred_out > 0 and oc.returned_to_store <= 0 %}
+                            <span class="badge bg-info text-dark">All transferred</span>
+                        {% elif oc and oc.transferred_out > 0 %}
+                            <span class="badge bg-success">All back / moved on</span>
                         {% else %}
                             <span class="badge bg-success">All returned</span>
+                        {% endif %}
+                        {% if oc %}
+                            {% if oc.returned_to_store > 0 %}
+                                <div class="small text-success mt-1 rental-returned-store">
+                                    <i class="fas fa-warehouse me-1" aria-hidden="true"></i>{{ "%.0f"|format(oc.returned_to_store) }} returned to store{% if oc.last_return_date %} · {{ oc.last_return_date }}{% endif %}
+                                </div>
+                            {% endif %}
+                            {% for n in oc.next %}
+                                <div class="small text-info mt-1 rental-transferred-next">
+                                    <i class="fas fa-arrow-right me-1" aria-hidden="true"></i>{{ "%.0f"|format(n.qty) }} transferred to
+                                    {% if n.rental_code %}<a href="{{ url_for('hdc_tool_rental_detail', rental_id=n.rental_id) }}">{{ n.label }}</a> ({{ n.rental_code }}){% else %}{{ n.label }}{% endif %}
+                                    {% if n.date %} · {{ n.date }}{% endif %}
+                                </div>
+                            {% endfor %}
                         {% endif %}
                     </td>
                     <td>
                         {% if r.status=='overdue' %}<span class="badge bg-danger">Overdue</span>
                         {% elif r.status=='partially_returned' %}<span class="badge bg-warning text-dark">Partly returned</span>
                         {% elif r.status=='closed' %}<span class="badge bg-success">Closed</span>
-                        {% elif r.status=='returned' %}<span class="badge bg-secondary">Returned</span>
+                        {% elif r.status=='returned' %}
+                            {% set oc = outcomes.get(r.id) if outcomes else none %}
+                            {% if oc and oc.transferred_out > 0 and oc.returned_to_store <= 0 %}<span class="badge bg-info text-dark">Transferred</span>
+                            {% elif oc and oc.transferred_out > 0 %}<span class="badge bg-secondary">Returned + transferred</span>
+                            {% else %}<span class="badge bg-secondary">Returned to store</span>{% endif %}
                         {% else %}<span class="badge bg-primary">In use</span>{% endif %}
                         {% if r.payment_status=='partial' %}<div class="mt-1"><span class="badge bg-warning text-dark">Partly paid</span></div>
                         {% elif r.payment_status=='credit' %}<div class="mt-1"><span class="badge bg-danger">On credit</span></div>

@@ -719,6 +719,108 @@ def search_rentals(filters):
     q = q.order_by(ToolRental.rental_date.desc(), ToolRental.id.desc())
     return q.all()
 
+
+def rental_outcomes(rentals):
+    """How the tools of each rental left — and where they came from.
+
+    A rental's ``total_returned_qty`` lumps two very different things together:
+    pieces that physically came back to the store (a ``ToolRentalReturn``) and
+    pieces that were handed straight to the next site / customer (a
+    ``ToolRentalTransfer`` that opened a new rental).  The list page needs to
+    say which one happened, so the record reads "20 returned to store, 10
+    handed to Ali Traders (TR-0042)" instead of just "All returned".
+
+    Returns ``{rental_id: {...}}`` with, per rental:
+
+    * ``returned_to_store`` — qty that came back to the warehouse;
+    * ``transferred_out`` — qty passed on to the next holder;
+    * ``next`` — list of ``{'label', 'rental_id', 'rental_code', 'date', 'qty'}``
+      for every onward hand-over (newest last);
+    * ``prev`` — same shape, for the holder(s) this rental received from;
+    * ``last_return_date`` — date of the latest store return, if any.
+
+    Three grouped queries no matter how many rentals are on the page.
+    """
+    ids = [int(r.id) for r in rentals if r is not None]
+    out = {rid: {'returned_to_store': 0.0, 'transferred_out': 0.0,
+                 'next': [], 'prev': [], 'last_return_date': None}
+           for rid in ids}
+    if not ids:
+        return out
+
+    # 1) store returns
+    rows = (db.session.query(ToolRentalReturn.rental_id,
+                             func.coalesce(func.sum(ToolRentalReturn.total_tools_returned), 0.0),
+                             func.max(ToolRentalReturn.return_date))
+            .filter(ToolRentalReturn.rental_id.in_(ids))
+            .group_by(ToolRentalReturn.rental_id).all())
+    for rid, qty, last in rows:
+        rec = out.get(int(rid))
+        if rec is not None:
+            rec['returned_to_store'] = float(qty or 0.0)
+            rec['last_return_date'] = last
+
+    # 2) onward hand-overs (this rental -> a new rental)
+    nxt = (ToolRentalTransfer.query
+           .filter(ToolRentalTransfer.rental_id.in_(ids),
+                   ToolRentalTransfer.to_rental_id.isnot(None))
+           .order_by(ToolRentalTransfer.transfer_date.asc(), ToolRentalTransfer.id.asc())
+           .all())
+    # 3) inbound hand-overs (a previous rental -> this rental)
+    prv = (ToolRentalTransfer.query
+           .filter(ToolRentalTransfer.to_rental_id.in_(ids))
+           .order_by(ToolRentalTransfer.transfer_date.asc(), ToolRentalTransfer.id.asc())
+           .all())
+
+    linked_ids = {int(t.to_rental_id) for t in nxt} | {int(t.rental_id) for t in prv}
+    linked = {}
+    if linked_ids:
+        linked = {int(r.id): r for r in
+                  ToolRental.query.filter(ToolRental.id.in_(linked_ids)).all()}
+
+    for t in nxt:
+        rec = out.get(int(t.rental_id))
+        if rec is None:
+            continue
+        target = linked.get(int(t.to_rental_id))
+        rec['transferred_out'] += float(t.qty_transferred or 0.0)
+        rec['next'].append({
+            'label': t.to_location_label or (_rental_holder_label(target) if target else 'Next holder'),
+            'rental_id': int(t.to_rental_id),
+            'rental_code': target.rental_code if target else None,
+            'date': t.transfer_date,
+            'qty': float(t.qty_transferred or 0.0),
+        })
+    for t in prv:
+        rec = out.get(int(t.to_rental_id))
+        if rec is None:
+            continue
+        source = linked.get(int(t.rental_id))
+        rec['prev'].append({
+            'label': t.from_location_label or (_rental_holder_label(source) if source else 'Previous holder'),
+            'rental_id': int(t.rental_id),
+            'rental_code': source.rental_code if source else None,
+            'date': t.transfer_date,
+            'qty': float(t.qty_transferred or 0.0),
+        })
+
+    for rec in out.values():
+        rec['returned_to_store'] = round(rec['returned_to_store'], 2)
+        rec['transferred_out'] = round(rec['transferred_out'], 2)
+    return out
+
+
+def rental_outcome_filter(rentals, outcome, outcomes=None):
+    """Narrow a rental list to one outcome: ``'returned_to_store'`` keeps
+    rentals where at least one piece came back to the store, ``'transferred'``
+    keeps rentals that handed pieces to a next holder."""
+    if outcome not in ('returned_to_store', 'transferred'):
+        return rentals
+    outcomes = outcomes if outcomes is not None else rental_outcomes(rentals)
+    key = 'returned_to_store' if outcome == 'returned_to_store' else 'transferred_out'
+    return [r for r in rentals if outcomes.get(int(r.id), {}).get(key, 0.0) > 0.001]
+
+
 def global_tool_locations(search_tool_id=None, search_project_id=None, search_text=None):
     from hdc.services.tool_tracking import tool_ledger
     ledger = tool_ledger()

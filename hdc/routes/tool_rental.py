@@ -37,7 +37,7 @@ from hdc.services.tool_rental import (
     post_tool_rental_payment_to_accounts, recalc_rental_totals,
     record_tool_purchase, record_tool_scrap,
     record_tool_rental_discount, rental_discount_rows, rental_transfer_chain,
-    search_rentals, tool_available_for_integrity, tool_kpis, tool_purchases,
+    rental_outcome_filter, rental_outcomes, search_rentals, tool_available_for_integrity, tool_kpis, tool_purchases,
     tool_scraps, tool_stock_aggregates, void_discounts_for_payment,
     void_tool_rental_discount, void_tool_rental_payment_in_accounts,
     # Serial management functions
@@ -681,7 +681,14 @@ def register(app):
             'status': (request.args.get('status') or '').strip() or None,
             'search_text': (request.args.get('q') or '').strip() or None,
         }
-        all_rentals = search_rentals(filters)
+        # "Returned to store" and "Transferred to next holder" are both
+        # status='returned' in the database; the hub tells them apart so the
+        # record shows *how* the tools left.
+        outcome = (request.args.get('outcome') or '').strip() or None
+        filters['outcome'] = outcome
+        all_rentals = search_rentals({k: v for k, v in filters.items() if k != 'outcome'})
+        if outcome:
+            all_rentals = rental_outcome_filter(all_rentals, outcome)
         # The hub listed every rental ever created on one page; with a few
         # hundred rentals that is a half-megabyte document.  Paginate it.
         page, per_page, pages = _page_args(len(all_rentals), default_per_page=50)
@@ -690,6 +697,7 @@ def register(app):
         return render_template('tool_rental/tool_rental.html',
             kpis=kpis,
             rentals=rentals,
+            outcomes=rental_outcomes(rentals),
             filters=filters,
             # The hub is a summary + list, but it still has to offer the way in:
             # its subtitle points at the New Rental page, so without these
