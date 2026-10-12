@@ -25,7 +25,7 @@
                 <div class="d-flex align-items-center gap-2 flex-wrap">
                     <span class="badge {% if rental.status=='active' %}bg-primary{% elif rental.status=='partially_returned' %}bg-warning text-dark{% elif rental.status=='overdue' %}bg-danger{% elif rental.status=='closed' %}bg-success{% else %}bg-secondary{% endif %}">{{ rental.status }}</span>
                     <span class="badge {% if rental.payment_status=='paid' %}bg-success{% elif rental.payment_status=='partial' %}bg-warning text-dark{% elif rental.payment_status=='credit' %}bg-danger{% else %}bg-secondary{% endif %}">{{ 'No charge — no rent due' if rental.billing_type == 'no_charge' else rental.payment_status|replace('_', ' ')|title }}</span>
-                    {% if not rental.is_void and rental.status not in ('returned', 'closed') %}
+                    {% if not rental.is_void %}
                     <a href="{{ url_for('hdc_tool_rental_edit', rental_id=rental.id) }}" class="btn btn-sm btn-outline-primary" title="Edit this rental on the form that created it"><i class="fas fa-pen me-1"></i>Edit</a>
                     {% endif %}
                 </div>
