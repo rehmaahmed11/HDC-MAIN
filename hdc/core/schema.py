@@ -2025,6 +2025,17 @@ def _ensure_tool_rental_schema():
         'created_by': "created_by INTEGER REFERENCES hdc_user(id)",
         'updated_by': "updated_by INTEGER REFERENCES hdc_user(id)",
     })
+    # A cancelled rental and an archived tool both need to say why and when, so
+    # the reversal (restore / un-cancel) can be audited later.
+    _ensure_table_columns_sqlite('hdc_tool_rental', {
+        'void_reason': "void_reason VARCHAR(300)",
+        'voided_at': "voided_at DATETIME",
+        'voided_by': "voided_by INTEGER REFERENCES hdc_user(id)",
+    })
+    _ensure_table_columns_sqlite('hdc_tool', {
+        'void_reason': "void_reason VARCHAR(300)",
+        'voided_at': "voided_at DATETIME",
+    })
     # Backfill is_void for legacy rows and ensure link table indexes - auto on reload
     with db.engine.connect() as conn:
         try:
@@ -2052,6 +2063,18 @@ def _ensure_tool_rental_schema():
             pass
         try:
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_tool_rental_acct_txn_acct ON hdc_tool_rental_account_txn(account_txn_id)"))
+            conn.commit()
+        except Exception:
+            pass
+        try:
+            # Serial pages filter and search on the piece's current location
+            # label; without an index that is a full scan of every marking.
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_tool_serial_location ON hdc_tool_serial(current_location_label)"))
+            conn.commit()
+        except Exception:
+            pass
+        try:
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_tool_serial_status_store ON hdc_tool_serial(tool_id, status, is_in_store)"))
             conn.commit()
         except Exception:
             pass

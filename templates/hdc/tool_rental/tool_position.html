@@ -24,7 +24,7 @@
 </div>
 
 <!-- balance strip for this one tool -->
-<div class="card hdc-card mb-3 {% if not recon.balanced %}border-danger{% endif %}">
+<div class="card hdc-card mb-3 {% if not recon.balanced and not recon.scope_limited %}border-danger{% endif %}">
     <div class="card-body">
         <div class="d-flex flex-wrap align-items-center justify-content-center gap-2 tools-recon-total">
             <span class="tools-chip chip-store"><i class="fas fa-warehouse"></i>{{ "%g"|format(recon.in_store) }} in store</span>
@@ -36,7 +36,10 @@
             <span class="tools-chip"><i class="fas fa-equals"></i>{{ "%g"|format(recon.accounted) }}</span>
             <span class="text-muted">of</span>
             <span class="tools-chip"><i class="fas fa-tools"></i>{{ "%g"|format(recon.owned) }} owned</span>
-            {% if recon.balanced %}
+            {% if recon.scope_limited %}
+                <span class="badge bg-info text-dark ms-1" title="Your access is limited to certain sites, so only part of this tool's rental history is counted here.">
+                    <i class="fas fa-filter me-1"></i>Scope-limited view — balance not asserted</span>
+            {% elif recon.balanced %}
                 <span class="badge bg-success ms-1"><i class="fas fa-check me-1"></i>Balanced</span>
             {% else %}
                 <span class="badge bg-danger ms-1">{{ "%+g"|format(recon.variance) }} unaccounted — fix stock in Inventory</span>

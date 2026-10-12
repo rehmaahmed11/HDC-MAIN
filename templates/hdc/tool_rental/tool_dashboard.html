@@ -10,6 +10,7 @@
 {% block content %}
 {% set tools_active = 'dashboard' %}
 {% include "tool_rental/_tools_nav.html" %}
+{% include "tool_rental/_scope_note.html" %}
 {% set t = totals %}
 {% set internal_pending = summary.internal_pending or 0 %}
 

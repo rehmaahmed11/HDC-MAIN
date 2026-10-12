@@ -2,6 +2,7 @@
 
 from datetime import date, datetime
 from sqlalchemy import func, or_
+from sqlalchemy.orm import joinedload
 
 from hdc.extensions import db
 from hdc.models.accounts import Account
@@ -336,10 +337,17 @@ def record_tool_scrap(tool_id, qty, reason='damaged', scrap_date=None, reference
     return True, '', scrap
 
 
-def tool_purchases(tool_id=None, date_from=None, date_to=None, search_text=None, limit=200):
-    """Purchase (stock-in) register, newest first."""
-    q = ToolPurchase.query.join(Tool, Tool.id == ToolPurchase.tool_id).filter(
-        Tool.is_void == False)  # noqa: E712
+def tool_purchases(tool_id=None, date_from=None, date_to=None, search_text=None, limit=200,
+                   include_archived=False):
+    """Purchase (stock-in) register, newest first.
+
+    ``include_archived`` adds the purchases of archived tools.  By default they
+    are left out so this register always ties to the KPI purchase totals, which
+    count live tools only (see :func:`tool_kpis`).
+    """
+    q = ToolPurchase.query.join(Tool, Tool.id == ToolPurchase.tool_id)
+    if not include_archived:
+        q = q.filter(Tool.is_void == False)  # noqa: E712
     if tool_id:
         q = q.filter(ToolPurchase.tool_id == int(tool_id))
     if date_from:
@@ -358,10 +366,16 @@ def tool_purchases(tool_id=None, date_from=None, date_to=None, search_text=None,
     return q.order_by(ToolPurchase.purchase_date.desc(), ToolPurchase.id.desc()).limit(limit).all()
 
 
-def tool_scraps(tool_id=None, date_from=None, date_to=None, search_text=None, limit=200):
-    """Scrap (write-off) register, newest first."""
-    q = ToolScrap.query.join(Tool, Tool.id == ToolScrap.tool_id).filter(
-        Tool.is_void == False)  # noqa: E712
+def tool_scraps(tool_id=None, date_from=None, date_to=None, search_text=None, limit=200,
+                include_archived=False):
+    """Scrap (write-off) register, newest first.
+
+    ``include_archived`` adds the write-offs of archived tools, mirroring
+    :func:`tool_purchases`.
+    """
+    q = ToolScrap.query.join(Tool, Tool.id == ToolScrap.tool_id)
+    if not include_archived:
+        q = q.filter(Tool.is_void == False)  # noqa: E712
     if tool_id:
         q = q.filter(ToolScrap.tool_id == int(tool_id))
     if date_from:
@@ -404,7 +418,10 @@ def recalc_rental_totals(rental_id):
 
     rental.total_rented_qty = total_rented
     rental.total_returned_qty = total_returned
-    rental.total_amount = total_amount if total_amount>0 else float(rental.total_amount or 0)
+    # The tool lines *are* the bill.  Keeping the old header total whenever the
+    # lines summed to zero meant a rental switched to No Charge (or edited down
+    # to nothing) kept being owed its previous amount forever.
+    rental.total_amount = _round2(total_amount) if items else float(rental.total_amount or 0)
     rental.total_paid = float(total_paid)
     rental.total_discount = min(float(total_discount), max(0.0, float(rental.total_amount or 0.0)))
 
@@ -435,15 +452,40 @@ def recalc_rental_totals(rental_id):
                 rental.payment_status = 'paid'
             else:
                 rental.payment_status = 'credit'
+        elif pending_amt <= 0.001:
+            # A zero-value rental owes nothing: "unpaid" would keep it on the
+            # receivable list forever.
+            rental.payment_status = 'paid'
         else:
-            rental.payment_status = 'unpaid' if float(rental.total_amount or 0) > 0 else 'unpaid'
+            rental.payment_status = 'unpaid'
 
     if total_pending <= 0.001 and rental.payment_status in ('paid','no_charge'):
         rental.status = 'closed'
 
     db.session.flush()
 
-def create_movement_log(tool_id, rental_id, movement_type, from_label, to_label, qty, transfer_id=None, return_id=None, notes=""):
+def _movement_stamp(when=None):
+    """Timestamp for a movement row: the posted date when the form gave one.
+
+    A maintenance move posted for last Tuesday belongs to last Tuesday in the
+    tracking chain.  The transaction forms read ``transaction_date`` and then
+    dropped it, so every movement claimed to have happened "now".
+    """
+    now = _pkt_now_naive()
+    if not when:
+        return now
+    if isinstance(when, datetime):
+        return when
+    if isinstance(when, date):
+        try:
+            return now.replace(year=when.year, month=when.month, day=when.day)
+        except ValueError:
+            return now
+    return now
+
+
+def create_movement_log(tool_id, rental_id, movement_type, from_label, to_label, qty,
+                        transfer_id=None, return_id=None, notes="", when=None):
     log = ToolMovementLog(
         tool_id=tool_id,
         rental_id=rental_id,
@@ -453,7 +495,7 @@ def create_movement_log(tool_id, rental_id, movement_type, from_label, to_label,
         from_location_label=from_label,
         to_location_label=to_label,
         qty=float(qty or 0),
-        timestamp=_pkt_now_naive(),
+        timestamp=_movement_stamp(when),
         notes=notes
     )
     db.session.add(log)
@@ -571,33 +613,64 @@ def get_rental_tracking_chain(rental_id):
     return chain
 
 def tool_kpis():
+    """Section-wide numbers for the dashboard/hub KPI strip.
+
+    Two rules keep this strip honest:
+
+    * every figure counts **live** rows only — an archived tool and its
+      purchase/scrap history leave the KPIs together, so the strip always ties
+      to the Reports registers (which exclude archived tools as well);
+    * money still owed is ``earned − cash − discounts`` — the same formula the
+      rental detail page uses, so the hub never shows a receivable that the
+      rental itself says is settled.
+    """
+    live_tools = db.session.query(Tool.id).filter(Tool.is_void == False)  # noqa: E712
+    billable = (ToolRental.is_void == False,  # noqa: E712
+                ToolRental.billing_type != 'no_charge')
     total_tools = db.session.query(func.coalesce(func.sum(Tool.total_quantity), 0.0)).filter(Tool.is_void==False).scalar() or 0.0
     total_tool_types = db.session.query(func.count(Tool.id)).filter(Tool.is_void==False).scalar() or 0
+    archived_tool_types = db.session.query(func.count(Tool.id)).filter(Tool.is_void == True).scalar() or 0  # noqa: E712
     rented_out = db.session.query(func.coalesce(func.sum(ToolRentalItem.qty_pending), 0.0)).scalar() or 0.0
     available = max(0.0, float(total_tools) - float(rented_out))
     active_rentals = db.session.query(func.count(ToolRental.id)).filter(ToolRental.status.in_(['active','partially_returned','overdue']), ToolRental.is_void==False).scalar() or 0
     overdue_rentals = db.session.query(func.count(ToolRental.id)).filter(ToolRental.status=='overdue', ToolRental.is_void==False).scalar() or 0
-    total_amount = db.session.query(func.coalesce(func.sum(ToolRental.total_amount), 0.0)).filter(ToolRental.is_void==False, ToolRental.billing_type!='no_charge').scalar() or 0.0
-    total_paid = db.session.query(func.coalesce(func.sum(ToolRental.total_paid), 0.0)).filter(ToolRental.is_void==False).scalar() or 0.0
-    pending_amount = max(0.0, float(total_amount) - float(total_paid))
+    total_amount = db.session.query(func.coalesce(func.sum(ToolRental.total_amount), 0.0)).filter(*billable).scalar() or 0.0
+    total_paid = db.session.query(func.coalesce(func.sum(ToolRental.total_paid), 0.0)).filter(*billable).scalar() or 0.0
+    total_discount = db.session.query(func.coalesce(func.sum(ToolRental.total_discount), 0.0)).filter(*billable).scalar() or 0.0
+    pending_amount = max(0.0, float(total_amount) - float(total_paid) - float(total_discount))
     pending_tools = db.session.query(func.coalesce(func.sum(ToolRentalItem.qty_pending), 0.0)).scalar() or 0.0
     internal_rentals = db.session.query(func.count(ToolRental.id)).filter(ToolRental.renter_type=='internal', ToolRental.is_void==False).scalar() or 0
     external_rentals = db.session.query(func.count(ToolRental.id)).filter(ToolRental.renter_type=='external', ToolRental.is_void==False).scalar() or 0
     credit_rentals = db.session.query(func.count(ToolRental.id)).filter(ToolRental.payment_status=='credit', ToolRental.is_void==False).scalar() or 0
-    credit_amount = db.session.query(func.coalesce(func.sum(ToolRental.total_amount - ToolRental.total_paid), 0.0)).filter(ToolRental.payment_status=='credit', ToolRental.is_void==False).scalar() or 0.0
-    purchased_qty = db.session.query(func.coalesce(func.sum(ToolPurchase.qty), 0.0)).scalar() or 0.0
-    purchase_value = db.session.query(func.coalesce(func.sum(ToolPurchase.total_cost), 0.0)).scalar() or 0.0
-    scrapped_qty = db.session.query(func.coalesce(func.sum(ToolScrap.qty), 0.0)).scalar() or 0.0
-    scrapped_value = db.session.query(func.coalesce(func.sum(ToolScrap.value_written_off), 0.0)).scalar() or 0.0
+    credit_amount = db.session.query(func.coalesce(func.sum(
+        ToolRental.total_amount - ToolRental.total_paid
+        - func.coalesce(ToolRental.total_discount, 0.0)), 0.0)).filter(
+        ToolRental.payment_status=='credit', ToolRental.is_void==False).scalar() or 0.0
+    purchased_qty = db.session.query(func.coalesce(func.sum(ToolPurchase.qty), 0.0)).filter(
+        ToolPurchase.tool_id.in_(live_tools)).scalar() or 0.0
+    purchase_value = db.session.query(func.coalesce(func.sum(ToolPurchase.total_cost), 0.0)).filter(
+        ToolPurchase.tool_id.in_(live_tools)).scalar() or 0.0
+    scrapped_qty = db.session.query(func.coalesce(func.sum(ToolScrap.qty), 0.0)).filter(
+        ToolScrap.tool_id.in_(live_tools)).scalar() or 0.0
+    scrapped_value = db.session.query(func.coalesce(func.sum(ToolScrap.value_written_off), 0.0)).filter(
+        ToolScrap.tool_id.in_(live_tools)).scalar() or 0.0
+    archived_purchase_value = db.session.query(func.coalesce(func.sum(ToolPurchase.total_cost), 0.0)).filter(
+        ~ToolPurchase.tool_id.in_(live_tools)).scalar() or 0.0
+    archived_scrapped_value = db.session.query(func.coalesce(func.sum(ToolScrap.value_written_off), 0.0)).filter(
+        ~ToolScrap.tool_id.in_(live_tools)).scalar() or 0.0
     return {
         'total_tools': float(total_tools),
         'total_tool_types': int(total_tool_types),
+        'archived_tool_types': int(archived_tool_types),
+        'archived_purchase_value': float(archived_purchase_value),
+        'archived_scrapped_value': float(archived_scrapped_value),
         'rented_out': float(rented_out),
         'available': float(available),
         'active_rentals': int(active_rentals),
         'overdue_rentals': int(overdue_rentals),
         'total_amount': float(total_amount),
         'total_paid': float(total_paid),
+        'total_discount': float(total_discount),
         'pending_amount': float(pending_amount),
         'pending_tools': float(pending_tools),
         'internal_rentals': int(internal_rentals),
@@ -1412,9 +1485,8 @@ def ensure_all_tools_serials(tools=None, created_by=None, commit=False):
 
 def get_available_serials(tool_id, rental_id=None):
     """Get serials that are currently in store (available for new rental)."""
-    tool = db.session.get(Tool, int(tool_id or 0))
-    if tool:
-        ensure_tool_serials(tool=tool, commit=False)
+    # Read-only helper (the rental form and the serial APIs call it on GET):
+    # no backfill here, see all_tool_serials_tracking.
     query = ToolSerial.query.filter(
         ToolSerial.tool_id == int(tool_id or 0),
         ToolSerial.is_in_store == True,  # noqa: E712
@@ -1530,21 +1602,50 @@ def _serial_chain_from_movements(movements):
     return deduped
 
 
-def all_tool_serials_tracking(search=None, status=None, tool_id=None,
-                              include_scrapped=True, commit_sync=False):
-    """List every serial-numbered piece with its current location and full
-    movement chain, for the dedicated *Track by Serial* page.
+SERIAL_CHAIN_BATCH = 400
+SERIALS_PER_PAGE = 50
+SERIALS_MAX_PER_PAGE = 250
 
-    The serial markings are kept in sync with the live rental holdings first
-    (so a piece that the books say is out really shows as out here), and each
-    row carries the human-readable current location, status, the rental that
-    currently holds it (if any), and the ordered movement chain plus the raw
-    movement log so the page can show both a compact path and the full history.
+
+def _attach_serial_chains(rows):
+    """Fill ``movements`` / ``chain`` for the given rows in batched queries.
+
+    One ``IN (...)`` query per batch instead of one query per serial: a fleet of
+    2,400 markings used to cost 3,000+ queries and 1.6 s on this page alone.
     """
-    ensure_all_tools_serials(tools=None, commit=commit_sync)
+    rows = [r for r in (rows or []) if r.get('serial_id')]
+    if not rows:
+        return rows
+    ids = [int(r['serial_id']) for r in rows]
+    by_serial = {}
+    for i in range(0, len(ids), SERIAL_CHAIN_BATCH):
+        batch = ids[i:i + SERIAL_CHAIN_BATCH]
+        found = (ToolSerialMovement.query
+                 .filter(ToolSerialMovement.serial_id.in_(batch))
+                 .order_by(ToolSerialMovement.serial_id.asc(),
+                           ToolSerialMovement.timestamp.asc(),
+                           ToolSerialMovement.id.asc())
+                 .all())
+        for mv in found:
+            by_serial.setdefault(int(mv.serial_id), []).append(mv)
+    for row in rows:
+        movements = by_serial.get(int(row['serial_id']), [])
+        row['movements'] = movements
+        row['chain'] = _serial_chain_from_movements(movements)
+    return rows
 
+
+def _serial_tracking_rows(search=None, status=None, tool_id=None,
+                          include_scrapped=True, only=None):
+    """Cheap (chain-free) serial rows, filtered and naturally sorted.
+
+    The tool, its category and the holding rental are eager-loaded so a page of
+    50 rows is three queries, not 150.
+    """
     q = (ToolSerial.query
          .join(Tool, ToolSerial.tool_id == Tool.id)
+         .options(joinedload(ToolSerial.tool).joinedload(Tool.category),
+                  joinedload(ToolSerial.current_rental))
          .filter(Tool.is_void == False))  # noqa: E712
     if status:
         q = q.filter(ToolSerial.status == str(status))
@@ -1552,28 +1653,39 @@ def all_tool_serials_tracking(search=None, status=None, tool_id=None,
         q = q.filter(ToolSerial.tool_id == int(tool_id))
     if not include_scrapped:
         q = q.filter(ToolSerial.is_scrapped == False)  # noqa: E712
+    if only == 'out':
+        q = q.filter(ToolSerial.is_in_store == False,  # noqa: E712
+                     ToolSerial.is_scrapped == False)  # noqa: E712
+    elif only == 'in_store':
+        q = q.filter(ToolSerial.is_in_store == True,  # noqa: E712
+                     ToolSerial.is_scrapped == False)  # noqa: E712
+    needle = (search or '').strip().lower()
+    if needle:
+        like = f'%{needle}%'
+        q = q.outerjoin(ToolRental, ToolRental.id == ToolSerial.current_rental_id).filter(or_(
+            func.lower(func.coalesce(ToolSerial.serial_number, '')).like(like),
+            func.lower(func.coalesce(ToolSerial.current_location_label, '')).like(like),
+            func.lower(func.coalesce(Tool.name, '')).like(like),
+            func.lower(func.coalesce(Tool.tool_code, '')).like(like),
+            func.lower(func.coalesce(ToolRental.rental_code, '')).like(like),
+        ))
     # ``sort_key`` is a Python property (natural serial order), not a SQL column,
-    # so we sort the final rows in Python; the DB order just groups by tool.
+    # so the final ordering happens in Python; the DB order just groups by tool.
     serials = q.order_by(Tool.name.asc(), ToolSerial.id.asc()).all()
 
-    result = []
+    rows = []
     for s in serials:
-        movements = (ToolSerialMovement.query
-                     .filter_by(serial_id=s.id)
-                     .order_by(ToolSerialMovement.timestamp.asc(),
-                               ToolSerialMovement.id.asc())
-                     .all())
         rental = s.current_rental
-        result.append({
+        tool = s.tool
+        rows.append({
             'serial': s,
             'serial_id': s.id,
             'serial_number': s.serial_number,
-            'tool': s.tool,
-            'tool_name': s.tool.name if s.tool else '-',
-            'tool_code': s.tool.tool_code if s.tool else '-',
-            'category_name': (s.tool.category.name
-                              if (s.tool and s.tool.category)
-                              else (s.tool.name if s.tool else '-')),
+            'tool': tool,
+            'tool_name': tool.name if tool else '-',
+            'tool_code': tool.tool_code if tool else '-',
+            'category_name': (tool.category.name if (tool and tool.category)
+                              else (tool.name if tool else '-')),
             'is_in_store': bool(s.is_in_store),
             'is_scrapped': bool(s.is_scrapped),
             'status': s.status,
@@ -1583,26 +1695,49 @@ def all_tool_serials_tracking(search=None, status=None, tool_id=None,
             'current_rental_id': s.current_rental_id,
             'rental_code': rental.rental_code if rental else '',
             'rental': rental,
-            'movements': movements,
-            'chain': _serial_chain_from_movements(movements),
+            'movements': [],
+            'chain': '',
         })
+    rows.sort(key=lambda r: (r['tool_name'], r['serial'].sort_key))
+    return rows
 
-    if search:
-        needle = (search or '').strip().lower()
-        if needle:
-            result = [r for r in result if (
-                needle in (r['serial_number'] or '').lower()
-                or needle in (r['tool_name'] or '').lower()
-                or needle in (r['tool_code'] or '').lower()
-                or needle in (r['rental_code'] or '').lower()
-                or needle in (r['current_location_label'] or '').lower()
-                or needle in (r['status_label'] or '').lower()
-            )]
-    # Natural order: by tool name, then the human-readable serial (Shovel No 2
-    # before Shovel No 10).  ``sort_key`` is a property, so this is done in
-    # Python after the rows are built.
-    result.sort(key=lambda r: (r['tool_name'], r['serial'].sort_key))
-    return result
+
+def all_tool_serials_tracking(search=None, status=None, tool_id=None,
+                              include_scrapped=True, commit_sync=False, only=None):
+    """Every serial-numbered piece with its location and full movement chain.
+
+    Read-only: serial markings are maintained by the stock write paths
+    (purchase, scrap, tool edit, rental create/transfer/return) and can be
+    rebuilt on demand from the *Track by Serial* page.  This used to rebuild
+    them on every visit, which made a GET write hundreds of rows.
+
+    ``commit_sync`` is kept for call compatibility and ignored.
+    """
+    rows = _serial_tracking_rows(search=search, status=status, tool_id=tool_id,
+                                 include_scrapped=include_scrapped, only=only)
+    return _attach_serial_chains(rows)
+
+
+def serial_tracking_page(search=None, status=None, tool_id=None,
+                         include_scrapped=True, only=None, page=1,
+                         per_page=SERIALS_PER_PAGE):
+    """Paginated *Track by Serial* rows plus KPIs over the whole filtered set.
+
+    Movement chains are loaded for the visible page only, so a 2,400-piece fleet
+    renders 50 rows instead of a 12 MB document.
+    """
+    per_page = int(per_page or SERIALS_PER_PAGE)
+    per_page = max(10, min(SERIALS_MAX_PER_PAGE, per_page))
+    rows = _serial_tracking_rows(search=search, status=status, tool_id=tool_id,
+                                 include_scrapped=include_scrapped, only=only)
+    kpis = get_tool_serials_tracking_kpis(rows)
+    total = len(rows)
+    pages = max(1, -(-total // per_page))
+    page = max(1, min(int(page or 1), pages))
+    start = (page - 1) * per_page
+    page_rows = _attach_serial_chains(rows[start:start + per_page])
+    return {'rows': page_rows, 'kpis': kpis, 'total': total, 'page': page,
+            'pages': pages, 'per_page': per_page}
 
 
 def get_tool_serials_tracking_kpis(rows):
@@ -1800,7 +1935,7 @@ def get_all_tool_serials_summary(tool_id=None):
     if tool_id:
         q = q.filter(Tool.id == int(tool_id))
     tools = q.order_by(Tool.name.asc()).all()
-    ensure_all_tools_serials(tools=tools, commit=False)
+    # Read-only: see all_tool_serials_tracking -- no backfill on a GET.
     result = []
 
     for tool in tools:
@@ -1909,7 +2044,7 @@ def update_serial_status(serial_id, status, location_label=None, rental_id=None,
     return True, f'Serial status updated to {status}.'
 
 
-def create_serial_movement(serial_id, movement_type, from_label, to_label, notes='', rental_id=None, transfer_id=None, return_id=None, created_by=None):
+def create_serial_movement(serial_id, movement_type, from_label, to_label, notes='', rental_id=None, transfer_id=None, return_id=None, created_by=None, when=None):
     """Log a movement for a serial-numbered piece."""
     serial = db.session.get(ToolSerial, int(serial_id or 0))
     if not serial:
@@ -1925,6 +2060,7 @@ def create_serial_movement(serial_id, movement_type, from_label, to_label, notes
         to_location_label=to_label,
         notes=notes,
         created_by=created_by,
+        timestamp=_movement_stamp(when),
     )
     db.session.add(movement)
     db.session.flush()
@@ -1937,10 +2073,7 @@ def get_serials_for_rental(rental_id):
     if not rental:
         return []
 
-    for item in rental.items:
-        if item.tool:
-            ensure_tool_serials(tool=item.tool, commit=False)
-
+    # Read-only: no serial backfill while a page is being rendered.
     serials = (
         ToolSerial.query
         .filter(
@@ -1979,7 +2112,7 @@ def get_serials_in_store_summary(category_id=None, tool_id=None):
     if tool_id:
         q = q.filter(Tool.id == int(tool_id))
     tools = q.order_by(Tool.name.asc()).all()
-    ensure_all_tools_serials(tools=tools, commit=False)
+    # Read-only: see all_tool_serials_tracking -- no backfill on a GET.
 
     result = []
     for tool in tools:
@@ -2010,7 +2143,7 @@ def get_serials_out_of_store_summary(category_id=None, tool_id=None, rental_id=N
     if tool_id:
         q = q.filter(Tool.id == int(tool_id))
     tools = q.order_by(Tool.name.asc()).all()
-    ensure_all_tools_serials(tools=tools, commit=False)
+    # Read-only: see all_tool_serials_tracking -- no backfill on a GET.
 
     result = []
     for tool in tools:
@@ -2171,3 +2304,246 @@ def transfer_serials(serial_ids, from_label, to_label, transfer_id=None, rental_
     if commit:
         db.session.commit()
     return True, f'Transferred {transferred} serial(s) to {to_label}.', transferred
+
+
+# --------------------------------------------------------------------------- #
+# reversals: cancel a rental, archive / restore a tool, reconcile serial stock
+# --------------------------------------------------------------------------- #
+def live_serial_count(tool_id):
+    """Serial markings that represent a real, non-scrapped piece."""
+    q = db.session.query(func.count(ToolSerial.id)).filter(
+        ToolSerial.tool_id == int(tool_id or 0),
+        ToolSerial.is_scrapped == False,  # noqa: E712
+        ToolSerial.status != 'scrapped',
+    )
+    return int(integrity_query(q).scalar() or 0)
+
+
+def reconcile_tool_serial_stock(tool_id, created_by=None, commit=False, source='Serial manager'):
+    """Make the books own every piece the store has marked.
+
+    Adding a serial marking for a piece nobody ever recorded as purchased used
+    to leave ``live serials > total_quantity`` forever: the backfill only adds
+    markings up to the owned quantity, it never removes extras.  Recording the
+    difference as a stock-in row keeps ``owned == purchased - scrapped`` true and
+    values the extra pieces at the tool's book cost, instead of silently
+    inflating the serial list.
+
+    Returns ``(added_qty, purchase_row_or_None)``.
+    """
+    tool = db.session.get(Tool, int(tool_id or 0))
+    if not tool or tool.is_void:
+        return 0.0, None
+    owned = _round2(tool.total_quantity)
+    marked = float(live_serial_count(tool.id))
+    diff = _round2(marked - owned)
+    if diff <= EPS:
+        return 0.0, None
+
+    cost = _round2(tool.purchase_cost)
+    purchase = ToolPurchase(
+        purchase_code=_next_purchase_code(),
+        tool_id=tool.id,
+        purchase_date=_pkt_today(),
+        qty=diff,
+        unit_cost=cost,
+        total_cost=_round2(diff * cost),
+        supplier=(source or 'Serial manager')[:150],
+        reference='',
+        notes=(f'{marked:g} serial-marked piece(s) against {owned:g} owned — '
+               f'{diff:g} reconciled into stock at book cost')[:300],
+        is_opening_stock=False,
+        created_by=created_by,
+    )
+    db.session.add(purchase)
+    db.session.flush()
+    tool.total_quantity = _round2(owned + diff)
+    tool.updated_at = _pkt_now_naive()
+    create_movement_log(
+        tool_id=tool.id, rental_id=None, movement_type=MOVEMENT_PURCHASE_IN,
+        from_label=SUPPLIER_LABEL, to_label=STORE_LABEL, qty=diff,
+        notes=(f'Serial reconciliation {purchase.purchase_code}: +{diff:g} '
+               f'{tool.unit or "pcs"} marked in the store but never purchased'),
+    )
+    if commit:
+        db.session.commit()
+    return diff, purchase
+
+
+def archive_tool(tool_id, reason='', actor_id=None, commit=True):
+    """Retire a tool.  Reversible: :func:`restore_tool` brings it back."""
+    tool = db.session.get(Tool, int(tool_id or 0))
+    if not tool:
+        return False, 'Tool not found.', None
+    if tool.is_void:
+        return False, f'{tool.name} is already archived.', None
+    pending = db.session.query(func.coalesce(func.sum(ToolRentalItem.qty_pending), 0.0)).filter(
+        ToolRentalItem.tool_id == tool.id).scalar() or 0.0
+    if float(pending) > EPS:
+        return False, (f'Cannot archive {tool.name}: {_round2(pending):g} qty still '
+                       f'rented out. Return it first.'), None
+    tool.is_void = True
+    tool.status = 'retired'
+    tool.void_reason = (reason or 'Archived by user').strip()[:300]
+    tool.voided_at = _pkt_now_naive()
+    tool.updated_at = _pkt_now_naive()
+    if commit:
+        db.session.commit()
+    return True, f'Tool {tool.name} archived.', tool
+
+
+def restore_tool(tool_id, actor_id=None, commit=True):
+    """Un-archive a tool so its stock and history are live again."""
+    tool = db.session.get(Tool, int(tool_id or 0))
+    if not tool:
+        return False, 'Tool not found.', None
+    if not tool.is_void:
+        return False, f'{tool.name} is not archived.', None
+    tool.is_void = False
+    tool.status = 'active'
+    tool.void_reason = None
+    tool.voided_at = None
+    tool.updated_at = _pkt_now_naive()
+    db.session.flush()
+    ensure_tool_serials(tool=tool, created_by=actor_id, commit=False)
+    if commit:
+        db.session.commit()
+    return True, f'Tool {tool.name} restored to active inventory.', tool
+
+
+def archived_tool_rows(term=None, limit=200):
+    """Archived tools with the stock history that archived with them.
+
+    The Reports page lists these so an archived tool's purchases and write-offs
+    stay reachable (they leave the live registers and the KPIs on purpose) and so
+    the *Restore* action has something to hang off.
+    """
+    q = Tool.query.filter(Tool.is_void == True).order_by(  # noqa: E712
+        func.coalesce(Tool.voided_at, Tool.updated_at).desc(), Tool.id.desc())
+    tools = q.limit(int(limit or 200)).all()
+    term = (term or '').strip().lower()
+    if term:
+        tools = [t for t in tools
+                 if term in ' '.join([str(t.name or ''), str(t.tool_code or ''),
+                                      str(t.description or '')]).lower()]
+    stats = tool_stock_aggregates([int(t.id) for t in tools])
+    rows = []
+    for t in tools:
+        st = stock_stats_for(stats, t.id)
+        rows.append({
+            'tool': t, 'tool_id': int(t.id), 'name': t.name, 'code': t.tool_code,
+            'unit': t.unit or 'pcs',
+            'category': t.category.name if t.category else 'No Category',
+            'owned_qty': _round2(t.total_quantity),
+            'condition': t.condition or 'good',
+            'reason': t.void_reason or '',
+            'archived_at': t.voided_at,
+            'purchased_qty': st['purchased_qty'], 'purchase_value': st['purchase_value'],
+            'scrapped_qty': st['scrapped_qty'], 'scrapped_value': st['scrapped_value'],
+            'purchases': st['purchases'], 'scraps': st['scraps'],
+            'serials': live_serial_count(t.id),
+        })
+    return rows
+
+
+def void_tool_rental(rental_id, reason='', actor_id=None, commit=True):
+    """Cancel a rental: every piece still out comes home, the books forget it.
+
+    Money is never reversed from here — a rental with a live payment or discount
+    has to have those voided first, on purpose, from the rental's own page.  That
+    keeps "I created this rental by mistake" a one-click fix without ever letting
+    a stock screen silently unwind cash that reached the Accounts ledger.
+    """
+    rental = db.session.get(ToolRental, int(rental_id or 0))
+    if not rental:
+        return False, 'Rental not found.', None
+    if rental.is_void:
+        return False, f'{rental.rental_code} is already cancelled.', None
+
+    live_payments = [p for p in (rental.payments or []) if not p.is_void]
+    live_discounts = [d for d in (rental.discounts or []) if not d.is_void]
+    if live_payments or live_discounts:
+        bits = []
+        if live_payments:
+            bits.append(f'{len(live_payments)} payment(s)')
+        if live_discounts:
+            bits.append(f'{len(live_discounts)} discount(s)')
+        return False, (f'Void the {" and ".join(bits)} on {rental.rental_code} first — '
+                       f'a cancelled rental may not keep money in the ledger.'), None
+
+    from_label = rental.current_location_label or 'Site / Customer'
+    returned_qty = 0.0
+    serial_ids = [int(s.id) for s in ToolSerial.query.filter(
+        ToolSerial.current_rental_id == rental.id,
+        ToolSerial.is_in_store == False).all()]  # noqa: E712
+    if serial_ids:
+        return_serials_from_rental(rental.id, serial_ids, condition=None,
+                                   notes=f'Rental {rental.rental_code} cancelled',
+                                   created_by=actor_id, commit=False)
+    for item in (rental.items or []):
+        qty_out = _round2(item.qty_pending)
+        if qty_out <= EPS:
+            continue
+        item.qty_pending = 0.0
+        returned_qty = _round2(returned_qty + qty_out)
+        create_movement_log(
+            tool_id=int(item.tool_id), rental_id=int(rental.id), movement_type='return',
+            from_label=from_label, to_label=STORE_LABEL, qty=qty_out,
+            notes=(f'Rental {rental.rental_code} cancelled — {_round2(qty_out):g} '
+                   f'piece(s) back in store')[:500])
+
+    rental.is_void = True
+    rental.void_reason = (reason or 'Cancelled by user').strip()[:300]
+    rental.voided_at = _pkt_now_naive()
+    rental.voided_by = int(actor_id) if actor_id else None
+    rental.updated_at = _pkt_now_naive()
+    recalc_rental_totals(rental.id)
+    rental.status = 'closed'
+    if commit:
+        db.session.commit()
+    return True, (f'Rental {rental.rental_code} cancelled — {_round2(returned_qty):g} '
+                  f'piece(s) returned to store.'), rental
+
+
+def restore_tool_rental(rental_id, actor_id=None, commit=True):
+    """Undo a cancellation: the rental comes back and its pieces go out again."""
+    rental = db.session.get(ToolRental, int(rental_id or 0))
+    if not rental:
+        return False, 'Rental not found.', None
+    if not rental.is_void:
+        return False, f'{rental.rental_code} is not cancelled.', None
+
+    rental.is_void = False
+    rental.void_reason = None
+    rental.voided_at = None
+    rental.voided_by = None
+    db.session.flush()
+
+    to_label = rental.current_location_label or 'Site / Customer'
+    for item in sorted((rental.items or []), key=lambda i: i.id):
+        item.qty_pending = _round2(max(0.0, _round2(item.qty_rented) - _round2(item.qty_returned)))
+        if item.qty_pending <= EPS:
+            continue
+        candidates = (ToolSerial.query
+                      .filter(ToolSerial.tool_id == item.tool_id,
+                              ToolSerial.is_in_store == True,  # noqa: E712
+                              ToolSerial.is_scrapped == False,  # noqa: E712
+                              ToolSerial.current_rental_id.is_(None))
+                      .order_by(ToolSerial.id.asc())
+                      .limit(int(round(item.qty_pending)))
+                      .all())
+        if candidates:
+            assign_serials_to_rental(rental.id, [int(s.id) for s in candidates],
+                                     rental_item_id=int(item.id), location_label=to_label,
+                                     notes=f'Rental {rental.rental_code} reinstated',
+                                     created_by=actor_id, commit=False)
+        create_movement_log(
+            tool_id=int(item.tool_id), rental_id=int(rental.id), movement_type='rental_out',
+            from_label=STORE_LABEL, to_label=to_label, qty=item.qty_pending,
+            notes=f'Rental {rental.rental_code} reinstated after cancellation'[:500])
+
+    recalc_rental_totals(rental.id)
+    rental.updated_at = _pkt_now_naive()
+    if commit:
+        db.session.commit()
+    return True, f'Rental {rental.rental_code} reinstated.', rental

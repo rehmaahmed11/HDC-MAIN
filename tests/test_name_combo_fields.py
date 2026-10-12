@@ -219,7 +219,10 @@ class NameComboFieldTestCase(unittest.TestCase):
         rental = self._rental()
         pages = {
             '/hdc/tool-rental': ('status',),
-            '/hdc/tool-rental/new': ('txn_type', 'billing_type', 'renter_type', 'payment_mode'),
+            # The transaction picker lives on the one transaction page; the
+            # dedicated New Rental page keeps the terms enumerations only.
+            '/hdc/tool-rental/new': ('billing_type', 'renter_type', 'payment_mode'),
+            '/hdc/tool-rental/transaction': ('txn_type', 'billing_type', 'payment_mode'),
             '/hdc/tool-rental/%d' % rental.id: ('payment_mode',),
             '/hdc/tool-rental/reports': ('renter_type', 'status', 'billing_type'),
         }

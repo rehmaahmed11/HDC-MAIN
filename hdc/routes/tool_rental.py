@@ -43,25 +43,28 @@ from hdc.services.tool_rental import (
     # Serial management functions
     assign_serials_to_rental, create_tool_serials, create_serial_movement,
     ensure_all_tools_serials, ensure_tool_serials,
+    archive_tool, restore_tool, archived_tool_rows, reconcile_tool_serial_stock,
+    void_tool_rental, restore_tool_rental,
     get_all_tool_serials_summary, get_available_serials, get_out_of_store_serials,
     get_serial_status, get_serials_by_tool_for_rental, get_serials_for_rental,
     get_serials_in_store_summary, get_serials_out_of_store_summary,
     parse_custom_serial_list, rename_tool_serial,
     return_serials_from_rental, transfer_serials, update_serial_status,
     all_tool_serials_tracking, get_tool_serials_tracking_kpis, SERIAL_STATUSES,
+    serial_tracking_page, SERIALS_PER_PAGE,
     tool_glance_rows,
 )
 from hdc.services.tool_audit import (
     AUDIT_LOSS_REASONS, audit_history, audit_locations, audit_matrix, audit_movement,
     audit_rows_for_json, audit_sheet, audit_summary, close_audit, open_audit_count,
     parse_location_key, pending_audit_for, plan_adjustments, post_adjustments,
-    reopen_audit, save_counts, start_audit, void_audit,
+    posted_adjustment_lines, reopen_audit, save_counts, start_audit, void_audit,
 )
 from hdc.services.tool_tracking import (
     LOC_CUSTOMER, LOC_OWN_PROJECT, LOC_STORE, WAREHOUSE_LABEL,
     allocate_transfer_qty, dashboard_summary, inventory_rows, location_summary,
     record_transfer_items, tool_item_summary, tool_ledger, tool_position,
-    tracking_location_groups,
+    tracking_location_groups, viewer_scope_limited,
 )
 from hdc.utils.dates import _pkt_now_naive, _pkt_today
 from hdc.utils.format import _flt, _amount_to_words
@@ -575,7 +578,30 @@ def _apply_rental_item_edit(rental, rows, billing_type, to_label, old_location_l
     db.session.flush()
 
 
+def _posted_text(key, current, default=''):
+    """A posted text field, falling back to what the row already holds.
+
+    ``(request.form.get(key) or current).strip()`` looks harmless but 500s the
+    moment both sides are empty: a tool saved without a description has
+    ``NULL`` there, and an edit form that posts ``description=''`` evaluates to
+    ``None.strip()``.  Editing such a tool was impossible from the UI.
+    """
+    raw = request.form.get(key)
+    if raw is None:
+        raw = current
+    if raw is None:
+        raw = default
+    return str(raw).strip()
+
+
 def register(app):
+
+    # Every tools page can tell the reader when the numbers are a filtered slice
+    # (a record-scoped user sees their sites' rentals against the full tool
+    # list), so the pages never claim to reconcile books they cannot see.
+    @app.context_processor
+    def _inject_tools_scope_flag():
+        return {'tools_scope_limited': viewer_scope_limited}
 
     # ------------------ TOOLS DASHBOARD (simple stock & rent summary) ------------------
     @app.route('/hdc/tool-rental/dashboard')
@@ -613,7 +639,7 @@ def register(app):
             return redirect(url_for('hdc_tool_rental_dashboard'))
         row = position['row']
         tool = row['tool']
-        ensure_tool_serials(tool=tool, commit=True)
+        # Read-only: serial markings are maintained by the stock write paths.
         return render_template('tool_rental/tool_position.html',
             row=row,
             movements=position['movements'],
@@ -625,7 +651,9 @@ def register(app):
                 'own_project': row['own_project_qty'], 'customer': row['customer_qty'],
                 'total_sent': row['own_project_qty'] + row['customer_qty'],
                 'accounted': row['in_store_qty'] + row['out_qty'],
-                'variance': row['variance'], 'balanced': not row['unaccounted'],
+                'variance': row['variance'],
+                'scope_limited': viewer_scope_limited(),
+                'balanced': (not row['unaccounted']) and not viewer_scope_limited(),
             },
             purchases=tool_purchases(tool_id=tool.id, limit=100),
             scraps=tool_scraps(tool_id=tool.id, limit=100),
@@ -653,13 +681,52 @@ def register(app):
             'status': (request.args.get('status') or '').strip() or None,
             'search_text': (request.args.get('q') or '').strip() or None,
         }
-        rentals = search_rentals(filters)
+        all_rentals = search_rentals(filters)
+        # The hub listed every rental ever created on one page; with a few
+        # hundred rentals that is a half-megabyte document.  Paginate it.
+        page, per_page, pages = _page_args(len(all_rentals), default_per_page=50)
+        start = (page - 1) * per_page
+        rentals = all_rentals[start:start + per_page]
         return render_template('tool_rental/tool_rental.html',
             kpis=kpis,
             rentals=rentals,
             filters=filters,
+            # The hub is a summary + list, but it still has to offer the way in:
+            # its subtitle points at the New Rental page, so without these
+            # buttons the only route there was the sidebar.
+            can_write_tools=_rental_form_access_allowed(),
             known_customers=known_tool_customers(),
+            **_page_context(page=page, per_page=per_page, pages=pages,
+                            total=len(all_rentals), endpoint='hdc_tool_rental',
+                            query={k: v for k, v in filters.items() if v},
+                            label='rentals'),
         )
+
+    # ------------------ pagination helpers ------------------
+    def _page_args(total, default_per_page=50, max_per_page=250):
+        """Current page / per-page / page-count from the querystring."""
+        try:
+            per_page = int(request.args.get('per_page') or default_per_page)
+        except (TypeError, ValueError):
+            per_page = default_per_page
+        per_page = max(10, min(max_per_page, per_page))
+        try:
+            page = int(request.args.get('page') or 1)
+        except (TypeError, ValueError):
+            page = 1
+        pages = max(1, -(-int(total or 0) // per_page))
+        page = max(1, min(page, pages))
+        return page, per_page, pages
+
+    def _page_context(page, per_page, pages, total, endpoint, query=None, label='entries'):
+        """Context for ``shared/_pagination.html``."""
+        clean = {str(k): v for k, v in (query or {}).items() if v not in (None, '')}
+        return {
+            'pg_page': int(page), 'pg_total_pages': int(pages),
+            'pg_total_items': int(total or 0), 'pg_per_page': int(per_page),
+            'pg_endpoint': endpoint, 'pg_url_kwargs': {}, 'pg_query': clean,
+            'pg_label': label,
+        }
 
     # ------------------ INVENTORY ------------------
     @app.route('/hdc/tool-rental/inventory', methods=['GET','POST'])
@@ -702,7 +769,10 @@ def register(app):
                     category_id = cat.id if cat else None
 
                 code = (request.form.get('tool_code') or '').strip().upper() or _next_tool_code()
+                typed_code = code
+                code_was_taken = False
                 if Tool.query.filter_by(tool_code=code).first():
+                    code_was_taken = True
                     code = _next_tool_code()
                 total_qty = max(0.0, _flt(request.form.get('total_quantity')))
                 purchase_cost = max(0.0, _flt(request.form.get('purchase_cost')))
@@ -756,6 +826,9 @@ def register(app):
                         return redirect(url_for('hdc_tool_rental_inventory'))
 
                 db.session.commit()
+                if code_was_taken:
+                    flash(f'The tool code "{typed_code}" was already taken — this tool was '
+                          f'saved as {code}.', 'warning')
                 if purchase is not None:
                     serial_list = tool.active_serials
                     serial_hint = ''
@@ -795,11 +868,11 @@ def register(app):
             if cid is not None)
         kpis = tool_kpis()
 
-        # Sync serial markings with ledger quantities & get serial summary for inventory
-        ensure_all_tools_serials(
-            created_by=getattr(current_user, 'id', None),
-            commit=True,
-        )
+        # Serial summary for the inventory list.  Opening the page no longer
+        # rebuilds markings: a GET must not write (it used to fire hundreds of
+        # INSERTs on the first visit after a stock change).  Markings are kept by
+        # the purchase / scrap / edit / rental write paths, and the Track by
+        # Serial page has an explicit "Rebuild missing markings" action.
         serial_summary = get_all_tool_serials_summary()
         serial_lookup = {s['tool_id']: s for s in serial_summary}
         in_store_serials_by_tool = {}
@@ -826,6 +899,7 @@ def register(app):
             focus=(request.args.get('focus') or '').strip(),
             serial_lookup=serial_lookup,
             in_store_serials_by_tool=in_store_serials_by_tool,
+            can_write_tools=_rental_form_access_allowed(),
         )
 
     # ------------------ EDIT / ARCHIVE A TOOL ------------------
@@ -834,8 +908,8 @@ def register(app):
     @_money_write_required()
     def hdc_tool_rental_tool_edit(tool_id):
         tool = Tool.query.get_or_404(tool_id)
-        name = (request.form.get('name') or tool.name).strip()
-        code = (request.form.get('tool_code') or tool.tool_code).strip().upper()
+        name = _posted_text('name', tool.name)
+        code = _posted_text('tool_code', tool.tool_code).upper()
         if not name:
             flash('Tool name required.', 'danger')
             return redirect(url_for('hdc_tool_rental_inventory'))
@@ -847,16 +921,54 @@ def register(app):
         new_qty = max(0.0, _flt(request.form.get('total_quantity'), old_qty))
         diff = new_qty - old_qty
 
+        # ---- category: never lose it by accident ----
+        # The edit form posts category_id, but a combo widget that has not
+        # synced yet, a partial post or a scripted call can omit it.  Absent key
+        # = keep what the tool has; an explicitly posted empty value = the
+        # operator really did choose "No Category".
+        category_id = tool.category_id
+        if 'category_id' in request.form:
+            raw_cat = str(request.form.get('category_id') or '').strip()
+            if not raw_cat or raw_cat.lower() in ('none', 'null'):
+                category_id = None
+            else:
+                try:
+                    picked = int(raw_cat)
+                except (TypeError, ValueError):
+                    picked = 0
+                if picked and db.session.get(ToolCategory, picked):
+                    category_id = picked
+                else:
+                    flash('The selected category no longer exists — the current '
+                          'category was kept.', 'warning')
+
+        # ---- owned qty may never drop below what is physically out ----
+        # Otherwise the books claim the store owns less than it has handed out
+        # (available_qty goes negative and the ledger reports balanced=False).
+        rented_out = float(tool.rented_out_qty or 0.0)
+        serial_out = float(db.session.query(func.count(ToolSerial.id)).filter(
+            ToolSerial.tool_id == tool.id,
+            ToolSerial.is_in_store == False,  # noqa: E712
+            ToolSerial.is_scrapped == False,  # noqa: E712
+            ToolSerial.status != 'scrapped',
+        ).scalar() or 0)
+        floor_qty = max(rented_out, serial_out)
+        if new_qty < floor_qty - 0.001:
+            flash(f'Cannot set owned quantity to {new_qty:g}: {floor_qty:g} piece(s) of '
+                  f'{tool.name} are still out (rented, on a site or in maintenance). '
+                  f'Return or scrap them first.', 'danger')
+            return redirect(url_for('hdc_tool_rental_inventory', q=tool.tool_code))
+
         tool.name = name
         tool.tool_code = code
-        tool.category_id = request.form.get('category_id', type=int)
-        tool.unit = (request.form.get('unit') or tool.unit).strip()
+        tool.category_id = category_id
+        tool.unit = _posted_text('unit', tool.unit, 'pcs')
         tool.total_quantity = new_qty
         tool.purchase_cost = max(0.0, _flt(request.form.get('purchase_cost'), tool.purchase_cost))
         tool.rental_rate_per_day = max(0.0, _flt(request.form.get('rental_rate_per_day'), tool.rental_rate_per_day))
-        tool.condition = (request.form.get('condition') or tool.condition).strip()
-        tool.status = (request.form.get('status') or tool.status).strip()
-        tool.description = (request.form.get('description') or tool.description).strip()
+        tool.condition = _posted_text('condition', tool.condition, 'good')
+        tool.status = _posted_text('status', tool.status, 'active')
+        tool.description = _posted_text('description', tool.description)
         tool.updated_at = _pkt_now_naive()
 
         # A hand-typed qty is a stock adjustment, not a purchase or a scrap, so
@@ -881,15 +993,31 @@ def register(app):
     @_money_write_required()
     def hdc_tool_rental_tool_delete(tool_id):
         tool = Tool.query.get_or_404(tool_id)
-        pending = db.session.query(func.coalesce(func.sum(ToolRentalItem.qty_pending),0.0)).filter(ToolRentalItem.tool_id==tool.id).scalar() or 0.0
-        if float(pending) > 0.001:
-            flash(f'Cannot archive {tool.name}: {pending:g} qty still rented out.', 'danger')
+        reason = (request.form.get('void_reason') or request.form.get('reason') or '').strip()
+        ok, message, _row = archive_tool(
+            tool.id, reason=reason,
+            actor_id=getattr(current_user, 'id', None), commit=True)
+        flash(message, 'success' if ok else 'danger')
+        return redirect(url_for('hdc_tool_rental_inventory', q=tool.tool_code))
+
+    @app.route('/hdc/tool-rental/inventory/<int:tool_id>/restore', methods=['POST'])
+    @login_required
+    @_money_write_required()
+    def hdc_tool_rental_tool_restore(tool_id):
+        """Bring an archived tool back: archiving is reversible on purpose.
+
+        Without this an archived tool disappeared from inventory, serial
+        tracking and the registers with no way back short of editing the
+        database — while its purchases kept inflating the KPI strip.
+        """
+        tool = Tool.query.get_or_404(tool_id)
+        ok, message, _row = restore_tool(
+            tool.id, actor_id=getattr(current_user, 'id', None), commit=True)
+        flash(message, 'success' if ok else 'danger')
+        target = request.form.get('return_to') or 'reports'
+        if target == 'inventory':
             return redirect(url_for('hdc_tool_rental_inventory', q=tool.tool_code))
-        tool.is_void = True
-        tool.status = 'retired'
-        db.session.commit()
-        flash(f'Tool {tool.name} archived.', 'success')
-        return redirect(url_for('hdc_tool_rental_inventory'))
+        return redirect(url_for('hdc_tool_rental_reports'))
 
     # ------------------ PURCHASE / STOCK IN ------------------
     def _do_tool_purchase(tool_id):
@@ -1062,9 +1190,6 @@ def register(app):
         fields that created it, prefilled with what was saved.
         """
         recent_rentals = search_rentals({})[:RECENT_RENTALS_ON_NEW]
-
-        # Ensure all tools have their individual serial markings synced
-        ensure_all_tools_serials(commit=True)
 
         # For "Transfer Rental": offer each actual holder/location within the
         # latest active rentals, not just a rental-wide "current location". A
@@ -1608,15 +1733,23 @@ def register(app):
 
         sources = []                       # [(rental, location)] in posted order
         seen_rental_ids = set()
+        cancelled = []                     # cancelled rentals somebody ticked
         for raw in raw_sources:
             rental_id, location = _parse_transfer_source_key(raw)
             if not rental_id or rental_id in seen_rental_ids:
                 continue
             rental = db.session.get(ToolRental, rental_id)
-            if not rental or rental.is_void:
+            if not rental:
+                continue
+            if rental.is_void:
+                cancelled.append(rental.rental_code)
                 continue
             seen_rental_ids.add(rental_id)
             sources.append((rental, location))
+        if cancelled:
+            flash(f'{", ".join(cancelled)} is cancelled — reinstate it before '
+                  f'transferring its tools.', 'danger')
+            return redirect(_txn_return_url(url_for('hdc_tool_rental_new')))
         if not sources:
             flash('Select the rental you are transferring from.', 'danger')
             return redirect(_txn_return_url(url_for('hdc_tool_rental_new')))
@@ -2552,6 +2685,14 @@ def register(app):
                     continue
                 serial.current_location_label = to_label
 
+            # The lines above changed what this rental holds, so the markings
+            # have to follow *now*: which pieces are out is derived from the
+            # open rental lines.  This sync used to happen on the next page
+            # view, i.e. inside a GET that wrote to the database.
+            for row in rows:
+                if row.get('tool') is not None:
+                    ensure_tool_serials(tool=row['tool'], commit=False)
+
         if renter_type == 'external' and customer_name:
             ensure_party(customer_name, party_type='rental', phone=customer_phone)
 
@@ -2569,8 +2710,10 @@ def register(app):
     @login_required
     def hdc_tool_rental_detail(rental_id):
         rental = ToolRental.query.get_or_404(rental_id)
-        recalc_rental_totals(rental.id)
-        db.session.commit()
+        # Opening a rental used to recompute its totals and commit: twelve write
+        # statements on a GET, plus a serial backfill further down.  Every write
+        # path (create, edit, return, transfer, payment, discount, audit) already
+        # recalculates, so the page just reads what those paths stored.
 
         items = ToolRentalItem.query.filter_by(rental_id=rental.id).all()
         returns = (ToolRentalReturn.query
@@ -2665,6 +2808,9 @@ def register(app):
             discounts=discounts,
             discount_total=discount_total,
             discount_reason_options=discount_reason_options(),
+            can_write_tools=_rental_form_access_allowed(),
+            live_money_rows=(sum(1 for p in payments if not p.is_void)
+                             + sum(1 for d in discounts if not d.is_void)),
             today=_pkt_today().isoformat()
         )
 
@@ -2794,6 +2940,15 @@ def register(app):
             amount_paid = 0.0
         elif payment_type == 'credit':
             amount_paid = max(0.0, _flt(request.form.get('amount_paid') or 0))
+
+        # Same rule as the standalone payment form: never take more cash than
+        # the rental still owes, or the surplus becomes an invisible credit.
+        if amount_paid > 0 and rental.billing_type != 'no_charge':
+            owed_now = float(rental.total_pending_amount or 0.0)
+            if amount_paid > owed_now + 0.001:
+                flash(f'Payment {amount_paid:,.2f} PKR exceeds the outstanding balance '
+                      f'{owed_now:,.2f} PKR on {rental.rental_code}.', 'danger')
+                return redirect(_txn_return_url(url_for('hdc_tool_rental_detail', rental_id=rental.id)))
 
         # receiving account for this return's payment
         received_to_account_id = request.form.get('received_to_account_id', type=int)
@@ -2925,6 +3080,17 @@ def register(app):
         amount = max(0.0, _flt(request.form.get('amount')))
         if amount <=0:
             flash('Payment amount must be >0.', 'danger')
+            return redirect(_txn_return_url(url_for('hdc_tool_rental_detail', rental_id=rental.id)))
+
+        # Cash may never exceed what is still owed.  An overpayment used to be
+        # accepted silently: the rental flipped to 'paid', the surplus landed on
+        # the customer's ledger as a credit and no KPI, report or receivable view
+        # ever surfaced it again.
+        outstanding_now = float(rental.total_pending_amount or 0.0)
+        if amount > outstanding_now + 0.001:
+            flash(f'Payment {amount:,.2f} PKR exceeds the outstanding balance '
+                  f'{outstanding_now:,.2f} PKR on {rental.rental_code}. Record the '
+                  f'exact amount due, or grant the difference as a discount.', 'danger')
             return redirect(_txn_return_url(url_for('hdc_tool_rental_detail', rental_id=rental.id)))
 
         received_to_account_id = request.form.get('received_to_account_id', type=int)
@@ -3136,6 +3302,45 @@ def register(app):
               f'removed from accounts.', 'warning')
         return redirect(url_for('hdc_tool_rental_detail', rental_id=rental_id))
 
+    # ------------------ CANCEL / REINSTATE A RENTAL ------------------
+    @app.route('/hdc/tool-rental/<int:rental_id>/void', methods=['POST'])
+    @login_required
+    @_money_write_required()
+    def hdc_tool_rental_void(rental_id):
+        """Cancel a rental that should never have existed.
+
+        Every piece still out goes back to the store and the rental leaves the
+        books.  Money is deliberately *not* reversed here: a rental with a live
+        payment or discount has to have those voided first, from this same page,
+        so cash never disappears as a side-effect of a stock action.
+        """
+        rental = ToolRental.query.get_or_404(rental_id)
+        detail_url = url_for('hdc_tool_rental_detail', rental_id=rental.id)
+        reason = (request.form.get('void_reason') or '').strip()
+        if not reason:
+            flash('Give a reason for cancelling this rental.', 'danger')
+            return redirect(_txn_return_url(detail_url))
+        if _has_recent_duplicate(ToolRental, id=rental.id, is_void=True):
+            flash('This rental was already cancelled.', 'info')
+            return redirect(_txn_return_url(detail_url))
+        ok, message, _row = void_tool_rental(
+            rental.id, reason=reason,
+            actor_id=getattr(current_user, 'id', None), commit=True)
+        flash(message, 'success' if ok else 'danger')
+        return redirect(_txn_return_url(detail_url))
+
+    @app.route('/hdc/tool-rental/<int:rental_id>/restore', methods=['POST'])
+    @login_required
+    @_money_write_required()
+    def hdc_tool_rental_restore(rental_id):
+        """Reinstate a cancelled rental (its pieces go out again)."""
+        rental = ToolRental.query.get_or_404(rental_id)
+        ok, message, _row = restore_tool_rental(
+            rental.id, actor_id=getattr(current_user, 'id', None), commit=True)
+        flash(message, 'success' if ok else 'danger')
+        return redirect(_txn_return_url(
+            url_for('hdc_tool_rental_detail', rental_id=rental.id)))
+
     # ------------------ TRANSFER SITE TO SITE ------------------
     @app.route('/hdc/tool-rental/<int:rental_id>/transfer', methods=['POST'])
     @login_required
@@ -3201,6 +3406,37 @@ def register(app):
         else:
             from_project_id = rental.project_id
             from_stage_id = rental.stage_id
+
+        # ---- a transfer has to actually go somewhere ----
+        # Posting "Site B -> Site B" writes a row, a movement log and moves the
+        # serials' labels for nothing, and the location chain then reads
+        # 'Site B › Site B'.
+        _detail_url = url_for('hdc_tool_rental_detail', rental_id=rental.id)
+        if to_type == 'site':
+            same_place = (int(to_project_id or 0) == int(from_project_id or 0)
+                          and int(to_stage_id or 0) == int(from_stage_id or 0))
+        elif to_type == 'customer':
+            same_place = (not from_project_id
+                          and (to_customer_name or '').strip().lower()
+                          == (rental.customer_name or '').strip().lower()
+                          and bool((to_customer_name or '').strip()))
+        else:  # warehouse
+            same_place = not from_project_id and str(from_label).strip().lower() in (
+                'warehouse / store', 'warehouse', 'store')
+        if same_place or str(to_label).strip().lower() == str(from_label).strip().lower():
+            flash(f'{rental.rental_code} is already at "{from_label}" — pick a different '
+                  f'destination to transfer it.', 'warning')
+            return redirect(_txn_return_url(_detail_url))
+
+        # ---- double-submit / retry guard (same values within 12 seconds) ----
+        if _has_recent_duplicate(ToolRentalTransfer, rental_id=rental.id,
+                                 to_project_id=to_project_id, to_stage_id=to_stage_id,
+                                 to_customer_name=to_customer_name,
+                                 qty_transferred=qty_transferred,
+                                 transfer_date=transfer_date):
+            flash('Duplicate transfer prevented (same destination and quantity '
+                  'submitted too quickly).', 'warning')
+            return redirect(_txn_return_url(_detail_url))
 
         transfer = ToolRentalTransfer(
             rental_id=rental.id,
@@ -3379,16 +3615,14 @@ def register(app):
         tool_id = request.args.get('tool_id', type=int)
         q = (request.args.get('q') or '').strip() or None
         status = (request.args.get('status') or '').strip() or None
-        only_out = (request.args.get('only') or '').strip() == 'out'
-        only_in_store = (request.args.get('only') or '').strip() == 'in_store'
 
-        rows = all_tool_serials_tracking(search=q, status=status, tool_id=tool_id)
-        if only_out:
-            rows = [r for r in rows if (not r['is_in_store']) and (not r['is_scrapped'])]
-        elif only_in_store:
-            rows = [r for r in rows if r['is_in_store'] and (not r['is_scrapped'])]
-
-        kpis = get_tool_serials_tracking_kpis(rows)
+        only = (request.args.get('only') or '').strip()
+        page_data = serial_tracking_page(
+            search=q, status=status, tool_id=tool_id, only=only or None,
+            page=request.args.get('page', type=int) or 1,
+            per_page=request.args.get('per_page', type=int) or SERIALS_PER_PAGE)
+        rows = page_data['rows']
+        kpis = page_data['kpis']
         tools = Tool.query.filter(Tool.is_void == False).order_by(Tool.name.asc()).all()  # noqa: E712
         status_options = [(st, dict(
             in_store='In Store', rented='Rented Out', transferred='Transferred',
@@ -3398,6 +3632,13 @@ def register(app):
             serials=rows, kpis=kpis,
             search=q, status=status, selected_tool=tool_id,
             only=(request.args.get('only') or '').strip(),
+            can_write_tools=_rental_form_access_allowed(),
+            **_page_context(page=page_data['page'], per_page=page_data['per_page'],
+                            pages=page_data['pages'], total=page_data['total'],
+                            endpoint='hdc_tool_rental_serials',
+                            query={'q': q or '', 'status': status or '',
+                                   'tool_id': tool_id or '', 'only': only},
+                            label='serial-marked pieces'),
             tools=tools, tool_options=_tool_picker_options(tools),
             status_options=status_options,
         )
@@ -3421,9 +3662,16 @@ def register(app):
             rows = [r for r in rows if r['current_kind'] == 'site']
         elif only == 'customer':
             rows = [r for r in rows if r['current_kind'] == 'customer']
+        page, per_page, pages = _page_args(len(rows), default_per_page=50)
+        start = (page - 1) * per_page
+        page_rows = rows[start:start + per_page]
         return render_template('tool_rental/tool_glance.html',
-            rows=rows, destinations=data['destinations'], kpis=data['kpis'],
+            rows=page_rows, destinations=data['destinations'], kpis=data['kpis'],
             search=q, only=only,
+            **_page_context(page=page, per_page=per_page, pages=pages,
+                            total=len(rows), endpoint='hdc_tool_rental_glance',
+                            query={'q': q or '', 'only': only or ''},
+                            label='pieces'),
         )
 
     # ------------------ PHYSICAL AUDIT: what the sites actually counted ------------------
@@ -3535,9 +3783,12 @@ def register(app):
     def hdc_tool_rental_audit_sheet(audit_id):
         """One physical count: entry sheet, discrepancy report, adjust action."""
         audit = db.session.get(ToolAudit, int(audit_id))
-        if audit is None or audit.is_void:
+        if audit is None:
             flash('Audit not found.', 'danger')
             return redirect(url_for('hdc_tool_rental_audit'))
+        # A cancelled sheet stays readable: it is the record of a count that
+        # happened, and the operator has to see what it posted before deciding
+        # whether to reverse it.  Writing to it is what is blocked.
         sheet = audit_sheet(audit=audit)
         plan = plan_adjustments(audit) if audit.is_open else []
         return render_template('tool_rental/tool_audit_sheet.html',
@@ -3545,7 +3796,8 @@ def register(app):
             sheet=sheet, audit=audit, spec=sheet['spec'], plan=plan,
             movements=audit_movement(audit),
             history=audit_history(limit=10, location_key_filter=sheet['spec']['key']),
-            can_adjust=_audit_write_allowed(),
+            posted_adjustments=len(posted_adjustment_lines(audit)),
+            can_adjust=(_audit_write_allowed() and not audit.is_void),
             audit_open_count=open_audit_count(),
             scrap_reasons=AUDIT_LOSS_REASONS,
             today=_pkt_today().isoformat(),
@@ -3673,7 +3925,11 @@ def register(app):
     @_money_write_required()
     def hdc_tool_rental_audit_reopen(audit_id):
         audit = db.session.get(ToolAudit, int(audit_id))
-        ok, message = reopen_audit(audit)
+        reverse = (request.form.get('reverse_adjustments') or '').strip().lower() in (
+            '1', 'true', 'on', 'yes')
+        ok, message = reopen_audit(
+            audit, reverse=reverse,
+            user_id=getattr(current_user, 'id', None))
         flash(message, 'success' if ok else 'warning')
         return _audit_redirect(audit_id)
 
@@ -3685,7 +3941,11 @@ def register(app):
         if audit is None:
             flash('Audit not found.', 'danger')
             return redirect(url_for('hdc_tool_rental_audit'))
-        ok, message = void_audit(audit, reason=(request.form.get('void_reason') or '').strip())
+        reverse = (request.form.get('reverse_adjustments') or '').strip().lower() in (
+            '1', 'true', 'on', 'yes')
+        ok, message = void_audit(
+            audit, reason=(request.form.get('void_reason') or '').strip(),
+            reverse=reverse, user_id=getattr(current_user, 'id', None))
         flash(message, 'success' if ok else 'warning')
         return redirect(url_for('hdc_tool_rental_audit'))
 
@@ -3819,10 +4079,24 @@ def register(app):
                 date_from = parsed
             else:
                 date_to = parsed
+        # Archived tools leave the live registers and the KPI strip together, so
+        # the two always tie.  Their history is still reachable here: tick
+        # "include archived" to fold it back into the registers, and the archived
+        # list below carries a Restore action.
+        include_archived = (request.args.get('include_archived') or '').strip().lower() in (
+            '1', 'true', 'yes', 'on')
         purchases = tool_purchases(tool_id=filters.get('tool_id'), date_from=date_from,
-                                   date_to=date_to, search_text=filters.get('search_text'))
+                                   date_to=date_to, search_text=filters.get('search_text'),
+                                   include_archived=include_archived)
         scraps = tool_scraps(tool_id=filters.get('tool_id'), date_from=date_from,
-                             date_to=date_to, search_text=filters.get('search_text'))
+                             date_to=date_to, search_text=filters.get('search_text'),
+                             include_archived=include_archived)
+        archived_tools = archived_tool_rows(term=filters.get('search_text'))
+        toggle_args = {k: v for k, v in request.args.items()
+                       if k != 'include_archived' and v not in (None, '')}
+        hide_archived_url = url_for('hdc_tool_rental_reports', **toggle_args)
+        show_archived_url = url_for('hdc_tool_rental_reports',
+                                    include_archived='1', **toggle_args)
         purchase_totals = {
             'qty': sum(float(p.qty or 0) for p in purchases),
             'value': sum(float(p.total_cost or 0) for p in purchases),
@@ -3850,6 +4124,11 @@ def register(app):
             scraps=scraps,
             purchase_totals=purchase_totals,
             scrap_totals=scrap_totals,
+            include_archived=include_archived,
+            archived_tools=archived_tools,
+            hide_archived_url=hide_archived_url,
+            show_archived_url=show_archived_url,
+            can_write_tools=_rental_form_access_allowed(),
             projects=projects,
             project_options=_tool_project_combo_options(projects),
             tools=tools,
@@ -3922,6 +4201,9 @@ def register(app):
                 'own_project': recon['own_project'], 'customer': recon['customer'],
                 'total_sent': recon['total_sent'], 'accounted': recon['accounted'],
                 'variance': recon['variance'], 'balanced': recon['balanced'],
+                # A record-scoped caller sees filtered rentals against the full
+                # tool list, so the balance is deliberately not asserted.
+                'scope_limited': bool(recon.get('scope_limited')),
             },
             'split': summary['split'],
             # every location, not just the top few — an analyst reconciling
@@ -4126,76 +4408,13 @@ def register(app):
             } for s in serials],
         })
 
-    @app.route('/hdc/api/tool-rental/serials/assign', methods=['POST'])
-    @login_required
-    @_money_write_required(api=True)
-    def hdc_api_serials_assign():
-        """Assign serials to a rental."""
-        rental_id = request.form.get('rental_id', type=int)
-        serial_ids_raw = request.form.get('serial_ids', '').strip()
-        notes = (request.form.get('notes') or '').strip()
-        created_by = getattr(current_user, 'id', None)
-
-        if not rental_id:
-            return jsonify({'success': False, 'message': 'Rental ID required'}), 400
-
-        if not serial_ids_raw:
-            return jsonify({'success': False, 'message': 'No serials selected'}), 400
-
-        try:
-            serial_ids = [int(x.strip()) for x in serial_ids_raw.split(',') if x.strip()]
-        except ValueError:
-            return jsonify({'success': False, 'message': 'Invalid serial IDs'}), 400
-
-        success, message, assigned = assign_serials_to_rental(
-            rental_id, serial_ids, notes=notes, created_by=created_by
-        )
-
-        if not success:
-            return jsonify({'success': False, 'message': message}), 400
-
-        return jsonify({
-            'success': True,
-            'message': message,
-            'assigned': assigned,
-            'rental_id': rental_id,
-        })
-
-    @app.route('/hdc/api/tool-rental/serials/return', methods=['POST'])
-    @login_required
-    @_money_write_required(api=True)
-    def hdc_api_serials_return():
-        """Return serials from a rental."""
-        rental_id = request.form.get('rental_id', type=int)
-        serial_ids_raw = request.form.get('serial_ids', '').strip()
-        return_id = request.form.get('return_id', type=int)
-        notes = (request.form.get('notes') or '').strip()
-        created_by = getattr(current_user, 'id', None)
-
-        if not rental_id:
-            return jsonify({'success': False, 'message': 'Rental ID required'}), 400
-
-        if not serial_ids_raw:
-            return jsonify({'success': False, 'message': 'No serials selected'}), 400
-
-        try:
-            serial_ids = [int(x.strip()) for x in serial_ids_raw.split(',') if x.strip()]
-        except ValueError:
-            return jsonify({'success': False, 'message': 'Invalid serial IDs'}), 400
-
-        success, message, returned = return_serials_from_rental(
-            rental_id, serial_ids, return_id=return_id, notes=notes, created_by=created_by
-        )
-
-        if not success:
-            return jsonify({'success': False, 'message': message}), 400
-
-        return jsonify({
-            'success': True,
-            'message': message,
-            'returned': returned,
-            'rental_id': rental_id,
-        })
+    # NOTE: POST /hdc/api/tool-rental/serials/assign and .../serials/return were
+    # removed.  They called assign_serials_to_rental()/return_serials_from_rental()
+    # on their own, which only re-marks serial rows: the rental's qty_pending was
+    # left untouched, so a single call desynchronised "serials out" from the books
+    # (2 serials out while qty_pending still said 4).  Nothing in the app called
+    # them.  Serial marking belongs to the Rental / Return / Transfer forms, which
+    # do the quantity bookkeeping in the same write transaction.
 
     @app.route('/hdc/api/tool-rental/serials/create', methods=['POST'])
     @login_required
@@ -4225,11 +4444,21 @@ def register(app):
         if not success:
             return jsonify({'success': False, 'message': message}), 400
 
+        # Markings are the physical truth: if the store now has more marked
+        # pieces than the books own, record the difference as a stock-in so
+        # ``owned == purchased - scrapped`` stays true.
+        added, purchase = reconcile_tool_serial_stock(
+            tool_id, created_by=created_by, commit=True, source='Serial API')
+
         return jsonify({
             'success': True,
-            'message': message,
+            'message': message if added <= 0 else (
+                f'{message} {added:g} piece(s) reconciled into stock as '
+                f'{purchase.purchase_code}.'),
             'serial_ids': serial_ids,
             'tool_id': tool_id,
+            'reconciled_qty': added,
+            'reconciled_purchase_code': purchase.purchase_code if purchase else None,
         })
 
     @app.route('/hdc/api/tool-rental/tools/<int:tool_id>/summary')
@@ -4237,7 +4466,6 @@ def register(app):
     def hdc_api_tool_summary(tool_id):
         """Get summary of a tool including full serial breakdown (in store vs out at site/customer)."""
         tool = Tool.query.get_or_404(tool_id)
-        ensure_tool_serials(tool=tool, commit=True)
         serials = tool.active_serials
 
         serial_data = []
@@ -4304,6 +4532,34 @@ def register(app):
             for s in summary
         ])
 
+    @app.route('/hdc/tool-rental/serials/rebuild', methods=['POST'])
+    @login_required
+    @_money_write_required()
+    def hdc_tool_rental_serials_rebuild():
+        """Create the serial markings a tool should have but does not.
+
+        This used to happen on every inventory / new-rental / tracking / serial
+        page view, which made a GET write hundreds of rows.  It is now an
+        explicit action: legacy tools get their markings, and reading a page
+        never changes the database.
+        """
+        before = int(db.session.query(func.count(ToolSerial.id)).scalar() or 0)
+        ensure_all_tools_serials(
+            created_by=getattr(current_user, 'id', None), commit=True)
+        after = int(db.session.query(func.count(ToolSerial.id)).scalar() or 0)
+        count = max(0, after - before)
+        flash(f'Serial markings rebuilt — {count} new marking(s) created.'
+              if count else
+              'Serial markings checked — nothing was missing.',
+              'success' if count else 'info')
+        target = (request.form.get('return_to') or 'serials').strip()
+        if target == 'inventory':
+            return redirect(url_for('hdc_tool_rental_inventory'))
+        if target == 'tool' and request.form.get('tool_id', type=int):
+            return redirect(url_for('hdc_tool_rental_serials_create',
+                                    tool_id=request.form.get('tool_id', type=int)))
+        return redirect(url_for('hdc_tool_rental_serials'))
+
     @app.route('/hdc/tool-rental/inventory/<int:tool_id>/serials/create', methods=['GET', 'POST'])
     @login_required
     @_money_write_required()
@@ -4350,12 +4606,18 @@ def register(app):
 
             if success:
                 flash(message, 'success')
+                added, purchase = reconcile_tool_serial_stock(
+                    tool_id, created_by=getattr(current_user, 'id', None),
+                    commit=True, source='Serial manager')
+                if added > 0:
+                    flash(f'{added:g} piece(s) had no stock behind them — owned quantity '
+                          f'raised and recorded as {purchase.purchase_code} at book cost. '
+                          f'Post a real purchase if you have the supplier bill.', 'warning')
             else:
                 flash(message or 'Could not create serials.', 'danger')
             return redirect(url_for('hdc_tool_rental_serials_create', tool_id=tool_id))
 
-        # GET: ensure serials are synced and show management page
-        ensure_tool_serials(tool=tool, commit=True)
+        # GET: show the management page without writing anything
         serials = tool.active_serials
         return render_template('tool_rental/tool_serials_create.html',
             tool=tool,

@@ -73,7 +73,9 @@ class Tool(db.Model):
     rental_rate_per_day = db.Column(db.Float, default=0.0)
     condition = db.Column(db.String(30), default='good')  # good / maintenance / damaged / lost
     status = db.Column(db.String(30), default='active')  # active / retired / maintenance
-    is_void = db.Column(db.Boolean, default=False)
+    is_void = db.Column(db.Boolean, default=False)       # True = archived (reversible)
+    void_reason = db.Column(db.String(300))              # why it was archived
+    voided_at = db.Column(db.DateTime)                   # when it was archived
     created_at = db.Column(db.DateTime, default=_pkt_now_naive)
     updated_at = db.Column(db.DateTime, default=_pkt_now_naive, onupdate=_pkt_now_naive)
 
@@ -249,6 +251,9 @@ class ToolRental(db.Model):
     updated_at = db.Column(db.DateTime, default=_pkt_now_naive, onupdate=_pkt_now_naive)
 
     is_void = db.Column(db.Boolean, default=False)
+    void_reason = db.Column(db.String(300))              # why the rental was cancelled
+    voided_at = db.Column(db.DateTime)
+    voided_by = db.Column(db.Integer, db.ForeignKey('hdc_user.id'), nullable=True)
 
     project = db.relationship('Project', foreign_keys=[project_id])
     stage = db.relationship('Stage', foreign_keys=[stage_id])

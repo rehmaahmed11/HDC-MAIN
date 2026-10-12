@@ -6,6 +6,7 @@
 {% set tools_active = 'serials' %}
 {% from "shared/_combo_field.html" import combo_select %}
 {% include "tool_rental/_tools_nav.html" %}
+{% include "tool_rental/_scope_note.html" %}
 
 <div class="row g-3 mt-1">
     <div class="col-6 col-md-3"><div class="kpi-card kpi-blue"><div class="kpi-icon"><i class="fas fa-barcode"></i></div><div class="kpi-value">{{ "%.0f"|format(kpis.total) }}</div><div class="kpi-label">Pieces Tracked</div></div></div>
@@ -18,6 +19,16 @@
     <div class="card-header hdc-card-header d-flex justify-content-between">
         <span><i class="fas fa-filter me-2"></i>Filter Pieces by Serial / Tool / Status / Location</span>
         <div class="d-flex gap-2">
+            {% if can_write_tools %}
+            <form method="post" action="{{ url_for('hdc_tool_rental_serials_rebuild') }}" class="d-inline">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="return_to" value="serials">
+                <button type="submit" class="btn btn-sm btn-outline-primary"
+                        title="Create the serial markings a tool should have but does not">
+                    <i class="fas fa-rotate me-1"></i>Rebuild missing markings
+                </button>
+            </form>
+            {% endif %}
             <a href="{{ url_for('hdc_tool_rental_tracking') }}" class="btn btn-sm btn-outline-secondary">Tracking</a>
             <a href="{{ url_for('hdc_tool_rental_reports') }}" class="btn btn-sm btn-outline-secondary">Reports</a>
         </div>
@@ -145,6 +156,7 @@
             </tbody>
         </table>
     </div>
+    {% include 'shared/_pagination.html' %}
 </div>
 
 {% for row in serials %}

@@ -238,6 +238,7 @@ _WIPE_TARGETS = {
             'hdc_tool_rental_account_txn',
             'hdc_tool_rental_transfer_item',
             'hdc_tool_rental_return_item',
+            'hdc_tool_rental_discount',
             'hdc_tool_rental_payment',
             'hdc_tool_rental_transfer',
             'hdc_tool_rental_return',
@@ -261,12 +262,15 @@ _WIPE_TARGETS = {
 def _void_tool_rental_ledger_income():
     """Void ledger income that belonged to tool rentals about to be wiped.
 
-    A tool rental payment posts an income transaction into ``hdc_account_txn``.
-    Wiping the Tools section must not leave that rent sitting in the Accounts
-    ledger as income for a rental that no longer exists.
+    A tool rental payment posts an income transaction into ``hdc_account_txn``,
+    and a concession posts one too (``tool_rental_discount``).  Wiping the Tools
+    section must not leave either sitting in the Accounts ledger for a rental
+    that no longer exists.
     """
     from hdc.services.accounts import _accounts_void_by_source_prefix
-    return int(_accounts_void_by_source_prefix('tool_rental_payment', 'Tool data wiped'))
+    voided = int(_accounts_void_by_source_prefix('tool_rental_payment', 'Tool data wiped'))
+    voided += int(_accounts_void_by_source_prefix('tool_rental_discount', 'Tool data wiped'))
+    return voided
 
 
 def _drop_dead_tool_rental_account_links():

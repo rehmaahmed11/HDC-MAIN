@@ -375,6 +375,29 @@ def _is_overdue(rental, today=None):
 # --------------------------------------------------------------------------- #
 # the ledger: where every piece of every tool is
 # --------------------------------------------------------------------------- #
+def viewer_scope_limited():
+    """True when the signed-in user only sees a filtered slice of the rentals.
+
+    Page grants do not narrow rows; a *record scope* (allowed projects/stages)
+    does — the ORM query scope silently filters rentals and rental items.  When
+    that is active, the stock and receivable numbers on a tools page describe
+    the slice, not the books, so they must never be presented as a
+    reconciliation: a scoped manager used to see 48 in store against an admin's
+    44 while both pages claimed ``reconciled: true``.
+    """
+    try:
+        from flask_login import current_user
+        if not current_user or not getattr(current_user, 'is_authenticated', False):
+            return False
+        if (getattr(current_user, 'role', '') or '').strip().lower() == 'admin':
+            return False
+        from hdc.services.permissions import user_stage_scope
+        return bool(getattr(current_user, 'record_scope_enabled', False)
+                    or user_stage_scope(current_user) is not None)
+    except Exception:
+        return False
+
+
 def tool_ledger():
     """Build the complete position for every (non-void) tool.
 
@@ -690,6 +713,13 @@ def tool_ledger():
                 'scrapped_qty', 'scrapped_value'):
         totals[key] = _round_qty(totals[key])
 
+    # A record-scoped viewer sees filtered rentals against unfiltered tools, so
+    # the totals below describe their slice only.  Say so, and do not claim the
+    # books reconcile on numbers that cannot.
+    totals['scope_limited'] = viewer_scope_limited()
+    if totals['scope_limited']:
+        totals['reconciled'] = False
+
     return {'tools': tool_rows, 'locations': location_rows, 'totals': totals, 'today': today}
 
 
@@ -747,16 +777,20 @@ def tools_reconciliation(ledger=None):
         },
     ]
     total_sent = _round_qty(totals['own_project_qty'] + totals['customer_qty'])
+    scope_limited = bool(totals.get('scope_limited'))
+    variance = _round_qty(totals['owned_qty'] - (totals['in_store_qty'] + total_sent))
     return {
         'rows': rows,
+        'scope_limited': scope_limited,
         'owned': totals['owned_qty'],
         'in_store': totals['in_store_qty'],
         'own_project': totals['own_project_qty'],
         'customer': totals['customer_qty'],
         'total_sent': total_sent,
         'accounted': _round_qty(totals['in_store_qty'] + total_sent),
-        'variance': _round_qty(totals['owned_qty'] - (totals['in_store_qty'] + total_sent)),
-        'balanced': abs(totals['owned_qty'] - (totals['in_store_qty'] + total_sent)) <= EPS,
+        'variance': variance,
+        'balanced': (not scope_limited)
+        and abs(variance) <= EPS,
         'unaccounted_rows': [t for t in ledger['tools'] if t['unaccounted']],
     }
 

@@ -1,0 +1,15 @@
+{# Shown on every tools page that reports numbers when the signed-in user has a
+   record scope (allowed projects/stages).  Their rentals are filtered by that
+   scope while the tool list is not, so the totals describe a slice: the pages
+   must not present that slice as the whole book.  Rendered by
+   `tools_scope_limited()` (hdc.routes.tool_rental context processor). #}
+{% if tools_scope_limited is defined and tools_scope_limited() %}
+<div class="alert alert-info py-2 small mb-3" role="status">
+    <i class="fas fa-filter me-1" aria-hidden="true"></i>
+    <strong>Scope-limited view.</strong>
+    Your access is limited to certain sites, so the rentals, quantities and
+    receivables below count only those sites — while the tool list counts every
+    tool. These numbers are not a reconciliation of the full stock book, and the
+    balance check is suppressed on purpose.
+</div>
+{% endif %}

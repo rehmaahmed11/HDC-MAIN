@@ -6,6 +6,7 @@
 {% set tools_active = 'reports' %}
 {% from "shared/_combo_field.html" import combo_field, combo_select %}
 {% include "tool_rental/_tools_nav.html" %}
+{% include "tool_rental/_scope_note.html" %}
 
 <div class="row g-3 mt-1">
     <div class="col-6 col-md-2"><div class="kpi-card kpi-blue"><div class="kpi-icon"><i class="fas fa-tools"></i></div><div class="kpi-value">{{ "%.0f"|format(kpis.total_tools) }}</div><div class="kpi-label">Total Tools</div></div></div>
@@ -114,6 +115,70 @@
                     </tfoot>
                 </table>
             </div>
+        </div>
+    </div>
+</div>
+
+<div class="card hdc-card mt-3">
+    <div class="card-header hdc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span><i class="fas fa-box-archive me-2"></i>Archived tools — history kept, stock not counted</span>
+        <span class="d-flex gap-2 align-items-center">
+            {% if include_archived %}
+                <a class="btn btn-sm btn-warning" href="{{ hide_archived_url }}">
+                    <i class="fas fa-eye-slash me-1"></i>Hide archived from registers</a>
+            {% else %}
+                <a class="btn btn-sm btn-outline-secondary" href="{{ show_archived_url }}">
+                    <i class="fas fa-eye me-1"></i>Include archived in registers</a>
+            {% endif %}
+        </span>
+    </div>
+    <div class="card-body">
+        <p class="text-muted small mb-2">
+            The KPI strip and the registers above count <strong>live tools only</strong>, so they always tie.
+            Archived tools keep their purchase and write-off history here, and can be restored.
+            {% if kpis.archived_tool_types %}{{ kpis.archived_tool_types }} archived tool type(s),
+            {{ "{:,.0f}".format(kpis.archived_purchase_value) }} PKR of purchases and
+            {{ "{:,.0f}".format(kpis.archived_scrapped_value) }} PKR of write-offs are outside the live figures.{% endif %}
+        </p>
+        <div class="table-responsive">
+            <table class="table hdc-table table-sm mb-0">
+                <thead><tr>
+                    <th>Code</th><th>Tool</th><th>Category</th><th class="text-center">Owned</th>
+                    <th class="text-center">Markings</th><th class="text-center">Purchased</th>
+                    <th class="text-end">Purchase value</th><th class="text-center">Scrapped</th>
+                    <th>Archived</th><th class="text-center">Restore</th>
+                </tr></thead>
+                <tbody>
+                {% for row in archived_tools %}
+                    <tr>
+                        <td class="text-nowrap">{{ row.code }}</td>
+                        <td>{{ row.name }}</td>
+                        <td>{{ row.category }}</td>
+                        <td class="text-center">{{ "%g"|format(row.owned_qty) }}</td>
+                        <td class="text-center">{{ row.serials }}</td>
+                        <td class="text-center">{{ "%g"|format(row.purchased_qty) }} ({{ row.purchases }})</td>
+                        <td class="text-end">{{ "{:,.0f}".format(row.purchase_value) }}</td>
+                        <td class="text-center">{{ "%g"|format(row.scrapped_qty) }} ({{ row.scraps }})</td>
+                        <td class="small">
+                            {{ row.archived_at.strftime('%d-%b-%Y') if row.archived_at else '—' }}
+                            {% if row.reason %}<span class="d-block text-muted">{{ row.reason }}</span>{% endif %}
+                        </td>
+                        <td class="text-center">
+                            {% if can_write_tools %}
+                            <form method="post" action="{{ url_for('hdc_tool_rental_tool_restore', tool_id=row.tool_id) }}">
+                                <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+                                <input type="hidden" name="return_to" value="reports">
+                                <button type="submit" class="btn btn-sm btn-outline-success">
+                                    <i class="fas fa-rotate-left me-1"></i>Restore</button>
+                            </form>
+                            {% else %}<span class="text-muted small">—</span>{% endif %}
+                        </td>
+                    </tr>
+                {% else %}
+                    <tr><td colspan="10" class="text-center text-muted py-3">No archived tools.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
         </div>
     </div>
 </div>

@@ -40,8 +40,9 @@ from sqlalchemy import func, or_
 from hdc.extensions import db
 from hdc.models.tool_rental import (
     TOOL_DISCOUNT_REASONS, TOOL_SCRAP_REASONS, Tool, ToolCategory, ToolMovementLog,
-    ToolRental, ToolRentalDiscount, ToolRentalItem, ToolRentalPayment, ToolRentalReturn,
-    ToolRentalReturnItem, ToolScrap, ToolSerial,
+    ToolMovementLog, ToolPurchase, ToolRental, ToolRentalDiscount, ToolRentalItem,
+    ToolRentalPayment, ToolRentalReturn, ToolRentalReturnItem, ToolRentalTransfer,
+    ToolScrap, ToolSerial,
 )
 from hdc.services.record_permissions import integrity_message
 from hdc.services.tool_rental import (
@@ -122,6 +123,13 @@ def txn_reference_seen(reference: str) -> bool:
         (ToolRentalDiscount, ToolRentalDiscount.notes),
         (ToolScrap, ToolScrap.reference),
         (ToolScrap, ToolScrap.notes),
+        # A maintenance move and a site transfer leave their reference on the
+        # transfer row and on the movement log; without these two a re-posted
+        # form looked brand new and moved the same pieces twice.
+        (ToolRentalTransfer, ToolRentalTransfer.notes),
+        (ToolPurchase, ToolPurchase.reference),
+        (ToolPurchase, ToolPurchase.notes),
+        (ToolMovementLog, ToolMovementLog.notes),
     )
     for model, column in checks:
         found = (db.session.query(model.id)
@@ -592,6 +600,7 @@ def _record_rental_damage_loss(*, actor_id, rental_id, rental_item_id, qty,
         tool_id=int(tool.id), rental_id=rental.id, movement_type='return_in',
         from_label=from_label, to_label=STORE_LABEL, qty=qty, return_id=ret.id,
         notes=stamp_reference(f'{reason_label} at {from_label} — written off', reference),
+        when=when,
     )
 
     # 2. Write the pieces off the stock register (store side, unchanged by step 1).
@@ -677,7 +686,7 @@ def send_to_maintenance(*, actor_id, serial_ids, txn_date=None, reference='',
             notes=stamp_reference(
                 f'Sent for maintenance{f" — {reason}" if reason else ""}. {notes}'.strip(),
                 reference),
-            created_by=actor_id)
+            created_by=actor_id, when=when)
         moved_by_tool.setdefault(int(serial.tool_id), []).append(serial)
 
     for tool_id_value, pieces in moved_by_tool.items():
@@ -688,7 +697,8 @@ def send_to_maintenance(*, actor_id, serial_ids, txn_date=None, reference='',
             from_label=STORE_LABEL, to_label=MAINTENANCE_LABEL,
             qty=float(len(pieces)),
             notes=stamp_reference(
-                f'{len(pieces)} piece(s) sent for maintenance. {notes}'.strip(), reference))
+                f'{len(pieces)} piece(s) sent for maintenance. {notes}'.strip(), reference),
+            when=when)
         if tool and _tool_fully_in_maintenance(tool):
             tool.condition = 'maintenance'
             tool.updated_at = _pkt_now_naive()
@@ -747,7 +757,7 @@ def return_from_maintenance(*, actor_id, serial_ids, condition='good',
                 ('Repaired and back in store.' if not write_off
                  else f'Not repairable ({outcome}) — written off.') + f' {notes}'.strip(),
                 reference),
-            created_by=actor_id)
+            created_by=actor_id, when=when)
         moved_by_tool.setdefault(int(serial.tool_id), []).append(serial)
 
     # Pieces the workshop cannot fix go through the ordinary scrap register.
@@ -762,7 +772,8 @@ def return_from_maintenance(*, actor_id, serial_ids, condition='good',
             qty=float(len(pieces)),
             notes=stamp_reference(
                 ('Back from maintenance. ' if not write_off else 'Not repairable — ')
-                + f'{len(pieces)} piece(s). {notes}'.strip(), reference))
+                + f'{len(pieces)} piece(s). {notes}'.strip(), reference),
+            when=when)
         if write_off:
             ok, msg, scrap = record_tool_scrap(
                 tool_id=tool_id_value, qty=float(len(pieces)),
