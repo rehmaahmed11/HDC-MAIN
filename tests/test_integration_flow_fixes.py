@@ -228,6 +228,42 @@ class IntegrationFlowFixesTestCase(unittest.TestCase):
                               f'{path} answered {resp.status_code} to a staff user')
         self.assertEqual(counts(), before)
 
+    # F8 ---------------------------------------------------------------------
+    def _owner_payment(self, pid, amount):
+        with self.app.app_context():
+            acc_id = _accounts_default_company_cash().id
+        self.client.post(f'/hdc/projects/{pid}/owner_payment', data={
+            'amount': str(amount), 'date': date.today().isoformat(),
+            'received_to_account_id': str(acc_id), '_csrf_token': self._token()})
+
+    def test_client_rename_moves_owner_history_and_retires_old_party(self):
+        pid = self._add_project('PR8', 'Villa Rename', 'Owner Old')
+        self.client.get('/hdc/parties')
+        self._owner_payment(pid, 4000)
+        resp = self.client.post(f'/hdc/projects/{pid}/edit', data={
+            'name': 'Villa Rename', 'client': 'Owner New', 'client_phone': '',
+            'location': '', 'status': 'active', '_csrf_token': self._token()})
+        self.assertEqual(resp.status_code, 302)
+        with self.app.app_context():
+            txn = AccountTransaction.query.filter_by(type='project_income').one()
+            self.assertEqual(txn.party_name, 'Owner New')
+            old = CashFlowParty.query.filter_by(name='Owner Old').one()
+            self.assertFalse(old.is_active)
+            new = CashFlowParty.query.filter_by(name='Owner New').one()
+            with self.app.test_request_context('/'):
+                self.assertEqual(len(party_ledger(new)['rows']), 1)
+
+    def test_old_client_stays_active_while_another_project_uses_it(self):
+        pid = self._add_project('PR8B', 'Site One', 'Owner Shared')
+        self._add_project('PR8C', 'Site Two', 'Owner Shared')
+        self.client.get('/hdc/parties')
+        self.client.post(f'/hdc/projects/{pid}/edit', data={
+            'name': 'Site One', 'client': 'Owner Moved', 'client_phone': '',
+            'location': '', 'status': 'active', '_csrf_token': self._token()})
+        with self.app.app_context():
+            self.assertTrue(CashFlowParty.query.filter_by(name='Owner Shared').one().is_active)
+
+
     # Backfill script (F1/F3 legacy rows) ------------------------------------
     def test_backfill_refiles_legacy_owner_rows_only(self):
         import importlib.util

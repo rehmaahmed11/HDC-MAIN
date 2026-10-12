@@ -323,11 +323,16 @@ def register(app):
             # ── Keep Parties in sync when client name changes ────────────
             new_client = (p.client or '').strip()
             linked = True
+            refiled = 0
             if new_client and new_client.lower() != old_client.lower():
                 linked = _link_client_party(p, new_client)
+                if linked and old_client:
+                    from hdc.services.parties import rename_owner_client
+                    refiled = rename_owner_client(p, old_client, new_client)
             db.session.commit()
             if linked:
-                flash('Project updated.', 'success')
+                note = f' {refiled} ledger row(s) moved to the new client name.' if refiled else ''
+                flash(f'Project updated.{note}', 'success')
             else:
                 flash(f'Project updated, but client "{new_client}" could not be linked to Parties. '
                       f'Check the server log and re-save the project.', 'warning')

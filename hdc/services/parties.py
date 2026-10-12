@@ -683,3 +683,41 @@ def type_choice_groups():
          [(value, label) for value, label in PARTY_TYPES
           if value not in BUCKETED_PARTY_TYPES]),
     ]
+
+
+def rename_owner_client(project, old_client, new_client):
+    """Carry an owner's rename through the owner-linked ledger rows (F8).
+
+    Re-points the ``party_name`` of this project's owner rows (owner receipts
+    and own-site tool-rental money) from the old client name to the new one,
+    so the owner's statement keeps its history under the current name.  Only
+    those rows change: amounts, dates, accounts and other parties are left
+    alone.  The old client party is deactivated (not deleted) when no other
+    project still uses that name.  Returns the number of ledger rows re-filed.
+    """
+    from sqlalchemy import or_
+    from hdc.models.projects import Project
+    old_key = party_name_key(old_client)
+    new_name = (new_client or '').strip()[:120]
+    if not old_key or not new_name or old_key == party_name_key(new_name):
+        return 0
+    rows = (AccountTransaction.query
+            .filter(AccountTransaction.project_id == int(project.id),
+                    func.lower(func.trim(func.coalesce(AccountTransaction.party_name, ''))) == old_key,
+                    or_(AccountTransaction.type == 'project_income',
+                        AccountTransaction.related_entity_type == 'tool_rental'))
+            .all())
+    for txn in rows:
+        txn.party_name = new_name
+    still_used = (Project.query
+                  .filter(func.lower(func.trim(func.coalesce(Project.client, ''))) == old_key,
+                          Project.id != int(project.id))
+                  .count())
+    if not still_used:
+        old_party = (CashFlowParty.query
+                     .filter(func.lower(func.trim(CashFlowParty.name)) == old_key,
+                             func.lower(CashFlowParty.party_type) == 'client')
+                     .first())
+        if old_party is not None and old_party.is_active:
+            old_party.is_active = False
+    return len(rows)

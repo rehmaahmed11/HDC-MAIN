@@ -165,7 +165,7 @@ Severity: **High** = wrong money/party state visible to users; **Medium** = sile
 | F5 | Failed party link swallowed; success still shown | **Fixed** | `_link_client_party()` uses a savepoint, logs the error, and shows a warning instead of "linked". |
 | F6 | Client change skips permission check | **Fixed** | Changing `client` now requires `project_financials` write. |
 | F7 | Sync cost on every load | **Partly fixed** | Duplicate loop removed; project-form client list is a `DISTINCT` query. The directory still *creates* missing parties on GET (idempotent); it no longer writes reactivations. |
-| F8 | Renames don't propagate | **Not fixed (decision needed)** | Needs a `Project.client_party_id` foreign key and a migration. Ledger rows keep the old name as history, so the fix must choose how old statements are re-linked. |
+| F8 | Renames don't propagate | **Fixed (chosen: re-point history)** | Renaming a project's client calls `rename_owner_client()` (`services/parties.py`). It re-files that project's owner rows (receipts and own-site tool money) to the new name, and deactivates the old client party only if no other project uses it. Amounts, dates, accounts and other parties are untouched. Tests: `test_client_rename_*`, `test_old_client_stays_active_*`. Note: this rewrites posted labels, which the audit's immutability rule normally discourages; it was a deliberate choice. |
 | F9 | Money POST routes rely on layered guards | **Fixed (16 routes covered)** | `test_money_write_matrix_refuses_non_finance_role` POSTs as a staff user to 16 money-write routes (accounts, Money Center, projects, tool payments, discounts, returns, transfers, voids) and asserts refusal and no money rows written. |
 | F10 | Bare `except:` in tools; silent filter dates | **Fixed** | Bare excepts narrowed to `(TypeError, ValueError)`. Bad filter dates on the Reports and register pages now show a warning instead of being dropped. |
 
@@ -178,3 +178,5 @@ Severity: **High** = wrong money/party state visible to users; **Medium** = sile
 **Full suite after the fixes:** 978 tests run, 5 skipped, the one failure above (now fixed). Re-run the full suite before merging.
 
 **Follow-up (second pass):** `tests/test_integration_flow_fixes.py` now has 8 cases, including the backfill re-filing a legacy row only, and the staff-role permission check. The earlier permission test was run on the admin session by mistake; it now uses a fresh client.
+
+**Open items after this pass:** F7 still creates missing parties on a directory GET (idempotent; reactivation is removed). Moving creation out of GET would change when workers and clients appear in the directory.
