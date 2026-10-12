@@ -166,7 +166,7 @@ Severity: **High** = wrong money/party state visible to users; **Medium** = sile
 | F6 | Client change skips permission check | **Fixed** | Changing `client` now requires `project_financials` write. |
 | F7 | Sync cost on every load | **Partly fixed** | Duplicate loop removed; project-form client list is a `DISTINCT` query. The directory still *creates* missing parties on GET (idempotent); it no longer writes reactivations. |
 | F8 | Renames don't propagate | **Not fixed (decision needed)** | Needs a `Project.client_party_id` foreign key and a migration. Ledger rows keep the old name as history, so the fix must choose how old statements are re-linked. |
-| F9 | Money POST routes rely on layered guards | **Partly fixed** | `test_non_finance_role_cannot_post_money` checks a staff user cannot post an owner receipt or a new transaction. Other money routes (tool payments, account edits, Money Center quick-post) are not yet in the matrix. |
+| F9 | Money POST routes rely on layered guards | **Fixed (16 routes covered)** | `test_money_write_matrix_refuses_non_finance_role` POSTs as a staff user to 16 money-write routes (accounts, Money Center, projects, tool payments, discounts, returns, transfers, voids) and asserts refusal and no money rows written. |
 | F10 | Bare `except:` in tools; silent filter dates | **Fixed** | Bare excepts narrowed to `(TypeError, ValueError)`. Bad filter dates on the Reports and register pages now show a warning instead of being dropped. |
 
 **Behaviour change to note:** owner receipts and own-site tool money now show the owner's name in the Accounts "party" column instead of the project name. Project and rental identity still live in `project_id` and `related_entity_id`.

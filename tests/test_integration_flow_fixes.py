@@ -185,6 +185,49 @@ class IntegrationFlowFixesTestCase(unittest.TestCase):
             self.assertEqual(OwnerPayment.query.count(), before_op)
             self.assertEqual(AccountTransaction.query.count(), before_txn)
 
+    def test_money_write_matrix_refuses_non_finance_role(self):
+        """Every money POST route refuses a staff user and writes nothing (F9).
+
+        Ids are nonexistent on purpose: the permission check runs before the
+        view, so a refusal must not depend on the record existing.
+        """
+        from hdc.models.accounts import OwnerPayment
+        from hdc.models.tool_rental import ToolRental, ToolRentalPayment
+        routes = [
+            ('POST', '/hdc/accounts/new-transaction'),
+            ('POST', '/hdc/accounts/money-center/api/quick-post'),
+            ('POST', '/hdc/accounts/transactions/999999/edit'),
+            ('POST', '/hdc/accounts/new'),
+            ('POST', '/hdc/accounts/999999/edit'),
+            ('POST', '/hdc/personal-management/expenses'),
+            ('POST', '/hdc/projects/999999/owner_payment'),
+            ('POST', '/hdc/projects/999999/owner_payment/999999/delete'),
+            ('POST', '/hdc/tool-rental/create'),
+            ('POST', '/hdc/tool-rental/999999/payment'),
+            ('POST', '/hdc/tool-rental/999999/discount'),
+            ('POST', '/hdc/tool-rental/999999/return'),
+            ('POST', '/hdc/tool-rental/999999/transfer'),
+            ('POST', '/hdc/tool-rental/payment/999999/void'),
+            ('POST', '/hdc/tool-rental/999999/void'),
+            ('POST', '/hdc/tool-rental/transaction/damage-loss'),
+        ]
+
+        def counts():
+            with self.app.app_context():
+                return (AccountTransaction.query.count(), OwnerPayment.query.count(),
+                        ToolRentalPayment.query.count(), ToolRental.query.count())
+
+        self._login_as('f9-matrix', 'staff')
+        before = counts()
+        for method, path in routes:
+            with self.subTest(path=path):
+                resp = self.client.open(path, method=method, data={
+                    'amount': '100', 'date': date.today().isoformat(),
+                    'category': 'income', '_csrf_token': self._token()})
+                self.assertIn(resp.status_code, (302, 403),
+                              f'{path} answered {resp.status_code} to a staff user')
+        self.assertEqual(counts(), before)
+
     # Backfill script (F1/F3 legacy rows) ------------------------------------
     def test_backfill_refiles_legacy_owner_rows_only(self):
         import importlib.util
