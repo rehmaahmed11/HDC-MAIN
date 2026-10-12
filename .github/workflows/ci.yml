@@ -36,6 +36,21 @@ jobs:
       - name: Ensure databases and archives stay out of Git
         run: python scripts/check_db_safety.py
 
+      - name: Tools section regression smoke
+        # Named, fast signal for the Tools area: every fix recorded in
+        # TOOLS_SECTION_CRUD_HEALTH_AUDIT.md has a case in test_tool_crud_gaps,
+        # and the modules below cover the stock/serial/audit/money flows around
+        # it. The whole-suite step still runs everything else.
+        run: |
+          python -m unittest -v \
+            tests.test_tool_crud_gaps \
+            tests.test_tool_stock_lifecycle \
+            tests.test_tool_rental_edit \
+            tests.test_tool_rental_discount \
+            tests.test_tool_audit \
+            tests.test_tool_serial_tracking \
+            tests.test_tool_serial_markings
+
       - name: Deploy automation tests
         run: python -m unittest discover -s tests -p 'test_*.py' -v
 

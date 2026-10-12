@@ -286,11 +286,12 @@ class ToolTrackingTestCase(unittest.TestCase):
         response = self.client.get('/hdc/tool-rental/new')
         self.assertEqual(response.status_code, 200)
         html = response.get_data(as_text=True)
-        # The form reads in one order, the same six steps the Tools transaction
-        # page uses: what is happening → from where → which tools → to whom →
+        # The form reads in one order: from where → which tools → to whom →
         # rent & terms → settle the previous holder.  So the holder list sits
         # directly below the From picker, the available tools below that, the
-        # destination after the tools, and rent type only at the end.
+        # destination after the tools, and rent type only at the end.  (The
+        # "what is happening" step moved off this page when rental creation got
+        # its own page — the txn picker is still here, only not as a step.)
         ordered_ids = [
             'id="txnType"', 'id="transferSourceField"', 'id="transferHoldersList"',
             'id="transferToolsPanel"', 'id="renterType"',
@@ -300,9 +301,9 @@ class ToolTrackingTestCase(unittest.TestCase):
         positions = [html.index(marker) for marker in ordered_ids]
         self.assertEqual(positions, sorted(positions))
         # … and the steps are numbered the same way on both tool forms.
-        steps = ['1 · What is happening?', '2 · From where are the tools coming?',
-                 '3 · Which tools are moving?', '4 · To — who receives the tools?',
-                 '5 · Rent type &amp; terms', "6 · Settle the previous holder's rent"]
+        steps = ['1 · From where are the tools coming?',
+                 '2 · Which tools are moving?', '3 · To — who receives the tools?',
+                 '4 · Rent type &amp; terms', "5 · Settle the previous holder's rent"]
         step_positions = [html.index(step) for step in steps]
         self.assertEqual(step_positions, sorted(step_positions))
         self.assertIn('Rent already fixed in contact / contract (no extra rent)', html)
