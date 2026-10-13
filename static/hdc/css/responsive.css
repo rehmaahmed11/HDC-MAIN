@@ -257,6 +257,25 @@ pre, code, kbd, samp {
 
     .modal-dialog { max-width: calc(100% - 1.5rem); }
 
+    /* ── The drawer's own footer never leaves the screen ────────────────
+       The rail is a flex column: brand, the group list, then the footer
+       holding “Expand all” and Logout.  Scrolling the whole rail works on a
+       tall screen, but a 320×568 phone needs 689px for the same content, so
+       Logout sat ~120px below the fold and the last tap of the session meant
+       scrolling to find it.  Pinning brand and footer and scrolling only the
+       group list keeps Logout where the operator expects it, and the drawer
+       still scrolls; only the rail that moves changes. */
+    #sidebar { overflow: hidden; }
+    #sidebarGroups {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        -webkit-overflow-scrolling: touch;
+    }
+    .sidebar-brand,
+    .sidebar-footer { flex: 0 0 auto; }
+
     /* Filters: stop stacking one control per line. */
     :is(form[method="GET"], form[method="get"]) :is(.row) {
         display: grid;
@@ -299,6 +318,27 @@ pre, code, kbd, samp {
         padding-right: max(var(--hdc-page-pad), env(safe-area-inset-right)) !important;
         padding-bottom: max(1rem, env(safe-area-inset-bottom)) !important;
     }
+
+    /* ── Rows stop at the edge of the screen ─────────────────────────────
+       Bootstrap pulls a `.row` out sideways by half a gutter
+       (`margin-inline: calc(-0.5 * var(--bs-gutter-x))`, i.e. -12px for the
+       default 1.5rem gutter) and relies on the wrapper's `px-4` (24px) to
+       absorb it.  On a phone this layer shrinks that padding to 10px — 8px
+       below 576px, 6.4px below 360px — while the gutter stays 12px, so every
+       plain `.row` that is a direct child of `main.main-content` hangs
+       2–6px off the right edge of the screen (measured on the dashboard, the
+       add/edit forms, payroll, timekeeping, purchases, materials and every
+       tool-rental page: 78 of 125 pages at 320px, 17 at 390px).  The page
+       then has a strip of content the operator can never reach, because the
+       overflow guard above clips it rather than scrolling to it.
+
+       Dropping the negative margin keeps the row inside its container on
+       every screen; the columns keep their own half-gutter padding, so the
+       vertical rhythm and the spacing between fields are unchanged. */
+    .row {
+        margin-left: 0;
+        margin-right: 0;
+    }
     #flashMessages {
         padding-left: max(var(--hdc-page-pad), env(safe-area-inset-left)) !important;
         padding-right: max(var(--hdc-page-pad), env(safe-area-inset-right)) !important;
@@ -340,6 +380,22 @@ pre, code, kbd, samp {
         padding: 0.5rem 0.7rem;
         font-size: 0.82rem;
     }
+
+    /* A header that holds a title AND a group of buttons: the header itself
+       wraps (see the tablet block), but the button group is a single flex
+       item whose minimum width is the sum of its buttons, so on a phone it
+       used to hang off the card — "Create Transaction" reached 13px past the
+       right edge of a 390px screen on the Accounts page and the transaction
+       search, and every similar header with two or three actions (HDC Tools,
+       Projects, Purchases…).  Letting the group wrap too keeps every button
+       inside the card, on its own line when the line is full. */
+    .card-header .d-flex,
+    .hdc-card-header .d-flex {
+        flex-wrap: wrap;
+        min-width: 0;
+    }
+    .card-header .d-flex > .btn,
+    .hdc-card-header .d-flex > .btn { min-width: 0; }
     .hdc-card { border-radius: 12px; }
     form .mb-3, .card-body .mb-3, .modal-body .mb-3 { margin-bottom: 0.6rem !important; }
     form .mb-4, .card-body .mb-4, .modal-body .mb-4 { margin-bottom: 0.8rem !important; }
@@ -768,6 +824,33 @@ pre, code, kbd, samp {
         flex-wrap: wrap;
         gap: 0.45rem;
     }
+
+    /* ── Shared-expense split table ─────────────────────────────────────
+       `1fr 110px 78px` needs 240px of columns before the party name gets a
+       single pixel, so on a 320px phone the two figure fields were cropped
+       (13px of the amount column cut off, the row's own border hiding it).
+       Sharing the row proportionally keeps all three fields on screen and
+       readable — the name wraps, the figures stay right-aligned. */
+    .se-split-head,
+    .se-split-row {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 4.5rem) minmax(0, 3.2rem);
+        gap: 6px;
+        padding: 6px 7px;
+    }
+    .se-split-name { min-width: 0; overflow-wrap: anywhere; }
+    .se-split-head > span,
+    .se-split-row > * { min-width: 0; }
+    .se-split-row .form-control { padding-left: 5px; padding-right: 5px; }
+}
+
+@media screen and (max-width: 419.98px) {
+    /* The party name needs room to wrap; the two figure fields shrink to
+       what a four-figure amount actually needs (320px phone). */
+    .se-split-head,
+    .se-split-row {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 3.9rem) minmax(0, 2.7rem);
+        gap: 5px;
+    }
 }
 
 /* ═════════════════════════════════════════════════════════════════════════
@@ -873,6 +956,32 @@ pre, code, kbd, samp {
     .form-check-label { padding-top: 1px; }
 
     .btn-hamburger { min-width: 40px; min-height: 38px; }
+
+    /* ── Text links with a thumb ────────────────────────────────────────
+       An inline link inside helper text, an alert or a card footer is only
+       14–19px tall — the height of its own text — which is well under a
+       comfortable thumb target ("Parties → Clients / Owner", "Sync Project
+       Clients", "View all Clients in Parties", "Tool Tracking", the print
+       bar's Print/Close buttons).  The padding grows the tap area to
+       ~30–36px; the matching negative margin keeps the surrounding line
+       height, so the copy still sets exactly as designed. */
+    .alert a:not(.btn),
+    .form-text a:not(.btn),
+    .card-footer a:not(.btn),
+    .small a:not(.btn),
+    .kpi-sub a:not(.btn),
+    p a:not(.btn),
+    small a:not(.btn),
+    a.small,
+    /* A `btn-link` is text with a pointer; give it a target height too. */
+    .btn-link,
+    .acc-section-body > .small > a {
+        display: inline-block;
+        padding-block: 8px;
+        margin-block: -8px;
+    }
+    .btn-link { min-height: 32px; }
+    .print-bar .btn { min-height: 36px; }
 }
 
 /* ═════════════════════════════════════════════════════════════════════════
