@@ -784,49 +784,151 @@ a .kpi-card:hover,
     color: #ffffff;
 }
 
+/* NOTE: no global width cap here.  `.form-control`/`.form-select` are used by
+   every page in the app, and a blanket `max-width` silently re-sizes fields in
+   dialogs and cards that were deliberately laid out full width (the money
+   dialogs, the tool transaction sheet, ...).  A field that needs a readable
+   length caps itself on its own wrapper — the way `.stage-form-card` and the
+   Expense Categories block below already do. */
 .form-control,
 .form-select {
-    max-width: min(100%, 36rem);
     border-radius: 10px;
     border-color: var(--input-border) !important;
     background: var(--input-bg) !important;
     color: var(--text) !important;
 }
 
-/* Keep short labels and values from becoming full-screen bars on wide
-   monitors. Grid columns still make controls fluid when there is room, while
-   this cap gives the whole app a consistent, readable field length. */
+/* ── Expense Categories admin list ─────────────────────────────────────────
+   Same idiom as the Trades workspace so the app's two "list of names" screens
+   read as one family: a fixed-width centred shell, a one-line quick-add bar
+   whose button sits next to its field, and read-only rows whose only buttons
+   are the grouped icons in the Actions column.
+
+   Sizing rules of thumb used here:
+     • a category name is ~20 characters — the field is ~320px, not the width
+       of the card;
+     • the shell keeps the add card and the table on exactly the same edges;
+     • the Actions column is wide enough for its icons and no wider. */
 .expense-category-page {
     width: 100%;
-    max-width: 68rem;
+    max-width: 52.5rem; /* 840px — same shell as .trades-shell */
     margin-inline: auto;
 }
 
-.expense-category-add-card { max-width: 44rem; }
-
-.expense-category-add-form {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: end;
-    gap: 0.75rem;
+.expense-category-hero {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 10px 0 14px;
 }
 
-.expense-category-add-field { min-width: 0; }
-.expense-category-add-field .form-control { max-width: 100%; }
-.expense-category-add-form > .btn { white-space: nowrap; }
-
-.expense-category-table .expense-category-index { width: 4rem; }
-.expense-category-table .expense-category-actions-heading { width: 8.5rem; }
-.expense-category-edit-form { max-width: 34rem; }
-.expense-category-edit-form .form-control {
-    min-width: 0;
-    max-width: 32rem;
+.expense-category-hero-icon {
+    width: 42px;
+    height: 42px;
+    border-radius: 13px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    background: linear-gradient(135deg, #0f766e, #14b8a6);
+    color: #ffffff;
+    font-size: 1.02rem;
+    box-shadow: 0 8px 18px rgba(20, 184, 166, 0.28);
 }
-.expense-category-row-actions { white-space: nowrap; }
+
+.expense-category-count {
+    background: var(--accent-soft);
+    color: var(--accent-strong);
+    border-radius: 999px;
+    padding: 4px 12px;
+    font-size: 0.78rem;
+    font-weight: 800;
+    white-space: nowrap;
+}
+
+[data-theme="dark"] .expense-category-count { color: var(--accent); }
+
+/* Quick add: label + field + button on one line, wrapping (never overflowing)
+   on narrow screens. */
+.expense-category-quick-add {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 12px 16px;
+}
+
+.expense-category-quick-add-label {
+    font-size: 0.76rem;
+    font-weight: 800;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+.expense-category-new-name {
+    width: 100%;
+    max-width: 320px;
+}
+
+.expense-category-quick-add > .btn {
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
+/* Rows: name on the left, both row actions grouped at the right edge. */
+.expense-category-table tbody td { padding-top: 10px; padding-bottom: 10px; }
+
+.expense-category-idx {
+    width: 28px;
+    height: 28px;
+    border-radius: 9px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--accent-soft);
+    color: var(--accent-strong);
+    font-size: 0.76rem;
+    font-weight: 800;
+}
+
+[data-theme="dark"] .expense-category-idx { color: var(--accent); }
+
+.expense-category-table .expense-category-index { width: 64px; }
+
+.expense-category-table .expense-category-actions-heading,
+.expense-category-row-actions {
+    width: 110px;
+    white-space: nowrap;
+}
+
+.expense-category-name {
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+/* The rename form only appears while a row is being edited. */
+.expense-category-edit-form { max-width: 100%; }
+.expense-category-edit-form .form-control { max-width: 210px; }
+
+.expense-category-icon-btn {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border-radius: 9px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    vertical-align: middle;
+}
 
 @media (max-width: 575.98px) {
-    .expense-category-add-form { grid-template-columns: minmax(0, 1fr); }
-    .expense-category-add-form > .btn { width: 100%; }
+    .expense-category-quick-add { align-items: stretch; }
+    .expense-category-new-name { max-width: 100%; }
+    .expense-category-quick-add > .btn { width: 100%; }
+    .expense-category-edit-form { width: 100%; }
+    .expense-category-edit-form .form-control { max-width: 100%; }
 }
 
 .form-control:focus,

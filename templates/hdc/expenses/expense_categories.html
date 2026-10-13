@@ -3,28 +3,44 @@
 {% block page_heading %}Expense Categories{% endblock %}
 
 {% block content %}
+{# Same workspace idiom as the Trades page: one centred shell, one-line quick
+   add, read-only rows whose only buttons are the grouped icons in Actions.
+   The rename field is revealed per row instead of a live input sitting in
+   every row, which is what made the table read as a wall of text boxes. #}
+<noscript>
+    <style>
+        .expense-category-edit-form { display: flex !important; }
+        .expense-category-name,
+        .expense-category-edit-btn { display: none !important; }
+    </style>
+</noscript>
+
 <div class="expense-category-page">
-    <div class="d-flex justify-content-between align-items-center mt-2 mb-3">
-        <h5 class="mb-0"><i class="fas fa-tags me-2 text-mint"></i>Expense Categories ({{ categories|length }})</h5>
-    </div>
-
-    <div class="card hdc-card expense-category-add-card mb-3">
-        <div class="card-body">
-            <form method="POST" class="expense-category-add-form" data-hdc-dialog>
-                <input type="hidden" name="action" value="add_category">
-                <div class="expense-category-add-field">
-                    <label class="form-label" for="expenseCategoryName">Category Name</label>
-                    <input type="text" id="expenseCategoryName" name="category_name"
-                           class="form-control form-control-sm" placeholder="e.g. Site Utilities" required>
-                </div>
-                <button type="submit" class="btn btn-mint btn-sm">
-                    <i class="fas fa-plus me-1"></i>Add Category
-                </button>
-            </form>
+    <div class="expense-category-hero">
+        <div class="expense-category-hero-icon"><i class="fas fa-tags"></i></div>
+        <div class="me-auto">
+            <h5 class="mb-0">Expense Categories</h5>
+            <div class="small text-muted">Headings offered when recording a site expense</div>
         </div>
+        <span class="expense-category-count">{{ categories|length }} active</span>
     </div>
 
-    <div class="card hdc-card expense-category-list-card">
+    <div class="card hdc-card mb-3">
+        <form method="POST" class="expense-category-quick-add" data-hdc-dialog>
+            <input type="hidden" name="action" value="add_category">
+            <label class="expense-category-quick-add-label" for="expenseCategoryName">
+                <i class="fas fa-plus-circle me-1 text-mint" aria-hidden="true"></i>New Category
+            </label>
+            <input type="text" id="expenseCategoryName" name="category_name"
+                   class="form-control form-control-sm expense-category-new-name"
+                   placeholder="e.g. Site Utilities" maxlength="80" autocomplete="off" required>
+            <button type="submit" class="btn btn-mint btn-sm px-3">
+                <i class="fas fa-plus me-1"></i>Add Category
+            </button>
+        </form>
+    </div>
+
+    <div class="card hdc-card">
         <div class="table-responsive">
             <table class="table hdc-table expense-category-table">
                 <thead>
@@ -37,23 +53,39 @@
                 <tbody>
                     {% for cat in categories %}
                     <tr {{ cat|hdc_row_attrs }}>
-                        <td>{{ loop.index }}</td>
+                        <td><span class="expense-category-idx">{{ loop.index }}</span></td>
                         <td>
-                            <form method="POST" class="d-flex gap-2 align-items-center expense-category-edit-form" data-hdc-dialog>
-                                <input type="hidden" name="action" value="edit_category">
-                                <input type="hidden" name="category_id" value="{{ cat.id }}">
-                                <input type="text" name="category_name" value="{{ cat.name }}"
-                                       class="form-control form-control-sm" required>
-                                <button type="submit" class="btn btn-outline-info btn-sm" title="Save Name" aria-label="Save category name">
-                                    <i class="fas fa-save"></i>
-                                </button>
-                            </form>
+                            <div class="d-flex align-items-center gap-2 flex-wrap">
+                                <span class="expense-category-name">{{ cat.name }}</span>
+                                <form method="POST" class="expense-category-edit-form d-none align-items-center gap-1"
+                                      data-hdc-dialog>
+                                    <input type="hidden" name="action" value="edit_category">
+                                    <input type="hidden" name="category_id" value="{{ cat.id }}">
+                                    <input type="text" name="category_name" value="{{ cat.name }}"
+                                           class="form-control form-control-sm" maxlength="80"
+                                           autocomplete="off" required
+                                           aria-label="Category name for {{ cat.name }}">
+                                    <button type="submit" class="btn btn-outline-info btn-sm expense-category-icon-btn"
+                                            title="Save name" aria-label="Save category name">
+                                        <i class="fas fa-check"></i>
+                                    </button>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm expense-category-icon-btn"
+                                            title="Cancel rename" aria-label="Cancel rename">
+                                        <i class="fas fa-xmark"></i>
+                                    </button>
+                                </form>
+                            </div>
                         </td>
                         <td class="text-end expense-category-row-actions">
+                            <button type="button" class="btn btn-outline-info btn-sm expense-category-icon-btn expense-category-edit-btn"
+                                    title="Rename category" aria-label="Rename {{ cat.name }}">
+                                <i class="fas fa-pen"></i>
+                            </button>
                             <form method="POST" class="d-inline" onsubmit="return confirm('Remove this category from active list?');">
                                 <input type="hidden" name="action" value="delete_category">
                                 <input type="hidden" name="category_id" value="{{ cat.id }}">
-                                <button type="submit" class="btn btn-outline-danger btn-sm" title="Delete Category" aria-label="Delete category">
+                                <button type="submit" class="btn btn-outline-danger btn-sm expense-category-icon-btn ms-1"
+                                        title="Delete category" aria-label="Delete {{ cat.name }}">
                                     <i class="fas fa-trash"></i>
                                 </button>
                             </form>
@@ -67,4 +99,9 @@
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+{# Page behaviour: static/hdc/js/pages/expense_categories.js #}
+<script src="/hdc_static/js/pages/expense_categories.js"></script>
 {% endblock %}
