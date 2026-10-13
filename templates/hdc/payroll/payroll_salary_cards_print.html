@@ -2,6 +2,12 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+{# This sheet does not extend shared/base.html (it is a paper layout, not an
+   app page), so it carries its own viewport tag. Without it a phone lays the
+   sheet out in a 980px virtual viewport and shrinks every salary card to
+   unreadable type; with it the sheet reflows (see the screen rules below)
+   and still prints exactly as before. #}
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{{ title }} - {{ label_period }}</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -104,6 +110,32 @@
     body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     .print-bar { display: none; }
     .wrapper { margin-top: 0; }
+  }
+
+  /* ── On screen, a sheet narrower than A4 ───────────────────────────────
+     The 210mm page is 794px wide: on a 768px tablet it was cropped by 26px
+     and on a phone the browser scaled the whole sheet down.  Below A4 width
+     the page becomes as wide as the screen (the tables already use
+     width:100%), the type steps down one size and the print bar wraps.
+     Print output is untouched — every rule here is `screen and`. */
+  @media screen and (max-width: 820px) {
+    .wrapper { margin-top: 52px; }
+    .page {
+      width: 100%;
+      min-height: 0;
+      padding: 10px 10px 14px;
+      border-bottom: 1px dashed #d6d6d6;
+    }
+    .header { flex-direction: column; gap: 6px; }
+    .meta { text-align: left; font-size: 11px; }
+    .worker-strip { grid-template-columns: 1fr 1fr; }
+    .kpis { grid-template-columns: repeat(2, 1fr); }
+    .kpi { min-height: 0; padding: 8px; }
+    .kpi .v { font-size: 14px; }
+    th, td { padding: 4px 5px; font-size: 10.5px; }
+    .signatures { grid-template-columns: 1fr; gap: 12px; }
+    .print-bar { height: auto; min-height: 48px; flex-wrap: wrap; padding: 6px 12px; gap: 8px; }
+    .btn { padding: 9px 14px; }
   }
 </style>
 </head>

@@ -46,5 +46,9 @@ node_modules/
 *.log
 instance/
 
+# QA screenshots (regenerate with scripts/qa_responsive_functional.py --shots).
+# The audits keep their JSON evidence in qa/; the images are throwaway.
+qa/screenshots/
+
 # Runtime bootstrap coordination (same directory as the SQLite database)
 *.bootstrap.lock

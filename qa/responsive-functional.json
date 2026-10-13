@@ -1,0 +1,464 @@
+{
+ "views": [
+  "mob-320",
+  "mob-390",
+  "tab-768",
+  "pc-1440"
+ ],
+ "checks": [
+  {
+   "view": "mob-320",
+   "check": "login card fits the screen",
+   "ok": true,
+   "detail": {
+    "x": 22,
+    "y": 22,
+    "width": 276,
+    "height": 537.78125
+   }
+  },
+  {
+   "view": "mob-320",
+   "check": "hamburger visible",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "view": "mob-320",
+   "check": "drawer opens on screen",
+   "ok": true,
+   "detail": {
+    "x": 0,
+    "y": 0,
+    "width": 234,
+    "height": 568
+   }
+  },
+  {
+   "view": "mob-320",
+   "check": "logout reachable inside the drawer",
+   "ok": true,
+   "detail": {
+    "x": 0,
+    "y": 532.984375,
+    "width": 234,
+    "height": 32
+   }
+  },
+  {
+   "view": "mob-320",
+   "check": "drawer closes again",
+   "ok": true,
+   "detail": {
+    "x": -234,
+    "y": 0,
+    "width": 234,
+    "height": 568
+   }
+  },
+  {
+   "view": "mob-320",
+   "check": "no input under 16px (no iOS zoom)",
+   "ok": true,
+   "detail": []
+  },
+  {
+   "view": "mob-320",
+   "check": "top bar stays pinned while scrolling",
+   "ok": true,
+   "detail": {
+    "x": 0,
+    "y": 0,
+    "width": 320,
+    "height": 52
+   }
+  },
+  {
+   "view": "mob-320",
+   "check": "modal fits the screen",
+   "ok": true,
+   "detail": {
+    "x": 0,
+    "right": 320,
+    "vw": 320,
+    "vh": 568,
+    "bodyOverflowX": false,
+    "hasFooter": false,
+    "footerOnScreen": false,
+    "footerReachable": true,
+    "footerText": "Record Transaction"
+   }
+  },
+  {
+   "view": "mob-320",
+   "check": "modal action button reachable",
+   "ok": true,
+   "detail": {
+    "x": 0,
+    "right": 320,
+    "vw": 320,
+    "vh": 568,
+    "bodyOverflowX": false,
+    "hasFooter": false,
+    "footerOnScreen": false,
+    "footerReachable": true,
+    "footerText": "Record Transaction"
+   }
+  },
+  {
+   "view": "mob-320",
+   "check": "stacked table keeps every field labelled",
+   "ok": true,
+   "detail": {
+    "stacked": true,
+    "cells": 49,
+    "unlabelled": 0,
+    "display": "block",
+    "label": null
+   }
+  },
+  {
+   "view": "mob-320",
+   "check": "page does not scroll sideways",
+   "ok": true,
+   "detail": {
+    "doc": 0,
+    "body": 0
+   }
+  },
+  {
+   "view": "mob-320",
+   "check": "no uncaught page errors",
+   "ok": true,
+   "detail": []
+  },
+  {
+   "view": "mob-390",
+   "check": "login card fits the screen",
+   "ok": true,
+   "detail": {
+    "x": 22,
+    "y": 161.84375,
+    "width": 346,
+    "height": 520.296875
+   }
+  },
+  {
+   "view": "mob-390",
+   "check": "hamburger visible",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "view": "mob-390",
+   "check": "drawer opens on screen",
+   "ok": true,
+   "detail": {
+    "x": 0,
+    "y": 0,
+    "width": 234,
+    "height": 844
+   }
+  },
+  {
+   "view": "mob-390",
+   "check": "logout reachable inside the drawer",
+   "ok": true,
+   "detail": {
+    "x": 0,
+    "y": 808.984375,
+    "width": 234,
+    "height": 32
+   }
+  },
+  {
+   "view": "mob-390",
+   "check": "drawer closes again",
+   "ok": true,
+   "detail": {
+    "x": -234,
+    "y": 0,
+    "width": 234,
+    "height": 844
+   }
+  },
+  {
+   "view": "mob-390",
+   "check": "no input under 16px (no iOS zoom)",
+   "ok": true,
+   "detail": []
+  },
+  {
+   "view": "mob-390",
+   "check": "top bar stays pinned while scrolling",
+   "ok": true,
+   "detail": {
+    "x": 0,
+    "y": 0,
+    "width": 390,
+    "height": 52
+   }
+  },
+  {
+   "view": "mob-390",
+   "check": "modal fits the screen",
+   "ok": true,
+   "detail": {
+    "x": 0,
+    "right": 390,
+    "vw": 390,
+    "vh": 844,
+    "bodyOverflowX": false,
+    "hasFooter": false,
+    "footerOnScreen": true,
+    "footerReachable": true,
+    "footerText": "Record Transaction"
+   }
+  },
+  {
+   "view": "mob-390",
+   "check": "modal action button reachable",
+   "ok": true,
+   "detail": {
+    "x": 0,
+    "right": 390,
+    "vw": 390,
+    "vh": 844,
+    "bodyOverflowX": false,
+    "hasFooter": false,
+    "footerOnScreen": true,
+    "footerReachable": true,
+    "footerText": "Record Transaction"
+   }
+  },
+  {
+   "view": "mob-390",
+   "check": "stacked table keeps every field labelled",
+   "ok": true,
+   "detail": {
+    "stacked": true,
+    "cells": 49,
+    "unlabelled": 0,
+    "display": "block",
+    "label": null
+   }
+  },
+  {
+   "view": "mob-390",
+   "check": "page does not scroll sideways",
+   "ok": true,
+   "detail": {
+    "doc": 0,
+    "body": 0
+   }
+  },
+  {
+   "view": "mob-390",
+   "check": "no uncaught page errors",
+   "ok": true,
+   "detail": []
+  },
+  {
+   "view": "tab-768",
+   "check": "login card fits the screen",
+   "ok": true,
+   "detail": {
+    "x": 186,
+    "y": 258.921875,
+    "width": 396,
+    "height": 506.140625
+   }
+  },
+  {
+   "view": "tab-768",
+   "check": "hamburger visible",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "view": "tab-768",
+   "check": "drawer opens on screen",
+   "ok": true,
+   "detail": {
+    "x": 0,
+    "y": 0,
+    "width": 234,
+    "height": 1024
+   }
+  },
+  {
+   "view": "tab-768",
+   "check": "logout reachable inside the drawer",
+   "ok": true,
+   "detail": {
+    "x": 0,
+    "y": 988.984375,
+    "width": 234,
+    "height": 32
+   }
+  },
+  {
+   "view": "tab-768",
+   "check": "drawer closes again",
+   "ok": true,
+   "detail": {
+    "x": -234,
+    "y": 0,
+    "width": 234,
+    "height": 1024
+   }
+  },
+  {
+   "view": "tab-768",
+   "check": "top bar stays pinned while scrolling",
+   "ok": true,
+   "detail": {
+    "x": 0,
+    "y": 0,
+    "width": 768,
+    "height": 52
+   }
+  },
+  {
+   "view": "tab-768",
+   "check": "modal fits the screen",
+   "ok": true,
+   "detail": {
+    "x": 12,
+    "right": 756,
+    "vw": 768,
+    "vh": 1024,
+    "bodyOverflowX": false,
+    "hasFooter": false,
+    "footerOnScreen": true,
+    "footerReachable": true,
+    "footerText": "Record Transaction"
+   }
+  },
+  {
+   "view": "tab-768",
+   "check": "modal action button reachable",
+   "ok": true,
+   "detail": {
+    "x": 12,
+    "right": 756,
+    "vw": 768,
+    "vh": 1024,
+    "bodyOverflowX": false,
+    "hasFooter": false,
+    "footerOnScreen": true,
+    "footerReachable": true,
+    "footerText": "Record Transaction"
+   }
+  },
+  {
+   "view": "tab-768",
+   "check": "stacked table keeps every field labelled",
+   "ok": true,
+   "detail": {
+    "stacked": true,
+    "cells": 54,
+    "unlabelled": 0,
+    "display": "table",
+    "label": null
+   }
+  },
+  {
+   "view": "tab-768",
+   "check": "page does not scroll sideways",
+   "ok": true,
+   "detail": {
+    "doc": 0,
+    "body": 0
+   }
+  },
+  {
+   "view": "tab-768",
+   "check": "no uncaught page errors",
+   "ok": true,
+   "detail": []
+  },
+  {
+   "view": "pc-1440",
+   "check": "login card fits the screen",
+   "ok": true,
+   "detail": {
+    "x": 522,
+    "y": 194.59375,
+    "width": 396,
+    "height": 510.8125
+   }
+  },
+  {
+   "view": "pc-1440",
+   "check": "top bar stays pinned while scrolling",
+   "ok": true,
+   "detail": {
+    "x": 0,
+    "y": 0,
+    "width": 1440,
+    "height": 56
+   }
+  },
+  {
+   "view": "pc-1440",
+   "check": "modal fits the screen",
+   "ok": true,
+   "detail": {
+    "x": 150,
+    "right": 1290,
+    "vw": 1440,
+    "vh": 900,
+    "bodyOverflowX": false,
+    "hasFooter": false,
+    "footerOnScreen": true,
+    "footerReachable": true,
+    "footerText": "Record Transaction"
+   }
+  },
+  {
+   "view": "pc-1440",
+   "check": "modal action button reachable",
+   "ok": true,
+   "detail": {
+    "x": 150,
+    "right": 1290,
+    "vw": 1440,
+    "vh": 900,
+    "bodyOverflowX": false,
+    "hasFooter": false,
+    "footerOnScreen": true,
+    "footerReachable": true,
+    "footerText": "Record Transaction"
+   }
+  },
+  {
+   "view": "pc-1440",
+   "check": "stacked table keeps every field labelled",
+   "ok": true,
+   "detail": {
+    "stacked": true,
+    "cells": 54,
+    "unlabelled": 0,
+    "display": "table",
+    "label": null
+   }
+  },
+  {
+   "view": "pc-1440",
+   "check": "page does not scroll sideways",
+   "ok": true,
+   "detail": {
+    "doc": 0,
+    "body": 0
+   }
+  },
+  {
+   "view": "pc-1440",
+   "check": "no uncaught page errors",
+   "ok": true,
+   "detail": []
+  }
+ ],
+ "failed": []
+}

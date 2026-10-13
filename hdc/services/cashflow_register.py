@@ -33,6 +33,7 @@ from datetime import datetime, timedelta
 
 from flask import current_app
 from sqlalchemy import func, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
 from hdc.extensions import db
@@ -1835,8 +1836,22 @@ def day_positions(day, *, refresh=False):
             values.update(position_date=day, account_id=int(acc.id), account=acc, _hdc_row=saved)
             pos = SimpleNamespace(**values)
         elif pos is None:
-            pos = CashDayAccountPosition(position_date=day, account_id=int(acc.id))
-            db.session.add(pos)
+            # Two operators (or two tabs) opening the same day at the same
+            # moment both see "no position yet" and both try to insert one.
+            # The unique index on (position_date, account_id) rejects the
+            # loser — which must adopt the row the winner wrote, not fail the
+            # whole day-close screen with a 500.
+            try:
+                with db.session.begin_nested():
+                    pos = CashDayAccountPosition(position_date=day, account_id=int(acc.id))
+                    db.session.add(pos)
+            except IntegrityError:
+                pos = (CashDayAccountPosition.query
+                       .filter(CashDayAccountPosition.position_date == day,
+                               CashDayAccountPosition.account_id == int(acc.id))
+                       .first())
+                if pos is None:
+                    raise
         pos.account_name = acc.name
         pos.opening_minor = opening
         pos.amount_in_minor = amount_in
