@@ -100,13 +100,49 @@ class ExpenseBatchTest(IsolatedAppTest):
         self.assertIn('item_category_id', html)
         self.assertIn('expItems', html)
 
-    def test_expense_categories_uses_compact_admin_layout(self):
+    def test_expense_categories_rows_group_their_actions(self):
+        """The page is an admin list: name on the left, its buttons on the right.
+
+        The layout contract this locks down is the one that was wrong before:
+        a live text box in every row pushed the Save (tick) button ~330px away
+        from the row's Delete (trash) button, across a 136px Actions column
+        that held a single icon.  Both row actions now live in the Actions
+        cell, and the rename field only appears while a row is being edited.
+        """
         response = self.client.get('/hdc/expense_categories')
         self.assertEqual(response.status_code, 200)
         html = response.get_data(as_text=True)
         self.assertIn('expense-category-page', html)
-        self.assertIn('expense-category-add-form', html)
         self.assertIn('expense-category-edit-form', html)
+        # the add form is a one-line labelled quick-add, not a wide card stub
+        self.assertIn('expense-category-quick-add', html)
+        self.assertIn('expense-category-new-name', html)
+
+        with self.app.app_context():
+            self.assertIsNotNone(ExpenseCategory.query.filter_by(active_status=True).first())
+        self.form('/hdc/expense_categories', action='add_category', category_name='Row Contract')
+        html = self.client.get('/hdc/expense_categories').get_data(as_text=True)
+        row = html.split('data-hdc-label="Row Contract"', 1)[1].split('</tr>', 1)[0]
+        actions = row.split('expense-category-row-actions', 1)[1]
+        self.assertIn('fa-pen', actions, 'the rename button belongs in the Actions cell')
+        self.assertIn('fa-trash', actions, 'the delete button belongs in the Actions cell')
+        # one live input per row, not a text box behind every name
+        self.assertEqual(row.count('<input type="text"'), 1)
+        self.assertIn('expense-category-name', row)
+
+    def test_expense_categories_rename_round_trip(self):
+        self.form('/hdc/expense_categories', action='add_category', category_name='Rename Me')
+        with self.app.app_context():
+            cat = ExpenseCategory.query.filter_by(name='Rename Me').one()
+            cat_id = cat.id
+        self.form('/hdc/expense_categories', action='edit_category',
+                  category_id=cat_id, category_name='Renamed')
+        with self.app.app_context():
+            self.assertIsNone(ExpenseCategory.query.filter_by(name='Rename Me').first())
+            self.assertIsNotNone(ExpenseCategory.query.filter_by(name='Renamed').first())
+        self.form('/hdc/expense_categories', action='delete_category', category_id=cat_id)
+        with self.app.app_context():
+            self.assertFalse(ExpenseCategory.query.get(cat_id).active_status)
 
 
 class TradesPageTest(IsolatedAppTest):

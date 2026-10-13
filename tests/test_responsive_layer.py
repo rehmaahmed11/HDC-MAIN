@@ -79,12 +79,23 @@ class LayoutContractTest(unittest.TestCase):
         self.assertNotIn('maximum-scale', content)
         self.assertNotIn('user-scalable=no', content)
 
-    def test_form_controls_have_a_readable_wide_screen_limit(self):
+    def test_shared_controls_carry_no_blanket_width_cap(self):
+        """A global cap on `.form-control` re-sizes every page at once.
+
+        It was tried and had to be pulled: full-width fields inside the
+        money/tool dialogs (800-1140px wide) were clamped to 36rem, leaving
+        them stopping short of the dialog's own footer buttons.  Field length
+        belongs to the page that wants it — see `.expense-category-new-name`
+        and `.stage-form-card` — so this test keeps the shared rule clean.
+        """
         css = _read('static', 'hdc', 'css', 'hdc.css')
-        self.assertRegex(
-            css,
-            r'\.form-control,\s*\.form-select\s*\{\s*max-width:\s*min\(100%,\s*36rem\);',
-            'shared controls should not stretch across the full desktop viewport',
+        shared = re.search(
+            r'(?m)^\.form-control,\s*\n\.form-select\s*\{(?P<body>[^}]*)\}', css)
+        self.assertIsNotNone(shared, 'shared control rule missing from hdc.css')
+        self.assertNotIn(
+            'max-width', shared.group('body'),
+            'the shared .form-control/.form-select rule must not cap width: it '
+            'silently re-sizes every dialog and card in the app',
         )
 
 
