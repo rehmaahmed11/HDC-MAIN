@@ -24,7 +24,7 @@
                 <td class="text-muted">{{ a.stage.name if a.stage_id else '—' }}</td>
                 <td class="text-end">
                     {% if not a.resolved %}
-                    <form method="POST" action="{{ url_for('hdc_alerts_resolve', aid=a.id) }}">
+                    <form method="POST" action="{{ url_for('hdc_alerts_resolve', aid=a.id) }}" data-hdc-dialog>
                         <button type="submit" class="btn btn-sm btn-outline-secondary">Resolve</button>
                     </form>
                     {% else %}

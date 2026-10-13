@@ -1196,6 +1196,11 @@ def _lines_for_expense(expense, party_names):
             'split_mode': expense.split_mode,
             'note': expense.note or '',
         })
+    # lets every ledger line carry "entered by" audit attributes
+    # ({{ line|hdc_row_attrs }} resolves the author of the underlying expense)
+    for line in lines:
+        line['_hdc_entity'] = 'hdc_shared_expense'
+        line['_hdc_id'] = int(expense.id)
     return lines
 
 
@@ -1244,6 +1249,10 @@ def _lines_for_settlement(settlement, party_names):
             'split_mode': '',
             'note': settlement.note or '',
         })
+    # same "entered by" stamp as the expense lines, pointing at the settlement
+    for line in out:
+        line['_hdc_entity'] = 'hdc_shared_settlement'
+        line['_hdc_id'] = int(settlement.id)
     return out
 
 

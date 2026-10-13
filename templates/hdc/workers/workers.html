@@ -42,7 +42,7 @@
                 <h5 class="modal-title"><i class="fas fa-user-plus me-2"></i>Add New Worker</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
-            <form method="POST">
+            <form method="POST" data-hdc-dialog>
                 <div class="modal-body row g-3">
                     <div class="col-md-7">
                         <label class="form-label">Worker Code *</label>
@@ -107,7 +107,7 @@
                 <h5 class="modal-title"><i class="fas fa-user-edit me-2"></i>Edit Worker</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
-            <form method="POST" id="editWorkerForm">
+            <form method="POST" id="editWorkerForm" data-hdc-dialog>
                 <div class="modal-body row g-3">
                     <div class="col-md-7">
                         <label class="form-label">Worker Code *</label>
@@ -214,7 +214,7 @@
             <button type="button" class="btn btn-sm btn-outline-info js-edit-worker" data-worker-id="{{ w.id }}" title="Edit Worker">
                 <i class="fas fa-pen"></i>
             </button>
-            <form method="POST" action="{{ url_for('hdc_toggle_worker', wid=w.id) }}" class="d-inline">
+            <form method="POST" action="{{ url_for('hdc_toggle_worker', wid=w.id) }}" class="d-inline" data-hdc-dialog>
                 <button type="submit" class="btn btn-sm {% if w.active_status %}btn-outline-warning{% else %}btn-outline-success{% endif %} ms-1" title="{% if w.active_status %}Suspend Worker{% else %}Activate Worker{% endif %}">
                     {% if w.active_status %}Suspend{% else %}Activate{% endif %}
                 </button>

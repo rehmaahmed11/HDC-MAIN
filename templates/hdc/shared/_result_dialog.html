@@ -9,10 +9,10 @@
    `tojson` escapes the payload for a <script> block, and the banner is left
    in place for browsers with JavaScript turned off.
 
-   Mount it from a page's extra_js block:
-       {% include 'shared/_result_dialog.html' %}
-   …and mark that page's entry form <form data-hdc-dialog> so incomplete
-   entries are reported by the same box before the POST is sent. #}
+   Mounted once, globally, by shared/base.html right after the flash banner —
+   so every entry save in every module reports its verdict in this box. Pages
+   mark their entry form <form data-hdc-dialog> so incomplete entries are
+   reported by the same box before the POST is sent. #}
 {% set _hdc_result_allowed = {'success': 1, 'danger': 1, 'warning': 1, 'info': 1} %}
 {% set _hdc_result_items = [] %}
 {% for _cat, _msg in (hdc_flashes | default([], true)) %}

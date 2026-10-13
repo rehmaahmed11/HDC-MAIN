@@ -20,7 +20,7 @@
 <div class="card hdc-card mb-4">
     <div class="card-header hdc-card-header"><i class="fas fa-plus me-2"></i>Add New Material</div>
     <div class="card-body">
-        <form method="POST" class="row g-2 align-items-end">
+        <form method="POST" class="row g-2 align-items-end" data-hdc-dialog>
             <div class="col-md-5">
                 <label class="form-label fw-semibold">Material Name <span class="text-danger">*</span></label>
                 <input class="form-control" name="name" placeholder="e.g. Cement OPC, Steel Bar 12mm" required>
@@ -108,7 +108,7 @@
                 <h5 class="modal-title"><i class="fas fa-edit me-2"></i>Edit Material</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
-            <form method="POST" id="matEditForm">
+            <form method="POST" id="matEditForm" data-hdc-dialog>
                 <div class="modal-body">
                     <div class="mb-3">
                         <label class="form-label fw-semibold">Material Name</label>

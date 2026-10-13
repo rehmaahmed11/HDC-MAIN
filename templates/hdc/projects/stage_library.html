@@ -8,7 +8,7 @@
         <div class="card hdc-card">
             <div class="card-header hdc-card-header"><i class="fas fa-plus me-2"></i>Add Stage Definition</div>
             <div class="card-body">
-                <form method="POST">
+                <form method="POST" data-hdc-dialog>
                     <input type="hidden" name="project_id" value="{{ project.id }}">
                     <input type="hidden" name="action" value="add">
                     <div class="mb-3">
@@ -39,7 +39,7 @@
                     <tr {{ d|hdc_row_attrs }}>
                         <td class="text-muted">{{ loop.index }}</td>
                         <td>
-                            <form method="POST" class="d-flex gap-1 align-items-center">
+                            <form method="POST" class="d-flex gap-1 align-items-center" data-hdc-dialog>
                                 <input type="hidden" name="project_id" value="{{ project.id }}">
                                 <input type="hidden" name="action" value="edit">
                                 <input type="hidden" name="def_id" value="{{ d.id }}">
@@ -59,7 +59,7 @@
                             <span class="badge {% if count > 0 %}bg-success{% else %}bg-secondary{% endif %}">{{ count }} stage(s)</span>
                         </td>
                         <td>
-                            <form method="POST" class="d-inline">
+                            <form method="POST" class="d-inline" data-hdc-dialog>
                                 <input type="hidden" name="project_id" value="{{ project.id }}">
                                 <input type="hidden" name="action" value="toggle">
                                 <input type="hidden" name="def_id" value="{{ d.id }}">

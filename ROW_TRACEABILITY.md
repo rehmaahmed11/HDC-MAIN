@@ -71,12 +71,40 @@ payments, payroll, office staff, personal expenses.
 The Shared Expenses lists tag their rows too — the expense list, the heads list
 and the settlement register all pipe their loop variable through
 `{{ row|hdc_row_attrs }}`, so a voided bill is greyed and "who entered this?"
-works there like everywhere else.
+works there like everywhere else.  The ledger/report line dicts are stamped in
+`hdc/services/shared_expenses.py` with `_hdc_entity: hdc_shared_expense` /
+`hdc_shared_settlement` + the row id, so every running-ledger line and every
+report row resolves its author; the expense-detail share rows are tagged with
+the parent expense.
+
+The Tools / Rentals module tags every entry list as well — inventory tools,
+rentals, glance pieces (stamped `hdc_tool_serial` in `tool_glance_rows`),
+serial tracking, rental-detail items / movement logs / returns, movement logs
+on the tracking page, the reports registers (purchases, scraps, archived tools,
+rentals), tool-position stock history, the count-sheet history rows (`audit`
+key), the saved count-sheet lines (tagged with the parent `hdc_tool_audit` —
+"who recorded the count"), and serial-create rows.  The directory pages follow
+the same rule: party-directory rows resolve `row.party`, the consolidated
+worker statement resolves `r.row` (the labour mirror chain above), Money Center
+recent transactions are stamped `hdc_account_txn` by `_cashflow_row_dict`, and
+the cash-flow reconciliation positions/day-entries carry their own rows.
+
+`hdc/services/actors.py` resolves these view-model shapes through
+`_VIEW_ROW_KEYS`, which now also knows `party`, `serial`, `rental`, `holding`,
+`tool`, `audit`, `share`, `line`, `movement`, `log`, `return` and `transfer`
+(most specific first — a serial row carries both `serial` and `tool`, and the
+piece wins).
 
 `GET /hdc/api/row_actors` answers a 600-row page in ~0.01 s, and
-`tests/test_row_traceability.py` (15 tests) pins the filter shapes, the void
-flag, the endpoint, the ledger derivation, and the exact nested timekeeping
-entry tags; the whole suite is 127 tests.
+`tests/test_row_traceability.py` (23 tests) pins the filter shapes, the void
+flag, the endpoint, the ledger derivation, the exact nested timekeeping entry
+tags, the shared-expense line stamps, the tool/serial/party/audit view-key
+resolution and the newly tagged pages (worker statement, tools, parties
+directory, shared ledger/report); the whole suite is green.
+
+A follow-up sweep (see
+[`ENTRY_SAVE_DIALOG_USER_MENTION_AUDIT.md`](ENTRY_SAVE_DIALOG_USER_MENTION_AUDIT.md))
+tagged the remaining untagged entry lists across every module.
 
 ## Which user is shown
 

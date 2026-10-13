@@ -43,7 +43,7 @@
                 <h5><i class="fas fa-user-plus me-2" style="color:#10b981;"></i>Add a sharing party</h5>
             </div>
             <div class="acc-section-body">
-                <form method="post" action="{{ url_for('hdc_shared_parties') }}">
+                <form method="post" action="{{ url_for('hdc_shared_parties') }}" data-hdc-dialog>
                     <input type="hidden" name="action" value="create">
                     <div class="mb-2">
                         <label class="form-label" for="name">Name <span class="text-danger">*</span></label>
@@ -158,7 +158,7 @@
                                             data-bs-target="#editParty{{ p.id }}" title="Edit">
                                         <i class="fas fa-pen"></i>
                                     </button>
-                                    <form method="post" action="{{ url_for('hdc_shared_parties') }}" class="d-inline">
+                                    <form method="post" action="{{ url_for('hdc_shared_parties') }}" class="d-inline" data-hdc-dialog>
                                         <input type="hidden" name="action" value="status">
                                         <input type="hidden" name="party_id" value="{{ p.id }}">
                                         <input type="hidden" name="status" value="{{ 'inactive' if p.is_active else 'active' }}">
@@ -182,7 +182,7 @@
                             </tr>
                             <tr class="collapse" id="editParty{{ p.id }}">
                                 <td colspan="7">
-                                    <form method="post" action="{{ url_for('hdc_shared_parties') }}" class="se-inline-edit">
+                                    <form method="post" action="{{ url_for('hdc_shared_parties') }}" class="se-inline-edit" data-hdc-dialog>
                                         <input type="hidden" name="action" value="update">
                                         <input type="hidden" name="party_id" value="{{ p.id }}">
                                         <div class="row g-2 align-items-end">

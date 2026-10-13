@@ -9,7 +9,7 @@
 
 <div class="card hdc-card mb-3">
     <div class="card-body">
-        <form method="POST" class="row g-2 align-items-end">
+        <form method="POST" class="row g-2 align-items-end" data-hdc-dialog>
             <input type="hidden" name="action" value="add_category">
             <div class="col-md-9">
                 <label class="form-label">Category Name</label>
@@ -37,7 +37,7 @@
                 <tr {{ cat|hdc_row_attrs }}>
                     <td>{{ loop.index }}</td>
                     <td>
-                        <form method="POST" class="d-flex gap-2 align-items-center">
+                        <form method="POST" class="d-flex gap-2 align-items-center" data-hdc-dialog>
                             <input type="hidden" name="action" value="edit_category">
                             <input type="hidden" name="category_id" value="{{ cat.id }}">
                             <input type="text" name="category_name" value="{{ cat.name }}" class="form-control form-control-sm" required>

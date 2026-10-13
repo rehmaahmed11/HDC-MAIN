@@ -176,7 +176,7 @@
                 <h5 class="modal-title"><i class="fas fa-edit me-2"></i>Edit Delivery</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
-            <form method="POST" id="stockEditForm">
+            <form method="POST" id="stockEditForm" data-hdc-dialog>
                 <div class="modal-body">
                     <div class="mb-3">
                         <label class="form-label fw-semibold">Date</label>
@@ -211,7 +211,7 @@
                 <h5 class="modal-title"><i class="fas fa-right-left me-2"></i>Shift Stock</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
-            <form method="POST" action="{{ url_for('hdc_purchase_v2_delivery_transfer') }}" id="stockShiftFormModal">
+            <form method="POST" action="{{ url_for('hdc_purchase_v2_delivery_transfer') }}" id="stockShiftFormModal" data-hdc-dialog>
                 <div class="modal-body">
                     <input type="hidden" name="material_id" id="stockShiftMaterialId">
                     <div class="row g-3">
@@ -290,7 +290,7 @@
                 <h5 class="modal-title"><i class="fas fa-ban me-2"></i>Void Delivery</h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
-            <form method="POST" id="stockVoidForm">
+            <form method="POST" id="stockVoidForm" data-hdc-dialog>
                 <div class="modal-body">
                     <p class="text-muted mb-3">This will void the selected delivery and return quantity to purchase stock.</p>
                     <label class="form-label fw-semibold">Reason <span class="text-muted fw-normal small">(optional)</span></label>

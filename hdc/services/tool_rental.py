@@ -1976,6 +1976,9 @@ def tool_glance_rows(search=None):
         tool_name = p['tool_name']
         serial_no = p['serial_number']
         rows.append({
+            # lets the list row carry "entered by" audit attributes
+            '_hdc_entity': 'hdc_tool_serial',
+            '_hdc_id': int(p['serial_id']) if p['serial_id'] is not None else None,
             'serial_id': p['serial_id'],
             'tool_id': p['tool'].id if p['tool'] else None,
             'tool_code': p['tool_code'],

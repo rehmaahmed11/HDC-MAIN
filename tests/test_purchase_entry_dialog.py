@@ -12,15 +12,18 @@ the verdict, and the same box refuses an incomplete entry *before* it is posted.
 
 What is pinned here:
 
-* the three sections mount the dialog, and the banner stays for no-JavaScript
-  browsers (so the message is never lost, only upgraded);
-* the mount must sit in ``extra_js`` — after base.html pops the flash queue —
-  because a second ``get_flashed_messages()`` returns nothing;
+* the dialog is mounted **globally** — once, in ``shared/base.html``, right
+  after the flash queue is popped (a second ``get_flashed_messages()`` returns
+  nothing, so a mount above the pop would always be empty) — so every entry
+  save in every module reports its verdict in the box;
+* the banner stays for no-JavaScript browsers (so the message is never lost,
+  only upgraded);
 * the JSON payload carries the real sentence and the right tone for a save, a
   warning (duplicate prevention) and each kind of refusal;
 * the entry forms opt in (``data-hdc-dialog``) and carry the page rules that
   know the stock limits locally;
-* pages outside the three sections are untouched (opt-in, not a global sweep);
+* pages outside the three sections report through the dialog too — that is
+  what the global mount buys; the Materials screen is the proof;
 * ``dialog.js`` is loaded before ``forms.js``, which is what lets a blocked
   submit release the double-click lock instead of eating the retry.
 
@@ -147,14 +150,20 @@ class PurchaseEntryDialogFixture(unittest.TestCase):
 class DialogMountTest(PurchaseEntryDialogFixture):
     """Every section of the trio behaves the same way."""
 
-    def test_each_section_mounts_the_dialog_and_opts_its_entry_form_in(self):
+    def test_dialog_is_mounted_globally_and_sections_opt_their_entry_form_in(self):
+        base = _read('templates/hdc/shared/base.html')
+        self.assertIn("{% include 'shared/_result_dialog.html' %}", base,
+                      'the shared layout mounts the entry-result dialogue box')
+        pop_at = base.find('get_flashed_messages')
+        mount_at = base.find("{% include 'shared/_result_dialog.html' %}")
+        self.assertGreater(mount_at, pop_at,
+                           'the mount must sit after the flash queue is popped')
         for url, template, form_id in SECTIONS:
             body = self.client.get(url).get_data(as_text=True)
             with self.subTest(url=url):
                 self.assertIn('id="flashMessages"', body, 'banner is still rendered (no-JS fallback)')
                 self.assertIn('core/dialog.js', body, 'the dialog engine is loaded')
                 source = _read(template)
-                self.assertIn("{% include 'shared/_result_dialog.html' %}", source)
                 match = re.search(r'<form[^>]*id="%s"[^>]*>' % form_id, source)
                 self.assertTrue(match, '%s not found in %s' % (form_id, template))
                 self.assertIn('data-hdc-dialog', match.group(0),
@@ -173,15 +182,19 @@ class DialogMountTest(PurchaseEntryDialogFixture):
         self.assertGreater(payload_at, -1, 'the payload must be present when a save reports')
         self.assertGreater(payload_at, banner_at, 'and only because it is emitted after the pop')
 
-    def test_pages_outside_the_three_sections_are_untouched(self):
-        """The dialog is mounted per section on purpose.
+    def test_pages_outside_the_three_sections_report_through_the_dialog_too(self):
+        """The mount is global on purpose: every module's saves get the box.
 
         The Materials screen shares the flash plumbing but has its own busy
-        layout; it must keep the plain banner until someone opts it in.
+        layout; it used to keep the plain banner only. Now its verdict lands in
+        the same dialogue box as a purchase save, and the banner still carries
+        the sentence for no-JavaScript browsers.
         """
         body = self.post('/hdc/purchase-v2/materials', name='', unit='BAG')
         self.assertIn('Material name is required.', body, 'the banner still reports there')
-        self.assertIsNone(payload_in(body), 'without a dialog mount, no payload is written')
+        payload = payload_in(body)
+        self.assertIsNotNone(payload, 'the global mount writes the payload for every page')
+        self.assertIn(('danger', 'Material name is required.'), kinds_and_text(payload))
 
     def test_dialog_script_is_loaded_once_and_before_forms_js(self):
         base = _read('templates/hdc/shared/base.html')

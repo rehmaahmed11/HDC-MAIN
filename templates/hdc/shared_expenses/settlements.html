@@ -48,7 +48,7 @@
                 <h5><i class="fas fa-plus me-2" style="color:#10b981;"></i>Record a settlement</h5>
             </div>
             <div class="acc-section-body">
-                <form method="post" action="{{ url_for('hdc_shared_settlements') }}">
+                <form method="post" action="{{ url_for('hdc_shared_settlements') }}" data-hdc-dialog>
                     <input type="hidden" name="action" value="create">
                     <div class="mb-2">
                         <label class="form-label" for="date">Date <span class="text-danger">*</span></label>
@@ -188,7 +188,7 @@
                                 <td class="small">{{ s.note or '—' }}</td>
                                 <td class="text-end acc-actions">
                                     {% if s.is_void %}
-                                    <form method="post" action="{{ url_for('hdc_shared_settlements') }}" class="d-inline">
+                                    <form method="post" action="{{ url_for('hdc_shared_settlements') }}" class="d-inline" data-hdc-dialog>
                                         <input type="hidden" name="action" value="restore">
                                         <input type="hidden" name="settlement_id" value="{{ s.id }}">
                                         <button class="btn btn-outline-success" type="submit" title="Restore">
@@ -196,7 +196,7 @@
                                         </button>
                                     </form>
                                     {% else %}
-                                    <form method="post" action="{{ url_for('hdc_shared_settlements') }}" class="d-inline">
+                                    <form method="post" action="{{ url_for('hdc_shared_settlements') }}" class="d-inline" data-hdc-dialog>
                                         <input type="hidden" name="action" value="void">
                                         <input type="hidden" name="settlement_id" value="{{ s.id }}">
                                         <input type="hidden" name="void_reason" value="Voided from the settlements list">

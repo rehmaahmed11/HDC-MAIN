@@ -335,7 +335,7 @@
                                     <i class="fas fa-pen-to-square"></i>
                                 </a>
                                 <form method="POST" class="d-inline"
-                                      action="{{ url_for('hdc_accounts_manage', show=show_mode, show_auto_person=(1 if show_auto_person else 0)) }}">
+                                      action="{{ url_for('hdc_accounts_manage', show=show_mode, show_auto_person=(1 if show_auto_person else 0)) }}" data-hdc-dialog>
                                     <input type="hidden" name="action" value="{{ 'activate_account' if a.status != 'active' else 'suspend_account' }}">
                                     <input type="hidden" name="account_id" value="{{ a.id }}">
                                     <button type="submit"
@@ -346,7 +346,7 @@
                                     </button>
                                 </form>
                                 <form method="POST" class="d-inline"
-                                      action="{{ url_for('hdc_accounts_manage', show=show_mode, show_auto_person=(1 if show_auto_person else 0)) }}">
+                                      action="{{ url_for('hdc_accounts_manage', show=show_mode, show_auto_person=(1 if show_auto_person else 0)) }}" data-hdc-dialog>
                                     <input type="hidden" name="action" value="delete_account">
                                     <input type="hidden" name="account_id" value="{{ a.id }}">
                                     <button type="submit" class="btn btn-outline-danger" title="Delete / archive"
@@ -362,7 +362,7 @@
                                     <i class="fas fa-lock"></i>
                                 </a>
                                 <form method="POST" class="d-inline"
-                                      action="{{ url_for('hdc_accounts_manage', show=show_mode, show_auto_person=(1 if show_auto_person else 0)) }}">
+                                      action="{{ url_for('hdc_accounts_manage', show=show_mode, show_auto_person=(1 if show_auto_person else 0)) }}" data-hdc-dialog>
                                     <input type="hidden" name="action" value="restore_account">
                                     <input type="hidden" name="account_id" value="{{ a.id }}">
                                     <button type="submit" class="btn btn-outline-success" title="Restore this archived account"

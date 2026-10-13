@@ -17,7 +17,7 @@
                 <h5 class="modal-title"><i class="fas fa-user-plus me-2"></i>Add Office Staff</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
-            <form method="POST" action="{{ url_for('hdc_office_staff_home') }}">
+            <form method="POST" action="{{ url_for('hdc_office_staff_home') }}" data-hdc-dialog>
                 <div class="modal-body row g-3">
                     <div class="col-md-6">
                         <label class="form-label">Staff Code *</label>
@@ -59,7 +59,7 @@
                 <h5 class="modal-title"><i class="fas fa-user-edit me-2"></i>Edit Office Staff</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
-            <form method="POST" id="editOfficeStaffForm">
+            <form method="POST" id="editOfficeStaffForm" data-hdc-dialog>
                 <div class="modal-body row g-3">
                     <div class="col-md-6">
                         <label class="form-label">Staff Code *</label>
@@ -129,7 +129,7 @@
                         <a href="{{ url_for('hdc_office_staff_ledger', sid=s.id) }}" class="btn btn-outline-dark btn-sm ms-1" title="Open Ledger"><i class="fas fa-book"></i></a>
                         <a href="{{ url_for('hdc_office_staff_payment', sid=s.id) }}" class="btn btn-outline-success btn-sm ms-1" title="Pay Salary"><i class="fas fa-money-bill-wave"></i></a>
                         <button type="button" class="btn btn-outline-info btn-sm js-edit-office ms-1" title="Edit"><i class="fas fa-pen"></i></button>
-                        <form method="POST" action="{{ url_for('hdc_office_staff_toggle', sid=s.id) }}" class="d-inline">
+                        <form method="POST" action="{{ url_for('hdc_office_staff_toggle', sid=s.id) }}" class="d-inline" data-hdc-dialog>
                             <button type="submit" class="btn btn-sm {% if s.active_status %}btn-outline-warning{% else %}btn-outline-success{% endif %} ms-1" title="{{ 'Suspend' if s.active_status else 'Activate' }}">
                                 {{ 'Suspend' if s.active_status else 'Activate' }}
                             </button>

@@ -9,7 +9,7 @@
             <div class="card-header hdc-card-header"><i class="fas fa-database me-2"></i>Backup</div>
             <div class="card-body">
                 <p class="text-muted small mb-3">Create a full backup ZIP of current system data (includes <strong>hdc_erp.db</strong> and <strong>hdc_data_export.xlsx</strong>).</p>
-                <form method="POST">
+                <form method="POST" data-hdc-dialog>
                     <input type="hidden" name="action" value="create_backup">
                     <button type="submit" class="btn btn-mint w-100">
                         <i class="fas fa-download me-1"></i>Create Backup Now

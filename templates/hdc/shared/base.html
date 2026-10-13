@@ -312,6 +312,11 @@ body[data-hdc-custom-access="true"][data-hdc-page-write="false"] form[method="PO
             </div>
           {% endfor %}
         </div>
+        {# The entry-result dialogue box is mounted here — for every screen of
+           every module — after the banner and after the flash queue is popped,
+           so any entry save anywhere reports its verdict in the same centred
+           box. core/dialog.js reads the payload and folds the banner away. #}
+        {% include 'shared/_result_dialog.html' %}
 
         <!-- MAIN CONTENT -->
         <main class="main-content px-4 pb-4">

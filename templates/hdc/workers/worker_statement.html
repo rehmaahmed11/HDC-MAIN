@@ -169,7 +169,7 @@ tr.no-notes-row > td { background: transparent !important; }
             </thead>
             <tbody>
             {% for r in rows %}
-                <tr class="{% if r.is_void %}table-secondary{% elif r.entry_type == 'work' %}table-success-light{% elif r.entry_type == 'advance' %}table-warning-light{% elif r.entry_type == 'payment' %}table-danger-light{% elif r.entry_type == 'tip' %}table-info{% elif r.entry_type == 'settlement' %}table-primary{% endif %}"
+                <tr {{ r|hdc_row_attrs }} class="{% if r.is_void %}table-secondary{% elif r.entry_type == 'work' %}table-success-light{% elif r.entry_type == 'advance' %}table-warning-light{% elif r.entry_type == 'payment' %}table-danger-light{% elif r.entry_type == 'tip' %}table-info{% elif r.entry_type == 'settlement' %}table-primary{% endif %}"
                     style="{% if r.is_void %}text-decoration:line-through;opacity:.6{% endif %}">
                     <td>{{ r.date or '-' }}</td>
                     <td>

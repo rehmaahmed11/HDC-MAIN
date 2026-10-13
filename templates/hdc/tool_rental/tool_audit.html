@@ -419,7 +419,7 @@
             <tbody>
             {% for entry in history %}
                 {% set brief = entry.brief %}
-                <tr>
+                <tr {{ entry|hdc_row_attrs }}>
                     <td>
                         <a href="{{ url_for('hdc_tool_rental_audit_sheet', audit_id=entry.audit.id) }}"
                            class="fw-bold text-decoration-none">{{ brief.code }}</a>

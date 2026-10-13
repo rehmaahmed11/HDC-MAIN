@@ -53,7 +53,7 @@
 <div class="card hdc-card mt-2 mb-3">
     <div class="card-header hdc-card-header"><i class="fas fa-money-bill me-2"></i>Pay Subcontractor</div>
     <div class="card-body py-2">
-        <form method="POST" id="subPayForm" action="{{ url_for('hdc_pay_subcontractor', sid=sub.id) }}" class="d-flex gap-2 align-items-center flex-wrap">
+        <form method="POST" id="subPayForm" action="{{ url_for('hdc_pay_subcontractor', sid=sub.id) }}" class="d-flex gap-2 align-items-center flex-wrap" data-hdc-dialog>
             <input type="hidden" name="return_to" value="payment_page">
             <select name="project_id" id="payProject" class="form-select form-select-sm" style="max-width:240px">
                 <option value="">All Projects</option>

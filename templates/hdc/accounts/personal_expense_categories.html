@@ -40,13 +40,13 @@
                         <td><small>{{ cat.created_at.strftime('%Y-%m-%d') }}</small></td>
                         <td>
                             {% if cat.active_status %}
-                                <form method="POST" action="{{ url_for('hdc_personal_category_suspend', cat_id=cat.id) }}" style="display: inline;">
+                                <form method="POST" action="{{ url_for('hdc_personal_category_suspend', cat_id=cat.id) }}" style="display: inline;" data-hdc-dialog>
                                     <button type="submit" class="btn btn-sm btn-outline-warning" title="Suspend category">
                                         <i class="fas fa-pause"></i>
                                     </button>
                                 </form>
                             {% else %}
-                                <form method="POST" action="{{ url_for('hdc_personal_category_activate', cat_id=cat.id) }}" style="display: inline;">
+                                <form method="POST" action="{{ url_for('hdc_personal_category_activate', cat_id=cat.id) }}" style="display: inline;" data-hdc-dialog>
                                     <button type="submit" class="btn btn-sm btn-outline-success" title="Activate category">
                                         <i class="fas fa-play"></i>
                                     </button>
@@ -74,7 +74,7 @@
                 <h5 class="modal-title"><i class="fas fa-plus me-2"></i>Add Expense Category</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
-            <form method="POST" action="{{ url_for('hdc_personal_expense_categories') }}">
+            <form method="POST" action="{{ url_for('hdc_personal_expense_categories') }}" data-hdc-dialog>
                 <input type="hidden" name="action" value="add">
                 <div class="modal-body row g-3">
                     <div class="col-12">

@@ -29,7 +29,7 @@
         <div class="card hdc-card">
             <div class="card-header hdc-card-header"><i class="fas fa-user-plus me-2"></i>Add New User</div>
             <div class="card-body">
-                <form method="POST">
+                <form method="POST" data-hdc-dialog>
                     <input type="hidden" name="action" value="add">
                     <div class="mb-3"><label class="form-label">Username *</label><input type="text" name="username" class="form-control" placeholder="e.g. manager_ali" required></div>
                     <div class="mb-3"><label class="form-label">Password *</label><input type="password" name="password" class="form-control" placeholder="8+ characters with upper/lower, number and symbol" autocomplete="new-password" minlength="8" required></div>
@@ -113,7 +113,7 @@
                                 <div class="p-3 border rounded bg-body-tertiary" style="min-width:280px;max-width:650px;white-space:normal">
                                     <div class="fw-semibold mb-1"><i class="fas fa-lock me-1"></i>Password settings for {{ u.username }}</div>
                                     <p class="small text-muted mb-2">Set a new password for this account. The old one stops working immediately and the user is signed out. The new password is also saved (encrypted) so it can be viewed from the Password column.</p>
-                                    <form method="POST">
+                                    <form method="POST" data-hdc-dialog>
                                         <input type="hidden" name="action" value="reset_password"><input type="hidden" name="user_id" value="{{ u.id }}">
                                         <div class="row g-2">
                                             <div class="col-md-6">
@@ -135,7 +135,7 @@
                         </td>
                     </tr>
                     <tr class="collapse" id="access-{{ u.id }}"><td colspan="7" class="p-0 border-0">
-                        <form method="POST" class="p-3 bg-body-tertiary border-bottom">
+                        <form method="POST" class="p-3 bg-body-tertiary border-bottom" data-hdc-dialog>
                             <input type="hidden" name="action" value="configure_permissions"><input type="hidden" name="user_id" value="{{ u.id }}">
                             <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
                                 <div><strong>Access for {{ u.username }}</strong><div class="small text-muted">Changes take effect on their next request.{% if u.role == 'admin' %} Admin role always has unrestricted access.{% endif %}</div></div>

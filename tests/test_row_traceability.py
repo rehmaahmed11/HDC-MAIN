@@ -260,6 +260,112 @@ class TestListPagesCarryRowTags(RowTraceabilityTestCase):
         marker = f'data-hdc-ent="hdc_time_entry" data-hdc-id="{entry.id}"'
         self.assertGreaterEqual(html.count(marker), 2)
 
+    def test_worker_statement_tags_every_ledger_row(self):
+        """The consolidated statement resolves through the labour mirrors."""
+        from datetime import date
+        from hdc.models.workforce import LabourLedger
+
+        worker = self._add_worker(code='W-002', name='Statement Worker')
+        db.session.add(LabourLedger(worker_id=worker.id, entry_type='advance',
+                                    amount=500.0, date=date(2026, 8, 2),
+                                    is_void=False))
+        db.session.commit()
+        html = self.client.get(f'/hdc/workers/{worker.id}/statement').get_data(as_text=True)
+        self.assertIn(f'data-hdc-ent="hdc_labour_ledger" data-hdc-id=', html)
+
+    def test_tool_pages_tag_tool_and_serial_rows(self):
+        """The whole tools module used to list rows with no "Entered by"."""
+        from hdc.models.tool_rental import Tool, ToolSerial
+
+        tool = Tool(tool_code='T-100', name='Shovel', unit='pcs', total_quantity=2.0)
+        db.session.add(tool)
+        db.session.flush()
+        serial = ToolSerial(serial_number='Shovel No 100', tool_id=tool.id)
+        db.session.add(serial)
+        db.session.commit()
+
+        inventory = self.client.get('/hdc/tool-rental/inventory').get_data(as_text=True)
+        self.assertIn(f'data-hdc-ent="hdc_tool" data-hdc-id="{tool.id}"', inventory)
+        glance = self.client.get('/hdc/tool-rental/glance').get_data(as_text=True)
+        self.assertIn(f'data-hdc-ent="hdc_tool_serial" data-hdc-id="{serial.id}"', glance)
+        rentals = self.client.get('/hdc/tool-rental').get_data(as_text=True)
+        self.assertIn('js/core/audit.js', rentals)
+
+    def test_parties_directory_tags_party_rows(self):
+        from hdc.models.cashflow import CashFlowParty
+
+        party = CashFlowParty(name='Trace Party', party_type='client')
+        db.session.add(party)
+        db.session.commit()
+        html = self.client.get('/hdc/parties').get_data(as_text=True)
+        self.assertIn(f'data-hdc-ent="{party.__tablename__}" data-hdc-id="{party.id}"', html)
+
+
+class TestSharedExpenseLineStamps(RowTraceabilityTestCase):
+    """Ledger lines carry their expense/settlement, so every line shows an author."""
+
+    def _seed(self):
+        from datetime import date
+        from hdc.models.shared_expenses import (
+            SharedExpense, SharedExpenseShare, SharedParty,
+        )
+
+        party = SharedParty(name='Trace Head')
+        db.session.add(party)
+        db.session.flush()
+        expense = SharedExpense(title='Diesel', date=date(2026, 9, 1),
+                                total_amount=100.0, total_amount_minor=10000,
+                                payer_party_id=party.id)
+        db.session.add(expense)
+        db.session.flush()
+        db.session.add(SharedExpenseShare(expense_id=expense.id, party_id=party.id,
+                                          amount=100.0, amount_minor=10000))
+        db.session.commit()
+        return party, expense
+
+    def test_ledger_lines_carry_the_expense_stamp(self):
+        from hdc.services.shared_expenses import ledger_lines
+
+        _, expense = self._seed()
+        lines = ledger_lines()
+        self.assertTrue(lines)
+        for line in lines:
+            self.assertEqual(line['_hdc_entity'], 'hdc_shared_expense')
+            self.assertEqual(line['_hdc_id'], expense.id)
+
+    def test_ledger_and_report_pages_tag_each_entry(self):
+        self._seed()
+        ledger = self.client.get('/hdc/accounts/shared').get_data(as_text=True)
+        self.assertIn('data-hdc-ent="hdc_shared_expense"', ledger)
+        report = self.client.get('/hdc/accounts/shared/report').get_data(as_text=True)
+        self.assertIn('data-hdc-ent="hdc_shared_expense"', report)
+
+
+class TestViewModelKeyResolution(RowTraceabilityTestCase):
+    """Directory/tool view-model dicts resolve through their named row keys."""
+
+    def test_serial_row_prefers_the_piece_over_the_tool(self):
+        html = str(row_attrs_html({'serial': _Obj('hdc_tool_serial', 5, serial_number='S-5'),
+                                   'tool': _Obj('hdc_tool', 1, name='Shovel')}))
+        self.assertIn('data-hdc-ent="hdc_tool_serial"', html)
+        self.assertIn('data-hdc-id="5"', html)
+
+    def test_rental_holding_and_tool_rows_resolve(self):
+        html = str(row_attrs_html({'rental': _Obj('hdc_tool_rental', 3, rental_code='R-3'),
+                                   'tool': _Obj('hdc_tool', 1, name='Shovel')}))
+        self.assertIn('data-hdc-ent="hdc_tool_rental"', html)
+        html = str(row_attrs_html({'tool': _Obj('hdc_tool', 1, name='Shovel'),
+                                   'owned_qty': 4}))
+        self.assertIn('data-hdc-ent="hdc_tool"', html)
+
+    def test_party_and_audit_rows_resolve(self):
+        html = str(row_attrs_html({'party': _Obj('hdc_cash_flow_party', 2, name='FBM'),
+                                   'entries': 3}))
+        self.assertIn('data-hdc-ent="hdc_cash_flow_party"', html)
+        html = str(row_attrs_html({'audit': _Obj('hdc_tool_audit', 9, audit_code='A-9'),
+                                   'brief': {'lines': 2}}))
+        self.assertIn('data-hdc-ent="hdc_tool_audit"', html)
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

@@ -50,7 +50,7 @@
             <strong>not</strong> maintained &mdash; we only track how many workers worked how many days
             and what the labour cost is.
         </div>
-        <form method="POST" action="{{ url_for('hdc_subcontractor_team_attendance', sid=sub.id) }}" id="teamAttendanceForm">
+        <form method="POST" action="{{ url_for('hdc_subcontractor_team_attendance', sid=sub.id) }}" id="teamAttendanceForm" data-hdc-dialog>
             <div class="row g-2 align-items-end">
                 <div class="col-6 col-md-2">
                     <label class="form-label small text-muted mb-1">Worker Type</label>
@@ -221,7 +221,7 @@
 <div class="card hdc-card mt-2 mb-3">
     <div class="card-header hdc-card-header"><i class="fas fa-user-plus me-2"></i>Add New Worker</div>
     <div class="card-body py-2">
-        <form method="POST" action="{{ url_for('hdc_subcontractor_add_worker', sid=sub.id) }}" class="d-flex gap-2 align-items-center flex-wrap">
+        <form method="POST" action="{{ url_for('hdc_subcontractor_add_worker', sid=sub.id) }}" class="d-flex gap-2 align-items-center flex-wrap" data-hdc-dialog>
             <input type="text" name="name" class="form-control form-control-sm" style="max-width:220px" placeholder="Worker Name" required>
             <input type="text" name="phone" class="form-control form-control-sm" style="max-width:180px" placeholder="Phone">
             <input type="text" name="trade" class="form-control form-control-sm" style="max-width:180px" placeholder="Trade">
@@ -257,7 +257,7 @@
                 <td class="text-end {% if (row.payable or 0) > 0 %}text-warning fw-bold{% else %}text-muted{% endif %}">{{ "{:,.0f}".format(row.payable or 0) }}</td>
                 <td class="text-nowrap">
                     <a href="{{ url_for('hdc_subcontractor_worker_ledger', sid=sub.id, wid=w.id) }}" class="btn btn-xs btn-outline-dark btn-sm" title="Worker Ledger"><i class="fas fa-book"></i></a>
-                    <form method="POST" action="{{ url_for('hdc_subcontractor_worker_toggle', sid=sub.id, wid=w.id) }}" class="d-inline">
+                    <form method="POST" action="{{ url_for('hdc_subcontractor_worker_toggle', sid=sub.id, wid=w.id) }}" class="d-inline" data-hdc-dialog>
                         <button type="submit" class="btn btn-xs btn-outline-secondary btn-sm" title="{% if w.active_status %}Suspend{% else %}Activate{% endif %}">
                             <i class="fas {% if w.active_status %}fa-pause{% else %}fa-play{% endif %}"></i>
                         </button>
@@ -267,7 +267,7 @@
             </tr>
             <tr {{ row|hdc_row_attrs }} class="collapse worker-editor-collapse" id="editWorker{{ w.id }}">
                 <td colspan="9" class="bg-light">
-                    <form method="POST" action="{{ url_for('hdc_subcontractor_worker_edit', sid=sub.id, wid=w.id) }}" class="d-flex gap-2 align-items-center flex-wrap py-1">
+                    <form method="POST" action="{{ url_for('hdc_subcontractor_worker_edit', sid=sub.id, wid=w.id) }}" class="d-flex gap-2 align-items-center flex-wrap py-1" data-hdc-dialog>
                         <input type="text" name="name" class="form-control form-control-sm" style="max-width:220px" value="{{ w.name }}" required>
                         <input type="text" name="phone" class="form-control form-control-sm" style="max-width:180px" value="{{ w.phone or '' }}" placeholder="Phone">
                         <input type="text" name="trade" class="form-control form-control-sm" style="max-width:180px" value="{{ w.trade or '' }}" placeholder="Trade">
@@ -298,7 +298,7 @@
         </form>
     </div>
     <div class="card-body py-2">
-        <form method="POST" action="{{ url_for('hdc_subcontractor_labour_attendance', sid=sub.id) }}">
+        <form method="POST" action="{{ url_for('hdc_subcontractor_labour_attendance', sid=sub.id) }}" data-hdc-dialog>
             <input type="hidden" name="bulk_mode" value="1">
             <input type="hidden" name="date" value="{{ sheet_date }}">
             <input type="hidden" name="return_to" value="attendance_page">

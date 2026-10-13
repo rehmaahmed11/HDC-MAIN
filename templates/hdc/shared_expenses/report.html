@@ -136,7 +136,7 @@
                 </thead>
                 <tbody>
                     {% for row in rows %}
-                    <tr class="{% if row.is_void %}se-void-row{% endif %}">
+                    <tr {{ row|hdc_row_attrs }} class="{% if row.is_void %}se-void-row{% endif %}">
                         <td>{{ row.date.strftime('%d %b %y') if row.date else '—' }}</td>
                         <td>
                             <a href="{{ url_for('hdc_shared_expense_detail', expense_id=row.id) }}"

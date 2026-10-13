@@ -789,7 +789,8 @@ class ToolCrudGapTestCase(unittest.TestCase):
         db.session.expire_all()
         self.assertEqual(live_serial_count(tool.id) + live_serial_count(second.id), 20)
 
-        rows = lambda html: html.count('<tr class="serial-')  # noqa: E731
+        # tolerate the row-traceability attributes audit.js reads (data-hdc-*)
+        rows = lambda html: len(re.findall(r'<tr[^>]*class="serial-', html))  # noqa: E731
         page1 = self.client.get('/hdc/tool-rental/serials?per_page=10')
         html = page1.get_data(as_text=True)
         self.assertEqual(page1.status_code, 200)

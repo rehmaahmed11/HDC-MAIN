@@ -48,7 +48,7 @@
             <div class="card-header hdc-card-header"><i class="fas fa-cart-plus me-2"></i>Record Purchase</div>
             <div class="card-body">
                 <form method="POST" action="{{ url_for('hdc_purchase_v2_supplier_purchase', supplier_id=supplier.id) }}"
-                      class="row g-2" id="supplierPurchaseForm">
+                      class="row g-2" id="supplierPurchaseForm" data-hdc-dialog>
                     <div class="col-md-6">
                         <label class="form-label fw-semibold">Select Material <span class="text-danger">*</span></label>
                         <div class="d-flex gap-2">
@@ -104,7 +104,7 @@
             <div class="card-header hdc-card-header"><i class="fas fa-money-bill me-2"></i>Record Payment</div>
             <div class="card-body">
                 <form method="POST" action="{{ url_for('hdc_purchase_v2_supplier_payment', supplier_id=supplier.id) }}"
-                      class="row g-2">
+                      class="row g-2" data-hdc-dialog>
                     <div class="col-md-5">
                         <label class="form-label fw-semibold">Type</label>
                         <select name="entry_kind" class="form-select">

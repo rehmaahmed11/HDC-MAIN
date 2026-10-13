@@ -11,7 +11,7 @@
   <div class="modal-dialog modal-lg">
     <div class="modal-content hdc-modal">
       <form method="POST" action="{% if tool %}{{ url_for('hdc_tool_rental_tool_purchase', tool_id=tool.id) }}{% else %}{{ url_for('hdc_tool_rental_purchase_create') }}{% endif %}"
-            id="{{ modal_id }}Form">
+            id="{{ modal_id }}Form" data-hdc-dialog>
         <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
         <div class="modal-header">
           <h6 class="modal-title"><i class="fas fa-cart-plus me-2"></i>Add Stock — New Purchase</h6>
@@ -103,7 +103,7 @@
   <div class="modal-dialog">
     <div class="modal-content hdc-modal">
       <form method="POST" action="{% if tool %}{{ url_for('hdc_tool_rental_tool_scrap', tool_id=tool.id) }}{% else %}{{ url_for('hdc_tool_rental_scrap_create') }}{% endif %}"
-            id="{{ modal_id }}Form">
+            id="{{ modal_id }}Form" data-hdc-dialog>
         <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
         <div class="modal-header">
           <h6 class="modal-title text-danger"><i class="fas fa-trash-can me-2"></i>Scrap / Discard Old Tool</h6>

@@ -22,7 +22,7 @@
 <div class="card hdc-card mb-4">
     <div class="card-header hdc-card-header"><i class="fas fa-user-plus me-2"></i>Add New Supplier</div>
     <div class="card-body">
-        <form method="POST" class="row g-2 align-items-end">
+        <form method="POST" class="row g-2 align-items-end" data-hdc-dialog>
             <div class="col-md-4">
                 <label class="form-label fw-semibold">Supplier Name <span class="text-danger">*</span></label>
                 <input class="form-control" name="name" placeholder="Full name / company" required>
@@ -132,7 +132,7 @@
                 <h5 class="modal-title"><i class="fas fa-user-edit me-2"></i>Edit Supplier</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
-            <form method="POST" id="supplierEditForm">
+            <form method="POST" id="supplierEditForm" data-hdc-dialog>
                 <div class="modal-body">
                     <div class="mb-3">
                         <label class="form-label fw-semibold">Supplier Name</label>

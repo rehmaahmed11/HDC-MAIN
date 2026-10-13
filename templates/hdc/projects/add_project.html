@@ -9,7 +9,7 @@
 <div class="card hdc-card">
     <div class="card-header hdc-card-header"><i class="fas fa-plus-circle me-2"></i>New Project</div>
     <div class="card-body">
-        <form method="POST" action="{{ url_for('hdc_add_project') }}">
+        <form method="POST" action="{{ url_for('hdc_add_project') }}" data-hdc-dialog>
         <div class="row g-3">
             <div class="col-md-8">
                 <label class="form-label">Project Code *</label>
