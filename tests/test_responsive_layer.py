@@ -79,6 +79,14 @@ class LayoutContractTest(unittest.TestCase):
         self.assertNotIn('maximum-scale', content)
         self.assertNotIn('user-scalable=no', content)
 
+    def test_form_controls_have_a_readable_wide_screen_limit(self):
+        css = _read('static', 'hdc', 'css', 'hdc.css')
+        self.assertRegex(
+            css,
+            r'\.form-control,\s*\.form-select\s*\{\s*max-width:\s*min\(100%,\s*36rem\);',
+            'shared controls should not stretch across the full desktop viewport',
+        )
+
 
 class RenderedPageTest(IsolatedAppTest):
     """A real page must actually ship the layer, stamped against staleness."""

@@ -786,10 +786,47 @@ a .kpi-card:hover,
 
 .form-control,
 .form-select {
+    max-width: min(100%, 36rem);
     border-radius: 10px;
     border-color: var(--input-border) !important;
     background: var(--input-bg) !important;
     color: var(--text) !important;
+}
+
+/* Keep short labels and values from becoming full-screen bars on wide
+   monitors. Grid columns still make controls fluid when there is room, while
+   this cap gives the whole app a consistent, readable field length. */
+.expense-category-page {
+    width: 100%;
+    max-width: 68rem;
+    margin-inline: auto;
+}
+
+.expense-category-add-card { max-width: 44rem; }
+
+.expense-category-add-form {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+    gap: 0.75rem;
+}
+
+.expense-category-add-field { min-width: 0; }
+.expense-category-add-field .form-control { max-width: 100%; }
+.expense-category-add-form > .btn { white-space: nowrap; }
+
+.expense-category-table .expense-category-index { width: 4rem; }
+.expense-category-table .expense-category-actions-heading { width: 8.5rem; }
+.expense-category-edit-form { max-width: 34rem; }
+.expense-category-edit-form .form-control {
+    min-width: 0;
+    max-width: 32rem;
+}
+.expense-category-row-actions { white-space: nowrap; }
+
+@media (max-width: 575.98px) {
+    .expense-category-add-form { grid-template-columns: minmax(0, 1fr); }
+    .expense-category-add-form > .btn { width: 100%; }
 }
 
 .form-control:focus,
