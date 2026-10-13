@@ -100,6 +100,14 @@ class ExpenseBatchTest(IsolatedAppTest):
         self.assertIn('item_category_id', html)
         self.assertIn('expItems', html)
 
+    def test_expense_categories_uses_compact_admin_layout(self):
+        response = self.client.get('/hdc/expense_categories')
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        self.assertIn('expense-category-page', html)
+        self.assertIn('expense-category-add-form', html)
+        self.assertIn('expense-category-edit-form', html)
+
 
 class TradesPageTest(IsolatedAppTest):
     def test_trades_page_add_rename_delete_and_render(self):
