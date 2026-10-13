@@ -37,7 +37,7 @@
         <div class="card hdc-card" id="addToolCard">
             <div class="card-header hdc-card-header"><i class="fas fa-plus me-2"></i>Add New Tool / Category</div>
             <div class="card-body">
-                <form method="POST" class="mb-3 pb-3 border-bottom" id="newCategoryForm">
+                <form method="POST" class="mb-3 pb-3 border-bottom" id="newCategoryForm" data-hdc-dialog>
                     <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
                     <input type="hidden" name="action" value="add_category">
                     <label class="form-label">New Category</label>
@@ -48,7 +48,7 @@
                     <small class="text-muted">Created categories are selected for the tool form below automatically.</small>
                 </form>
 
-                <form method="POST" id="addToolForm">
+                <form method="POST" id="addToolForm" data-hdc-dialog>
                     <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
                     <input type="hidden" name="action" value="add_tool">
                     <div class="row g-2">
@@ -251,7 +251,7 @@
                     {% for r in tools %}
                         {% set st = stock_stats|stock_lookup(r.tool_id) %}
                         {% set sr = serial_lookup.get(r.tool_id) %}
-                        <tr>
+                        <tr {{ r|hdc_row_attrs }}>
                             <td><span class="badge bg-secondary">{{ r.code }}</span></td>
                             <td>
                                 <strong>{{ r.name }}</strong>
@@ -335,7 +335,7 @@
                 <div class="modal fade" id="catModal{{ c.id }}" tabindex="-1">
                   <div class="modal-dialog modal-sm">
                     <div class="modal-content hdc-modal">
-                      <form method="POST" action="{{ url_for('hdc_tool_rental_category_edit', category_id=c.id) }}">
+                      <form method="POST" action="{{ url_for('hdc_tool_rental_category_edit', category_id=c.id) }}" data-hdc-dialog>
                         <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
                         <div class="modal-header"><h6 class="modal-title">Rename Category</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
                         <div class="modal-body">
@@ -351,7 +351,7 @@
                 <div class="modal fade" id="catDelModal{{ c.id }}" tabindex="-1">
                   <div class="modal-dialog modal-sm">
                     <div class="modal-content hdc-modal">
-                      <form method="POST" action="{{ url_for('hdc_tool_rental_category_delete', category_id=c.id) }}">
+                      <form method="POST" action="{{ url_for('hdc_tool_rental_category_delete', category_id=c.id) }}" data-hdc-dialog>
                         <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
                         <div class="modal-header"><h6 class="modal-title">Delete Category?</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
                         <div class="modal-body">
@@ -375,7 +375,7 @@
                         <div class="modal fade" id="editModal{{ r.tool_id }}" tabindex="-1">
                           <div class="modal-dialog modal-lg">
                             <div class="modal-content hdc-modal">
-                              <form method="POST" action="{{ url_for('hdc_tool_rental_tool_edit', tool_id=r.tool_id) }}">
+                              <form method="POST" action="{{ url_for('hdc_tool_rental_tool_edit', tool_id=r.tool_id) }}" data-hdc-dialog>
                                 <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
                                 <div class="modal-header"><h6 class="modal-title">Edit {{ r.name }}</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
                                 <div class="modal-body row g-2">
@@ -410,7 +410,7 @@
                         <div class="modal fade" id="delModal{{ r.tool_id }}" tabindex="-1">
                           <div class="modal-dialog modal-sm">
                             <div class="modal-content hdc-modal">
-                              <form method="POST" action="{{ url_for('hdc_tool_rental_tool_delete', tool_id=r.tool_id) }}">
+                              <form method="POST" action="{{ url_for('hdc_tool_rental_tool_delete', tool_id=r.tool_id) }}" data-hdc-dialog>
                                 <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
                                 <div class="modal-header"><h6 class="modal-title">Archive Tool?</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
                                 <div class="modal-body">

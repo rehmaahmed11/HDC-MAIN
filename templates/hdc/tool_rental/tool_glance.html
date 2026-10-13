@@ -63,7 +63,7 @@
             </thead>
             <tbody>
             {% for r in rows %}
-                <tr class="{% if r.is_scrapped %}serial-scrapped{% elif r.is_in_store %}serial-in-store{% else %}serial-out{% endif %}">
+                <tr {{ r|hdc_row_attrs }} class="{% if r.is_scrapped %}serial-scrapped{% elif r.is_in_store %}serial-in-store{% else %}serial-out{% endif %}">
                     <td class="text-muted">{{ loop.index }}</td>
                     <td><strong>{{ r.tool_and_serial }}</strong></td>
                     <td>{{ r.tool_code }}</td>

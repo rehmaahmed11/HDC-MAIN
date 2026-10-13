@@ -80,7 +80,7 @@
             </div>
             <div class="card-body pt-2">
                 {% for txn in recent_txns %}
-                <div class="rm-entry">
+                <div class="rm-entry" {{ txn|hdc_row_attrs }}>
                     <span class="rm-entry-dot {{ 'in' if txn.direction == 'in' else ('transfer' if txn.direction == 'internal' else 'out') }}"></span>
                     <div class="rm-entry-main">
                         <div class="rm-entry-title">{{ txn.note or txn.category|title or txn.type_label or 'Transaction' }}</div>

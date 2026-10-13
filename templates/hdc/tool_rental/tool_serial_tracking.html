@@ -20,7 +20,7 @@
         <span><i class="fas fa-filter me-2"></i>Filter Pieces by Serial / Tool / Status / Location</span>
         <div class="d-flex gap-2">
             {% if can_write_tools %}
-            <form method="post" action="{{ url_for('hdc_tool_rental_serials_rebuild') }}" class="d-inline">
+            <form method="post" action="{{ url_for('hdc_tool_rental_serials_rebuild') }}" class="d-inline" data-hdc-dialog>
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
                 <input type="hidden" name="return_to" value="serials">
                 <button type="submit" class="btn btn-sm btn-outline-primary"
@@ -87,7 +87,7 @@
             <tbody>
             {% for row in serials %}
                 {% set s = row.serial %}
-                <tr class="{% if row.is_scrapped %}serial-scrapped{% elif row.is_in_store %}serial-in-store{% else %}serial-out{% endif %}">
+                <tr {{ row|hdc_row_attrs }} class="{% if row.is_scrapped %}serial-scrapped{% elif row.is_in_store %}serial-in-store{% else %}serial-out{% endif %}">
                     <td>
                         <strong>{{ row.serial_number }}</strong>
                         <small class="d-block text-muted">{{ row.tool_code }}</small>

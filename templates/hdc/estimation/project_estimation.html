@@ -110,7 +110,7 @@
                         </td>
                         <td class="text-end">
                             {% if e.status != 'finalized' %}
-                            <form method="POST" action="{{ url_for('hdc_project_estimation_convert', est_id=e.id) }}" class="d-inline">
+                            <form method="POST" action="{{ url_for('hdc_project_estimation_convert', est_id=e.id) }}" class="d-inline" data-hdc-dialog>
                                 <button type="submit" class="btn btn-sm btn-outline-success">
                                     <i class="fas fa-arrow-right me-1"></i>Convert
                                 </button>

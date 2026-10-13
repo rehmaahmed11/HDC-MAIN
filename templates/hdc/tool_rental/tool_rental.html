@@ -140,7 +140,7 @@
             </thead>
             <tbody>
             {% for r in rentals %}
-                <tr class="tool-rental-row">
+                <tr {{ r|hdc_row_attrs }} class="tool-rental-row">
                     <td>
                         <a href="{{ url_for('hdc_tool_rental_detail', rental_id=r.id) }}" class="fw-semibold">{{ r.rental_code }}</a>
                         <div class="small text-muted">{{ r.rental_date }}{% if r.expected_return_date %} · Return by {{ r.expected_return_date }}{% endif %}</div>

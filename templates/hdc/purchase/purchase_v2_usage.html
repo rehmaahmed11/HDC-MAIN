@@ -301,7 +301,7 @@
                 <h5 class="modal-title"><i class="fas fa-ban me-2"></i>Void Usage Record</h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
-            <form method="POST" id="usageVoidForm">
+            <form method="POST" id="usageVoidForm" data-hdc-dialog>
                 <div class="modal-body">
                     <p class="text-muted mb-3">This will void the usage entry and restore inventory.</p>
                     <label class="form-label fw-semibold">Reason (optional)</label>
@@ -318,7 +318,6 @@
 {% endblock %}
 
 {% block extra_js %}
-{% include 'shared/_result_dialog.html' %}
 <script>
 (function () {
     var matSel  = document.getElementById('usageV2MaterialSelect');

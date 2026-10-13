@@ -314,7 +314,7 @@
                             <i class="fas fa-trash"></i>
                         </button>
                     </form>
-                    <form method="POST" action="{{ url_for('hdc_stage_status', sid=s.id) }}" class="d-inline ms-1">
+                    <form method="POST" action="{{ url_for('hdc_stage_status', sid=s.id) }}" class="d-inline ms-1" data-hdc-dialog>
                         {% if s.status in ['completed','Complete'] %}
                         <input type="hidden" name="status" value="active">
                         <button type="submit" class="btn btn-xs btn-outline-secondary btn-sm" title="Mark Active">
@@ -428,7 +428,7 @@
                         <td class="fw-semibold">{{ "{:,.0f}".format(member.contract_value or 0) }}</td>
                         <td class="small">{{ "{:,.0f}".format(member.total_paid or 0) }}</td>
                         <td style="min-width:190px">
-                            <form method="POST" action="{{ url_for('hdc_stage_sub_progress', sid=s.id) }}" class="d-flex gap-1">
+                            <form method="POST" action="{{ url_for('hdc_stage_sub_progress', sid=s.id) }}" class="d-flex gap-1" data-hdc-dialog>
                                 <input type="hidden" name="subcontractor_id" value="{{ member.id }}">
                                 <input type="number" step="0.01" min="0" max="100" name="work_done_percentage" class="form-control form-control-sm"
                                        style="width:90px" value="{{ member.work_done_percentage or 0 }}" aria-label="{{ member.name }} completion %">
@@ -456,7 +456,7 @@
                             {% if (s.qty_sqft or 0) > 0 and member.contract_type == 'sqft' %}
                             <div class="small text-muted mb-1">Remaining if you exclude {{ member.name }}: <strong>{{ "{:,.0f}".format(rem_excl or 0) }} sqft</strong> (stage {{ "{:,.0f}".format(s.qty_sqft or 0) }} - others {{ "{:,.0f}".format((s.subcontracted_sqft or 0) - (member.total_sqft or 0)) }}) — max you can set for this member is {{ "{:,.0f}".format((rem_excl or 0) + (member.total_sqft or 0)) }} sqft if you include its current.</div>
                             {% endif %}
-                            <form method="POST" action="{{ url_for('hdc_stage_shift_to_subcontractor', sid=s.id) }}" class="stage-member-terms stage-terms-grid">
+                            <form method="POST" action="{{ url_for('hdc_stage_shift_to_subcontractor', sid=s.id) }}" class="stage-member-terms stage-terms-grid" data-hdc-dialog>
                                 <input type="hidden" name="subcontractor_id" value="{{ member.id }}">
                                 <span class="small fw-bold stage-terms-heading">Terms for {{ member.name }}:</span>
                                 <label class="stage-term-field"><span class="form-label small mb-0">Contract type</span><select name="contract_type" class="form-select form-select-sm">
@@ -500,7 +500,7 @@
                 <div class="stage-details-section-title"><i class="fas fa-file-pdf me-1 text-danger"></i>Drawings
                     <span class="badge bg-secondary ms-1">{{ s.drawings|length if hdc_page_allowed('stage_drawings') else '—' }}</span></div>
                 <div class="d-flex flex-column gap-2">
-            <form method="POST" action="{{ url_for('hdc_stage_drawings_upload', sid=s.id) }}" enctype="multipart/form-data" class="d-flex flex-wrap gap-2 align-items-center">
+            <form method="POST" action="{{ url_for('hdc_stage_drawings_upload', sid=s.id) }}" enctype="multipart/form-data" class="d-flex flex-wrap gap-2 align-items-center" data-hdc-dialog>
                 <span class="small text-muted fw-bold">Upload PDF Drawings:</span>
                 <input type="file" name="drawings" accept="application/pdf,.pdf" multiple required class="form-control form-control-sm" style="max-width:320px">
                 <button type="submit" class="btn btn-sm btn-mint"><i class="fas fa-upload me-1"></i>Upload</button>
@@ -515,7 +515,7 @@
                             <td><a href="{{ url_for('hdc_stage_drawing_view', did=d.id) }}" target="_blank" class="text-decoration-none"><i class="fas fa-file-pdf text-danger me-1"></i>{{ d.original_name }}</a></td>
                             <td class="small text-muted">{{ fmt_pkt(d.updated_at or d.created_at) }}</td>
                             <td class="text-nowrap">
-                                <form method="POST" action="{{ url_for('hdc_stage_drawing_replace', did=d.id) }}" enctype="multipart/form-data" class="d-inline-flex gap-1 align-items-center">
+                                <form method="POST" action="{{ url_for('hdc_stage_drawing_replace', did=d.id) }}" enctype="multipart/form-data" class="d-inline-flex gap-1 align-items-center" data-hdc-dialog>
                                     <input type="file" name="drawing_file" accept="application/pdf,.pdf" required class="form-control form-control-sm" style="max-width:180px">
                                     <button type="submit" class="btn btn-xs btn-outline-primary btn-sm">Replace</button>
                                 </form>
@@ -592,7 +592,7 @@
                 </button>
             </div>
             <div class="collapse px-3 pb-2" id="addPaymentForm">
-                <form method="POST" action="{{ url_for('hdc_add_owner_payment', pid=p.id) }}" class="row g-2 mt-1">
+                <form method="POST" action="{{ url_for('hdc_add_owner_payment', pid=p.id) }}" class="row g-2 mt-1" data-hdc-dialog>
                     <div class="col-4">
                         <input type="number" step="0.01" name="amount" class="form-control form-control-sm" placeholder="Amount" onwheel="this.blur();" required>
                     </div>
@@ -659,7 +659,7 @@
         </button>
     </div>
     <div class="collapse px-3 pb-2" id="addSubForm">
-        <form method="POST" action="{{ url_for('hdc_add_subcontractor', pid=p.id) }}" class="row g-2 mt-1">
+        <form method="POST" action="{{ url_for('hdc_add_subcontractor', pid=p.id) }}" class="row g-2 mt-1" data-hdc-dialog>
             <div class="col-md-4"><input type="text" name="name" class="form-control form-control-sm" placeholder="Name *" required></div>
             <div class="col-md-3"><input type="text" name="phone" class="form-control form-control-sm" placeholder="Phone"></div>
             <div class="col-12"><button type="submit" class="btn btn-mint btn-sm">Add Subcontractor</button></div>
@@ -712,7 +712,7 @@
                         <i class="fas fa-user-check"></i>
                     </button>
                     <div class="collapse mt-2" id="pay-sub-{{ s.id }}">
-                        <form method="POST" action="{{ url_for('hdc_pay_subcontractor', sid=s.id) }}" class="d-flex gap-1 flex-wrap">
+                        <form method="POST" action="{{ url_for('hdc_pay_subcontractor', sid=s.id) }}" class="d-flex gap-1 flex-wrap" data-hdc-dialog>
                             <input type="number" step="0.01" name="amount" class="form-control form-control-sm" style="width:100px" placeholder="Amount" onwheel="this.blur();" required>
                             <input type="date" name="date" class="form-control form-control-sm" style="width:120px" value="{{ today }}">
                             <input type="text" name="notes" class="form-control form-control-sm" placeholder="Notes">
@@ -724,13 +724,13 @@
                         </form>
                     </div>
                     <div class="collapse mt-2" id="prog-sub-{{ s.id }}">
-                        <form method="POST" action="{{ url_for('hdc_subcontractor_progress', sid=s.id) }}" class="d-flex gap-1">
+                        <form method="POST" action="{{ url_for('hdc_subcontractor_progress', sid=s.id) }}" class="d-flex gap-1" data-hdc-dialog>
                             <input type="number" step="0.01" min="0" max="100" name="work_done_percentage" class="form-control form-control-sm" style="width:140px" placeholder="Work done %" value="{{ "{:.2f}".format(s.work_done_percentage or 0) }}">
                             <button type="submit" class="btn btn-primary btn-sm">Update</button>
                         </form>
                     </div>
                     <div class="collapse mt-2" id="att-sub-{{ s.id }}">
-                        <form method="POST" action="{{ url_for('hdc_subcontractor_attendance', sid=s.id) }}" class="d-flex gap-1 flex-wrap">
+                        <form method="POST" action="{{ url_for('hdc_subcontractor_attendance', sid=s.id) }}" class="d-flex gap-1 flex-wrap" data-hdc-dialog>
                             <input type="date" name="date" class="form-control form-control-sm" style="width:130px" value="{{ today }}">
                             <input type="number" min="0" step="1" name="present_count" class="form-control form-control-sm" style="width:110px" placeholder="Present">
                             <input type="number" step="0.01" min="0" max="100" name="work_done_pct" class="form-control form-control-sm" style="width:120px" placeholder="+Progress %">

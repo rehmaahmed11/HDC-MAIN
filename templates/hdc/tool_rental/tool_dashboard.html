@@ -121,7 +121,7 @@
                 </thead>
                 <tbody>
                     {% for r in rows %}
-                    <tr>
+                    <tr {{ r|hdc_row_attrs }}>
                         <td class="fw-semibold">
                             <a href="{{ url_for('hdc_tool_rental_tool_position', tool_id=r.tool_id) }}" class="text-decoration-none">{{ r.name }}</a>
                         </td>

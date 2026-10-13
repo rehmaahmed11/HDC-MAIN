@@ -230,13 +230,13 @@
                         <a href="{{ url_for('hdc_account_transaction_receipt', txn_id=r.id) }}" target="_blank" rel="noopener" class="btn btn-outline-primary btn-mini">Receipt</a>
                         <a href="{{ url_for('hdc_accounts_entries', edit_txn_id=r.id) }}" class="btn btn-outline-secondary btn-mini">Edit</a>
                         {% if r.is_void %}
-                        <form method="POST" action="{{ url_for('hdc_accounts') }}" class="d-inline">
+                        <form method="POST" action="{{ url_for('hdc_accounts') }}" class="d-inline" data-hdc-dialog>
                             <input type="hidden" name="action" value="restore_transaction">
                             <input type="hidden" name="transaction_id" value="{{ r.id }}">
                             <button type="submit" class="btn btn-outline-success btn-mini" onclick="return confirm('Restore this transaction/group and sync source record state?')">Restore</button>
                         </form>
                         {% else %}
-                        <form method="POST" action="{{ url_for('hdc_accounts') }}" class="d-inline">
+                        <form method="POST" action="{{ url_for('hdc_accounts') }}" class="d-inline" data-hdc-dialog>
                             <input type="hidden" name="action" value="void_transaction">
                             <input type="hidden" name="transaction_id" value="{{ r.id }}">
                             <input type="text" name="void_reason" class="form-control form-control-sm d-inline-block w-auto me-1"

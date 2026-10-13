@@ -21,7 +21,7 @@
         <div class="card hdc-card">
             <div class="card-header hdc-card-header"><i class="fas fa-plus me-2"></i>Add Material</div>
             <div class="card-body">
-                <form method="POST">
+                <form method="POST" data-hdc-dialog>
                     <input type="hidden" name="action" value="add">
                     <div class="mb-3">
                         <label class="form-label">Material Name *</label>
@@ -78,7 +78,7 @@
                             </span>
                         </td>
                         <td>
-                            <form method="POST" class="d-inline">
+                            <form method="POST" class="d-inline" data-hdc-dialog>
                                 <input type="hidden" name="action" value="toggle">
                                 <input type="hidden" name="mid" value="{{ m.id }}">
                                 <button type="submit" class="btn btn-xs btn-outline-secondary btn-sm"

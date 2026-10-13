@@ -50,7 +50,7 @@
     </div>
     <div class="card-body p-0">
         {% if positions %}
-        <form method="POST">
+        <form method="POST" data-hdc-dialog>
             <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
             <input type="hidden" name="day" value="{{ day_iso }}">
             <div class="table-responsive">
@@ -70,7 +70,7 @@
                     </thead>
                     <tbody>
                     {% for p in positions %}
-                        <tr>
+                        <tr {{ p|hdc_row_attrs }}>
                             <td>
                                 <input type="hidden" name="account_id" value="{{ p.account_id }}">
                                 {{ p.account_name }}
@@ -188,7 +188,7 @@
                 </thead>
                 <tbody>
                 {% for r in day_entries %}
-                    <tr {% if r.is_void %}class="table-secondary text-muted" style="opacity:.65"{% endif %}>
+                    <tr {{ r|hdc_row_attrs }} {% if r.is_void %}class="table-secondary text-muted" style="opacity:.65"{% endif %}>
                         <td>
                             {% if r.direction == 'in' %}<span class="badge bg-success">In</span>
                             {% elif r.direction == 'out' %}<span class="badge bg-danger">Out</span>

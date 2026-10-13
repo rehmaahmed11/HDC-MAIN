@@ -14,7 +14,7 @@
         {% if mode == 'add' %}New Stage for {{ p.name }}{% else %}Edit: {{ stage.name }}{% endif %}
     </div>
     <div class="card-body">
-        <form method="POST">
+        <form method="POST" data-hdc-dialog>
             {% if mode == 'add' and defs %}
             <div class="mb-3">
                 <label class="form-label">Pick from Stage Library <small class="text-muted">(or type custom name below)</small></label>

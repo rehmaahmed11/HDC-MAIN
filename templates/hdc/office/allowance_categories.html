@@ -18,7 +18,7 @@
                 <h5 class="modal-title"><i class="fas fa-plus me-2"></i>Add Allowance Category</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
-            <form method="POST">
+            <form method="POST" data-hdc-dialog>
                 <div class="modal-body row g-3">
                     <div class="col-12">
                         <label class="form-label">Category Name *</label>
@@ -67,7 +67,7 @@
                         <a href="{{ url_for('hdc_allowance_category_edit', cid=category.id) }}" class="btn btn-outline-info btn-sm" title="Edit">
                             <i class="fas fa-pen"></i>
                         </a>
-                        <form method="POST" action="{{ url_for('hdc_allowance_category_toggle', cid=category.id) }}" class="d-inline">
+                        <form method="POST" action="{{ url_for('hdc_allowance_category_toggle', cid=category.id) }}" class="d-inline" data-hdc-dialog>
                             <button type="submit" class="btn btn-sm {% if category.is_active %}btn-outline-warning{% else %}btn-outline-success{% endif %} ms-1"
                                     title="{{ 'Deactivate' if category.is_active else 'Activate' }}">
                                 <i class="fas fa-{% if category.is_active %}ban{% else %}check{% endif %}"></i>

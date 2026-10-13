@@ -95,7 +95,7 @@
                         <tbody>
                         {% for it in items %}
                             {% set item_serials = item_serials_map.get(it.id, []) if item_serials_map is defined else [] %}
-                            <tr>
+                            <tr {{ it|hdc_row_attrs }}>
                                 <td>
                                     <strong>{{ it.tool.name if it.tool else '-' }}</strong>
                                     <small class="text-muted ms-1">{{ it.tool.tool_code if it.tool else '' }}</small>
@@ -130,7 +130,7 @@
                     <thead><tr><th>Time</th><th>Type</th><th>From</th><th>To</th><th>Qty</th><th>Notes</th></tr></thead>
                     <tbody>
                     {% for log in movement_logs %}
-                        <tr>
+                        <tr {{ log|hdc_row_attrs }}>
                             <td>{{ log.timestamp.strftime('%Y-%m-%d %H:%M') if log.timestamp else '-' }}</td>
                             <td><span class="badge {% if log.movement_type=='rental_out' %}bg-primary{% elif log.movement_type=='return_in' %}bg-success{% elif 'transfer' in log.movement_type %}bg-warning text-dark{% else %}bg-secondary{% endif %}">{{ log.movement_type }}</span></td>
                             <td>{{ log.from_location_label }}</td>
@@ -155,7 +155,7 @@
                             <thead><tr><th>Date</th><th>Type</th><th>Tools</th><th>Paid</th><th>Pay Type</th></tr></thead>
                             <tbody>
                             {% for ret in returns %}
-                                <tr>
+                                <tr {{ ret|hdc_row_attrs }}>
                                     <td>{{ ret.return_date }}</td>
                                     <td><span class="badge {% if ret.return_type=='full' %}bg-success{% else %}bg-warning text-dark{% endif %}">{{ ret.return_type }}</span></td>
                                     <td>{{ "%.0f"|format(ret.total_tools_returned or 0) }}</td>
@@ -211,7 +211,7 @@
                                 <div class="modal fade" id="voidPay{{ p.id }}" tabindex="-1">
                                   <div class="modal-dialog modal-sm">
                                     <div class="modal-content hdc-modal">
-                                      <form method="POST" action="{{ url_for('hdc_tool_rental_payment_void', payment_id=p.id) }}">
+                                      <form method="POST" action="{{ url_for('hdc_tool_rental_payment_void', payment_id=p.id) }}" data-hdc-dialog>
                                         <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
                                         <div class="modal-header"><h6 class="modal-title">Void Payment?</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
                                         <div class="modal-body">Void {{ "{:,.0f}".format(p.amount) }} PKR payment? This will also void in Accounts (Cash/Bank ledger).<br><br><label class="form-label">Reason</label><input type="text" name="void_reason" class="form-control" placeholder="Reason"></div>
@@ -257,7 +257,7 @@
                 <small class="text-muted">Accounts Posting</small>
             </div>
             <div class="card-body">
-                <form method="POST" action="{{ url_for('hdc_tool_rental_return', rental_id=rental.id) }}" id="returnForm">
+                <form method="POST" action="{{ url_for('hdc_tool_rental_return', rental_id=rental.id) }}" id="returnForm" data-hdc-dialog>
                     <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
                     <div class="row g-2">
                         <div class="col-6">
@@ -392,7 +392,7 @@
         <div class="card hdc-card mt-3">
             <div class="card-header hdc-card-header"><i class="fas fa-money-bill me-2"></i>Add Payment Only — Cash/Bank Receiving</div>
             <div class="card-body">
-                <form method="POST" action="{{ url_for('hdc_tool_rental_payment', rental_id=rental.id) }}">
+                <form method="POST" action="{{ url_for('hdc_tool_rental_payment', rental_id=rental.id) }}" data-hdc-dialog>
                     <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
                     <div class="row g-2">
                         <div class="col-6"><label class="form-label">Date</label><input type="date" name="payment_date" value="{{ today }}" class="form-control" required></div>
@@ -449,7 +449,7 @@
                         This rental is <strong>No Charge</strong> (contract included) — there is nothing to discount.
                     </div>
                 {% else %}
-                <form method="POST" action="{{ url_for('hdc_tool_rental_add_discount', rental_id=rental.id) }}">
+                <form method="POST" action="{{ url_for('hdc_tool_rental_add_discount', rental_id=rental.id) }}" data-hdc-dialog>
                     <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
                     <div class="row g-2">
                         <div class="col-6"><label class="form-label">Date</label><input type="date" name="discount_date" value="{{ today }}" class="form-control" required></div>
@@ -502,7 +502,7 @@
                                     <div class="modal fade" id="voidDisc{{ d.id }}" tabindex="-1">
                                       <div class="modal-dialog modal-sm">
                                         <div class="modal-content hdc-modal">
-                                          <form method="POST" action="{{ url_for('hdc_tool_rental_discount_void', discount_id=d.id) }}">
+                                          <form method="POST" action="{{ url_for('hdc_tool_rental_discount_void', discount_id=d.id) }}" data-hdc-dialog>
                                             <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
                                             <div class="modal-header"><h6 class="modal-title">Void Discount?</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
                                             <div class="modal-body">Void {{ "{:,.0f}".format(d.amount) }} PKR discount? The amount becomes owed again and is removed from Accounts.<br><br><label class="form-label">Reason</label><input type="text" name="void_reason" class="form-control" placeholder="Reason"></div>
@@ -529,7 +529,7 @@
         <div class="card hdc-card mt-3">
             <div class="card-header hdc-card-header"><i class="fas fa-route me-2"></i>Move Tools Site1 → Site2 → Site3</div>
             <div class="card-body">
-                <form method="POST" action="{{ url_for('hdc_tool_rental_transfer', rental_id=rental.id) }}">
+                <form method="POST" action="{{ url_for('hdc_tool_rental_transfer', rental_id=rental.id) }}" data-hdc-dialog>
                     <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
                     <div class="row g-2">
                         <div class="col-12">
@@ -672,7 +672,7 @@
             <p class="text-muted small mb-3">A cancelled rental holds no stock and is hidden from the lists,
                 the dashboard and the reports. Reinstate it if it was cancelled by mistake — its pieces go
                 back out to {{ rental.current_location_label or 'the recorded location' }}.</p>
-            <form method="post" action="{{ url_for('hdc_tool_rental_restore', rental_id=rental.id) }}">
+            <form method="post" action="{{ url_for('hdc_tool_rental_restore', rental_id=rental.id) }}" data-hdc-dialog>
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
                 <button type="submit" class="btn btn-mint"><i class="fas fa-rotate-left me-1"></i>Reinstate rental</button>
             </form>

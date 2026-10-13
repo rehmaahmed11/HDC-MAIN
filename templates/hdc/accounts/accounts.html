@@ -411,12 +411,12 @@
                                 >
                                     Edit
                                 </button>
-                                <form method="POST" class="d-inline">
+                                <form method="POST" class="d-inline" data-hdc-dialog>
                                     <input type="hidden" name="action" value="suspend_account">
                                     <input type="hidden" name="account_id" value="{{ a.id }}">
                                     <button type="submit" class="btn btn-outline-warning btn-mini" onclick="return confirm('Suspend this account?')">Suspend</button>
                                 </form>
-                                <form method="POST" class="d-inline">
+                                <form method="POST" class="d-inline" data-hdc-dialog>
                                     <input type="hidden" name="action" value="delete_account">
                                     <input type="hidden" name="account_id" value="{{ a.id }}">
                                     <button type="submit" class="btn btn-outline-danger btn-mini" onclick="return confirm('Delete/archive this account?')">Delete</button>
@@ -464,7 +464,7 @@
                                 >
                                     Ledger
                                 </a>
-                                <form method="POST" class="d-inline">
+                                <form method="POST" class="d-inline" data-hdc-dialog>
                                     <input type="hidden" name="action" value="activate_account">
                                     <input type="hidden" name="account_id" value="{{ a.id }}">
                                     <button type="submit" class="btn btn-outline-success btn-mini">Activate</button>
@@ -514,7 +514,7 @@
 <div class="modal fade" id="accountCreateModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog">
         <div class="modal-content">
-            <form method="POST">
+            <form method="POST" data-hdc-dialog>
                 <div class="modal-header">
                     <h5 class="modal-title"><i class="fas fa-building-columns me-2"></i>Create Account</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
@@ -588,7 +588,7 @@
 <div class="modal fade" id="txnEditModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-scrollable">
         <div class="modal-content">
-            <form method="POST" id="txn_edit_form">
+            <form method="POST" id="txn_edit_form" data-hdc-dialog>
                 <input type="hidden" name="action" value="update_transaction">
                 <input type="hidden" name="transaction_id" id="edit_txn_id">
                 <input type="hidden" name="related_entity_type" id="edit_related_type">

@@ -580,7 +580,7 @@
                 <h5 class="modal-title"><i class="fas fa-ban me-2"></i>Void Delivery</h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
-            <form method="POST" id="delVoidForm">
+            <form method="POST" id="delVoidForm" data-hdc-dialog>
                 <div class="modal-body">
                     <p class="text-muted mb-3">This will void the delivery and return the quantity to the purchase order's remaining stock.</p>
                     <label class="form-label fw-semibold">Reason <span class="text-muted fw-normal small">(optional)</span></label>
@@ -604,7 +604,6 @@
 {% endblock %}
 
 {% block extra_js %}
-{% include 'shared/_result_dialog.html' %}
 <script>
 (function () {
     // ── data ───────────────────────────────────────────────────────────────

@@ -21,7 +21,7 @@
                     <strong>Serial Markings</strong> let you identify and track each physical piece of a tool by its exact number — e.g. <strong>{{ tool.name }} No 5</strong>, <strong>{{ tool.name }} No 6</strong> — whether it is in store or out at a site.
                 </div>
 
-                <form method="POST" id="createSerialsForm">
+                <form method="POST" id="createSerialsForm" data-hdc-dialog>
                     <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
                     <div class="row g-3">
                         <div class="col-12">
@@ -91,7 +91,7 @@
                     <tbody>
                     {% if serials is defined and serials %}
                         {% for s in serials %}
-                        <tr>
+                        <tr {{ s|hdc_row_attrs }}>
                             <td><span class="badge bg-dark">{{ s.serial_number }}</span></td>
                             <td>
                                 {% if s.is_in_store %}

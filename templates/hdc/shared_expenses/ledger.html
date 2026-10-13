@@ -283,7 +283,7 @@
                 </thead>
                 <tbody>
                     {% for line in (statement if selected_party else lines) %}
-                    <tr class="{% if line.is_void %}se-void-row{% endif %}">
+                    <tr {{ line|hdc_row_attrs }} class="{% if line.is_void %}se-void-row{% endif %}">
                         <td>{{ line.date.strftime('%d %b %Y') if line.date else '—' }}</td>
                         {% if not selected_party %}
                         <td>

@@ -38,7 +38,7 @@
                 <i class="fas fa-user-plus me-2" aria-hidden="true"></i>Add Party
             </div>
             <div class="card-body">
-                <form method="post" action="{{ url_for('hdc_parties') }}">
+                <form method="post" action="{{ url_for('hdc_parties') }}" data-hdc-dialog>
                     <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
                     <input type="hidden" name="action" value="add_party">
                     <div class="mb-2">
@@ -91,7 +91,7 @@
                 <p class="small text-muted mb-2">
                     <strong>Workers:</strong> {{ counts.worker }} worker parties / {{ counts.worker_total }} on the books.
                 </p>
-                <form method="post" action="{{ url_for('hdc_parties') }}" class="mb-2">
+                <form method="post" action="{{ url_for('hdc_parties') }}" class="mb-2" data-hdc-dialog>
                     <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
                     <input type="hidden" name="action" value="sync_workers">
                     <button type="submit" class="btn btn-sm btn-outline-primary w-100">
@@ -102,7 +102,7 @@
                     <strong>Project Clients:</strong> {{ counts.client }} client parties / {{ counts.client_total or 0 }} distinct clients from Projects.
                     {% if counts.client_auto_added %}Auto-added {{ counts.client_auto_added }} just now.{% endif %}
                 </p>
-                <form method="post" action="{{ url_for('hdc_parties') }}">
+                <form method="post" action="{{ url_for('hdc_parties') }}" data-hdc-dialog>
                     <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
                     <input type="hidden" name="action" value="sync_clients">
                     <button type="submit" class="btn btn-sm btn-outline-success w-100">
@@ -211,7 +211,7 @@
                         </tr>
                         {% endif %}
                         {% for row in rows %}
-                        <tr {% if not row.party.is_active %}class="table-secondary text-muted" style="opacity:.65"{% endif %}>
+                        <tr {{ row|hdc_row_attrs }} {% if not row.party.is_active %}class="table-secondary text-muted" style="opacity:.65"{% endif %}>
                             <td>
                                 <a href="{{ url_for('hdc_party_ledger', party_id=row.party.id) }}" class="fw-semibold text-decoration-none">{{ row.party.name }}</a>
                                 <div><span class="badge bg-light text-dark border">{{ row.type_label }}</span></div>
@@ -261,7 +261,7 @@
                                 <a href="{{ url_for('hdc_party_ledger', party_id=row.party.id) }}" class="btn btn-sm btn-outline-primary" aria-label="Open ledger for {{ row.party.name }}">
                                     <i class="fas fa-book-open me-1" aria-hidden="true"></i>Ledger
                                 </a>
-                                <form method="post" action="{{ url_for('hdc_parties') }}" class="d-inline">
+                                <form method="post" action="{{ url_for('hdc_parties') }}" class="d-inline" data-hdc-dialog>
                                     <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
                                     <input type="hidden" name="action" value="toggle_party">
                                     <input type="hidden" name="party_id" value="{{ row.party.id }}">

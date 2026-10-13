@@ -26,7 +26,7 @@
             <span class="badge bg-secondary ms-auto">Events: {{ kpis.events_count or 0 }}</span>
         </form>
         {% if current_user.role == 'admin' %}
-        <form method="POST" action="{{ url_for('hdc_subcontractor_events_rebuild', sid=sub.id) }}" class="mt-2">
+        <form method="POST" action="{{ url_for('hdc_subcontractor_events_rebuild', sid=sub.id) }}" class="mt-2" data-hdc-dialog>
             <button type="submit" class="btn btn-sm btn-outline-dark">Rebuild Missing History</button>
         </form>
         {% endif %}

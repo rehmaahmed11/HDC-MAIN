@@ -63,6 +63,12 @@ _VIEW_ROW_KEYS = (
     'material', 'supplier', 'purchase', 'delivery', 'usage', 'account', 'staff',
     'mark', 'attendance', 'run', 'document', 'doc', 'invoice', 'voucher',
     'report',
+    # Tools / rentals and the directories: a glance or serial row is its
+    # serial, a holding is the rental that holds it, an inventory row is the
+    # tool, a party-directory row is the party, a count-sheet history row is
+    # the audit.  More specific keys first: a serial row also carries 'tool'.
+    'party', 'serial', 'rental', 'holding', 'tool', 'audit', 'share', 'line',
+    'movement', 'log', 'return', 'transfer',
 )
 
 

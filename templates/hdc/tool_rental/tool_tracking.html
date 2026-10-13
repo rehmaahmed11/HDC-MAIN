@@ -182,7 +182,7 @@
                         <tbody>
                         {% for tool_detail in loc.tools %}
                             {% for movement in tool_detail.movement_logs %}
-                                <tr>
+                                <tr {{ movement|hdc_row_attrs }}>
                                     <td>{{ tool_detail.tool.name }} <small class="text-muted">{{ tool_detail.tool.tool_code }}</small></td>
                                     <td class="text-nowrap">{{ movement.timestamp.strftime('%Y-%m-%d %H:%M') if movement.timestamp else '' }}</td>
                                     <td><span class="badge bg-secondary tool-tracking-movement-type">{{ movement.movement_type }}</span></td>

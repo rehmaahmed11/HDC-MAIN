@@ -21,7 +21,7 @@
         <div class="card hdc-card">
             <div class="card-header hdc-card-header"><i class="fas fa-cube me-2"></i>Concrete Volume Calculator</div>
             <div class="card-body">
-                <form method="POST">
+                <form method="POST" data-hdc-dialog>
                     <input type="hidden" name="calc_type" value="concrete">
                     <div class="mb-3">
                         <label class="form-label">Member Type</label>
@@ -80,7 +80,7 @@
         <div class="card hdc-card">
             <div class="card-header hdc-card-header"><i class="fas fa-cog me-2"></i>Steel Weight Calculator</div>
             <div class="card-body">
-                <form method="POST">
+                <form method="POST" data-hdc-dialog>
                     <input type="hidden" name="calc_type" value="steel">
                     <div class="mb-3">
                         <label class="form-label">Bar Diameter</label>
@@ -125,7 +125,7 @@
             <div class="card-header hdc-card-header"><i class="fas fa-flask me-2"></i>Custom Formula Calculator</div>
             <div class="card-body">
                 {% if formulas %}
-                <form method="POST" id="customForm">
+                <form method="POST" id="customForm" data-hdc-dialog>
                     <input type="hidden" name="calc_type" value="custom">
                     <div class="mb-3">
                         <label class="form-label">Select Formula</label>

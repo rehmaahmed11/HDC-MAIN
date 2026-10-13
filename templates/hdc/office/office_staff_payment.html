@@ -24,7 +24,7 @@
                     </div>
                     <div class="col-md-4"><div class="small text-muted">Balance (MTD)</div><div class="fw-bold {% if (snap.balance or 0) > 0 %}text-warning{% elif (snap.balance or 0) < 0 %}text-success{% else %}text-muted{% endif %}">{{ "{:,.0f}".format(snap.balance or 0) }} PKR</div></div>
                 </div>
-                <form method="POST" class="row g-3">
+                <form method="POST" class="row g-3" data-hdc-dialog>
                     <div class="col-md-4">
                         <label class="form-label">Payment Date</label>
                         <input type="date" name="date" class="form-control" value="{{ today }}" required>

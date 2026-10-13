@@ -8,8 +8,14 @@
    whether this user may type into it.  The Diff cell is recomputed live by
    ``static/hdc/js/pages/tool_audit.js`` while someone counts, but the number
    that matters is the one the server stored — a saved sheet always renders its
-   own variance, with or without JavaScript. #}
-<tr class="tool-audit-line {% if row.status in ('short', 'extra') %}is-off{% elif row.status == 'adjusted' %}is-fixed{% elif row.status == 'match' %}is-clean{% endif %}"
+   own variance, with or without JavaScript.
+
+   On a saved sheet every line is part of that count entry, so the row is
+   tagged with the sheet itself ("Entered by" = who recorded the count); on a
+   still-unsaved sheet the filter falls back to nothing and the row stays
+   untagged. #}
+{% set line_attrs = (row|hdc_row_attrs(entity_type='hdc_tool_audit', row_id=audit.id)) if audit else '' %}
+<tr {{ line_attrs }} class="tool-audit-line {% if row.status in ('short', 'extra') %}is-off{% elif row.status == 'adjusted' %}is-fixed{% elif row.status == 'match' %}is-clean{% endif %}"
     data-tool-id="{{ row.tool_id }}"
     data-book="{{ row.expected_qty }}"
     data-unit="{{ row.unit }}"

@@ -9,7 +9,7 @@
         <div class="card hdc-card">
             <div class="card-header hdc-card-header"><i class="fas fa-calendar-plus me-2"></i>Mark Attendance</div>
             <div class="card-body">
-                <form method="POST" id="attForm">
+                <form method="POST" id="attForm" data-hdc-dialog>
                     <div class="mb-3">
                         <label class="form-label">Date *</label>
                         <input type="date" name="date" class="form-control" value="{{ today }}" required>
@@ -91,7 +91,7 @@
                         <td class="{% if a.overtime_hours > 0 %}text-warning{% endif %}">{{ a.overtime_hours }}h</td>
                         <td class="fw-bold text-success">{{ "{:,.0f}".format(a.total_wage) }}</td>
                         <td>
-                            <form method="POST" action="{{ url_for('hdc_delete_attendance', aid=a.id) }}" class="d-inline">
+                            <form method="POST" action="{{ url_for('hdc_delete_attendance', aid=a.id) }}" class="d-inline" data-hdc-dialog>
                                 <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete"
                                     onclick="return confirm('Delete this record?')">
                                     <i class="fas fa-trash"></i>

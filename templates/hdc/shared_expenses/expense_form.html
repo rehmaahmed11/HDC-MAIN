@@ -60,7 +60,7 @@
 {% endif %}
 
 <form method="post" id="seExpenseForm"
-      action="{{ url_for('hdc_shared_expense_edit', expense_id=expense.id) if is_edit else url_for('hdc_shared_expense_new') }}">
+      action="{{ url_for('hdc_shared_expense_edit', expense_id=expense.id) if is_edit else url_for('hdc_shared_expense_new') }}" data-hdc-dialog>
     <input type="hidden" name="idempotency_key" value="{{ form_token }}">
 
     <div class="row g-3">

@@ -202,7 +202,7 @@
                                     <a href="{{ url_for('hdc_account_transaction_receipt', txn_id=r.account_tx_id) }}" target="_blank" rel="noopener">Receipt</a>
                                     {% endif %}
                                     {% if r.is_void %}
-                                    <form method="POST" class="m-0">
+                                    <form method="POST" class="m-0" data-hdc-dialog>
                                         <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
                                         <input type="hidden" name="action" value="restore_entry">
                                         <input type="hidden" name="entry_id" value="{{ r.id }}">
@@ -235,7 +235,7 @@
     {% if not r.is_void %}
     <div class="modal fade" id="voidModal{{ r.id }}" tabindex="-1" aria-hidden="true">
         <div class="modal-dialog modal-dialog-centered">
-            <form method="POST" class="modal-content">
+            <form method="POST" class="modal-content" data-hdc-dialog>
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
                 <input type="hidden" name="action" value="void_entry">
                 <input type="hidden" name="entry_id" value="{{ r.id }}">
@@ -258,7 +258,7 @@
 
     <div class="modal fade" id="amendModal{{ r.id }}" tabindex="-1" aria-hidden="true">
         <div class="modal-dialog modal-lg modal-dialog-centered">
-            <form method="POST" class="modal-content">
+            <form method="POST" class="modal-content" data-hdc-dialog>
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
                 <input type="hidden" name="action" value="amend_entry">
                 <input type="hidden" name="entry_id" value="{{ r.id }}">

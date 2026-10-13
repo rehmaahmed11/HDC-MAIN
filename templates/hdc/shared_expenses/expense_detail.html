@@ -69,7 +69,7 @@
                         </thead>
                         <tbody>
                             {% for s in shares %}
-                            <tr>
+                            <tr {{ s|hdc_row_attrs(entity_type='hdc_shared_expense', row_id=expense.id) }}>
                                 <td class="acc-name">{{ s.party_name }}</td>
                                 <td class="text-end acc-amount">{{ '{:,.2f}'.format(s.amount) }}</td>
                                 <td class="text-end acc-muted-amount">
@@ -169,7 +169,7 @@
                             </a>
                             {% endif %}
                             {% if entry and not entry.is_void %}
-                            <form method="post" action="{{ url_for('hdc_shared_expense_unlink', expense_id=expense.id) }}">
+                            <form method="post" action="{{ url_for('hdc_shared_expense_unlink', expense_id=expense.id) }}" data-hdc-dialog>
                                 <button class="btn btn-sm btn-outline-danger" type="submit">
                                     <i class="fas fa-link-slash me-1"></i>Unlink
                                 </button>
@@ -196,7 +196,7 @@
                     <div class="col-12 col-lg-6">
                         <div class="se-money-box">
                             <h6><i class="fas fa-money-bill-transfer me-1 text-success"></i>Pay it now (posts to Accounts)</h6>
-                            <form method="post" action="{{ url_for('hdc_shared_expense_pay', expense_id=expense.id) }}">
+                            <form method="post" action="{{ url_for('hdc_shared_expense_pay', expense_id=expense.id) }}" data-hdc-dialog>
                                 <div class="mb-2">
                                     <label class="form-label small" for="pay_account_id">Pay from account</label>
                                     <select class="form-select form-select-sm" id="pay_account_id" name="account_id" required>
@@ -227,7 +227,7 @@
                     <div class="col-12 col-lg-6">
                         <div class="se-money-box">
                             <h6><i class="fas fa-link me-1 text-primary"></i>Already paid in Accounts</h6>
-                            <form method="post" action="{{ url_for('hdc_shared_expense_link', expense_id=expense.id) }}">
+                            <form method="post" action="{{ url_for('hdc_shared_expense_link', expense_id=expense.id) }}" data-hdc-dialog>
                                 <label class="form-label small" for="link_entry">Money-out entry</label>
                                 <select class="form-select form-select-sm mb-2" id="link_entry" name="cf_entry_id" required size="6">
                                     {% for item in linkable %}
@@ -262,7 +262,7 @@
                     {% if expense.voided_at %}on {{ expense.voided_at.strftime('%d %b %Y %H:%M') }}{% endif %}.
                     <div class="small mt-1">Reason: {{ expense.void_reason or '—' }}</div>
                 </div>
-                <form method="post" action="{{ url_for('hdc_shared_expense_restore', expense_id=expense.id) }}">
+                <form method="post" action="{{ url_for('hdc_shared_expense_restore', expense_id=expense.id) }}" data-hdc-dialog>
                     <div class="form-check mb-2">
                         <input class="form-check-input" type="checkbox" name="restore_linked_entry"
                                id="restoreLinked" value="1" checked>
@@ -275,7 +275,7 @@
                     </button>
                 </form>
                 {% else %}
-                <form method="post" action="{{ url_for('hdc_shared_expense_void', expense_id=expense.id) }}">
+                <form method="post" action="{{ url_for('hdc_shared_expense_void', expense_id=expense.id) }}" data-hdc-dialog>
                     <label class="form-label" for="void_reason">Reason for voiding <span class="text-danger">*</span></label>
                     <input type="text" class="form-control mb-2" id="void_reason" name="void_reason"
                            maxlength="300" required placeholder="Wrong amount / duplicate / cancelled">

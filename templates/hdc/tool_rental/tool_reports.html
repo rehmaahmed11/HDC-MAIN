@@ -68,7 +68,7 @@
                     <thead><tr><th>Date</th><th>Tool</th><th class="text-center">Qty</th><th class="text-end">Unit</th><th class="text-end">Total</th><th>Supplier / Ref</th></tr></thead>
                     <tbody>
                     {% for p in purchases %}
-                        <tr>
+                        <tr {{ p|hdc_row_attrs }}>
                             <td>{{ p.purchase_date }}</td>
                             <td>{{ p.tool.name if p.tool else p.tool_id }}<br><small class="text-muted">{{ p.purchase_code }}</small></td>
                             <td class="text-center fw-bold">{{ "%.0f"|format(p.qty or 0) }}</td>
@@ -98,7 +98,7 @@
                     <thead><tr><th>Date</th><th>Tool</th><th class="text-center">Qty</th><th>Reason</th><th class="text-end">Written off</th><th>Notes</th></tr></thead>
                     <tbody>
                     {% for s in scraps %}
-                        <tr>
+                        <tr {{ s|hdc_row_attrs }}>
                             <td>{{ s.scrap_date }}</td>
                             <td>{{ s.tool.name if s.tool else s.tool_id }}<br><small class="text-muted">{{ s.scrap_code }}</small></td>
                             <td class="text-center fw-bold">{{ "%.0f"|format(s.qty or 0) }}</td>
@@ -150,7 +150,7 @@
                 </tr></thead>
                 <tbody>
                 {% for row in archived_tools %}
-                    <tr>
+                    <tr {{ row|hdc_row_attrs }}>
                         <td class="text-nowrap">{{ row.code }}</td>
                         <td>{{ row.name }}</td>
                         <td>{{ row.category }}</td>
@@ -165,7 +165,7 @@
                         </td>
                         <td class="text-center">
                             {% if can_write_tools %}
-                            <form method="post" action="{{ url_for('hdc_tool_rental_tool_restore', tool_id=row.tool_id) }}">
+                            <form method="post" action="{{ url_for('hdc_tool_rental_tool_restore', tool_id=row.tool_id) }}" data-hdc-dialog>
                                 <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
                                 <input type="hidden" name="return_to" value="reports">
                                 <button type="submit" class="btn btn-sm btn-outline-success">
@@ -230,7 +230,7 @@
                     <tbody>
                     {% for rental_detail in report_rentals %}
                         {% set r = rental_detail.rental %}
-                        <tr>
+                        <tr {{ rental_detail|hdc_row_attrs }}>
                             <td><span class="badge bg-secondary">{{ r.rental_code }}</span></td>
                             <td class="text-nowrap">{{ r.rental_date }}<br><small>Exp: {{ r.expected_return_date or '-' }}</small></td>
                             <td><span class="badge {% if r.renter_type=='internal' %}bg-primary{% else %}bg-info{% endif %}">{{ r.renter_type }}</span><br><small>{{ r.billing_type }}</small></td>
