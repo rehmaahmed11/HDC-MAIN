@@ -509,13 +509,24 @@ def party_ledger(party, *, include_void=False):
     """
     from hdc.services.accounts import _account_reference_links
 
+    from sqlalchemy import or_
+    from hdc.models.projects import Project
     key = party_name_key(party.name)
     q = (AccountTransaction.query
          .options(joinedload(AccountTransaction.from_account),
                   joinedload(AccountTransaction.to_account),
                   joinedload(AccountTransaction.project),
                   joinedload(AccountTransaction.stage))
-         .filter(func.lower(func.trim(func.coalesce(AccountTransaction.party_name, ''))) == key))
+         .filter(or_(
+             func.lower(func.trim(func.coalesce(AccountTransaction.party_name, ''))) == key,
+             and_(
+                 AccountTransaction.type == 'project_income',
+                 AccountTransaction.project.has(
+                     func.lower(func.trim(func.coalesce(Project.client, ''))) == key
+                 ),
+                 AccountTransaction.project_id != None,
+             )
+         )))
     if not include_void:
         q = q.filter(AccountTransaction.is_void == False)  # noqa: E712
     txns = q.all()

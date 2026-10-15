@@ -367,7 +367,10 @@ def register(app):
 
 def _cf_posted_datetime(raw_date):
     """Build a PKT datetime from a ``YYYY-MM-DD`` form field (time = now)."""
-    return posted_datetime_from_form_date(raw_date)
+    try:
+        return posted_datetime_from_form_date(raw_date)
+    except ValueError:
+        return None
 
 
 def _handle_vocabulary_action(action, form):
