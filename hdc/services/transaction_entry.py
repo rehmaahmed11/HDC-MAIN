@@ -127,7 +127,7 @@ def posted_datetime_from_form_date(raw_date):
     """Build a PKT datetime from a ``YYYY-MM-DD`` form field (time = now)."""
     d = _parse_date((raw_date or '').strip(), fallback=None)
     if d is None:
-        return None
+        raise ValueError('Invalid date format. Expected YYYY-MM-DD.')
     now = _pkt_now_naive()
     return now.replace(year=d.year, month=d.month, day=d.day)
 

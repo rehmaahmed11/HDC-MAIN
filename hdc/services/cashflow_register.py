@@ -1434,7 +1434,7 @@ def save_cf_party(name, party_type='other', phone=None, note=None):
     return row, True
 
 
-def ensure_party(name, party_type='other', phone=None, note=None, *, reactivate=True):
+def ensure_party(name, party_type='other', phone=None, note=None, *, reactivate=False):
     """Get-or-create a party for *automatic* syncs (HDC Tools → Parties).
 
     Like :func:`save_cf_party` but never **reclassifies** a party that
