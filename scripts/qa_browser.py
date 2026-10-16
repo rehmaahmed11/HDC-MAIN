@@ -41,7 +41,9 @@ def _save_uncaught_browser_failure(exc_type, exc, tb):
             frames = [line.strip() for line in traceback.format_exception(exc_type, exc, tb)
                       if line.lstrip().startswith('File ')]
             progress = ' > '.join(_ACTIVE_RESULT.get('flows', [])[-3:]) or 'before first flow'
-            location = frames[-1] if frames else 'unknown'
+            browser_site = next((line for line in reversed(frames)
+                                 if 'scripts/qa_browser.py' in line), 'unknown browser call site')
+            location = browser_site
             progress = progress.replace('%', '%25').replace('\\r', '%0D').replace('\\n', '%0A')
             print(f'::notice title=Browser QA progress::{progress} | at {location}', flush=True)
             message = f'{exc_type.__name__}: {exc}'.replace('%', '%25').replace('\\r', '%0D').replace('\\n', '%0A')
