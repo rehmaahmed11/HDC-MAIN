@@ -13,6 +13,7 @@ import sys
 import tempfile
 import threading
 import time
+import traceback
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
@@ -25,6 +26,22 @@ PAGES=['/hdc/','/hdc/projects','/hdc/workers','/hdc/timekeeping','/hdc/payroll/g
        '/hdc/office-management','/hdc/tool-rental','/hdc/project-estimation',
        '/hdc/reports','/hdc/settings','/hdc/users']
 
+_ACTIVE_RESULT = None
+_ACTIVE_OUTPUT = None
+
+
+def _save_uncaught_browser_failure(exc_type, exc, tb):
+    """Preserve partial browser evidence even when an assertion aborts QA."""
+    if _ACTIVE_RESULT is not None and _ACTIVE_OUTPUT is not None:
+        try:
+            _ACTIVE_RESULT['fatal_error'] = ''.join(
+                traceback.format_exception(exc_type, exc, tb))
+            _ACTIVE_OUTPUT.parent.mkdir(parents=True, exist_ok=True)
+            _ACTIVE_OUTPUT.write_text(json.dumps(_ACTIVE_RESULT, indent=2) + '\n')
+        except Exception:
+            pass
+    sys.__excepthook__(exc_type, exc, tb)
+
 
 def main():
     ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('--output',required=True)
@@ -33,6 +50,10 @@ def main():
     from werkzeug.serving import make_server
     result={'pages':[],'flows':[],'page_errors':[],'console_errors':[],'failed_requests':[],
             'bad_responses':[],'third_party_requests':[],'download_navigations':[]}
+    global _ACTIVE_RESULT, _ACTIVE_OUTPUT
+    _ACTIVE_RESULT = result
+    _ACTIVE_OUTPUT = Path(args.output)
+    sys.excepthook = _save_uncaught_browser_failure
     with tempfile.TemporaryDirectory(prefix='hdc-browser-owned-') as tmp:
         os.environ.update(HDC_ENV='test',HDC_SECRET_KEY='browser-test-only',
                           HDC_BOOTSTRAP_ADMIN_PASSWORD='Browser-Test-Only-123',
