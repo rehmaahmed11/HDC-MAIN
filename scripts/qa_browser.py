@@ -117,6 +117,10 @@ def main():
                 page.locator('form[method=POST] [name=phone],form[method=post] [name=phone]').first.fill('03001234567')
                 page.locator('form').filter(has=page.locator('[name=name]')).first.locator('button[type=submit]').click()
                 page.wait_for_load_state('networkidle')
+                # Global save-result dialogs block later controls until the
+                # operator acknowledges them, just as they do in production.
+                page.locator('#hdcResultDialogOk').click()
+                page.locator('#hdcResultDialog.show').wait_for(state='hidden')
                 with app.app_context():supplier_id=Supplier.query.filter_by(name='Browser Supplier').one().id
                 button=page.locator(f'button[data-id="{supplier_id}"]').first
                 rect=button.bounding_box()
