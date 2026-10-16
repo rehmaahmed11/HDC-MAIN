@@ -115,7 +115,7 @@ def main():
                 page.locator('form').filter(has=page.locator('[name=name]')).first.locator('button[type=submit]').click()
                 page.wait_for_load_state('networkidle')
                 with app.app_context():supplier_id=Supplier.query.filter_by(name='Browser Supplier').one().id
-                button=page.locator(f'[data-id="{supplier_id}"]').first;button.click()
+                button=page.locator(f'button[data-id="{supplier_id}"]').first;button.click()
                 page.locator('#supplierEditModal.show').wait_for();page.locator('#supplierEditName').fill('Browser Supplier Edited')
                 page.locator('#supplierEditForm button[type=submit]').click();page.wait_for_load_state('networkidle')
                 with app.app_context():assert db.session.get(Supplier,supplier_id).name=='Browser Supplier Edited'
