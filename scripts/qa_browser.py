@@ -38,7 +38,12 @@ def _save_uncaught_browser_failure(exc_type, exc, tb):
                 traceback.format_exception(exc_type, exc, tb))
             _ACTIVE_OUTPUT.parent.mkdir(parents=True, exist_ok=True)
             _ACTIVE_OUTPUT.write_text(json.dumps(_ACTIVE_RESULT, indent=2) + '\n')
-            message = f'{exc_type.__name__}: {exc}'.replace('%', '%25').replace('\\r', '%0D').replace('\\n', '%0A')
+            frames = [line.strip() for line in traceback.format_exception(exc_type, exc, tb)
+                      if line.lstrip().startswith('File ')]
+            progress = ' > '.join(_ACTIVE_RESULT.get('flows', [])[-3:]) or 'before first flow'
+            message = (f'{exc_type.__name__}: {exc}; progress={progress}; '
+                       f"at={frames[-1] if frames else 'unknown'}")
+            message = message.replace('%', '%25').replace('\\r', '%0D').replace('\\n', '%0A')
             print(f'::error title=Browser QA failure::{message[:3000]}', flush=True)
         except Exception:
             pass
