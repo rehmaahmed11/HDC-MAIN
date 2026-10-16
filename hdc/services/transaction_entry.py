@@ -124,8 +124,12 @@ def party_types():
 # ---------------------------------------------------------------------------
 
 def posted_datetime_from_form_date(raw_date):
-    """Build a PKT datetime from a ``YYYY-MM-DD`` form field (time = now)."""
-    d = _parse_date((raw_date or '').strip(), fallback=None)
+    """Build a PKT datetime from a ``YYYY-MM-DD`` form field (time = now).
+
+    An omitted date uses today; a supplied but malformed date is rejected.
+    """
+    raw = (raw_date or '').strip()
+    d = _pkt_today() if not raw else _parse_date(raw, fallback=None)
     if d is None:
         raise ValueError('Invalid date format. Expected YYYY-MM-DD.')
     now = _pkt_now_naive()

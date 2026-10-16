@@ -1434,7 +1434,7 @@ def save_cf_party(name, party_type='other', phone=None, note=None):
     return row, True
 
 
-def ensure_party(name, party_type='other', phone=None, note=None, *, reactivate=False):
+def ensure_party(name, party_type='other', phone=None, note=None, *, reactivate=True):
     """Get-or-create a party for *automatic* syncs (HDC Tools → Parties).
 
     Like :func:`save_cf_party` but never **reclassifies** a party that
@@ -1442,7 +1442,9 @@ def ensure_party(name, party_type='other', phone=None, note=None, *, reactivate=
     already filed as (say) a lender must not silently become a rental
     customer — and vice versa.  A missing party is created with the given
     type, a party typed ``other`` is upgraded to it, and a deactivated row
-    is reactivated because new activity happened.  Returns ``(row, created)``.
+    is reactivated by default when new activity happens. Directory-only syncs
+    should pass ``reactivate=False`` so an explicit deactivation sticks.
+    Returns ``(row, created)``.
     """
     nm = (name or '').strip()
     if not nm:

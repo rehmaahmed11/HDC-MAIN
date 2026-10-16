@@ -38,6 +38,8 @@ from hdc.models.accounts import Account, AccountTransaction
 from hdc.models.cashflow import CashFlowEntry, CashFlowEntryItem, CashFlowParty, CashFlowSubcategory
 from hdc.models.projects import Project
 from hdc.services.cashflow_register import category_options, register_row_dicts, subcategory_options
+from hdc.services.transaction_entry import posted_datetime_from_form_date
+from hdc.utils.dates import _pkt_today
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HARNESS = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -163,6 +165,11 @@ class NewTransactionTestCase(unittest.TestCase):
             return session['_csrf_token']
 
     # ── the page and the shared form ─────────────────────────────────────────
+
+    def test_posted_date_defaults_today_but_rejects_malformed_input(self):
+        self.assertEqual(posted_datetime_from_form_date('').date(), _pkt_today())
+        with self.assertRaisesRegex(ValueError, 'Invalid date format'):
+            posted_datetime_from_form_date('not-a-date')
 
     def test_focused_page_renders_the_complete_form(self):
         html = self.client.get(NEW_TXN_URL).get_data(as_text=True)
