@@ -15,7 +15,7 @@ This module:
 
 from datetime import datetime
 
-from sqlalchemy import func
+from sqlalchemy import and_, func
 from sqlalchemy.orm import joinedload
 
 from hdc.extensions import db
