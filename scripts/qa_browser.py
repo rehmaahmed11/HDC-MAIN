@@ -41,6 +41,9 @@ def _save_uncaught_browser_failure(exc_type, exc, tb):
             frames = [line.strip() for line in traceback.format_exception(exc_type, exc, tb)
                       if line.lstrip().startswith('File ')]
             progress = ' > '.join(_ACTIVE_RESULT.get('flows', [])[-3:]) or 'before first flow'
+            checkpoint = _ACTIVE_RESULT.get('checkpoint')
+            if checkpoint:
+                progress += f" | checkpoint={json.dumps(checkpoint, sort_keys=True)}"
             browser_site = next((line for line in reversed(frames)
                                  if 'scripts/qa_browser.py' in line), 'unknown browser call site')
             location = browser_site
@@ -115,7 +118,11 @@ def main():
                 page.locator('form').filter(has=page.locator('[name=name]')).first.locator('button[type=submit]').click()
                 page.wait_for_load_state('networkidle')
                 with app.app_context():supplier_id=Supplier.query.filter_by(name='Browser Supplier').one().id
-                button=page.locator(f'button[data-id="{supplier_id}"]').first;button.click()
+                button=page.locator(f'button[data-id="{supplier_id}"]').first
+                result['checkpoint']={'url':page.url,'supplier_id':supplier_id,
+                                      'matching_edit_buttons':page.locator('button[data-id]').count(),
+                                      'target_visible':button.is_visible()}
+                button.click()
                 page.locator('#supplierEditModal.show').wait_for();page.locator('#supplierEditName').fill('Browser Supplier Edited')
                 page.locator('#supplierEditForm button[type=submit]').click();page.wait_for_load_state('networkidle')
                 with app.app_context():assert db.session.get(Supplier,supplier_id).name=='Browser Supplier Edited'
