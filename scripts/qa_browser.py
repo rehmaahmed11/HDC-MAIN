@@ -38,6 +38,8 @@ def _save_uncaught_browser_failure(exc_type, exc, tb):
                 traceback.format_exception(exc_type, exc, tb))
             _ACTIVE_OUTPUT.parent.mkdir(parents=True, exist_ok=True)
             _ACTIVE_OUTPUT.write_text(json.dumps(_ACTIVE_RESULT, indent=2) + '\n')
+            message = f'{exc_type.__name__}: {exc}'.replace('%', '%25').replace('\\r', '%0D').replace('\\n', '%0A')
+            print(f'::error title=Browser QA failure::{message[:3000]}', flush=True)
         except Exception:
             pass
     sys.__excepthook__(exc_type, exc, tb)
