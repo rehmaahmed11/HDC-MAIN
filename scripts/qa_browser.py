@@ -119,9 +119,16 @@ def main():
                 page.wait_for_load_state('networkidle')
                 with app.app_context():supplier_id=Supplier.query.filter_by(name='Browser Supplier').one().id
                 button=page.locator(f'button[data-id="{supplier_id}"]').first
+                rect=button.bounding_box()
+                hit=page.evaluate('''({sid,box}) => {
+                    const el=document.elementFromPoint(box.x+box.width/2,box.y+box.height/2);
+                    return {tag:el&&el.tagName,id:el&&el.id,classes:el&&el.className,
+                            text:(el&&el.innerText||'').trim().slice(0,80)};
+                }''',{'sid':supplier_id,'box':rect}) if rect else None
                 result['checkpoint']={'url':page.url,'supplier_id':supplier_id,
                                       'matching_edit_buttons':page.locator('button[data-id]').count(),
-                                      'target_visible':button.is_visible()}
+                                      'target_visible':button.is_visible(),
+                                      'target_enabled':button.is_enabled(),'hit_test':hit}
                 button.click()
                 page.locator('#supplierEditModal.show').wait_for();page.locator('#supplierEditName').fill('Browser Supplier Edited')
                 page.locator('#supplierEditForm button[type=submit]').click();page.wait_for_load_state('networkidle')
