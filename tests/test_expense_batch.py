@@ -101,34 +101,45 @@ class ExpenseBatchTest(IsolatedAppTest):
         self.assertIn('expItems', html)
 
     def test_expense_categories_rows_group_their_actions(self):
-        """The page is an admin list: name on the left, its buttons on the right.
+        """The page is an admin list like every other one in the app.
 
-        The layout contract this locks down is the one that was wrong before:
-        a live text box in every row pushed the Save (tick) button ~330px away
-        from the row's Delete (trash) button, across a 136px Actions column
-        that held a single icon.  Both row actions now live in the Actions
-        cell, and the rename field only appears while a row is being edited.
+        Two things are pinned here.  The page chrome: it uses the shared page
+        head and the standard full-width `hdc-card` / `hdc-table` shell, not a
+        page-specific centred "workspace" with a hero tile and a quick-add bar
+        — that shell was the only one of its kind left in the sidebar.  And the
+        row shape: a read-only name, its rename field revealed only while the
+        row is being edited, and both row actions grouped in one Actions cell
+        (they used to sit a third of a screen apart, one in the name cell).
         """
         response = self.client.get('/hdc/expense_categories')
         self.assertEqual(response.status_code, 200)
         html = response.get_data(as_text=True)
-        self.assertIn('expense-category-page', html)
-        self.assertIn('expense-category-edit-form', html)
-        # the add form is a one-line labelled quick-add, not a wide card stub
-        self.assertIn('expense-category-quick-add', html)
-        self.assertIn('expense-category-new-name', html)
+
+        # shared page head (title, row count, the one Add action)
+        self.assertIn('d-flex justify-content-between align-items-center mt-2 mb-3', html)
+        self.assertIn('Expense Categories (', html)
+        self.assertIn('addExpenseCategoryModal', html)
+        # standard table card + shared row-rename contract
+        self.assertIn('card hdc-card', html)
+        self.assertIn('table hdc-table', html)
+        self.assertIn('data-hdc-rename-table', html)
+        self.assertIn('/hdc_static/js/core/row_rename.js', html)
+        # the page-specific workspace chrome is retired for good
+        for retired in ('expense-category-page', 'expense-category-hero',
+                        'expense-category-quick-add', 'expense-category-idx'):
+            self.assertNotIn(retired, html)
 
         with self.app.app_context():
             self.assertIsNotNone(ExpenseCategory.query.filter_by(active_status=True).first())
         self.form('/hdc/expense_categories', action='add_category', category_name='Row Contract')
         html = self.client.get('/hdc/expense_categories').get_data(as_text=True)
         row = html.split('data-hdc-label="Row Contract"', 1)[1].split('</tr>', 1)[0]
-        actions = row.split('expense-category-row-actions', 1)[1]
+        actions = row.split('hdc-rename-actions', 1)[1]
         self.assertIn('fa-pen', actions, 'the rename button belongs in the Actions cell')
         self.assertIn('fa-trash', actions, 'the delete button belongs in the Actions cell')
         # one live input per row, not a text box behind every name
         self.assertEqual(row.count('<input type="text"'), 1)
-        self.assertIn('expense-category-name', row)
+        self.assertIn('hdc-rename-view', row)
 
     def test_expense_categories_rename_round_trip(self):
         self.form('/hdc/expense_categories', action='add_category', category_name='Rename Me')
@@ -149,7 +160,14 @@ class TradesPageTest(IsolatedAppTest):
     def test_trades_page_add_rename_delete_and_render(self):
         response = self.client.get('/hdc/trades')
         self.assertEqual(response.status_code, 200)
-        self.assertIn('trades-quick-add', response.get_data(as_text=True))
+        html = response.get_data(as_text=True)
+        # same page shape and row contract as Expense Categories
+        self.assertIn('d-flex justify-content-between align-items-center mt-2 mb-3', html)
+        self.assertIn('data-hdc-rename-table', html)
+        self.assertIn('addTradeModal', html)
+        self.assertIn('/hdc_static/js/core/row_rename.js', html)
+        self.assertNotIn('trades-quick-add', html)
+        self.assertNotIn('trades-shell', html)
 
         self.form('/hdc/trades', action='add_trade', trade_name='Welder')
         with self.app.app_context():

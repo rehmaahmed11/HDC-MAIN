@@ -24,7 +24,7 @@ declaration in a specific file.  This script answers it without a browser:
 
     # 2. ask which declarations win for the elements you care about
     python scripts/css_cascade_probe.py --html /tmp/page.html \
-        --selector ".expense-category-page" --selector ".expense-category-new-name"
+        --selector ".hdc-rename-actions" --selector ".hdc-rename-form .form-control"
 
 Optional development dependency: pip install tinycss2 cssselect2
 

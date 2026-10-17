@@ -2,7 +2,8 @@
  *
  * Runs the real Expense Categories page (rendered by the Flask test client,
  * handed to us as a file) inside jsdom, with the page's own script list, and
- * pins the row-rename behaviour of static/hdc/js/pages/expense_categories.js:
+ * pins the row-rename behaviour of static/hdc/js/core/row_rename.js (the same
+ * script the Trades page loads):
  *
  *   1. every row starts read-only: name visible, rename field hidden;
  *   2. the pencil opens that row: field shown, name hidden, field focused and
@@ -56,8 +57,8 @@ const document = window.document;
 
 function loadPageScript() {
     const src = fs.readFileSync(
-        path.join(__dirname, '..', 'static', 'hdc', 'js', 'pages',
-                  'expense_categories.js'),
+        path.join(__dirname, '..', 'static', 'hdc', 'js', 'core',
+                  'row_rename.js'),
         'utf8');
     const script = document.createElement('script');
     script.textContent = src;
@@ -72,19 +73,19 @@ function loadPageScript() {
 }
 
 function rows() {
-    return Array.from(document.querySelectorAll('.expense-category-table tbody tr'))
-        .filter((row) => row.querySelector('.expense-category-edit-form'));
+    return Array.from(document.querySelectorAll('[data-hdc-rename-table] tbody tr'))
+        .filter((row) => row.querySelector('.hdc-rename-form'));
 }
 
 function state(row) {
     return {
-        form: row.querySelector('.expense-category-edit-form'),
-        name: row.querySelector('.expense-category-name'),
+        form: row.querySelector('.hdc-rename-form'),
+        name: row.querySelector('.hdc-rename-view'),
         input: row.querySelector('input[name="category_name"]'),
-        pencil: row.querySelector('.expense-category-edit-btn'),
-        cancel: row.querySelector('.expense-category-edit-form button[type="button"]'),
-        save: row.querySelector('.expense-category-edit-form button[type="submit"]'),
-        deleteBtn: row.querySelector('.expense-category-row-actions button[type="submit"]'),
+        pencil: row.querySelector('.hdc-rename-open'),
+        cancel: row.querySelector('.hdc-rename-form button[type="button"]'),
+        save: row.querySelector('.hdc-rename-form button[type="submit"]'),
+        deleteBtn: row.querySelector('.hdc-rename-actions button[type="submit"]'),
     };
 }
 
@@ -111,9 +112,9 @@ const first = state(all[0]);
 check('the Save button lives inside the row form (dialog + submit lock)',
       first.save && first.form.contains(first.save));
 check('the rename pencil lives in the Actions cell',
-      first.pencil && first.pencil.closest('.expense-category-row-actions') !== null);
+      first.pencil && first.pencil.closest('.hdc-rename-actions') !== null);
 check('the delete button lives in the Actions cell next to the pencil',
-      first.deleteBtn && first.deleteBtn.closest('.expense-category-row-actions') !== null);
+      first.deleteBtn && first.deleteBtn.closest('.hdc-rename-actions') !== null);
 check('Save and Delete share one Actions cell',
       first.pencil.parentElement === first.deleteBtn.closest('td'));
 

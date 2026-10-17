@@ -1,0 +1,40 @@
+{#
+  The page head every list screen in the ERP shares.
+
+  A list page states three things above its table: what the list is, how many
+  rows it holds, and the one action that adds a row.  Most templates hand-wrote
+  that row; the two "workspace" pages (Trades, Expense Categories) hand-wrote a
+  different one instead — a centred 840px hero with an icon tile, a subtitle
+  and a count pill — so those two read as a different application next to
+  Projects, Workers, Materials, Allowance Categories, Settings…
+
+  This macro is that row, once.  It emits exactly the markup the rest of the app
+  already uses — a DIRECT child of <main class="main-content"> whose action
+  buttons are its own children — because responsive.css targets that shape to
+  wrap the heading and put the primary action on a full-width line on a phone:
+
+      .main-content > .d-flex.justify-content-between > .btn { width: 100%; }
+
+  A page that adopts this macro therefore cannot drift from the others by
+  accident.
+
+  Usage:
+
+      {% from "shared/_page_head.html" import page_head %}
+
+      {% call page_head('Expense Categories', 'fa-tags', categories|length) %}
+          <button class="btn btn-mint btn-sm" data-bs-toggle="modal"
+                  data-bs-target="#addExpenseCategoryModal">
+              <i class="fas fa-plus me-1"></i>Add Category
+          </button>
+      {% endcall %}
+
+  ``count`` is optional (pass None to omit it), ``icon_class`` defaults to the
+  app accent so the heading icon matches Workers/Projects/Materials.
+#}
+{% macro page_head(title, icon, count=None, icon_class='text-mint') -%}
+<div class="d-flex justify-content-between align-items-center mt-2 mb-3">
+    <h5 class="mb-0"><i class="fas {{ icon }} me-2 {{ icon_class }}" aria-hidden="true"></i>{{ title }}{% if count is not none %} ({{ count }}){% endif %}</h5>
+    {% if caller is defined %}{{ caller() }}{% endif %}
+</div>
+{%- endmacro %}
