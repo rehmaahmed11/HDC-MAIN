@@ -208,6 +208,31 @@ class PartyCategoriesTestCase(unittest.TestCase):
         self.assertIn('Mover Co', self._ledger_table(self._filter(category='loan')))
         self.assertNotIn('Mover Co', self._ledger_table(self._filter(category='cement-dealers')))
 
+    def test_edit_window_keeps_an_automatic_party_automatic(self):
+        """Opening Edit to change a phone number must not pin the category."""
+        with self.app.app_context():
+            party, _ = save_cf_party('Auto Form Co', party_type='lender')
+            db.session.commit()
+            party_id = party.id
+
+        html = self.client.get(PARTIES_URL).get_data(as_text=True)
+        button = re.search(r'<button[^>]*data-party-id="%d"[^>]*>' % party_id,
+                           html)
+        self.assertIsNotNone(button)
+        self.assertIn('data-party-category=""', button.group(0))
+
+        # The modal submits '' for Automatic; the filing falls back to
+        # Loan Parties and stays free to follow a later type change.
+        self._post({'action': 'edit_party', 'party_id': party_id,
+                    'name': 'Auto Form Co', 'party_type': 'lender',
+                    'category_id': '', 'phone': '0300-0000000', 'note': ''})
+        with self.app.app_context():
+            row = db.session.get(CashFlowParty, party_id)
+            self.assertIsNone(row.category_id)
+            self.assertTrue(row.category_auto)
+        self.assertIn('Auto Form Co',
+                      self._ledger_table(self._filter(category='loan')))
+
     def test_bulk_assign_files_every_selected_party(self):
         category_id = self._create_category()
         with self.app.app_context():
@@ -317,6 +342,19 @@ class PartyCategoriesTestCase(unittest.TestCase):
                              default_party_category_for_type('rental').id)
             self.assertEqual(staff.category_id,
                              default_party_category_for_type('staff').id)
+
+    def test_auto_filing_follows_a_type_upgrade(self):
+        """A party created as `other` then upgraded to supplier moves cards."""
+        with self.app.app_context():
+            party, _ = save_cf_party('Upgraded Co', party_type='other')
+            db.session.commit()
+            self.assertEqual(db.session.get(PartyCategory, party.category_id).key,
+                             'other')
+            save_cf_party('Upgraded Co', party_type='supplier')
+            db.session.commit()
+            self.assertEqual(db.session.get(PartyCategory, party.category_id).key,
+                             'supplier')
+            self.assertTrue(party.category_auto)
 
     def test_manual_filing_is_not_reset_by_an_automatic_sync(self):
         category_id = self._create_category('Special Folder')

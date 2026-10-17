@@ -405,7 +405,7 @@
                                             data-party-id="{{ row.party.id }}"
                                             data-party-name="{{ row.party.name }}"
                                             data-party-type="{{ row.party.party_type or 'other' }}"
-                                            data-party-category="{{ row.category_id or '' }}"
+                                            data-party-category="{{ '' if row.category_is_auto else (row.category_id or '') }}"
                                             data-party-phone="{{ row.party.phone or '' }}"
                                             data-party-note="{{ row.party.note or '' }}"
                                             title="Edit every detail of this party"

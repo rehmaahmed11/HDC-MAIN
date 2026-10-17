@@ -46,13 +46,19 @@
     </div>
     <div class="mb-2">
         <label class="form-label" for="{{ id_prefix }}Category">Category</label>
+        {# An automatic filing carries a category_id too (the bucket it is
+           currently derived into), so the select must offer "Automatic"
+           based on category_auto — not merely on category_id being empty.
+           Otherwise opening Edit to change a phone number would quietly pin
+           the party and stop it following its type. #}
+        {% set auto_selected = (not party) or party.category_auto or (not party.category_id) %}
         <select class="form-select" id="{{ id_prefix }}Category" name="category_id">
-            <option value="" {% if not party or not party.category_id %}selected{% endif %}>Automatic — from the party type</option>
+            <option value="" {% if auto_selected %}selected{% endif %}>Automatic — from the party type</option>
             {% for cat in categories %}
             {# A retired category is not offered for new filing, but stays
                visible when it is where this party is already filed. #}
             {% if cat.is_active or (party and party.category_id == cat.id) %}
-            <option value="{{ cat.id }}" {% if party and party.category_id == cat.id %}selected{% endif %}>{{ cat.name }}{% if not cat.is_active %} (retired){% endif %}</option>
+            <option value="{{ cat.id }}" {% if party and not auto_selected and party.category_id == cat.id %}selected{% endif %}>{{ cat.name }}{% if not cat.is_active %} (retired){% endif %}</option>
             {% endif %}
             {% endfor %}
         </select>

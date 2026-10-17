@@ -264,6 +264,7 @@ def backfill_party_categories(*, commit=True):
         cat = by_key.get(party_category(party.party_type))
         if cat is not None:
             party.category_id = int(cat.id)
+            party.category_auto = True
             updated += 1
     if updated:
         db.session.flush()
@@ -273,11 +274,24 @@ def backfill_party_categories(*, commit=True):
 
 
 def ensure_party_has_category(party):
-    """File a just-created party under its type's bucket (if still unfiled)."""
-    if party is None or party.category_id:
+    """Keep an **automatic** filing in step with the party's type.
+
+    Called after a party is created or its type changes:
+
+    * unfiled → file under the type's bucket and mark it automatic;
+    * auto-filed → follow the new type's bucket (``other`` → ``supplier``
+      must move *Other Parties* → *Suppliers / Vendors*);
+    * filed by hand (``category_auto`` false) → never touch it.
+    """
+    if party is None:
         return party
     cat = default_party_category_for_type(getattr(party, 'party_type', 'other'))
-    if cat is not None:
+    if cat is None:
+        return party
+    if party.category_id is None:
+        party.category_id = int(cat.id)
+        party.category_auto = True
+    elif party.category_auto is not False:
         party.category_id = int(cat.id)
     return party
 
@@ -372,10 +386,15 @@ def delete_party_category(category, *, commit=True):
 
 
 def assign_party_category(party, category, *, commit=True):
-    """File one party under *category* (``None`` clears the manual filing)."""
+    """File one party under *category*; ``None`` returns it to Automatic.
+
+    Either way this is a human decision, so ``category_auto`` follows it: a
+    later type change must not undo what the operator chose.
+    """
     if party is None:
         raise ValueError('Party not found.')
     party.category_id = int(category.id) if category is not None else None
+    party.category_auto = category is None
     db.session.flush()
     if commit:
         db.session.commit()
@@ -405,8 +424,10 @@ def bulk_assign_category(party_ids, category, *, commit=True):
     category_id = int(category.id) if category is not None else None
     updated = 0
     for party in parties:
-        if party.category_id != category_id:
+        was_auto = party.category_auto is not False
+        if party.category_id != category_id or was_auto != (category is None):
             party.category_id = category_id
+            party.category_auto = category is None
             updated += 1
     db.session.flush()
     if commit:
