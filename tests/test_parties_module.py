@@ -222,6 +222,40 @@ class PartiesModuleTestCase(unittest.TestCase):
         self.assertIn('Chacha Lender', self._ledger_table(self._filter(category='loan')))
         self.assertNotIn('Chacha Lender', self._ledger_table(self._filter(category='rental')))
 
+    def test_edit_party_updates_name_type_phone_and_note(self):
+        with self.app.app_context():
+            party, _ = save_cf_party('Edit Me Supplier', party_type='supplier')
+            db.session.commit()
+            party_id = party.id
+        token = self._token()
+
+        response = self.client.post(PARTIES_URL, data={
+            '_csrf_token': token, 'action': 'edit_party', 'party_id': party_id,
+            'name': 'Edited Lender Co', 'party_type': 'lender',
+            'phone': '0300-9998887', 'note': 'Updated note'}, follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('updated.', response.get_data(as_text=True))
+        with self.app.app_context():
+            row = db.session.get(CashFlowParty, party_id)
+            self.assertEqual(row.name, 'Edited Lender Co')
+            self.assertEqual(row.party_type, 'lender')
+            self.assertEqual(row.phone, '0300-9998887')
+            self.assertEqual(row.note, 'Updated note')
+
+    def test_edit_party_rejects_a_name_already_in_use(self):
+        with self.app.app_context():
+            save_cf_party('Taken Name Co', party_type='supplier')
+            party, _ = save_cf_party('Second Name Co', party_type='supplier')
+            db.session.commit()
+            party_id = party.id
+        token = self._token()
+
+        self.client.post(PARTIES_URL, data={
+            '_csrf_token': token, 'action': 'edit_party', 'party_id': party_id,
+            'name': 'taken name co', 'party_type': 'supplier'}, follow_redirects=True)
+        with self.app.app_context():
+            self.assertEqual(db.session.get(CashFlowParty, party_id).name, 'Second Name Co')
+
     def test_toggle_party_hides_and_restores_it(self):
         with self.app.app_context():
             party, _ = save_cf_party('Hidden Supplier Co', party_type='supplier')

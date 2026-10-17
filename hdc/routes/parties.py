@@ -16,6 +16,7 @@ from hdc.extensions import _money_write_required, db
 from hdc.models.cashflow import CashFlowParty
 from hdc.services.cashflow_register import (
     party_type_label, save_cf_party, sync_workers_as_parties,
+    update_cf_party,
 )
 from hdc.services.parties import (
     PARTY_CATEGORIES, build_party_directory, category_label, party_category,
@@ -69,6 +70,25 @@ def register(app):
                               'success')
                     else:
                         flash(f'All {total} project clients are already in the directory.', 'info')
+
+                elif action == 'edit_party':
+                    party = db.session.get(
+                        CashFlowParty, request.form.get('party_id', type=int) or 0)
+                    if party is None:
+                        flash('Party not found.', 'danger')
+                    else:
+                        name = (request.form.get('name') or '').strip()
+                        ptype = (request.form.get('party_type') or 'other').strip()
+                        update_cf_party(
+                            party,
+                            name=name,
+                            party_type=ptype,
+                            phone=(request.form.get('phone') or '').strip(),
+                            note=(request.form.get('note') or '').strip(),
+                            commit=False,
+                        )
+                        db.session.commit()
+                        flash(f'Party "{party.name}" updated.', 'success')
 
                 elif action == 'toggle_party':
                     party = db.session.get(
