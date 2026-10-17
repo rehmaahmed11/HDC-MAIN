@@ -5,6 +5,7 @@
 {% block content %}
 {% set tools_active = 'inventory' %}
 {% from "tool_rental/_stock_forms.html" import purchase_modal, scrap_modal %}
+{% from "tool_rental/_tool_photo.html" import tool_photo_thumb, tool_photo_button, photo_data %}
 {% from "shared/_combo_field.html" import combo_field %}
 {% include "tool_rental/_tools_nav.html" %}
 {% include "tool_rental/_scope_note.html" %}
@@ -259,9 +260,16 @@
                         <tr {{ r|hdc_row_attrs }}>
                             <td><span class="badge bg-secondary">{{ r.code }}</span></td>
                             <td>
-                                {% if r.tool.image_path %}<img src="{{ url_for('static', filename=r.tool.image_path) }}" alt="{{ r.name }}" loading="lazy" width="48" height="48" style="object-fit:cover;border-radius:6px;margin-right:6px;">{% endif %}
-                                <strong>{{ r.name }}</strong>
-                                <div><small class="text-muted">{{ r.category }} · {{ r.unit }}</small></div>
+                                {# One line for the photo dialog: what the picture is of. #}
+                                {% set photo_meta = r.category ~ ' · ' ~ r.unit ~ ' · ' ~ r.condition ~ ' · owns ' ~ ("%g"|format(r.owned_qty)) %}
+                                <div class="tool-photo-cell">
+                                    {{ tool_photo_thumb(r.tool, r.name, r.code, photo_meta,
+                                                        size=48, can_edit=can_write_tools) }}
+                                    <div>
+                                        <strong>{{ r.name }}</strong>
+                                        <div><small class="text-muted">{{ r.category }} · {{ r.unit }}</small></div>
+                                    </div>
+                                </div>
                                 {% if r.tool.description %}<div><small class="text-muted">{{ r.tool.description }}</small></div>{% endif %}
                                 {% if r.unaccounted %}<span class="badge bg-danger" title="Owned ≠ store + out">off {{ "%+g"|format(r.variance) }}</span>{% endif %}
                             </td>
@@ -295,6 +303,8 @@
                                 <small>{{ "%.1f"|format(r.utilization_pct) }}%</small>
                             </td>
                             <td class="text-end text-nowrap">
+                                {{ tool_photo_button(r.tool, r.name, r.code, photo_meta,
+                                                     can_edit=can_write_tools) }}
                                 <a href="{{ url_for('hdc_tool_rental_tool_position', tool_id=r.tool_id) }}" class="btn btn-sm btn-outline-secondary" title="Position + history"><i class="fas fa-eye"></i></a>
                                 <button class="btn btn-sm btn-outline-success js-stock-btn" title="Purchase / add stock"
                                         data-bs-toggle="modal" data-bs-target="#purchaseModal"
@@ -385,6 +395,29 @@
                                 <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
                                 <div class="modal-header"><h6 class="modal-title">Edit {{ r.name }}</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
                                 <div class="modal-body row g-2">
+                                    {# The photo lives here too: a tool saved before the photo
+                                       field existed gets one without leaving the edit dialog. #}
+                                    <div class="col-12">
+                                        <div class="border rounded-3 p-2 bg-light-subtle tool-photo-cell align-items-start">
+                                            {{ tool_photo_thumb(r.tool, r.name, r.code,
+                                                                r.category ~ ' · ' ~ r.unit ~ ' · ' ~ r.condition,
+                                                                size=64, can_edit=can_write_tools) }}
+                                            <div class="small">
+                                                <div class="fw-bold text-muted mb-1"><i class="fas fa-camera me-1"></i>Tool photo</div>
+                                                <div class="text-muted mb-1">
+                                                    {% if tool_photo_url(r.tool) %}Saved — click the picture to see it full size.
+                                                    {% else %}No photo yet — add one so the storekeeper can recognise this tool.{% endif %}
+                                                </div>
+                                                {% if can_write_tools %}
+                                                <button type="button" class="btn btn-sm btn-outline-primary" data-tool-photo="edit"
+                                                        {{ photo_data(r.tool, r.name, r.code, '', can_write_tools) }}>
+                                                    <i class="fas fa-camera me-1" aria-hidden="true"></i>
+                                                    {% if tool_photo_url(r.tool) %}Change / remove photo{% else %}Add photo{% endif %}
+                                                </button>
+                                                {% endif %}
+                                            </div>
+                                        </div>
+                                    </div>
                                     <div class="col-8"><label class="form-label">Name</label><input type="text" name="name" value="{{ r.name }}" class="form-control" required></div>
                                     <div class="col-4"><label class="form-label">Code</label><input type="text" name="tool_code" value="{{ r.code }}" class="form-control"></div>
                                     <div class="col-6">
@@ -460,9 +493,14 @@
 {# ------------------------------------------------ shared stock modals -- #}
 {{ purchase_modal('purchaseModal', tools|map(attribute='tool')|list, None, today, known_suppliers) }}
 {{ scrap_modal('scrapModal', tools|map(attribute='tool')|list, None, today, scrap_reasons) }}
+
+{# ---------------------------------------------- tool photo viewer + saver -- #}
+{% set tool_photo_can_edit = can_write_tools %}
+{% include "tool_rental/_tool_photo_dialogs.html" %}
 {% endblock %}
 
 {% block extra_js %}
+<script src="{{ url_for('static', filename='js/pages/tool_photos.js') }}?v={{ hdc_asset_stamp }}"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function () {
     // Keep the named selects as the submitted values; the visible inputs search their options.

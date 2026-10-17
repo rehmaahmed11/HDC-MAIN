@@ -936,6 +936,9 @@ def tool_item_summary(term=None, category_id=None):
             continue
         rows.append({
             'tool_id': row['tool_id'],
+            # The row's Tool, so the dashboard can render the tool's photo with
+            # the same macro the inventory list uses (tool_photo_thumb).
+            'tool': row['tool'],
             'name': row['name'],
             'code': row['code'],
             'category': row['category'],

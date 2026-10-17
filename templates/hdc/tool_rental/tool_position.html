@@ -5,15 +5,36 @@
 {% block content %}
 {% set tools_active = 'dashboard' %}
 {% from "tool_rental/_stock_forms.html" import purchase_modal, scrap_modal %}
+{% from "tool_rental/_tool_photo.html" import tool_photo_thumb, photo_data %}
 {% include "tool_rental/_tools_nav.html" %}
 
+{# What the picture is of, shown under the enlarged photo. #}
+{% set photo_meta = row.category ~ ' · ' ~ row.unit ~ ' · condition ' ~ row.condition ~
+                    ' · owns ' ~ ("%g"|format(row.owned_qty)) ~ ' · in store ' ~ ("%g"|format(row.in_store_qty)) ~
+                    ' · out ' ~ ("%g"|format(row.out_qty)) %}
+
 <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
-    <div>
-        <h5 class="mb-0"><i class="fas fa-screwdriver-wrench me-2"></i>{{ row.name }}
-            <span class="badge bg-secondary ms-1">{{ row.code }}</span>
-            <span class="badge bg-light text-dark border ms-1">{{ row.category }}</span>
-        </h5>
-        <small class="text-muted">Rate {{ "{:,.0f}".format(row.rate_per_day) }}/day · unit cost {{ "{:,.0f}".format(row.purchase_value / row.owned_qty if row.owned_qty else 0) }} · condition {{ row.condition }}</small>
+    <div class="tool-photo-cell align-items-start">
+        {# The eye button in every tools list lands here, so this page is where a
+           saved photo is finally seen at full size — one click on the picture. #}
+        {{ tool_photo_thumb(row.tool, row.name, row.code, photo_meta,
+                            size=72, can_edit=can_write_tools) }}
+        <div>
+            <h5 class="mb-0"><i class="fas fa-screwdriver-wrench me-2"></i>{{ row.name }}
+                <span class="badge bg-secondary ms-1">{{ row.code }}</span>
+                <span class="badge bg-light text-dark border ms-1">{{ row.category }}</span>
+            </h5>
+            <small class="text-muted">Rate {{ "{:,.0f}".format(row.rate_per_day) }}/day · unit cost {{ "{:,.0f}".format(row.purchase_value / row.owned_qty if row.owned_qty else 0) }} · condition {{ row.condition }}</small>
+            {% if can_write_tools %}
+            <div class="mt-1">
+                <button type="button" class="btn btn-sm btn-outline-primary" data-tool-photo="edit"
+                        {{ photo_data(row.tool, row.name, row.code, photo_meta, can_write_tools) }}>
+                    <i class="fas fa-camera me-1" aria-hidden="true"></i>
+                    {% if tool_photo_url(row.tool) %}Change / remove photo{% else %}Add photo{% endif %}
+                </button>
+            </div>
+            {% endif %}
+        </div>
     </div>
     <div class="d-flex gap-2 flex-wrap">
         <a href="{{ url_for('hdc_tool_rental_dashboard') }}" class="btn btn-sm btn-outline-secondary"><i class="fas fa-arrow-left me-1"></i>Dashboard</a>
@@ -287,4 +308,12 @@
 </div>
 {{ purchase_modal('purchaseModal', [row.tool], row.tool, today, known_suppliers) }}
 {{ scrap_modal('scrapModal', [row.tool], row.tool, today, scrap_reasons) }}
+
+{# ------------------------------------------------ tool photo viewer + saver -- #}
+{% set tool_photo_can_edit = can_write_tools %}
+{% include "tool_rental/_tool_photo_dialogs.html" %}
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/pages/tool_photos.js') }}?v={{ hdc_asset_stamp }}"></script>
 {% endblock %}
