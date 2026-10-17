@@ -41,6 +41,115 @@
     </div>
 </div>
 
+<!-- Item categories this supplier deals in, and the sites it is selected for.
+     Stated here once, then every register can be filtered by them. -->
+<div class="row g-3 mb-4">
+    <div class="col-lg-6">
+        <div class="card hdc-card h-100">
+            <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-tags me-2"></i>Deals In (Item Categories)</span>
+                <a href="{{ url_for('hdc_purchase_v2_suppliers', category_id='') }}" class="small text-muted text-decoration-none">category list</a>
+            </div>
+            <div class="card-body py-2">
+                <div class="d-flex flex-wrap gap-2 mb-2">
+                    {% for cid in stated_category_ids %}
+                    <span class="badge bg-info text-dark d-inline-flex align-items-center">
+                        {{ category_map.get(cid).name if category_map.get(cid) else ('Category #' ~ cid) }}
+                        <form method="POST" class="d-inline ms-1"
+                              action="{{ url_for('hdc_purchase_v2_supplier_category_remove', supplier_id=supplier.id, category_id=cid) }}"
+                              onsubmit="return confirm('Remove this category link?');">
+                            <button class="btn btn-sm btn-link text-dark p-0 lh-1" type="submit" title="Remove">&times;</button>
+                        </form>
+                    </span>
+                    {% else %}
+                    <span class="text-muted small">Nothing stated yet — the list below shows what was actually supplied.</span>
+                    {% endfor %}
+                </div>
+                <form method="POST" class="d-flex gap-2"
+                      action="{{ url_for('hdc_purchase_v2_supplier_category_add', supplier_id=supplier.id) }}">
+                    <select name="category_id" class="form-select form-select-sm" required>
+                        <option value="">Select category…</option>
+                        {% for c in category_options %}
+                        {% if c.id not in stated_category_ids %}
+                        <option value="{{ c.id }}">{{ c.name }}</option>
+                        {% endif %}
+                        {% endfor %}
+                    </select>
+                    <button class="btn btn-sm btn-outline-primary" type="submit"><i class="fas fa-plus"></i></button>
+                </form>
+                <div class="mt-2 small text-muted">
+                    Supplied so far:
+                    {% for r in supplied_category_rows %}
+                    <span class="badge {% if r.category_id in stated_category_ids %}bg-secondary{% else %}bg-light text-dark{% endif %} me-1"
+                          title="{{ r.purchase_count }} purchase row(s) · {{ '{:,.2f}'.format(r.quantity or 0) }} qty">
+                        {{ r.category_name }} · Rs {{ "{:,.0f}".format(r.value or 0) }}
+                    </span>
+                    {% else %}
+                    <span>nothing yet</span>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card hdc-card h-100">
+            <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-diagram-project me-2"></i>Sites — Assigned &amp; Supplied</span>
+                <a href="{{ url_for('hdc_purchase_v2_suppliers_by_site', supplier_id=supplier.id) }}"
+                   class="small text-decoration-none">site ⇄ supplier view</a>
+            </div>
+            <div class="card-body py-2">
+                <div class="d-flex flex-wrap gap-2 mb-2">
+                    {% for pid in stated_project_ids %}
+                    <span class="badge bg-warning text-dark d-inline-flex align-items-center">
+                        {{ project_names.get(pid, 'Site #' ~ pid) }}
+                        <form method="POST" class="d-inline ms-1"
+                              action="{{ url_for('hdc_purchase_v2_supplier_site_remove', supplier_id=supplier.id, project_id=pid) }}"
+                              onsubmit="return confirm('Remove this site assignment?');">
+                            <button class="btn btn-sm btn-link text-dark p-0 lh-1" type="submit" title="Remove">&times;</button>
+                        </form>
+                    </span>
+                    {% else %}
+                    <span class="text-muted small">No site assigned yet.</span>
+                    {% endfor %}
+                </div>
+                <form method="POST" class="d-flex gap-2"
+                      action="{{ url_for('hdc_purchase_v2_supplier_site_add', supplier_id=supplier.id) }}">
+                    <select name="project_id" class="form-select form-select-sm" required>
+                        <option value="">Select site…</option>
+                        {% for p in projects %}
+                        {% if p.id not in stated_project_ids %}
+                        <option value="{{ p.id }}">{{ p.name }}</option>
+                        {% endif %}
+                        {% endfor %}
+                    </select>
+                    <input name="note" class="form-control form-control-sm" placeholder="Note (optional)">
+                    <button class="btn btn-sm btn-outline-primary" type="submit"><i class="fas fa-plus"></i></button>
+                </form>
+                {% if supplied_site_rows %}
+                <div class="table-responsive mt-2">
+                    <table class="table table-sm mb-0">
+                        <thead><tr><th>Site supplied</th><th class="text-end">Qty</th><th class="text-end">Value</th><th>Last</th></tr></thead>
+                        <tbody>
+                        {% for row in supplied_site_rows %}
+                        <tr>
+                            <td>{{ row.project_name }}</td>
+                            <td class="text-end">{{ "{:,.2f}".format(row.quantity or 0) }}</td>
+                            <td class="text-end">Rs {{ "{:,.0f}".format(row.value or 0) }}</td>
+                            <td class="small text-muted">{{ row.last_delivery_date or '—' }}</td>
+                        </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="small text-muted mt-2">No deliveries to any site yet.</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="row g-4 mb-4">
     <!-- Record Purchase -->
     <div class="col-lg-7">
@@ -171,6 +280,15 @@
                             {% endfor %}
                         </select>
                     </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Item Category</label>
+                        <select id="quickMaterialCategory" class="form-select">
+                            <option value="">— Uncategorized —</option>
+                            {% for c in category_options %}
+                            <option value="{{ c.id }}">{{ c.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
@@ -193,7 +311,7 @@
         <table class="table hdc-table table-sm align-middle mb-0">
             <thead>
                 <tr>
-                    <th>#</th><th>Date</th><th>Material</th>
+                    <th>#</th><th>Date</th><th>Material</th><th>Item Category</th>
                     <th class="text-end">Qty</th><th class="text-end">Delivered</th>
                     <th class="text-end">Remaining</th><th class="text-end">Rate</th>
                     <th class="text-end">Total</th><th>Status</th>
@@ -206,6 +324,7 @@
                     <td class="text-muted small">#{{ p.id }}</td>
                     <td class="small">{{ p.date or (p.created_at.strftime('%Y-%m-%d') if p.created_at else '-') }}{% if p.created_at %}<div class="text-muted" style="font-size:.75rem">{{ p.created_at.strftime('%H:%M') }}</div>{% endif %}</td>
                     <td>{{ p.material.name if p.material else '-' }} <small class="text-muted">({{ p.material.unit if p.material else '' }})</small></td>
+                    <td><span class="badge bg-dark">{{ material_category_names.get(p.id, 'Uncategorized') }}</span></td>
                     <td class="text-end">{{ "{:,.2f}".format(p.quantity or 0) }}</td>
                     <td class="text-end">{{ "{:,.2f}".format(dq) }}</td>
                     <td class="text-end {% if (p.quantity or 0) - dq <= 0 %}text-muted{% else %}text-warning{% endif %}">
@@ -220,7 +339,7 @@
                     </td>
                 </tr>
                 {% else %}
-                <tr {{ p|hdc_row_attrs }}><td colspan="9" class="text-center text-muted py-3">No purchases yet.</td></tr>
+                <tr {{ p|hdc_row_attrs }}><td colspan="10" class="text-center text-muted py-3">No purchases yet.</td></tr>
                 {% endfor %}
             </tbody>
         </table>
@@ -346,6 +465,7 @@ document.getElementById('quickMaterialForm').addEventListener('submit', function
     clearQuickMaterialMessage();
     var nameEl = document.getElementById('quickMaterialName');
     var unitEl = document.getElementById('quickMaterialUnit');
+    var categoryEl = document.getElementById('quickMaterialCategory');
     var saveBtn = document.getElementById('quickMaterialSaveBtn');
     var materialSelect = document.getElementById('supplierMaterialSelect');
     var name = (nameEl.value || '').trim();
@@ -354,12 +474,16 @@ document.getElementById('quickMaterialForm').addEventListener('submit', function
         showQuickMaterialMessage('error', 'Material name is required.');
         return;
     }
+
     saveBtn.disabled = true;
     fetch('/api/v2/purchase/materials', {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name, unit: unit })
+        body: JSON.stringify({
+            name: name, unit: unit,
+            category_id: (categoryEl && categoryEl.value) ? categoryEl.value : null
+        })
     })
     .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
     .then(function (res) {
@@ -370,6 +494,7 @@ document.getElementById('quickMaterialForm').addEventListener('submit', function
         }
         var id = String(res.data.id || '');
         var label = (res.data.name || name) + ' (' + (res.data.unit || unit) + ')';
+        if (res.data.category_name) label += ' · ' + res.data.category_name;
         var found = false;
         if (materialSelect) {
             for (var i = 0; i < materialSelect.options.length; i++) {

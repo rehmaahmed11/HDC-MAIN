@@ -24,6 +24,23 @@ class MaterialUsage(db.Model):
     material = db.relationship('Material', backref='usages')
 
 
+class MaterialCategory(db.Model):
+    """Item type a material — and therefore every purchase/delivery/usage — belongs to.
+
+    Categories are the vocabulary the field asked for by name: Electric
+    Materials, Plumbing Materials, Cement, Steel …  A material carries one
+    category; a purchase line may repeat it or override it for that line only
+    (see ``PurchaseV2.category_id``).
+    """
+    __tablename__ = 'hdc_material_category'
+    id         = db.Column(db.Integer, primary_key=True)
+    name       = db.Column(db.String(120), nullable=False)
+    status     = db.Column(db.String(20), default='active')
+    is_void    = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=_pkt_now_naive)
+    updated_at = db.Column(db.DateTime, default=_pkt_now_naive)
+
+
 class Supplier(db.Model):
     __tablename__ = 'hdc_supplier'
     id         = db.Column(db.Integer, primary_key=True)
@@ -35,15 +52,55 @@ class Supplier(db.Model):
     updated_at = db.Column(db.DateTime, default=_pkt_now_naive)
 
 
+class SupplierCategory(db.Model):
+    """Which categories (item types) a supplier deals in — stated, not derived.
+
+    The supplier list can always be narrowed by what a supplier has actually
+    supplied (that comes from purchases); this table lets the operator say
+    "this supplier deals in Cement and Steel" up front, so the list is useful
+    before the first purchase is recorded.
+    """
+    __tablename__ = 'hdc_supplier_category'
+    id          = db.Column(db.Integer, primary_key=True)
+    supplier_id = db.Column(db.Integer, db.ForeignKey('hdc_supplier.id'), nullable=False)
+    category_id = db.Column(db.Integer, db.ForeignKey('hdc_material_category.id'), nullable=False)
+    created_at  = db.Column(db.DateTime, default=_pkt_now_naive)
+
+    supplier = db.relationship('Supplier', backref='category_links')
+    category = db.relationship('MaterialCategory', backref='supplier_links')
+
+
+class SupplierSite(db.Model):
+    """Which site/project a supplier is selected for — supplier ⇄ site tracking.
+
+    Both directions read from here: a supplier shows the sites it is assigned
+    to, and a site shows the suppliers selected for it.  Actual deliveries are
+    tracked separately (they come from ``Delivery``), so the two together
+    answer "who supplies this site" and "where does this supplier supply".
+    """
+    __tablename__ = 'hdc_supplier_site'
+    id          = db.Column(db.Integer, primary_key=True)
+    supplier_id = db.Column(db.Integer, db.ForeignKey('hdc_supplier.id'), nullable=False)
+    project_id  = db.Column(db.Integer, db.ForeignKey('hdc_project.id'), nullable=False)
+    note        = db.Column(db.String(200))
+    created_at  = db.Column(db.DateTime, default=_pkt_now_naive)
+
+    supplier = db.relationship('Supplier', backref='site_links')
+    project  = db.relationship('Project', backref='supplier_links')
+
+
 class MaterialV2(db.Model):
     __tablename__ = 'hdc_material_v2'
-    id         = db.Column(db.Integer, primary_key=True)
-    name       = db.Column(db.String(120), nullable=False)
-    unit       = db.Column(db.String(20), default='KG')
-    status     = db.Column(db.String(20), default='active')
-    is_void    = db.Column(db.Boolean, default=False)
-    created_at = db.Column(db.DateTime, default=_pkt_now_naive)
-    updated_at = db.Column(db.DateTime, default=_pkt_now_naive)
+    id          = db.Column(db.Integer, primary_key=True)
+    name        = db.Column(db.String(120), nullable=False)
+    unit        = db.Column(db.String(20), default='KG')
+    category_id = db.Column(db.Integer, db.ForeignKey('hdc_material_category.id'), nullable=True)
+    status      = db.Column(db.String(20), default='active')
+    is_void     = db.Column(db.Boolean, default=False)
+    created_at  = db.Column(db.DateTime, default=_pkt_now_naive)
+    updated_at  = db.Column(db.DateTime, default=_pkt_now_naive)
+
+    category = db.relationship('MaterialCategory', backref='materials')
 
 
 class PurchaseV2(db.Model):
@@ -51,6 +108,10 @@ class PurchaseV2(db.Model):
     id             = db.Column(db.Integer, primary_key=True)
     supplier_id    = db.Column(db.Integer, db.ForeignKey('hdc_supplier.id'), nullable=False)
     material_id    = db.Column(db.Integer, db.ForeignKey('hdc_material_v2.id'), nullable=False)
+    # The line's own category.  Filled from the material when the purchase is
+    # recorded (so every purchase row carries a category from day one) and
+    # editable afterwards, which is the "full control" the field asked for.
+    category_id    = db.Column(db.Integer, db.ForeignKey('hdc_material_category.id'), nullable=True)
     unit_price     = db.Column(db.Float, default=0.0)
     quantity       = db.Column(db.Float, default=0.0)
     total_amount   = db.Column(db.Float, default=0.0)
@@ -66,6 +127,7 @@ class PurchaseV2(db.Model):
 
     supplier = db.relationship('Supplier', backref='purchases_v2')
     material = db.relationship('MaterialV2', backref='purchases_v2')
+    category = db.relationship('MaterialCategory', backref='purchases_v2')
 
 
 class SupplierLedger(db.Model):

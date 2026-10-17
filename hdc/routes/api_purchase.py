@@ -16,6 +16,11 @@ from hdc.models.materials import Delivery, MaterialV2, PurchaseV2, Supplier, Sup
 from hdc.models.projects import Project, Stage
 from hdc.services.accounts import _accounts_post_supplier_credit_row, _accounts_set_void_by_source, _accounts_upsert_purchase_paid_txn
 from hdc.services.audit import log_action
+from hdc.services.material_categories import (
+    _ensure_material_category,
+    _material_category_by_id,
+    _material_category_choices,
+)
 from hdc.services.record_permissions import integrity_message, integrity_query
 from hdc.services.purchase import validate_delivery_reduction, _MATERIAL_V2_UNITS, _ensure_material_v2, _ensure_supplier_quick, _material_v2_available, _material_v2_delivered, _material_v2_scope_stock_rows, _material_v2_used, _purchase_v2_available_in_scope_qty, _purchase_v2_delivered_qty, _purchase_v2_delivered_to_scope_qty, _purchase_v2_scope_remaining_map, _purchase_v2_used_in_scope_qty, _supplier_balance, _sync_purchase_v2_ledger
 from hdc.utils.dates import _pkt_now_naive
@@ -141,10 +146,22 @@ def register(app):
             if not row:
                 return jsonify(ok=False, message='Material name is required.'), 400
             row.unit = unit
+            # Item type: an existing category id / name, or a new one typed on
+            # the spot — the same vocabulary the web forms use.
+            category = _material_category_by_id(payload.get('category_id'), active_only=True)
+            category_name = _normalize_name_ci(payload.get('category_name'))
+            if category_name:
+                category = _ensure_material_category(category_name)
+            row.category_id = (int(category.id) if category else None)
             row.updated_at = _pkt_now_naive()
-            log_action(current_user, 'create', f'{current_user.username.title()} added material {row.name} ({unit})', 'material_v2', row.id)
+            category_note = (f' [{category.name}]' if category else '')
+            log_action(current_user, 'create',
+                       f'{current_user.username.title()} added material {row.name} ({unit}){category_note}',
+                       'material_v2', row.id)
             db.session.commit()
-            return jsonify(ok=True, id=row.id, name=row.name, unit=row.unit)
+            return jsonify(ok=True, id=row.id, name=row.name, unit=row.unit,
+                           category_id=(int(category.id) if category else None),
+                           category_name=(category.name if category else ''))
         rows = MaterialV2.query.filter_by(is_void=False).order_by(MaterialV2.name.asc()).all()
         items = []
         for r in rows:
@@ -155,11 +172,14 @@ def register(app):
                 'name': r.name,
                 'unit': r.unit,
                 'status': r.status or 'active',
+                'category_id': (int(r.category_id) if r.category_id else None),
+                'category_name': (r.category.name if r.category else ''),
                 'delivered_qty': delivered,
                 'used_qty': used,
                 'available_qty': max(0.0, delivered - used)
             })
-        return jsonify(ok=True, units=list(_MATERIAL_V2_UNITS), items=items)
+        return jsonify(ok=True, units=list(_MATERIAL_V2_UNITS),
+                       categories=_material_category_choices(), items=items)
 
 
     @app.route('/api/v2/purchase/materials/<int:material_id>', methods=['PUT', 'DELETE'])
@@ -186,13 +206,21 @@ def register(app):
                       .first())
             if exists:
                 return jsonify(ok=False, message='Another material already uses this name.'), 400
+            category = _material_category_by_id(payload.get('category_id') if payload else None,
+                                                active_only=True)
+            category_name = _normalize_name_ci(payload.get('category_name') if payload else None)
+            if category_name:
+                category = _ensure_material_category(category_name)
             row.name = name
             row.unit = unit
             row.status = status
+            row.category_id = (int(category.id) if category else None)
             row.updated_at = _pkt_now_naive()
             log_action(current_user, 'update', f'{current_user.username.title()} updated material #{row.id}: {row.name} ({row.unit})', 'material_v2', row.id)
             db.session.commit()
-            return jsonify(ok=True, id=row.id)
+            return jsonify(ok=True, id=row.id,
+                           category_id=(int(category.id) if category else None),
+                           category_name=(category.name if category else ''))
         has_purchase = integrity_query(db.session.query(PurchaseV2.id).filter_by(material_id=row.id, is_void=False)).first() is not None
         has_delivery = integrity_query(db.session.query(Delivery.id).filter_by(material_id=row.id, is_void=False)).first() is not None
         has_usage = integrity_query(db.session.query(UsageLogV2.id).filter_by(material_id=row.id, is_void=False)).first() is not None

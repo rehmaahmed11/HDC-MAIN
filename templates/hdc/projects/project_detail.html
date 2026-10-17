@@ -815,6 +815,71 @@
     </div>
     {% endif %}
 </div>
+
+{# Site ⇄ supplier tracking from the Purchase section, read from the site side:
+   who is assigned to this site and who has actually delivered to it. #}
+{% if hdc_page_allowed('purchases') or hdc_page_allowed('purchase_orders') %}
+<div class="card hdc-card mt-3">
+    <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+        <span><i class="fas fa-truck-loading me-2"></i>Site Suppliers (Purchase Tracking)</span>
+        <a href="{{ url_for('hdc_purchase_v2_suppliers_by_site', project_id=p.id) }}"
+           class="btn btn-sm btn-outline-secondary">Open supplier ⇄ site view</a>
+    </div>
+    <div class="table-responsive">
+        <table class="table hdc-table table-sm align-middle mb-0">
+            <thead>
+                <tr>
+                    <th>Supplier</th>
+                    <th>Item Categories Supplied</th>
+                    <th class="text-end">Items</th>
+                    <th class="text-end">Qty Sent</th>
+                    <th class="text-end">Value Sent</th>
+                    <th>Last Delivery</th>
+                    <th>State</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in site_supplier_rows %}
+                <tr>
+                    <td>
+                        <a href="{{ url_for('hdc_purchase_v2_supplier_detail', supplier_id=r.supplier_id) }}"
+                           class="fw-semibold text-decoration-none">{{ r.supplier_name }}</a>
+                    </td>
+                    <td>
+                        {% for name in r.category_names %}<span class="badge bg-secondary me-1">{{ name }}</span>{% endfor %}
+                    </td>
+                    <td class="text-end">{{ r.material_count }}</td>
+                    <td class="text-end">{{ "{:,.2f}".format(r.quantity or 0) }}</td>
+                    <td class="text-end fw-semibold">Rs {{ "{:,.0f}".format(r.value or 0) }}</td>
+                    <td class="small text-muted">{{ r.last_delivery_date or '—' }}</td>
+                    <td><span class="badge bg-success">Supplied</span></td>
+                </tr>
+                {% endfor %}
+                {% for a in site_assigned_suppliers if not a.supplied %}
+                <tr class="table-warning">
+                    <td>
+                        <a href="{{ url_for('hdc_purchase_v2_supplier_detail', supplier_id=a.id) }}"
+                           class="fw-semibold text-decoration-none">{{ a.name }}</a>
+                    </td>
+                    <td class="small text-muted">{{ a.note or '—' }}</td>
+                    <td class="text-end">0</td>
+                    <td class="text-end">0.00</td>
+                    <td class="text-end">Rs 0</td>
+                    <td class="small text-muted">—</td>
+                    <td><span class="badge bg-warning text-dark">Assigned only</span></td>
+                </tr>
+                {% endfor %}
+                {% if not site_supplier_rows and not site_assigned_suppliers %}
+                <tr><td colspan="7" class="text-center text-muted small py-3">
+                    No supplier has been linked to this site yet. Assign one from the supplier page
+                    (Suppliers → supplier → Sites), or record a delivery against it.
+                </td></tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
 {% endblock %}
 
 {% block extra_js %}

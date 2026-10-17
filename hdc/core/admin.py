@@ -148,11 +148,16 @@ _WIPE_TARGETS = {
     'materials': {
         'label': 'Materials, Purchases, Material Usage',
         'tables': [
+            # Supplier ⇄ site / category links first: they point at the
+            # suppliers and categories this wipe also clears.
+            'hdc_supplier_site',
+            'hdc_supplier_category',
             'hdc_usage_log_v2',
             'hdc_delivery',
             'hdc_supplier_ledger',
             'hdc_purchase_v2',
             'hdc_material_v2',
+            'hdc_material_category',
             'hdc_supplier',
             'hdc_material_usage',
             'hdc_purchase',

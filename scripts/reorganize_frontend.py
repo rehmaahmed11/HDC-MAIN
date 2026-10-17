@@ -60,7 +60,12 @@ DOMAIN_OF = {
                  "purchase_v2_purchases.html", "purchase_v2_suppliers.html",
                  "purchase_v2_supplier_detail.html",
                  "purchase_v2_delivered.html", "purchase_v2_usage.html",
-                 "purchase_v2_stock.html"],
+                 "purchase_v2_stock.html",
+                 # Item types (categories) and the two directions of the
+                 # supplier ⇄ site / supplier ⇄ material tracking.
+                 "purchase_v2_categories.html", "purchase_v2_items.html",
+                 "purchase_v2_item_detail.html",
+                 "purchase_v2_suppliers_by_site.html"],
     "estimation": ["estimation.html", "project_estimation.html",
                    "formulas.html"],
     # Parties — the counterparty directory (sidebar → Parties).

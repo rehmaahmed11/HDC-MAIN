@@ -47,6 +47,16 @@
                 </div>
             </div>
             <div class="col-md-4">
+                <label class="form-label fw-semibold">Item Category</label>
+                <select name="category_id" class="form-select">
+                    <option value="">All Categories</option>
+                    {% for c in category_options %}
+                    <option value="{{ c.id }}" {% if selected_category_id == c.id %}selected{% endif %}>{{ c.name }}</option>
+                    {% endfor %}
+                    <option value="{{ uncategorized_id }}" {% if selected_category_id == uncategorized_id %}selected{% endif %}>Uncategorized</option>
+                </select>
+            </div>
+            <div class="col-md-4">
                 <label class="form-label fw-semibold">Material</label>
                 <div class="stock-combo" id="materialComboWrap">
                     <input type="text" id="materialComboInput" class="form-control" placeholder="Type material..." autocomplete="off">
@@ -68,6 +78,7 @@
             <thead>
                 <tr>
                     <th>Material</th>
+                    <th>Item Category</th>
                     <th>Unit</th>
                     <th class="text-end">Sent to Project/Stage</th>
                     <th class="text-end">Used at Project/Stage</th>
@@ -78,6 +89,12 @@
                 {% for r in summary_rows %}
                 <tr {{ r|hdc_row_attrs }}>
                     <td class="fw-semibold">{{ r.material.name }}</td>
+                    <td>
+                        <a href="{{ url_for('hdc_purchase_v2_stock', category_id=r.category_id, project_id=selected_project_id or '') }}"
+                           class="badge text-decoration-none {% if r.category_id == uncategorized_id %}bg-warning text-dark{% else %}bg-dark{% endif %}">
+                            {{ r.category_name }}
+                        </a>
+                    </td>
                     <td>{{ r.material.unit or '' }}</td>
                     <td class="text-end">{{ "{:,.2f}".format(r.sent_qty or 0) }}</td>
                     <td class="text-end">{{ "{:,.2f}".format(r.used_qty or 0) }}</td>
@@ -86,7 +103,7 @@
                     </td>
                 </tr>
                 {% else %}
-                <tr {{ r|hdc_row_attrs }}><td colspan="5" class="text-center text-muted py-4">No stock/usage data for selected filters.</td></tr>
+                <tr {{ r|hdc_row_attrs }}><td colspan="6" class="text-center text-muted py-4">No stock/usage data for selected filters.</td></tr>
                 {% endfor %}
             </tbody>
         </table>
@@ -101,6 +118,7 @@
                 <tr>
                     <th>Date</th>
                     <th>Material</th>
+                    <th>Item Category</th>
                     <th>Project</th>
                     <th>Stage</th>
                     <th>Supplier</th>
@@ -115,6 +133,11 @@
                 <tr {{ d|hdc_row_attrs }}>
                     <td class="small">{{ d.date.strftime('%Y-%m-%d') if d.date else (d.created_at.strftime('%Y-%m-%d') if d.created_at else '-') }}{% if d.created_at %}<div class="text-muted" style="font-size:.75rem">{{ d.created_at.strftime('%H:%M') }}</div>{% endif %}</td>
                     <td>{{ d.material.name if d.material else '-' }}</td>
+                    <td>
+                        {% set row_category = (d.purchase.category.name if d.purchase and d.purchase.category
+                                               else (d.material.category.name if (d.material and d.material.category) else 'Uncategorized')) %}
+                        <span class="badge {% if row_category == 'Uncategorized' %}bg-warning text-dark{% else %}bg-dark{% endif %}">{{ row_category }}</span>
+                    </td>
                     <td>{{ d.project.name if d.project else '-' }}</td>
                     <td>{{ d.stage.name if d.stage else '-' }}</td>
                     <td>{{ d.purchase.supplier.name if (d.purchase and d.purchase.supplier) else '-' }}</td>
@@ -162,7 +185,7 @@
                     </td>
                 </tr>
                 {% else %}
-                <tr {{ d|hdc_row_attrs }}><td colspan="9" class="text-center text-muted py-4">No deliveries for selected filters.</td></tr>
+                <tr {{ d|hdc_row_attrs }}><td colspan="10" class="text-center text-muted py-4">No deliveries for selected filters.</td></tr>
                 {% endfor %}
             </tbody>
         </table>

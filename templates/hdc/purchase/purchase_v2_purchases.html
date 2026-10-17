@@ -13,6 +13,13 @@
     <span class="badge bg-info text-dark">Qty Delivered = Delivered to Projects (All)</span>
     <div class="ms-auto">
         <form method="get" class="d-flex flex-wrap gap-2 align-items-center">
+            <select name="category_id" class="form-select form-select-sm" style="min-width:170px" title="Item category">
+                <option value="">All Categories</option>
+                {% for c in category_options %}
+                <option value="{{ c.id }}" {% if selected_category_id == c.id %}selected{% endif %}>{{ c.name }}</option>
+                {% endfor %}
+                <option value="{{ uncategorized_id }}" {% if selected_category_id == uncategorized_id %}selected{% endif %}>Uncategorized</option>
+            </select>
             <select name="supplier_id" class="form-select form-select-sm" style="min-width:170px" title="Supplier">
                 <option value="">All Suppliers</option>
                 {% for s in suppliers %}
@@ -33,12 +40,37 @@
                 <input type="date" name="date_to" class="form-control" value="{{ filter_date_to }}" title="To date">
             </div>
             <button type="submit" class="btn btn-sm btn-mint"><i class="fas fa-filter me-1"></i>Filter</button>
-            {% if selected_supplier_id or filter_po_number or selected_material_id or filter_date_from or filter_date_to %}
+            {% if selected_supplier_id or filter_po_number or selected_material_id or selected_category_id != '' or filter_date_from or filter_date_to %}
             <a href="{{ url_for('hdc_purchase_v2_purchases') }}" class="btn btn-sm btn-outline-secondary">Clear</a>
             {% endif %}
+            <a href="{{ url_for('hdc_purchase_v2_purchases') }}" class="btn btn-sm btn-outline-dark" title="All categories">All Categories</a>
         </form>
     </div>
 </div>
+
+{% if category_totals %}
+<div class="card hdc-card mb-3">
+    <div class="card-body py-2 d-flex flex-wrap gap-2 align-items-center">
+        <span class="small text-muted me-1"><i class="fas fa-layer-group me-1"></i>By category (filtered rows):</span>
+        <a href="{{ url_for('hdc_purchase_v2_purchases', supplier_id=selected_supplier_id or '', po_number=filter_po_number,
+                            material_id=selected_material_id or '', date_from=filter_date_from, date_to=filter_date_to) }}"
+           class="btn btn-sm {% if selected_category_id == '' %}btn-dark{% else %}btn-outline-dark{% endif %}">
+            All Categories <span class="badge bg-light text-dark ms-1">Rs {{ "{:,.0f}".format(total or 0) }}</span>
+        </a>
+        {% for c in category_totals %}
+        <a href="{{ url_for('hdc_purchase_v2_purchases', category_id=c.category_id, supplier_id=selected_supplier_id or '',
+                            po_number=filter_po_number, material_id=selected_material_id or '',
+                            date_from=filter_date_from, date_to=filter_date_to) }}"
+           class="btn btn-sm {% if selected_category_id != '' and selected_category_id == c.category_id %}btn-primary{% else %}btn-outline-secondary{% endif %}"
+           title="{{ c.rows }} line(s) · {{ '{:,.2f}'.format(c.quantity or 0) }} qty">
+            {% if c.category_id == uncategorized_id %}<i class="fas fa-triangle-exclamation me-1 text-warning"></i>{% endif %}
+            {{ c.category_name }}
+            <span class="badge bg-light text-dark ms-1">Rs {{ "{:,.0f}".format(c.value or 0) }}</span>
+        </a>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
 
 <!-- Add Purchase Form -->
 <div class="card hdc-card mb-4">
@@ -83,17 +115,27 @@
             </div>
             <div id="purchaseItems" class="vstack gap-2">
                 <div class="purchase-item row g-2 align-items-end border rounded p-2 bg-light">
-                    <div class="col-md-4">
+                    <div class="col-md-3">
                         <label class="form-label small fw-semibold">Material <span class="text-danger">*</span></label>
-                        <select name="material_id[]" class="form-select" required data-hdc-dialog-skip="true">
+                        <select name="material_id[]" class="form-select item-material" required data-hdc-dialog-skip="true">
                             <option value="">Select material</option>
-                            {% for m in materials %}<option value="{{ m.id }}">{{ m.name }} ({{ m.unit or '' }})</option>{% endfor %}
+                            {% for m in materials %}<option value="{{ m.id }}" data-category-id="{{ m.category_id or '' }}">{{ m.name }} ({{ m.unit or '' }})</option>{% endfor %}
                         </select>
                     </div>
-                    <div class="col-5 col-md-2"><label class="form-label small fw-semibold">Qty *</label><input type="number" step="0.01" min="0.01" name="quantity[]" class="form-control item-qty" required data-hdc-dialog-skip="true"></div>
+                    <div class="col-md-3">
+                        <label class="form-label small fw-semibold">Item Category</label>
+                        <select name="category_id[]" class="form-select item-category"
+                                title="Follows the item's own category; change it to override on this line only">
+                            <option value="">Item's category</option>
+                            {% for c in category_options %}
+                            <option value="{{ c.id }}">{{ c.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-5 col-md-1"><label class="form-label small fw-semibold">Qty *</label><input type="number" step="0.01" min="0.01" name="quantity[]" class="form-control item-qty" required data-hdc-dialog-skip="true"></div>
                     <div class="col-5 col-md-2"><label class="form-label small fw-semibold">Rate / Unit *</label><input type="number" step="0.01" min="0.01" name="unit_price[]" class="form-control item-rate" required data-hdc-dialog-skip="true"></div>
-                    <div class="col-8 col-md-2"><label class="form-label small fw-semibold">Line total</label><input type="text" class="form-control item-total bg-white" readonly tabindex="-1"></div>
-                    <div class="col-4 col-md-2"><button type="button" class="btn btn-outline-danger remove-purchase-item w-100" disabled><i class="fas fa-trash me-1"></i>Remove</button></div>
+                    <div class="col-6 col-md-1"><label class="form-label small fw-semibold">Line total</label><input type="text" class="form-control item-total bg-white" readonly tabindex="-1"></div>
+                    <div class="col-6 col-md-1"><button type="button" class="btn btn-outline-danger remove-purchase-item w-100" title="Remove this item"><i class="fas fa-trash"></i></button></div>
                     <div class="col-12"><input type="text" name="notes[]" class="form-control form-control-sm" placeholder="Item notes (optional)"></div>
                 </div>
             </div>
@@ -119,6 +161,7 @@
                     <th>Recorded</th>
                     <th>Supplier</th>
                     <th>Material</th>
+                    <th>Item Category</th>
                     <th class="text-end">Qty Ordered</th>
                     <th class="text-end">Qty Delivered</th>
                     <th style="min-width:120px"></th>
@@ -140,6 +183,17 @@
                     <td class="small text-muted" title="Entry created at">{{ r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at else '-' }}</td>
                     <td><span class="fw-semibold">{{ r.supplier.name if r.supplier else '-' }}</span></td>
                     <td>{{ r.material.name if r.material else '-' }} <small class="text-muted">({{ r.material.unit if r.material else '' }})</small></td>
+                    <td>
+                        {% set row_category = (r.category.name if r.category else (r.material.category.name if r.material and r.material.category else 'Uncategorized')) %}
+                        <span class="badge {% if r.category or (r.material and r.material.category) %}bg-dark{% else %}bg-warning text-dark{% endif %}">
+                            {{ row_category }}
+                        </span>
+                        {% if r.material and r.material.category and r.category and r.category_id != r.material.category_id %}
+                        <div class="small text-muted" title="Overridden on this line; the item's own category is {{ r.material.category.name }}">
+                            item type: {{ r.material.category.name }}
+                        </div>
+                        {% endif %}
+                    </td>
                     <td class="text-end fw-semibold">{{ "{:,.2f}".format(r.quantity or 0) }}</td>
                     <td class="text-end">{{ "{:,.2f}".format(delivered) }}</td>
                     <td style="min-width:110px">
@@ -162,7 +216,8 @@
                         <button class="btn btn-sm btn-outline-primary me-1" title="Edit"
                             onclick="openEditPurchaseModal({{ r.id }}, '{{ r.supplier_id }}', '{{ r.material_id }}',
                                 '{{ r.quantity }}', '{{ r.unit_price }}', '{{ r.payment_status or 'unpaid' }}',
-                                '{{ r.date or '' }}', '{{ (r.challan_no or '')|replace("'","") }}', '{{ (r.notes or '')|replace("'","") }}')">
+                                '{{ r.date or '' }}', '{{ (r.challan_no or '')|replace("'","") }}', '{{ (r.notes or '')|replace("'","") }}',
+                                '{{ r.category_id or '' }}')">
                             <i class="fas fa-edit"></i>
                         </button>
                         <form method="POST" action="{{ url_for('hdc_purchase_v2_purchase_delete', purchase_id=r.id) }}"
@@ -172,7 +227,7 @@
                     </td>
                 </tr>
                 {% else %}
-                <tr><td colspan="14" class="text-center text-muted py-4">
+                <tr><td colspan="15" class="text-center text-muted py-4">
                     <i class="fas fa-inbox fa-2x mb-2 d-block opacity-30"></i>No purchase orders found.
                 </td></tr>
                 {% endfor %}
@@ -228,6 +283,16 @@
                                 <option value="paid">Paid</option>
                             </select>
                         </div>
+                        <div class="col-6 col-md-3">
+                            <label class="form-label fw-semibold">Item Category</label>
+                            <select name="category_id" id="editCategory" class="form-select">
+                                <option value="">Item's category</option>
+                                <option value="0">Clear (leave as item's)</option>
+                                {% for c in category_options %}
+                                <option value="{{ c.id }}">{{ c.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
                         <div class="col-md-3">
                             <label class="form-label fw-semibold">Date</label>
                             <input type="date" name="date" id="editDate" class="form-control">
@@ -275,19 +340,36 @@
             row.querySelector('.remove-purchase-item').disabled = rows.length === 1;
         });
     }
+    // The item's own category is what a line starts from: pick the material
+    // and the category dropdown follows it.  Changing the dropdown afterwards
+    // overrides it for that line only (the server stores it on the line).
+    function followCategory(row) {
+        var material = row.querySelector('.item-material');
+        var category = row.querySelector('.item-category');
+        if (!material || !category) return;
+        var option = material.options[material.selectedIndex];
+        if (!option) return;
+        category.value = option.getAttribute('data-category-id') || '';
+    }
     function bind(row) {
         row.querySelectorAll('.item-qty, .item-rate').forEach(function (input) { input.addEventListener('input', update); });
+        var material = row.querySelector('.item-material');
+        if (material) {
+            material.addEventListener('change', function () { followCategory(row); });
+            if (material.value) followCategory(row);
+        }
         row.querySelector('.remove-purchase-item').addEventListener('click', function () { row.remove(); update(); });
     }
-    bind(items.querySelector('.purchase-item'));
+    items.querySelectorAll('.purchase-item').forEach(bind);
     add.addEventListener('click', function () {
         var row = items.querySelector('.purchase-item').cloneNode(true);
-        row.querySelector('select').selectedIndex = 0;
+        row.querySelectorAll('select').forEach(function (select) { select.selectedIndex = 0; });
         row.querySelectorAll('input').forEach(function (input) { input.value = ''; });
         items.appendChild(row);
         bind(row);
         update();
-        row.querySelector('select').focus();
+        var material = row.querySelector('.item-material');
+        (material || row.querySelector('select')).focus();
     });
     update();
 
@@ -341,11 +423,12 @@
 })();
 
 // Keep editing available for existing purchase rows.
-function openEditPurchaseModal(id, suppId, matId, qty, rate, payStatus, date, challan, notes) {
+function openEditPurchaseModal(id, suppId, matId, qty, rate, payStatus, date, challan, notes, categoryId) {
     var form = document.getElementById('editPurchaseForm');
     form.action = '/hdc/purchase-v2/purchases/' + id + '/edit';
     setSelectVal('editSupplier', suppId);
     setSelectVal('editMaterial', matId);
+    setSelectVal('editCategory', categoryId || '');
     document.getElementById('editQty').value = qty;
     document.getElementById('editRate').value = rate;
     setSelectVal('editPayStatus', payStatus);

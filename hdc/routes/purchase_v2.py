@@ -11,16 +11,71 @@ from flask_login import current_user, login_required
 from sqlalchemy import func, or_
 
 from hdc.extensions import _money_write_required, db
-from hdc.models.materials import Delivery, MaterialV2, PurchaseV2, Supplier, SupplierLedger, UsageLogV2
+from hdc.models.materials import Delivery, MaterialCategory, MaterialV2, PurchaseV2, Supplier, SupplierCategory, SupplierLedger, SupplierSite, UsageLogV2
 from hdc.models.projects import Project, Stage
 from hdc.services.accounts import _accounts_post_supplier_credit_row, _accounts_set_void_by_source, _accounts_upsert_purchase_paid_txn
 from hdc.services.audit import log_action
+from hdc.services.material_categories import (
+    UNCATEGORIZED_ID,
+    UNCATEGORIZED_LABEL,
+    _delivery_category_condition,
+    _ensure_material_category,
+    _material_category_by_id,
+    _material_category_by_name,
+    _material_category_choices,
+    _material_category_label,
+    _material_category_map,
+    _material_category_options,
+    _material_category_summary_rows,
+    _material_category_usage_counts,
+    _material_category_condition,
+    _purchase_category_condition,
+    _usage_category_condition,
+    material_category_id,
+    purchase_resolved_category_id,
+    purchase_resolved_category_name,
+)
 from hdc.services.record_permissions import integrity_message, integrity_query
-from hdc.services.purchase import REGISTER_SORT_MODES, validate_delivery_reduction, _MATERIAL_V2_UNITS, _ensure_material_v2, _ensure_supplier_quick, _material_v2_available, _material_v2_delivered, _material_v2_used, _material_v2_weighted_cost, _purchase_v2_available_in_scope_qty, _purchase_v2_delivered_qty, _purchase_v2_integrity_report, _purchase_v2_pending_rows, _repair_supplier_purchase_v2_ledger, _sync_purchase_v2_ledger, _sync_supplier_po_payment_status, _transfer_v2_material_between_scopes
+from hdc.services.purchase import REGISTER_SORT_MODES, validate_delivery_reduction, _MATERIAL_V2_UNITS, _ensure_material_v2, _ensure_supplier_quick, _material_v2_available, _material_v2_delivered, _material_v2_used, _material_v2_weighted_cost, _purchase_v2_available_in_scope_qty, _purchase_v2_delivered_qty, _purchase_v2_integrity_report, _purchase_v2_pending_rows, _repair_supplier_purchase_v2_ledger, _site_supplier_supplied_rows, _supplier_category_ids, _supplier_category_ids_map, _supplier_category_supplied_rows, _supplier_site_ids, _supplier_site_ids_map, _supplier_site_supplied_rows, _supplier_supplied_profile, _sync_purchase_category, _sync_purchase_v2_ledger, _sync_supplier_po_payment_status, _transfer_v2_material_between_scopes
 from hdc.services.timekeeping import _has_recent_duplicate
 from hdc.utils.dates import _pkt_now_naive, _pkt_today
 from hdc.utils.format import _flt, _parse_date
 from hdc.utils.normalize import _normalize_name_ci
+
+def _category_filter_arg(name='category_id'):
+    """Read a category filter from the query string.
+
+    ``None`` (no value) means **All Categories**; ``0`` is the deliberately
+    reachable "Uncategorized" bucket, so legacy rows can always be listed and
+    assigned; anything else must be a real, non-void category id or it is
+    ignored.  Every register reads its filter through here, which is what keeps
+    "All Categories" and "one category at a time" behaving identically on the
+    Purchases, Delivery, Usage, Stock, Materials and Supplier pages.
+    """
+    raw = (request.args.get(name) or '').strip()
+    if raw == '':
+        return None
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None
+    if value < 0:
+        return None
+    if value == UNCATEGORIZED_ID:
+        return UNCATEGORIZED_ID
+    return value if _material_category_by_id(value) else None
+
+
+def _category_filter_context(selected_category_id):
+    """Everything a template's category filter needs, in one place."""
+    return {
+        'category_options': _material_category_choices(include_inactive=False),
+        'selected_category_id': ('' if selected_category_id is None else int(selected_category_id)),
+        'category_filter_label': ('All Categories' if selected_category_id is None
+                                  else _material_category_label(selected_category_id)),
+        'uncategorized_id': UNCATEGORIZED_ID,
+    }
+
 
 def register(app):
     """Register Purchase V2 pages: materials, orders, suppliers, stock."""
@@ -38,8 +93,21 @@ def register(app):
         usage_qty = float(db.session.query(func.coalesce(func.sum(UsageLogV2.quantity), 0.0)).filter(UsageLogV2.is_void == False).scalar() or 0.0)
         usage_cost = float(db.session.query(func.coalesce(func.sum(UsageLogV2.cost), 0.0)).filter(UsageLogV2.is_void == False).scalar() or 0.0)
         integrity = _purchase_v2_integrity_report()
+        # Category counts for the hub: how many item types exist, how many are
+        # still unassigned, and the biggest categories by purchase value.
+        category_summary = _material_category_summary_rows(include_inactive=False)
+        category_count = len([c for c in category_summary if int(c['id']) != UNCATEGORIZED_ID])
+        uncategorized_material_count = len([m for m in MaterialV2.query.filter(MaterialV2.is_void == False).all()
+                                            if not m.category_id])
+        top_categories = sorted([c for c in category_summary if int(c['id']) != UNCATEGORIZED_ID],
+                                key=lambda c: -float(c['purchased_value'] or 0.0))[:6]
+        supplier_site_count = int(db.session.query(func.count(SupplierSite.id)).scalar() or 0)
         return render_template('purchase/purchase_v2.html',
             material_count=material_count,
+            category_count=category_count,
+            uncategorized_material_count=uncategorized_material_count,
+            top_categories=top_categories,
+            supplier_site_count=supplier_site_count,
             purchase_count=purchase_count,
             purchase_total=purchase_total,
             supplier_count=supplier_count,
@@ -62,17 +130,30 @@ def register(app):
             if unit not in _MATERIAL_V2_UNITS:
                 flash(f'Unit must be one of: {", ".join(_MATERIAL_V2_UNITS)}.', 'danger')
                 return redirect(url_for('hdc_purchase_v2_materials'))
+            # Item type: either an existing category, or one typed on the spot.
+            category = _material_category_by_id(request.form.get('category_id'), active_only=True)
+            new_category_name = _normalize_name_ci(request.form.get('category_new'))
+            if new_category_name:
+                category = _ensure_material_category(new_category_name)
             row = _ensure_material_v2(name, unit)
             if not row:
                 flash('Material name is required.', 'danger')
                 return redirect(url_for('hdc_purchase_v2_materials'))
             row.unit = unit
+            row.category_id = (int(category.id) if category else None)
             row.updated_at = _pkt_now_naive()
-            log_action(current_user, 'create', f'{current_user.username.title()} added material {row.name} ({unit})', 'material_v2', row.id)
+            category_note = (f' [{category.name}]' if category else '')
+            log_action(current_user, 'create',
+                       f'{current_user.username.title()} added material {row.name} ({unit}){category_note}',
+                       'material_v2', row.id)
             db.session.commit()
             flash('Material saved.', 'success')
             return redirect(url_for('hdc_purchase_v2_materials'))
-        rows = MaterialV2.query.filter_by(is_void=False).order_by(MaterialV2.name.asc()).all()
+        category_id = _category_filter_arg()
+        row_query = MaterialV2.query.filter_by(is_void=False)
+        if category_id is not None:
+            row_query = row_query.filter(_material_category_condition(category_id))
+        rows = row_query.order_by(MaterialV2.name.asc()).all()
         material_ids = [int(m.id) for m in rows]
         purchased_map = {}
         if material_ids:
@@ -85,6 +166,7 @@ def register(app):
                     PurchaseV2.material_id.in_(material_ids)
                 ).group_by(PurchaseV2.material_id).all()
             )
+        category_map = _material_category_map()
         materials = []
         totals = {
             'purchased_qty': 0.0,
@@ -101,6 +183,8 @@ def register(app):
             in_store = max(0.0, purchased - delivered)
             materials.append({
                 'row': m,
+                'category_id': (int(m.category_id) if m.category_id else UNCATEGORIZED_ID),
+                'category_name': _material_category_label(material_category_id(m), category_map=category_map),
                 'purchased_qty': purchased,
                 'delivered_qty': delivered,
                 'used_qty': used,
@@ -112,7 +196,13 @@ def register(app):
             totals['used_qty'] += used
             totals['available_qty'] += available
             totals['in_store_qty'] += in_store
-        return render_template('purchase/purchase_v2_materials.html', materials=materials, material_units=_MATERIAL_V2_UNITS, totals=totals)
+        return render_template('purchase/purchase_v2_materials.html',
+            materials=materials,
+            material_units=_MATERIAL_V2_UNITS,
+            totals=totals,
+            uncategorized_materials=[m for m in MaterialV2.query.filter(MaterialV2.is_void == False).all()
+                                     if not m.category_id],
+            **_category_filter_context(category_id))
 
 
     @app.route('/hdc/purchase-v2/materials/<int:material_id>/edit', methods=['POST'])
@@ -138,11 +228,19 @@ def register(app):
         if exists:
             flash('Another material already uses this name.', 'danger')
             return redirect(url_for('hdc_purchase_v2_materials'))
+        category = _material_category_by_id(request.form.get('category_id'), active_only=True)
+        new_category_name = _normalize_name_ci(request.form.get('category_new'))
+        if new_category_name:
+            category = _ensure_material_category(new_category_name)
         row.name = name
         row.unit = unit
         row.status = status
+        row.category_id = (int(category.id) if category else None)
         row.updated_at = _pkt_now_naive()
-        log_action(current_user, 'update', f'{current_user.username.title()} updated material #{row.id}: {row.name} ({row.unit})', 'material_v2', row.id)
+        log_action(current_user, 'update',
+                   f'{current_user.username.title()} updated material #{row.id}: {row.name} ({row.unit})'
+                   + (f' [{category.name}]' if category else ''),
+                   'material_v2', row.id)
         db.session.commit()
         flash('Material updated.', 'success')
         return redirect(url_for('hdc_purchase_v2_materials'))
@@ -183,6 +281,10 @@ def register(app):
             quantities = request.form.getlist('quantity[]') or request.form.getlist('quantity')
             unit_prices = request.form.getlist('unit_price[]') or request.form.getlist('unit_price')
             notes = request.form.getlist('notes[]') or request.form.getlist('notes')
+            # One category per item row — the item type the field asked for.
+            # Blank means "use the material's own category", which is the
+            # default the item row's dropdown pre-selects.
+            row_categories = request.form.getlist('category_id[]') or request.form.getlist('category_id')
             if not material_ids or len(material_ids) != len(quantities) or len(material_ids) != len(unit_prices):
                 flash('Add at least one complete purchase item.', 'danger')
                 return redirect(url_for('hdc_purchase_v2_purchases'))
@@ -215,10 +317,17 @@ def register(app):
                     flash(f'Quantity and rate must be greater than 0 for item {index + 1}.', 'danger')
                     return redirect(url_for('hdc_purchase_v2_purchases'))
                 item_notes = (notes[index] if index < len(notes) else '').strip() or None
-                items.append((material, quantity, unit_price, item_notes))
+                raw_category = (row_categories[index] if index < len(row_categories) else '').strip()
+                category = None
+                if raw_category and raw_category != '0':
+                    category = _material_category_by_id(raw_category, active_only=True)
+                    if not category:
+                        flash(f'Item {index + 1}: select a valid category.', 'danger')
+                        return redirect(url_for('hdc_purchase_v2_purchases'))
+                items.append((material, quantity, unit_price, item_notes, category))
 
             created = []
-            for material, quantity, unit_price, item_notes in items:
+            for material, quantity, unit_price, item_notes, category in items:
                 total_amount = float(unit_price * quantity)
                 if _has_recent_duplicate(PurchaseV2, supplier_id=supplier.id, material_id=material.id,
                         unit_price=unit_price, quantity=quantity, total_amount=total_amount,
@@ -230,6 +339,11 @@ def register(app):
                     unit_price=unit_price, quantity=quantity, total_amount=total_amount,
                     payment_status=payment_status, date=purchase_date, notes=item_notes,
                     challan_no=challan, is_void=False, created_at=_pkt_now_naive(), updated_at=_pkt_now_naive())
+                # Every purchase line carries a category: the one chosen on the
+                # row, or the material's own.  Stored on the line so a later
+                # catalog change cannot rewrite the history.
+                _sync_purchase_category(row, material=material,
+                                        category_id=(int(category.id) if category else None))
                 db.session.add(row)
                 db.session.flush()
                 _sync_purchase_v2_ledger(row)
@@ -257,6 +371,7 @@ def register(app):
                 flash('PO number must be numeric.', 'warning')
         date_from = _parse_date((request.args.get('date_from') or '').strip(), fallback=None)
         date_to = _parse_date((request.args.get('date_to') or '').strip(), fallback=None)
+        category_id = _category_filter_arg()
         page = max(1, request.args.get('page', type=int) or 1)
         per_page = 25
         q = PurchaseV2.query.filter(PurchaseV2.is_void == False)
@@ -266,6 +381,8 @@ def register(app):
             q = q.filter(PurchaseV2.id == po_number)
         if material_id:
             q = q.filter(PurchaseV2.material_id == material_id)
+        if category_id is not None:
+            q = q.filter(_purchase_category_condition(category_id))
         if date_from:
             q = q.filter(PurchaseV2.date >= date_from)
         if date_to:
@@ -299,10 +416,27 @@ def register(app):
             pg_query['po_number'] = po_number
         if material_id:
             pg_query['material_id'] = material_id
+        if category_id is not None:
+            pg_query['category_id'] = category_id
         if date_from:
             pg_query['date_from'] = date_from.isoformat()
         if date_to:
             pg_query['date_to'] = date_to.isoformat()
+        # Per-category totals for the rows behind the filters, so "All
+        # Categories" also answers "how much of each" without a second visit.
+        category_map = _material_category_map()
+        category_totals = {}
+        for row in q.all():
+            key = purchase_resolved_category_id(row) or UNCATEGORIZED_ID
+            bucket = category_totals.setdefault(key, {
+                'category_id': key,
+                'category_name': _material_category_label(key, category_map=category_map),
+                'rows': 0, 'quantity': 0.0, 'value': 0.0
+            })
+            bucket['rows'] += 1
+            bucket['quantity'] += float(row.quantity or 0.0)
+            bucket['value'] += float(row.total_amount or 0.0)
+        category_totals = sorted(category_totals.values(), key=lambda r: (-r['value'], r['category_name'].lower()))
         return render_template('purchase/purchase_v2_purchases.html',
             rows=rows,
             suppliers=suppliers,
@@ -322,7 +456,10 @@ def register(app):
             pg_endpoint='hdc_purchase_v2_purchases',
             pg_url_kwargs={},
             pg_query=pg_query,
-            pg_label='purchase rows'
+            pg_label='purchase rows',
+            category_totals=category_totals,
+            category_map=category_map,
+            **_category_filter_context(category_id)
         )
 
 
@@ -366,9 +503,17 @@ def register(app):
             _date = row.date or _pkt_today()
         _notes   = (request.form.get('notes') or '').strip() or None
         _challan = (request.form.get('challan_no') or '').strip() or None
+        # Category may be re-pointed on the line without touching the catalog.
+        raw_category = (request.form.get('category_id') or '').strip()
+        category = _material_category_by_id(raw_category, active_only=True) if raw_category else None
+        if raw_category and raw_category != '0' and not category:
+            flash('Select a valid category.', 'danger')
+            return redirect(url_for('hdc_purchase_v2_purchases'))
         old_payment_status = (row.payment_status or 'unpaid').strip().lower()
         row.supplier_id = supplier.id
         row.material_id = material.id
+        _sync_purchase_category(row, material=material,
+                                category_id=(int(category.id) if category else None))
         row.unit_price = unit_price
         row.quantity = quantity
         row.total_amount = float(unit_price * quantity)
@@ -441,6 +586,29 @@ def register(app):
             if address and hasattr(row, 'address'):
                 row.address = address
             row.updated_at = _pkt_now_naive()
+            # "Deals in" categories and the sites this supplier is selected
+            # for, straight from the add form — the supplier list is then
+            # useful by material and by site before the first purchase.
+            picked_categories = request.form.getlist('category_ids[]') or request.form.getlist('category_ids')
+            picked_projects = request.form.getlist('project_ids[]') or request.form.getlist('project_ids')
+            for raw_category in picked_categories:
+                category = _material_category_by_id(raw_category, active_only=True)
+                if not category:
+                    continue
+                exists_link = SupplierCategory.query.filter_by(
+                    supplier_id=row.id, category_id=category.id).first()
+                if not exists_link:
+                    db.session.add(SupplierCategory(supplier_id=row.id, category_id=category.id,
+                                                    created_at=_pkt_now_naive()))
+            for raw_project in picked_projects:
+                project = Project.query.get(int(raw_project)) if str(raw_project).isdigit() else None
+                if not project:
+                    continue
+                exists_link = SupplierSite.query.filter_by(
+                    supplier_id=row.id, project_id=project.id).first()
+                if not exists_link:
+                    db.session.add(SupplierSite(supplier_id=row.id, project_id=project.id,
+                                                created_at=_pkt_now_naive()))
             if opening_balance > 0:
                 db.session.add(SupplierLedger(
                     supplier_id=row.id,
@@ -458,11 +626,68 @@ def register(app):
             return redirect(url_for('hdc_purchase_v2_suppliers'))
 
         q = (request.args.get('q') or '').strip()
+        # The three questions the field asked this list to answer:
+        #   category_id → who deals in / has supplied this item type
+        #   material_id → who has supplied this exact item
+        #   project_id  → who is assigned to / has delivered to this site
+        filter_category_id = _category_filter_arg()
+        filter_material_id = request.args.get('material_id', type=int)
+        filter_project_id = request.args.get('project_id', type=int)
+        sort_mode = (request.args.get('sort') or 'name').strip().lower()
+        if sort_mode not in ('name', 'purchases', 'balance'):
+            sort_mode = 'name'
         query = Supplier.query.filter(Supplier.is_void == False)
         if q:
             ql = f'%{q.lower()}%'
             query = query.filter(or_(func.lower(Supplier.name).like(ql), func.lower(func.coalesce(Supplier.phone, '')).like(ql)))
         rows = query.order_by(Supplier.name.asc()).all()
+
+        profile_map = _supplier_supplied_profile()
+        stated_category_map = _supplier_category_ids_map()
+        stated_site_map = _supplier_site_ids_map()
+        supplied_site_rows = _site_supplier_supplied_rows()
+        supplied_sites_by_supplier = {}
+        for srow in supplied_site_rows:
+            supplied_sites_by_supplier.setdefault(srow['supplier_id'], []).append(srow)
+        stated_match_ids = set()
+        if filter_category_id is not None:
+            # A supplier matches when it says it deals in the category (stated)
+            # or when it has actually supplied it.  Both are shown apart.
+            stated_match_ids = {int(sid) for sid, cids in stated_category_map.items()
+                                if int(filter_category_id) in [int(c) for c in cids]}
+        material_match_ids = set()
+        if filter_material_id:
+            material_match_ids = {int(sid) for sid, profile in profile_map.items()
+                                  if int(filter_material_id) in profile['material_ids']}
+        site_stated_match_ids = set()
+        site_supplied_match_ids = set()
+        if filter_project_id:
+            site_stated_match_ids = {int(sid) for sid, pids in stated_site_map.items()
+                                     if int(filter_project_id) in [int(p) for p in pids]}
+            site_supplied_match_ids = {int(row['supplier_id']) for row in supplied_site_rows
+                                       if int(row['project_id']) == int(filter_project_id)}
+        project_names = {int(p.id): p.name for p in Project.query.all()}
+
+        def _profile_matches(supplier_id):
+            if filter_category_id is not None:
+                supplied = profile_map.get(int(supplier_id), {}).get('category_ids', [])
+                if filter_category_id == UNCATEGORIZED_ID:
+                    stated_has = any(int(c) == UNCATEGORIZED_ID for c in stated_category_map.get(int(supplier_id), []))
+                else:
+                    stated_has = int(supplier_id) in stated_match_ids
+                if not stated_has and (not supplied or int(filter_category_id) not in [int(c) for c in supplied]):
+                    return False
+            if filter_material_id:
+                if int(supplier_id) not in material_match_ids:
+                    return False
+            if filter_project_id:
+                if (int(supplier_id) not in site_stated_match_ids
+                        and int(supplier_id) not in site_supplied_match_ids):
+                    return False
+            return True
+
+        rows = [s for s in rows if _profile_matches(s.id)]
+        category_map = _material_category_map()
 
         debit_rows = dict(db.session.query(
             SupplierLedger.supplier_id,
@@ -504,6 +729,15 @@ def register(app):
         for s in rows:
             debit = float(debit_rows.get(s.id, 0.0) or 0.0)
             credit = float(credit_total_rows.get(s.id, 0.0) or 0.0)
+            profile = profile_map.get(int(s.id), {})
+            stated_categories = [_material_category_label(cid, category_map=category_map)
+                                 for cid in stated_category_map.get(int(s.id), [])]
+            supplied_categories = [_material_category_label(cid, category_map=category_map)
+                                   for cid in profile.get('category_ids', [])]
+            site_rows_for_supplier = sorted(supplied_sites_by_supplier.get(int(s.id), []),
+                                            key=lambda r: (-r['value'], r['project_name'].lower()))
+            stated_sites = [project_names.get(pid, f'Site #{pid}')
+                            for pid in stated_site_map.get(int(s.id), [])]
             suppliers.append({
                 '_hdc_entity': 'hdc_supplier',
                 'id': s.id,
@@ -515,9 +749,41 @@ def register(app):
                 'payment_total': float(credit_kind_map.get((s.id, 'payment'), 0.0) or 0.0),
                 'tip_total': float(credit_kind_map.get((s.id, 'tip'), 0.0) or 0.0),
                 'settlement_total': float(credit_kind_map.get((s.id, 'settlement'), 0.0) or 0.0),
+                # material basis: what this supplier deals in, and what it
+                # has actually supplied.
+                'stated_categories': stated_categories,
+                'supplied_categories': supplied_categories,
+                'material_count': len(profile.get('material_ids', [])),
+                'material_names': profile.get('material_names', []),
+                'purchase_rows': int(profile.get('purchase_count') or 0),
+                'supplied_qty': float(profile.get('quantity') or 0.0),
+                'last_supply_date': profile.get('last_purchase_date'),
+                # site basis: assigned sites and sites actually supplied, the
+                # two directions of the same supplier ⇄ site tracking.
+                'stated_sites': stated_sites,
+                'supplied_sites': [r['project_name'] for r in site_rows_for_supplier],
+                'supplied_site_rows': site_rows_for_supplier,
+                'site_count': len({r['project_id'] for r in site_rows_for_supplier}),
+                'delivered_value': float(sum(r['value'] for r in site_rows_for_supplier)),
+                'project_names': project_names,
             })
 
-        return render_template('purchase/purchase_v2_suppliers.html', suppliers=suppliers, q=q)
+        if sort_mode == 'purchases':
+            suppliers.sort(key=lambda r: (-r['purchase_rows'], r['name'].lower()))
+        elif sort_mode == 'balance':
+            suppliers.sort(key=lambda r: (-r['balance'], r['name'].lower()))
+
+        return render_template('purchase/purchase_v2_suppliers.html',
+            suppliers=suppliers,
+            q=q,
+            projects=Project.query.order_by(Project.name.asc()).all(),
+            materials=(MaterialV2.query.filter(MaterialV2.is_void == False)
+                       .order_by(MaterialV2.name.asc()).all()),
+            selected_material_id=filter_material_id,
+            selected_project_id=filter_project_id,
+            sort_mode=sort_mode,
+            category_map=category_map,
+            **_category_filter_context(filter_category_id))
 
 
     @app.route('/hdc/purchase-v2/suppliers/<int:supplier_id>')
@@ -610,6 +876,16 @@ def register(app):
         # Newest entry on top, exactly as the accounts and delivery registers
         # now read.  The balances were already computed in chronological order.
         ledger_items.reverse()
+        # Supplier tracking: what it deals in vs what it has supplied, and the
+        # sites it is assigned to vs the sites it has actually served.
+        category_map = _material_category_map()
+        stated_category_ids = _supplier_category_ids(supplier.id)
+        stated_project_ids = _supplier_site_ids(supplier.id)
+        supplied_category_rows = _supplier_category_supplied_rows(supplier.id)
+        supplied_site_rows = _supplier_site_supplied_rows(supplier.id)
+        linked_category_ids = set(int(c) for c in stated_category_ids)
+        supplied_category_ids = set(int(r['category_id']) for r in supplied_category_rows)
+        project_names = {int(p.id): p.name for p in Project.query.all()}
         return render_template('purchase/purchase_v2_supplier_detail.html',
             supplier=supplier,
             purchases=purchases,
@@ -625,7 +901,21 @@ def register(app):
             advance_total=advance_total,
             payment_total=payment_total,
             tip_total=tip_total,
-            settlement_total=settlement_total
+            settlement_total=settlement_total,
+            stated_category_ids=linked_category_ids,
+            stated_project_ids=set(int(p) for p in stated_project_ids),
+            supplied_category_rows=supplied_category_rows,
+            supplied_category_ids=supplied_category_ids,
+            supplied_site_rows=supplied_site_rows,
+            supplied_site_ids={int(r['project_id']) for r in supplied_site_rows},
+            project_names=project_names,
+            material_category_names={
+                int(p.id): _material_category_label(material_category_id(p.material), category_map=category_map)
+                for p in purchases if p.material
+            },
+            category_map=category_map,
+            category_options=_material_category_options(),
+            projects=Project.query.order_by(Project.name.asc()).all()
         )
 
 
@@ -651,9 +941,11 @@ def register(app):
             flash('Unit price and quantity must be greater than 0.', 'danger')
             return redirect(url_for('hdc_purchase_v2_supplier_detail', supplier_id=supplier.id))
         total_amount = float(unit_price * quantity)
+        category = _material_category_by_id(request.form.get('category_id'), active_only=True)
         row = PurchaseV2(
             supplier_id=supplier.id,
             material_id=material.id,
+            category_id=(int(category.id) if category else (int(material.category_id) if material.category_id else None)),
             unit_price=unit_price,
             quantity=quantity,
             total_amount=total_amount,
@@ -863,6 +1155,7 @@ def register(app):
         filter_supplier_id = request.args.get('supplier_id', type=int)
         filter_project_id = request.args.get('project_id', type=int)
         filter_stage_id = request.args.get('stage_id', type=int)
+        filter_category_id = _category_filter_arg()
         filter_date_from = _parse_date((request.args.get('date_from') or '').strip(), fallback=None)
         filter_date_to = _parse_date((request.args.get('date_to') or '').strip(), fallback=None)
         sort_mode = (request.args.get('sort') or 'newest').strip().lower()
@@ -881,6 +1174,8 @@ def register(app):
             dq = dq.filter(Delivery.project_id == filter_project_id)
         if filter_stage_id:
             dq = dq.filter(Delivery.stage_id == filter_stage_id)
+        if filter_category_id is not None:
+            dq = dq.filter(_delivery_category_condition(filter_category_id))
         if filter_date_from:
             dq = dq.filter(Delivery.date >= filter_date_from)
         if filter_date_to:
@@ -951,6 +1246,8 @@ def register(app):
             filter_date_to=(filter_date_to.isoformat() if filter_date_to else ''),
             sort_mode=sort_mode,
             today=_pkt_today().isoformat(),
+            category_map=_material_category_map(),
+            **_category_filter_context(filter_category_id),
             prefill_shift_material_id=prefill_shift_material_id,
             prefill_from_project_id=prefill_from_project_id,
             prefill_from_stage_id=prefill_from_stage_id,
@@ -1118,6 +1415,7 @@ def register(app):
         # to be readable one site at a time.
         filter_project_id = request.args.get('project_id', type=int)
         filter_stage_id = request.args.get('stage_id', type=int)
+        filter_category_id = _category_filter_arg()
         date_from = _parse_date((request.args.get('date_from') or '').strip(), fallback=None)
         date_to = _parse_date((request.args.get('date_to') or '').strip(), fallback=None)
         sort_mode = (request.args.get('sort') or 'newest').strip().lower()
@@ -1132,6 +1430,8 @@ def register(app):
             q = q.filter(UsageLogV2.project_id == filter_project_id)
         if filter_stage_id:
             q = q.filter(UsageLogV2.stage_id == filter_stage_id)
+        if filter_category_id is not None:
+            q = q.filter(_usage_category_condition(filter_category_id))
         if date_from:
             q = q.filter(UsageLogV2.date >= date_from)
         if date_to:
@@ -1180,7 +1480,9 @@ def register(app):
             filter_date_from=(date_from.isoformat() if date_from else ''),
             filter_date_to=(date_to.isoformat() if date_to else ''),
             sort_mode=sort_mode,
-            today=_pkt_today().isoformat()
+            today=_pkt_today().isoformat(),
+            category_map=_material_category_map(),
+            **_category_filter_context(filter_category_id)
         )
 
 
@@ -1190,6 +1492,7 @@ def register(app):
         project_id = request.args.get('project_id', type=int)
         stage_id = request.args.get('stage_id', type=int)
         material_id = request.args.get('material_id', type=int)
+        category_id = _category_filter_arg()
 
         project = Project.query.get(project_id) if project_id else None
         stage = Stage.query.get(stage_id) if stage_id else None
@@ -1200,33 +1503,32 @@ def register(app):
         projects = Project.query.order_by(Project.name.asc()).all()
         stages = Stage.query.order_by(Stage.name.asc()).all()
         materials = MaterialV2.query.filter(MaterialV2.is_void == False).order_by(MaterialV2.name.asc()).all()
+        if category_id is not None:
+            materials = [m for m in materials
+                         if (int(m.category_id) if m.category_id else UNCATEGORIZED_ID) == int(category_id)]
         if material_id:
             materials = [m for m in materials if int(m.id) == int(material_id)]
 
         scope_project_id = project.id if project else None
         scope_stage_id = stage.id if stage else None
 
+        category_map = _material_category_map()
         summary_rows = []
         for m in materials:
             sent_qty = _material_v2_delivered(m.id, scope_project_id, scope_stage_id)
             used_qty = _material_v2_used(m.id, scope_project_id, scope_stage_id)
             pending_qty = max(0.0, sent_qty - used_qty)
-            if sent_qty <= 1e-9 and used_qty <= 1e-9 and material_id:
-                summary_rows.append({
-                    'material': m,
-                    'sent_qty': 0.0,
-                    'used_qty': 0.0,
-                    'pending_qty': 0.0
-                })
-                continue
-            if sent_qty <= 1e-9 and used_qty <= 1e-9:
-                continue
-            summary_rows.append({
+            row = {
                 'material': m,
+                'category_id': (int(m.category_id) if m.category_id else UNCATEGORIZED_ID),
+                'category_name': _material_category_label(material_category_id(m), category_map=category_map),
                 'sent_qty': sent_qty,
                 'used_qty': used_qty,
                 'pending_qty': pending_qty
-            })
+            }
+            if sent_qty <= 1e-9 and used_qty <= 1e-9 and not material_id:
+                continue
+            summary_rows.append(row)
 
         dq = Delivery.query.filter(Delivery.is_void == False)
         if project:
@@ -1235,6 +1537,8 @@ def register(app):
             dq = dq.filter(Delivery.stage_id == stage.id)
         if material_id:
             dq = dq.filter(Delivery.material_id == material_id)
+        if category_id is not None:
+            dq = dq.filter(_delivery_category_condition(category_id))
         # Newest delivery first, same as the Delivery register.
         delivery_rows = dq.order_by(Delivery.created_at.desc(), Delivery.id.desc()).all()
 
@@ -1264,7 +1568,9 @@ def register(app):
             total_purchased_qty=total_purchased_qty,
             total_purchased_amount=total_purchased_amount,
             sent_of_purchased_pct=sent_of_purchased_pct,
-            used_of_sent_pct=used_of_sent_pct
+            used_of_sent_pct=used_of_sent_pct,
+            category_map=category_map,
+            **_category_filter_context(category_id)
         )
 
 
@@ -1423,3 +1729,691 @@ def register(app):
         db.session.commit()
         flash(f'Usage #{usage_id} updated.', 'success')
         return redirect(url_for('hdc_purchase_v2_usage_page'))
+
+
+    # ── Item-type categories ────────────────────────────────────────────────
+    # The field's own words: "every purchase and item needs a category like
+    # Electric Materials, Plumbing Materials, Cement, Steel … and a filter of
+    # all categories and separate separate too."  This is that control panel:
+    # the vocabulary, the per-category totals, and the bulk assign that fixes
+    # legacy rows which have no category yet.
+
+    @app.route('/hdc/purchase-v2/categories', methods=['GET', 'POST'])
+    @login_required
+    @_money_write_required()
+    def hdc_purchase_v2_categories():
+        if request.method == 'POST':
+            name = _normalize_name_ci(request.form.get('name'))
+            if not name:
+                flash('Category name is required.', 'danger')
+                return redirect(url_for('hdc_purchase_v2_categories'))
+            existing = _material_category_by_name(name)
+            if existing and not existing.is_void and (existing.status or 'active').strip().lower() == 'active':
+                flash(f'Category "{existing.name}" already exists.', 'warning')
+                return redirect(url_for('hdc_purchase_v2_categories'))
+            row = _ensure_material_category(name)
+            row.updated_at = _pkt_now_naive()
+            log_action(current_user, 'create',
+                       f'{current_user.username.title()} added material category: {row.name}',
+                       'material_category', row.id)
+            db.session.commit()
+            flash(f'Category "{row.name}" saved.', 'success')
+            return redirect(url_for('hdc_purchase_v2_categories'))
+
+        categories = _material_category_summary_rows(include_inactive=True)
+        materials = (MaterialV2.query.filter(MaterialV2.is_void == False)
+                     .order_by(MaterialV2.name.asc()).all())
+        uncategorized_materials = [m for m in materials if not m.category_id]
+        totals = {
+            'categories': len(categories),
+            'materials': len(materials),
+            'uncategorized_materials': len(uncategorized_materials),
+            'purchased_value': float(sum(float(c.get('purchased_value') or 0.0) for c in categories)),
+            'purchased_qty': float(sum(float(c.get('purchased_qty') or 0.0) for c in categories)),
+            'delivered_qty': float(sum(float(c.get('delivered_qty') or 0.0) for c in categories)),
+            'used_qty': float(sum(float(c.get('used_qty') or 0.0) for c in categories)),
+        }
+        return render_template('purchase/purchase_v2_categories.html',
+            categories=categories,
+            materials=materials,
+            uncategorized_materials=uncategorized_materials,
+            totals=totals,
+            uncategorized_label=UNCATEGORIZED_LABEL,
+            **_category_filter_context(None)
+        )
+
+
+    @app.route('/hdc/purchase-v2/categories/<int:category_id>/edit', methods=['POST'])
+    @login_required
+    @_money_write_required()
+    def hdc_purchase_v2_category_edit(category_id):
+        row = MaterialCategory.query.get_or_404(category_id)
+        name = _normalize_name_ci(request.form.get('name')) or row.name
+        status = (request.form.get('status') or row.status or 'active').strip().lower()
+        if status not in ('active', 'inactive'):
+            status = 'active'
+        clash = (MaterialCategory.query
+                 .filter(MaterialCategory.id != row.id,
+                         MaterialCategory.is_void == False,
+                         func.lower(MaterialCategory.name) == name.lower())
+                 .first())
+        if clash:
+            flash('Another category already uses this name.', 'danger')
+            return redirect(url_for('hdc_purchase_v2_categories'))
+        row.name = name
+        row.status = status
+        row.updated_at = _pkt_now_naive()
+        log_action(current_user, 'update',
+                   f'{current_user.username.title()} updated material category #{row.id}: {row.name} ({status})',
+                   'material_category', row.id)
+        db.session.commit()
+        flash('Category updated.', 'success')
+        return redirect(url_for('hdc_purchase_v2_categories'))
+
+
+    @app.route('/hdc/purchase-v2/categories/<int:category_id>/delete', methods=['POST'])
+    @login_required
+    @_money_write_required()
+    def hdc_purchase_v2_category_delete(category_id):
+        row = MaterialCategory.query.get_or_404(category_id)
+        counts = _material_category_usage_counts().get(int(row.id), {})
+        in_use = int(counts.get('materials') or 0) + int(counts.get('purchases') or 0)
+        if in_use:
+            # Deleting would silently strip the item type off real records, so
+            # the category steps aside instead — same rule materials follow.
+            row.status = 'inactive'
+            row.updated_at = _pkt_now_naive()
+            log_action(current_user, 'update',
+                       f'{current_user.username.title()} set material category #{row.id} inactive ({in_use} record(s) use it)',
+                       'material_category', row.id)
+            db.session.commit()
+            flash(f'"{row.name}" is used by {in_use} record(s), so it was set inactive instead of deleted.', 'warning')
+            return redirect(url_for('hdc_purchase_v2_categories'))
+        row.is_void = True
+        row.status = 'inactive'
+        row.updated_at = _pkt_now_naive()
+        log_action(current_user, 'delete',
+                   f'{current_user.username.title()} deleted material category #{row.id}: {row.name}',
+                   'material_category', row.id)
+        db.session.commit()
+        flash('Category deleted.', 'success')
+        return redirect(url_for('hdc_purchase_v2_categories'))
+
+
+    @app.route('/hdc/purchase-v2/categories/assign', methods=['POST'])
+    @login_required
+    @_money_write_required()
+    def hdc_purchase_v2_categories_assign():
+        """Put legacy / new materials into a category in one action."""
+        material_ids = request.form.getlist('material_ids[]') or request.form.getlist('material_ids')
+        raw_category = (request.form.get('category_id') or '').strip()
+        if raw_category in ('', '0', str(UNCATEGORIZED_ID)):
+            category = None
+            label = UNCATEGORIZED_LABEL
+        else:
+            category = _material_category_by_id(raw_category, active_only=True)
+            if not category:
+                flash('Select an active category.', 'danger')
+                return redirect(url_for('hdc_purchase_v2_categories'))
+            label = category.name
+        if not material_ids:
+            flash('Select at least one material to assign.', 'danger')
+            return redirect(url_for('hdc_purchase_v2_categories'))
+        updated = 0
+        for raw_id in material_ids:
+            raw_id = str(raw_id or '').strip()
+            if not raw_id.isdigit():
+                continue
+            material = MaterialV2.query.get(int(raw_id))
+            if (not material) or material.is_void:
+                continue
+            material.category_id = (int(category.id) if category else None)
+            material.updated_at = _pkt_now_naive()
+            updated += 1
+        if not updated:
+            flash('No matching material was found.', 'warning')
+            return redirect(url_for('hdc_purchase_v2_categories'))
+        log_action(current_user, 'update',
+                   f'{current_user.username.title()} set {updated} material(s) to category {label}',
+                   'material_category', (category.id if category else 0))
+        db.session.commit()
+        flash(f'{updated} material(s) set to "{label}".', 'success')
+        return redirect(url_for('hdc_purchase_v2_categories'))
+
+
+    @app.route('/hdc/purchase-v2/categories/sync-purchases', methods=['POST'])
+    @login_required
+    @_money_write_required()
+    def hdc_purchase_v2_categories_sync_purchases():
+        """Re-align purchase lines with their material's current category.
+
+        A purchase line stores the category it was recorded under, so changing
+        a material's item type never rewrites history.  When the operator does
+        want the history moved (a material was filed under the wrong type, for
+        example), this button does it explicitly and says how many rows moved.
+        """
+        moved = 0
+        rows = (db.session.query(PurchaseV2)
+                .filter(PurchaseV2.is_void == False)
+                .all())
+        for row in rows:
+            material = row.material
+            wanted = (int(material.category_id) if material and material.category_id else None)
+            if (row.category_id or None) != wanted:
+                row.category_id = wanted
+                row.updated_at = _pkt_now_naive()
+                moved += 1
+        if not moved:
+            flash('Every purchase line already matches its material category.', 'info')
+            return redirect(url_for('hdc_purchase_v2_categories'))
+        log_action(current_user, 'update',
+                   f'{current_user.username.title()} re-applied material categories to {moved} purchase line(s)',
+                   'material_category', 0)
+        db.session.commit()
+        flash(f'{moved} purchase line(s) re-aligned with their material category.', 'success')
+        return redirect(url_for('hdc_purchase_v2_categories'))
+
+
+    # ── Item-wise register: purchase / delivery / usage per item ────────────
+
+    @app.route('/hdc/purchase-v2/items')
+    @login_required
+    def hdc_purchase_v2_items():
+        """Every item with what was bought for it, sent to sites and used.
+
+        This is the "on item base" view the field asked for: one line per item
+        (material), with its category, and the three flows side by side.  The
+        category filter takes "All Categories" or any single category — and
+        each row links to that item's own ledger, where the three registers are
+        listed entry by entry.
+        """
+        category_id = _category_filter_arg()
+        material_id = request.args.get('material_id', type=int)
+        project_id = request.args.get('project_id', type=int)
+        stage_id = request.args.get('stage_id', type=int)
+        date_from = _parse_date((request.args.get('date_from') or '').strip(), fallback=None)
+        date_to = _parse_date((request.args.get('date_to') or '').strip(), fallback=None)
+        sort_mode = (request.args.get('sort') or 'value').strip().lower()
+        if sort_mode not in ('value', 'qty', 'name'):
+            sort_mode = 'value'
+
+        project = Project.query.get(project_id) if project_id else None
+        stage = Stage.query.get(stage_id) if stage_id else None
+        if stage_id and ((not stage) or (project and int(stage.project_id or 0) != int(project.id))):
+            flash('Selected stage does not belong to selected project.', 'danger')
+            return redirect(url_for('hdc_purchase_v2_items', project_id=project_id, material_id=material_id))
+
+        mq = MaterialV2.query.filter(MaterialV2.is_void == False)
+        if material_id:
+            mq = mq.filter(MaterialV2.id == int(material_id))
+        if category_id is not None:
+            mq = mq.filter(_material_category_condition(category_id))
+        materials = mq.order_by(MaterialV2.name.asc()).all()
+        material_ids = [int(m.id) for m in materials]
+
+        purchased_map = {}
+        purchase_count_map = {}
+        if material_ids:
+            pq = (db.session.query(
+                    PurchaseV2.material_id,
+                    func.coalesce(func.sum(PurchaseV2.quantity), 0.0),
+                    func.coalesce(func.sum(PurchaseV2.total_amount), 0.0),
+                    func.count(PurchaseV2.id))
+                  .filter(PurchaseV2.is_void == False, PurchaseV2.material_id.in_(material_ids)))
+            if date_from:
+                pq = pq.filter(PurchaseV2.date >= date_from)
+            if date_to:
+                pq = pq.filter(PurchaseV2.date <= date_to)
+            for mid, qty, value, count in pq.group_by(PurchaseV2.material_id).all():
+                purchased_map[int(mid)] = (float(qty or 0.0), float(value or 0.0), int(count or 0))
+
+            dq = (db.session.query(
+                    Delivery.material_id,
+                    func.coalesce(func.sum(Delivery.quantity), 0.0),
+                    func.count(Delivery.id))
+                  .filter(Delivery.is_void == False, Delivery.material_id.in_(material_ids)))
+            uq = (db.session.query(
+                    UsageLogV2.material_id,
+                    func.coalesce(func.sum(UsageLogV2.quantity), 0.0),
+                    func.coalesce(func.sum(UsageLogV2.cost), 0.0),
+                    func.count(UsageLogV2.id))
+                  .filter(UsageLogV2.is_void == False, UsageLogV2.material_id.in_(material_ids)))
+            if project:
+                dq = dq.filter(Delivery.project_id == project.id)
+                uq = uq.filter(UsageLogV2.project_id == project.id)
+            if stage:
+                dq = dq.filter(Delivery.stage_id == stage.id)
+                uq = uq.filter(UsageLogV2.stage_id == stage.id)
+            if date_from:
+                dq = dq.filter(Delivery.date >= date_from)
+                uq = uq.filter(UsageLogV2.date >= date_from)
+            if date_to:
+                dq = dq.filter(Delivery.date <= date_to)
+                uq = uq.filter(UsageLogV2.date <= date_to)
+            delivered_map = {int(mid): (float(qty or 0.0), int(count or 0))
+                             for mid, qty, count in dq.group_by(Delivery.material_id).all()}
+            used_map = {int(mid): (float(qty or 0.0), float(cost or 0.0), int(count or 0))
+                        for mid, qty, cost, count in uq.group_by(UsageLogV2.material_id).all()}
+        else:
+            delivered_map, used_map = {}, {}
+        all_delivered_map = {int(mid): float(qty or 0.0)
+                             for mid, qty in db.session.query(Delivery.material_id,
+                                                              func.coalesce(func.sum(Delivery.quantity), 0.0))
+                             .filter(Delivery.is_void == False).group_by(Delivery.material_id).all()} \
+            if material_ids else {}
+
+        category_map = _material_category_map()
+        rows = []
+        for m in materials:
+            mid = int(m.id)
+            purchased_qty, purchased_value, purchase_count = purchased_map.get(mid, (0.0, 0.0, 0))
+            delivered_qty, delivery_count = delivered_map.get(mid, (0.0, 0))
+            used_qty, used_value, usage_count = used_map.get(mid, (0.0, 0.0, 0))
+            lifetime_delivered = float(all_delivered_map.get(mid, 0.0) or 0.0)
+            rows.append({
+                '_hdc_entity': 'hdc_material_v2',
+                '_hdc_id': mid,
+                'id': mid,
+                'name': m.name,
+                'unit': m.unit or '',
+                'status': (m.status or 'active'),
+                'category_id': (int(m.category_id) if m.category_id else UNCATEGORIZED_ID),
+                'category_name': _material_category_label(material_category_id(m), category_map=category_map),
+                'purchased_qty': purchased_qty,
+                'purchased_value': purchased_value,
+                'purchase_count': purchase_count,
+                'delivered_qty': delivered_qty,
+                'delivery_count': delivery_count,
+                'used_qty': used_qty,
+                'used_value': used_value,
+                'usage_count': usage_count,
+                'in_store_qty': max(0.0, purchased_qty - lifetime_delivered),
+                'at_site_qty': max(0.0, delivered_qty - used_qty),
+            })
+        if sort_mode == 'name':
+            rows.sort(key=lambda r: r['name'].lower())
+        elif sort_mode == 'qty':
+            rows.sort(key=lambda r: (-r['purchased_qty'], r['name'].lower()))
+        else:
+            rows.sort(key=lambda r: (-r['purchased_value'], r['name'].lower()))
+
+        # Category strip: the same rows, grouped — the "all categories" answer
+        # that sits above the "one category at a time" filter.
+        strip = {}
+        for row in rows:
+            bucket = strip.setdefault(row['category_id'], {
+                'category_id': row['category_id'],
+                'category_name': row['category_name'],
+                'items': 0, 'purchased_qty': 0.0, 'purchased_value': 0.0,
+                'delivered_qty': 0.0, 'used_qty': 0.0
+            })
+            bucket['items'] += 1
+            bucket['purchased_qty'] += row['purchased_qty']
+            bucket['purchased_value'] += row['purchased_value']
+            bucket['delivered_qty'] += row['delivered_qty']
+            bucket['used_qty'] += row['used_qty']
+        category_strip = sorted(strip.values(), key=lambda r: (-r['purchased_value'], r['category_name'].lower()))
+
+        totals = {
+            'items': len(rows),
+            'purchased_qty': float(sum(r['purchased_qty'] for r in rows)),
+            'purchased_value': float(sum(r['purchased_value'] for r in rows)),
+            'delivered_qty': float(sum(r['delivered_qty'] for r in rows)),
+            'used_qty': float(sum(r['used_qty'] for r in rows)),
+            'in_store_qty': float(sum(r['in_store_qty'] for r in rows)),
+            'at_site_qty': float(sum(r['at_site_qty'] for r in rows)),
+        }
+        return render_template('purchase/purchase_v2_items.html',
+            rows=rows,
+            totals=totals,
+            category_strip=category_strip,
+            projects=Project.query.order_by(Project.name.asc()).all(),
+            stages=Stage.query.order_by(Stage.name.asc()).all(),
+            materials=(MaterialV2.query.filter(MaterialV2.is_void == False)
+                       .order_by(MaterialV2.name.asc()).all()),
+            selected_material_id=material_id,
+            selected_project_id=project_id,
+            selected_stage_id=stage_id,
+            filter_date_from=(date_from.isoformat() if date_from else ''),
+            filter_date_to=(date_to.isoformat() if date_to else ''),
+            sort_mode=sort_mode,
+            scope_label=(project.name if project else 'All Sites'),
+            **_category_filter_context(category_id)
+        )
+
+
+    @app.route('/hdc/purchase-v2/items/<int:material_id>')
+    @login_required
+    def hdc_purchase_v2_item_detail(material_id):
+        """One item's ledger: its purchases, deliveries and usage entries."""
+        material = MaterialV2.query.get_or_404(material_id)
+        project_id = request.args.get('project_id', type=int)
+        stage_id = request.args.get('stage_id', type=int)
+        date_from = _parse_date((request.args.get('date_from') or '').strip(), fallback=None)
+        date_to = _parse_date((request.args.get('date_to') or '').strip(), fallback=None)
+        project = Project.query.get(project_id) if project_id else None
+        stage = Stage.query.get(stage_id) if stage_id else None
+        if stage_id and ((not stage) or (project and int(stage.project_id or 0) != int(project.id))):
+            flash('Selected stage does not belong to selected project.', 'danger')
+            return redirect(url_for('hdc_purchase_v2_item_detail', material_id=material.id))
+
+        purchases = (PurchaseV2.query
+                     .filter(PurchaseV2.material_id == material.id, PurchaseV2.is_void == False)
+                     .order_by(PurchaseV2.created_at.desc(), PurchaseV2.id.desc()).all())
+        delivered_map = {}
+        if purchases:
+            delivered_map = dict(db.session.query(
+                Delivery.purchase_id,
+                func.coalesce(func.sum(Delivery.quantity), 0.0)
+            ).filter(Delivery.is_void == False,
+                     Delivery.purchase_id.in_([int(p.id) for p in purchases])
+                     ).group_by(Delivery.purchase_id).all())
+        if date_from:
+            purchases = [p for p in purchases if p.date and p.date >= date_from]
+        if date_to:
+            purchases = [p for p in purchases if p.date and p.date <= date_to]
+        purchase_total_qty = float(sum(float(p.quantity or 0.0) for p in purchases))
+        purchase_total_value = float(sum(float(p.total_amount or 0.0) for p in purchases))
+
+        dq = Delivery.query.filter(Delivery.material_id == material.id, Delivery.is_void == False)
+        uq = UsageLogV2.query.filter(UsageLogV2.material_id == material.id, UsageLogV2.is_void == False)
+        if project:
+            dq = dq.filter(Delivery.project_id == project.id)
+            uq = uq.filter(UsageLogV2.project_id == project.id)
+        if stage:
+            dq = dq.filter(Delivery.stage_id == stage.id)
+            uq = uq.filter(UsageLogV2.stage_id == stage.id)
+        if date_from:
+            dq = dq.filter(Delivery.date >= date_from)
+            uq = uq.filter(UsageLogV2.date >= date_from)
+        if date_to:
+            dq = dq.filter(Delivery.date <= date_to)
+            uq = uq.filter(UsageLogV2.date <= date_to)
+        deliveries = dq.order_by(Delivery.created_at.desc(), Delivery.id.desc()).all()
+        usages = uq.order_by(UsageLogV2.created_at.desc(), UsageLogV2.id.desc()).all()
+        delivered_qty = float(sum(float(r.quantity or 0.0) for r in deliveries))
+        used_qty = float(sum(float(r.quantity or 0.0) for r in usages))
+        used_cost = float(sum(float(r.cost or 0.0) for r in usages))
+        lifetime_delivered = _material_v2_delivered(material.id)
+        lifetime_used = _material_v2_used(material.id)
+        # Store-level numbers always read the full history (no site/date
+        # filter), so "in store" and "balance at site" cannot be misread as
+        # scoped totals when a filter is on.
+        lifetime_purchased = float(db.session.query(
+            func.coalesce(func.sum(PurchaseV2.quantity), 0.0)
+        ).filter(PurchaseV2.material_id == material.id,
+                 PurchaseV2.is_void == False).scalar() or 0.0)
+
+        category_map = _material_category_map()
+        return render_template('purchase/purchase_v2_item_detail.html',
+            material=material,
+            category_name=_material_category_label(material_category_id(material), category_map=category_map),
+            category_id=(int(material.category_id) if material.category_id else UNCATEGORIZED_ID),
+            purchases=purchases,
+            delivered_map=delivered_map,
+            deliveries=deliveries,
+            usages=usages,
+            purchase_total_qty=purchase_total_qty,
+            purchase_total_value=purchase_total_value,
+            delivered_qty=delivered_qty,
+            used_qty=used_qty,
+            used_cost=used_cost,
+            in_store_qty=max(0.0, lifetime_purchased - lifetime_delivered),
+            at_site_qty=max(0.0, delivered_qty - used_qty),
+            lifetime_delivered=lifetime_delivered,
+            lifetime_used=lifetime_used,
+            weighted_cost=_material_v2_weighted_cost(material.id),
+            projects=Project.query.order_by(Project.name.asc()).all(),
+            stages=Stage.query.order_by(Stage.name.asc()).all(),
+            selected_project_id=project_id,
+            selected_stage_id=stage_id,
+            filter_date_from=(date_from.isoformat() if date_from else ''),
+            filter_date_to=(date_to.isoformat() if date_to else ''),
+            **_category_filter_context(None)
+        )
+
+
+    # ── Supplier ⇄ site / item-category tracking ────────────────────────────
+
+    @app.route('/hdc/purchase-v2/suppliers-by-site')
+    @login_required
+    def hdc_purchase_v2_suppliers_by_site():
+        """Which supplier supplied which site — and the other way round.
+
+        Both directions of the same tracking question, on one page: each site
+        with the suppliers that delivered to it (and the ones that are only
+        assigned so far), and each supplier with the sites it supplied.
+        """
+        project_id = request.args.get('project_id', type=int)
+        supplier_id = request.args.get('supplier_id', type=int)
+        material_id = request.args.get('material_id', type=int)
+        category_id = _category_filter_arg()
+        q = (request.args.get('q') or '').strip()
+        date_from = _parse_date((request.args.get('date_from') or '').strip(), fallback=None)
+        date_to = _parse_date((request.args.get('date_to') or '').strip(), fallback=None)
+
+        rows = _site_supplier_supplied_rows(
+            project_id=project_id, category_id=category_id, material_id=material_id,
+            supplier_id=supplier_id, date_from=date_from, date_to=date_to)
+        if q:
+            needle = q.lower()
+            rows = [r for r in rows
+                    if needle in (r['supplier_name'] or '').lower()
+                    or needle in (r['project_name'] or '').lower()]
+
+        category_map = _material_category_map()
+        projects = {int(p.id): p.name for p in Project.query.order_by(Project.name.asc()).all()}
+        suppliers = {int(s.id): s for s in Supplier.query.filter(Supplier.is_void == False).all()}
+
+        sites = {}
+        for row in rows:
+            site = sites.setdefault(row['project_id'], {
+                'project_id': row['project_id'],
+                'project_name': row['project_name'],
+                'rows': [],
+                'supplier_ids': set(),
+                'quantity': 0.0,
+                'value': 0.0,
+                'assigned': [],
+            })
+            site['rows'].append(row)
+            site['supplier_ids'].add(row['supplier_id'])
+            site['quantity'] += row['quantity']
+            site['value'] += row['value']
+        # Stated assignments join the same view, marked as assigned-not-yet-supplied.
+        link_query = SupplierSite.query
+        if project_id:
+            link_query = link_query.filter(SupplierSite.project_id == int(project_id))
+        if supplier_id:
+            link_query = link_query.filter(SupplierSite.supplier_id == int(supplier_id))
+        for link in link_query.all():
+            sid = int(link.supplier_id or 0)
+            pid = int(link.project_id or 0)
+            if not sid or not pid:
+                continue
+            supplier = suppliers.get(sid)
+            if not supplier:
+                continue
+            site = sites.setdefault(pid, {
+                'project_id': pid,
+                'project_name': projects.get(pid, f'Site #{pid}'),
+                'rows': [], 'supplier_ids': set(), 'quantity': 0.0, 'value': 0.0, 'assigned': [],
+            })
+            if sid not in site['supplier_ids']:
+                site['assigned'].append({
+                    'supplier_id': sid,
+                    'supplier_name': supplier.name,
+                    'note': link.note or '',
+                })
+        site_rows = []
+        for site in sites.values():
+            site['rows'].sort(key=lambda r: (-r['value'], r['supplier_name'].lower()))
+            site['assigned'].sort(key=lambda r: r['supplier_name'].lower())
+            site['supplier_count'] = len(site['supplier_ids'])
+            del site['supplier_ids']
+            site_rows.append(site)
+        site_rows.sort(key=lambda s: s['project_name'].lower())
+
+        supplier_rows = {}
+        for row in rows:
+            entry = supplier_rows.setdefault(row['supplier_id'], {
+                'supplier_id': row['supplier_id'],
+                'supplier_name': row['supplier_name'],
+                'site_ids': set(),
+                'supplied_categories': set(),
+                'quantity': 0.0,
+                'value': 0.0,
+            })
+            entry['site_ids'].add(row['project_id'])
+            entry['quantity'] += row['quantity']
+            entry['value'] += row['value']
+            for category_name in row['category_names']:
+                entry['supplied_categories'].add(category_name)
+        stated_sites = _supplier_site_ids_map()
+        stated_categories = _supplier_category_ids_map()
+        for sid, entry in supplier_rows.items():
+            entry['site_names'] = sorted(projects.get(pid, f'Site #{pid}') for pid in entry['site_ids'])
+            entry['site_count'] = len(entry['site_ids'])
+            entry['assigned_site_ids'] = set(stated_sites.get(sid, []))
+            entry['assigned_site_names'] = sorted(projects.get(pid, f'Site #{pid}')
+                                                  for pid in entry['assigned_site_ids'])
+            entry['supplied_category_names'] = sorted(entry['supplied_categories'])
+            entry['deals_in'] = [_material_category_label(cid, category_map=category_map)
+                                 for cid in stated_categories.get(sid, [])]
+            del entry['supplied_categories']
+        supplier_list = sorted(supplier_rows.values(), key=lambda r: (-r['value'], r['supplier_name'].lower()))
+        # Assigned-only suppliers (no delivery yet) still belong on this page.
+        for sid, supplier in suppliers.items():
+            if sid in supplier_rows or sid not in stated_sites:
+                continue
+            if project_id and int(project_id) not in set(stated_sites.get(sid, [])):
+                continue
+            supplier_list.append({
+                'supplier_id': sid,
+                'supplier_name': supplier.name,
+                'quantity': 0.0,
+                'value': 0.0,
+                'supplied_category_names': [],
+                'site_names': [],
+                'site_count': 0,
+                'assigned_site_ids': set(stated_sites.get(sid, [])),
+                'assigned_site_names': sorted(projects.get(pid, f'Site #{pid}')
+                                              for pid in stated_sites.get(sid, [])),
+                'deals_in': [_material_category_label(cid, category_map=category_map)
+                             for cid in stated_categories.get(sid, [])],
+            })
+        totals = {
+            'sites': len(site_rows),
+            'suppliers': len({r['supplier_id'] for r in rows}),
+            'quantity': float(sum(r['quantity'] for r in rows)),
+            'value': float(sum(r['value'] for r in rows)),
+        }
+        return render_template('purchase/purchase_v2_suppliers_by_site.html',
+            site_rows=site_rows,
+            supplier_rows=supplier_list,
+            totals=totals,
+            projects=Project.query.order_by(Project.name.asc()).all(),
+            materials=(MaterialV2.query.filter(MaterialV2.is_void == False)
+                       .order_by(MaterialV2.name.asc()).all()),
+            supplier_options=Supplier.query.filter(Supplier.is_void == False)
+                              .order_by(Supplier.name.asc()).all(),
+            selected_project_id=project_id,
+            selected_supplier_id=supplier_id,
+            selected_material_id=material_id,
+            q=q,
+            filter_date_from=(date_from.isoformat() if date_from else ''),
+            filter_date_to=(date_to.isoformat() if date_to else ''),
+            **_category_filter_context(category_id)
+        )
+
+
+    @app.route('/hdc/purchase-v2/suppliers/<int:supplier_id>/categories/add', methods=['POST'])
+    @login_required
+    @_money_write_required()
+    def hdc_purchase_v2_supplier_category_add(supplier_id):
+        supplier = Supplier.query.get_or_404(supplier_id)
+        category = _material_category_by_id(request.form.get('category_id'), active_only=True)
+        if not category:
+            flash('Select an active category.', 'danger')
+            return redirect(url_for('hdc_purchase_v2_supplier_detail', supplier_id=supplier.id))
+        exists = (SupplierCategory.query
+                  .filter(SupplierCategory.supplier_id == supplier.id,
+                          SupplierCategory.category_id == category.id).first())
+        if exists:
+            flash(f'{supplier.name} already deals in {category.name}.', 'warning')
+            return redirect(url_for('hdc_purchase_v2_supplier_detail', supplier_id=supplier.id))
+        db.session.add(SupplierCategory(supplier_id=supplier.id, category_id=category.id,
+                                        created_at=_pkt_now_naive()))
+        log_action(current_user, 'update',
+                   f'{current_user.username.title()} set supplier #{supplier.id} to deal in {category.name}',
+                   'supplier_category', supplier.id)
+        db.session.commit()
+        flash(f'{supplier.name} now deals in {category.name}.', 'success')
+        return redirect(url_for('hdc_purchase_v2_supplier_detail', supplier_id=supplier.id))
+
+
+    @app.route('/hdc/purchase-v2/suppliers/<int:supplier_id>/categories/<int:category_id>/remove', methods=['POST'])
+    @login_required
+    @_money_write_required()
+    def hdc_purchase_v2_supplier_category_remove(supplier_id, category_id):
+        supplier = Supplier.query.get_or_404(supplier_id)
+        link = (SupplierCategory.query
+                .filter(SupplierCategory.supplier_id == supplier.id,
+                        SupplierCategory.category_id == int(category_id)).first())
+        if not link:
+            flash('That category is not linked to this supplier.', 'warning')
+            return redirect(url_for('hdc_purchase_v2_supplier_detail', supplier_id=supplier.id))
+        db.session.delete(link)
+        log_action(current_user, 'update',
+                   f'{current_user.username.title()} removed category link #{category_id} from supplier #{supplier.id}',
+                   'supplier_category', supplier.id)
+        db.session.commit()
+        flash('Category link removed. Purchases and deliveries stay untouched.', 'success')
+        return redirect(url_for('hdc_purchase_v2_supplier_detail', supplier_id=supplier.id))
+
+
+    @app.route('/hdc/purchase-v2/suppliers/<int:supplier_id>/sites/add', methods=['POST'])
+    @login_required
+    @_money_write_required()
+    def hdc_purchase_v2_supplier_site_add(supplier_id):
+        supplier = Supplier.query.get_or_404(supplier_id)
+        project_id = request.form.get('project_id', type=int)
+        project = Project.query.get(project_id) if project_id else None
+        if not project:
+            flash('Select a valid site / project.', 'danger')
+            return redirect(url_for('hdc_purchase_v2_supplier_detail', supplier_id=supplier.id))
+        exists = (SupplierSite.query
+                  .filter(SupplierSite.supplier_id == supplier.id,
+                          SupplierSite.project_id == project.id).first())
+        if exists:
+            flash(f'{supplier.name} is already assigned to {project.name}.', 'warning')
+            return redirect(url_for('hdc_purchase_v2_supplier_detail', supplier_id=supplier.id))
+        db.session.add(SupplierSite(supplier_id=supplier.id, project_id=project.id,
+                                    note=(request.form.get('note') or '').strip() or None,
+                                    created_at=_pkt_now_naive()))
+        log_action(current_user, 'update',
+                   f'{current_user.username.title()} assigned supplier #{supplier.id} to site {project.name}',
+                   'supplier_site', supplier.id)
+        db.session.commit()
+        flash(f'{supplier.name} assigned to {project.name}.', 'success')
+        return redirect(url_for('hdc_purchase_v2_supplier_detail', supplier_id=supplier.id))
+
+
+    @app.route('/hdc/purchase-v2/suppliers/<int:supplier_id>/sites/<int:project_id>/remove', methods=['POST'])
+    @login_required
+    @_money_write_required()
+    def hdc_purchase_v2_supplier_site_remove(supplier_id, project_id):
+        supplier = Supplier.query.get_or_404(supplier_id)
+        link = (SupplierSite.query
+                .filter(SupplierSite.supplier_id == supplier.id,
+                        SupplierSite.project_id == int(project_id)).first())
+        if not link:
+            flash('That site is not assigned to this supplier.', 'warning')
+            return redirect(url_for('hdc_purchase_v2_supplier_detail', supplier_id=supplier.id))
+        db.session.delete(link)
+        log_action(current_user, 'update',
+                   f'{current_user.username.title()} removed site link #{project_id} from supplier #{supplier.id}',
+                   'supplier_site', supplier.id)
+        db.session.commit()
+        flash('Site assignment removed. Deliveries stay untouched.', 'success')
+        return redirect(url_for('hdc_purchase_v2_supplier_detail', supplier_id=supplier.id))

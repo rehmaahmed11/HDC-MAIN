@@ -74,6 +74,10 @@ READ_PAGES = [
     "/hdc/purchase-v2/purchases", "/hdc/purchase-v2/suppliers",
     "/hdc/purchase-v2/delivered", "/hdc/purchase-v2/usage",
     "/hdc/purchase-v2/stock", "/hdc/estimation",
+    # Item types + the two directions of the supplier ⇄ material / site
+    # tracking added with the Purchase categories work.
+    "/hdc/purchase-v2/categories", "/hdc/purchase-v2/items",
+    "/hdc/purchase-v2/suppliers-by-site",
     "/hdc/project-estimation", "/hdc/estimation/formulas",
     "/hdc/reports", "/hdc/reports/glance",
     "/hdc/reports/export/profitability", "/hdc/reports/export/salary",

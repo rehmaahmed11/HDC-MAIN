@@ -1,0 +1,232 @@
+{% extends "shared/base.html" %}
+{% block title %}Item: {{ material.name }}{% endblock %}
+{% block page_heading %}Item Ledger: {{ material.name }}{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap gap-2 align-items-center mt-1 mb-3">
+    <a href="{{ url_for('hdc_purchase_v2_items') }}" class="btn btn-sm btn-outline-secondary">
+        <i class="fas fa-arrow-left me-1"></i>All Items
+    </a>
+    <span class="badge bg-secondary">#{{ material.id }}</span>
+    <a href="{{ url_for('hdc_purchase_v2_items', category_id=category_id) }}"
+       class="badge {% if category_id == uncategorized_id %}bg-warning text-dark{% else %}bg-dark{% endif %} text-decoration-none">
+        <i class="fas fa-tag me-1"></i>{{ category_name }}
+    </a>
+    <span class="badge bg-info text-dark">Unit: {{ material.unit or '-' }}</span>
+    <span class="badge {% if (material.status or 'active') == 'active' %}bg-success{% else %}bg-warning text-dark{% endif %}">
+        {{ (material.status or 'active')|title }}
+    </span>
+    <div class="ms-auto d-flex flex-wrap gap-1">
+        <a href="{{ url_for('hdc_purchase_v2_purchases', material_id=material.id) }}"
+           class="btn btn-sm btn-outline-success">Purchases</a>
+        <a href="{{ url_for('hdc_purchase_v2_delivered', material_id=material.id) }}"
+           class="btn btn-sm btn-outline-primary">Deliveries</a>
+        <a href="{{ url_for('hdc_purchase_v2_usage_page', material_id=material.id) }}"
+           class="btn btn-sm btn-outline-warning">Usage</a>
+        <a href="{{ url_for('hdc_purchase_v2_stock', material_id=material.id) }}"
+           class="btn btn-sm btn-outline-dark">Stock</a>
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-6 col-md-3 col-lg-2">
+        <div class="kpi-card kpi-green h-100 text-center">
+            <div class="kpi-value">Rs {{ "{:,.0f}".format(purchase_total_value or 0) }}</div>
+            <div class="kpi-label">Purchased Value</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3 col-lg-2">
+        <div class="kpi-card kpi-blue h-100 text-center">
+            <div class="kpi-value">{{ "{:,.2f}".format(purchase_total_qty or 0) }}</div>
+            <div class="kpi-label">Purchased Qty</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3 col-lg-2">
+        <div class="kpi-card kpi-blue h-100 text-center">
+            <div class="kpi-value">{{ "{:,.2f}".format(delivered_qty or 0) }}</div>
+            <div class="kpi-label">Sent Qty</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3 col-lg-2">
+        <div class="kpi-card kpi-red h-100 text-center">
+            <div class="kpi-value">{{ "{:,.2f}".format(used_qty or 0) }}</div>
+            <div class="kpi-label">Used Qty</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3 col-lg-2">
+        <div class="kpi-card kpi-blue h-100 text-center">
+            <div class="kpi-value">{{ "{:,.2f}".format(in_store_qty or 0) }}</div>
+            <div class="kpi-label">In Store (all sites)</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3 col-lg-2">
+        <div class="kpi-card {% if (at_site_qty or 0) <= 0 %}kpi-red{% else %}kpi-green{% endif %} h-100 text-center">
+            <div class="kpi-value">{{ "{:,.2f}".format(at_site_qty or 0) }}</div>
+            <div class="kpi-label">Balance at Site (filtered)</div>
+        </div>
+    </div>
+</div>
+
+<div class="card hdc-card mb-3">
+    <div class="card-body py-2 d-flex flex-wrap gap-3 small">
+        <span><span class="text-muted">Lifetime sent:</span> <span class="fw-semibold">{{ "{:,.2f}".format(lifetime_delivered or 0) }}</span></span>
+        <span><span class="text-muted">Lifetime used:</span> <span class="fw-semibold">{{ "{:,.2f}".format(lifetime_used or 0) }}</span></span>
+        <span><span class="text-muted">Weighted cost / unit:</span> <span class="fw-semibold">Rs {{ "{:,.2f}".format(weighted_cost or 0) }}</span></span>
+        <span><span class="text-muted">Forwarding note:</span> <span class="text-muted">“In store” and “balance at site” below follow the site / stage / date filters.</span></span>
+    </div>
+</div>
+
+<div class="card hdc-card mb-3">
+    <div class="card-body py-2">
+        <form method="get" class="d-flex flex-wrap gap-2 align-items-end">
+            <div>
+                <label class="form-label small fw-semibold mb-1">Site</label>
+                <select name="project_id" class="form-select form-select-sm" style="min-width:170px">
+                    <option value="">All Sites</option>
+                    {% for p in projects %}
+                    <option value="{{ p.id }}" {% if selected_project_id == p.id %}selected{% endif %}>{{ p.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="form-label small fw-semibold mb-1">Stage</label>
+                <select name="stage_id" class="form-select form-select-sm" style="min-width:160px">
+                    <option value="">All Stages</option>
+                    {% for s in stages %}
+                    <option value="{{ s.id }}" {% if selected_stage_id == s.id %}selected{% endif %}>
+                        {{ s.name }}{% if s.project %} — {{ s.project.name }}{% endif %}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="form-label small fw-semibold mb-1">From / To</label>
+                <div class="input-group input-group-sm">
+                    <input type="date" name="date_from" class="form-control" value="{{ filter_date_from }}">
+                    <span class="input-group-text">to</span>
+                    <input type="date" name="date_to" class="form-control" value="{{ filter_date_to }}">
+                </div>
+            </div>
+            <button type="submit" class="btn btn-sm btn-mint"><i class="fas fa-filter me-1"></i>Filter</button>
+            <a href="{{ url_for('hdc_purchase_v2_item_detail', material_id=material.id) }}"
+               class="btn btn-sm btn-outline-secondary">Clear</a>
+            <a href="{{ url_for('hdc_purchase_v2_item_detail', material_id=material.id) }}"
+               class="btn btn-sm btn-outline-dark">All Sites</a>
+            <a href="{{ url_for('hdc_purchase_v2_item_detail', material_id=material.id) }}"
+               class="btn btn-sm btn-outline-dark">All Stages</a>
+        </form>
+    </div>
+</div>
+
+<!-- Purchases for this item -->
+<div class="card hdc-card mb-3">
+    <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+        <span><i class="fas fa-cart-shopping me-2"></i>Purchases ({{ purchases|length }})</span>
+        <span class="small text-muted">Newest entry first</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table hdc-table table-sm align-middle mb-0">
+            <thead>
+                <tr>
+                    <th>PO #</th><th>Date</th><th>Recorded</th><th>Supplier</th><th>Category</th>
+                    <th class="text-end">Qty</th><th class="text-end">Delivered</th><th class="text-end">Rate</th>
+                    <th class="text-end">Total</th><th>Status</th><th>Challan</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for p in purchases %}
+                <tr {{ p|hdc_row_attrs }}>
+                    <td class="text-muted small">#{{ p.id }}</td>
+                    <td class="small">{{ p.date or '-' }}</td>
+                    <td class="small text-muted">{{ p.created_at.strftime('%Y-%m-%d %H:%M') if p.created_at else '-' }}</td>
+                    <td class="fw-semibold">{{ p.supplier.name if p.supplier else '-' }}</td>
+                    <td>
+                        <span class="badge bg-secondary">{{ p.category.name if p.category else (p.material.category.name if p.material and p.material.category else 'Uncategorized') }}</span>
+                    </td>
+                    <td class="text-end">{{ "{:,.2f}".format(p.quantity or 0) }}</td>
+                    <td class="text-end">{{ "{:,.2f}".format(delivered_map.get(p.id, 0) or 0) }}</td>
+                    <td class="text-end">{{ "{:,.2f}".format(p.unit_price or 0) }}</td>
+                    <td class="text-end fw-semibold">{{ "{:,.0f}".format(p.total_amount or 0) }}</td>
+                    <td>
+                        <span class="badge {% if (p.payment_status or '') == 'paid' %}bg-success{% else %}bg-warning text-dark{% endif %}">
+                            {{ (p.payment_status or 'unpaid')|title }}
+                        </span>
+                    </td>
+                    <td class="small text-muted">{{ p.challan_no or '-' }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="11" class="text-center text-muted py-3">No purchases for this item in the selected range.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Deliveries for this item -->
+<div class="card hdc-card mb-3">
+    <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+        <span><i class="fas fa-dolly me-2"></i>Deliveries / Stock Movement ({{ deliveries|length }})</span>
+        <span class="badge bg-info text-dark">Sent: {{ "{:,.2f}".format(delivered_qty or 0) }} {{ material.unit or '' }}</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table hdc-table table-sm align-middle mb-0">
+            <thead>
+                <tr><th>#</th><th>Date</th><th>Recorded</th><th>PO #</th><th>Site</th><th>Stage</th>
+                    <th class="text-end">Qty</th><th>Delivered By</th><th>Notes</th></tr>
+            </thead>
+            <tbody>
+                {% for d in deliveries %}
+                <tr {{ d|hdc_row_attrs }}>
+                    <td class="text-muted small">#{{ d.id }}</td>
+                    <td class="small">{{ d.date or '-' }}</td>
+                    <td class="small text-muted">{{ d.created_at.strftime('%Y-%m-%d %H:%M') if d.created_at else '-' }}</td>
+                    <td class="small">{% if d.purchase_id %}PO #{{ d.purchase_id }}{% else %}-{% endif %}</td>
+                    <td>{{ d.project.name if d.project else '-' }}</td>
+                    <td class="small text-muted">{{ d.stage.name if d.stage else '-' }}</td>
+                    <td class="text-end fw-semibold {% if (d.quantity or 0) < 0 %}text-danger{% endif %}">
+                        {{ "{:,.2f}".format(d.quantity or 0) }}
+                    </td>
+                    <td class="small text-muted">{{ d.delivery_person or '-' }}</td>
+                    <td class="small text-muted">{{ d.notes or '' }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="9" class="text-center text-muted py-3">No deliveries for this item in this scope.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Usage for this item -->
+<div class="card hdc-card">
+    <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+        <span><i class="fas fa-tools me-2"></i>Material Usage ({{ usages|length }})</span>
+        <span class="badge bg-danger">Used: {{ "{:,.2f}".format(used_qty or 0) }} {{ material.unit or '' }} · Rs {{ "{:,.0f}".format(used_cost or 0) }}</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table hdc-table table-sm align-middle mb-0">
+            <thead>
+                <tr><th>#</th><th>Date</th><th>Recorded</th><th>PO #</th><th>Site</th><th>Stage</th>
+                    <th class="text-end">Qty</th><th class="text-end">Cost</th><th>Notes</th></tr>
+            </thead>
+            <tbody>
+                {% for u in usages %}
+                <tr {{ u|hdc_row_attrs }}>
+                    <td class="text-muted small">#{{ u.id }}</td>
+                    <td class="small">{{ u.date or '-' }}</td>
+                    <td class="small text-muted">{{ u.created_at.strftime('%Y-%m-%d %H:%M') if u.created_at else '-' }}</td>
+                    <td class="small">{% if u.purchase_id %}PO #{{ u.purchase_id }}{% else %}-{% endif %}</td>
+                    <td>{{ u.project.name if u.project else '-' }}</td>
+                    <td class="small text-muted">{{ u.stage.name if u.stage else '-' }}</td>
+                    <td class="text-end fw-semibold">{{ "{:,.2f}".format(u.quantity or 0) }}</td>
+                    <td class="text-end">{{ "{:,.0f}".format(u.cost or 0) }}</td>
+                    <td class="small text-muted">{{ u.notes or '' }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="9" class="text-center text-muted py-3">No usage entries for this item in this scope.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
