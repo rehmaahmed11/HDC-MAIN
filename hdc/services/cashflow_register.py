@@ -49,6 +49,9 @@ from hdc.models.cashflow import (
     CashFlowParty,
     CashFlowSubcategory,
 )
+from hdc.services.party_categories import (
+    default_party_category_for_type, ensure_party_has_category,
+)
 from hdc.utils.dates import _pkt_now_naive
 from hdc.utils.money import from_minor, sync_money_fields, to_minor
 
@@ -1404,7 +1407,8 @@ def party_type_allowed(rules, party_type):
     return ptype in allowed or ptype == 'other'
 
 
-def save_cf_party(name, party_type='other', phone=None, note=None):
+def save_cf_party(name, party_type='other', phone=None, note=None,
+                  category_id=None):
     """Get-or-create a party by name (case-insensitive).  Returns ``(row, created)``.
 
     A generic ``other`` never overwrites a specific classification.  The entry
@@ -1413,6 +1417,12 @@ def save_cf_party(name, party_type='other', phone=None, note=None):
     re-file a known supplier as "other" every time a payment was recorded
     against them.  An explicit type still wins (that is how a party is
     reclassified), and ``other`` still applies to a party that has none.
+
+    ``category_id`` is the operator's own directory filing (see
+    :mod:`hdc.services.party_categories`).  When it is omitted a new party is
+    filed under the category that matches its type, so the automatic syncs
+    keep landing in the shipped buckets; passing it files the party exactly
+    where the form asked.
     """
     nm = (name or '').strip()
     if not nm:
@@ -1425,10 +1435,27 @@ def save_cf_party(name, party_type='other', phone=None, note=None):
         current = (row.party_type or 'other').strip().lower() or 'other'
         if ptype and ptype != current and (ptype != 'other' or current == 'other'):
             row.party_type = ptype
+        if category_id not in (None, ''):
+            from hdc.services.party_categories import category_by_id
+            cat = category_by_id(category_id)
+            if cat is None:
+                raise ValueError('Choose a valid party category.')
+            row.category_id = int(cat.id)
+        else:
+            ensure_party_has_category(row)
         db.session.flush()
         return row, False
+    cat = None
+    if category_id not in (None, ''):
+        from hdc.services.party_categories import category_by_id
+        cat = category_by_id(category_id)
+        if cat is None:
+            raise ValueError('Choose a valid party category.')
+    if cat is None:
+        cat = default_party_category_for_type(ptype)
     row = CashFlowParty(name=nm[:160], party_type=ptype, phone=(phone or '').strip() or None,
-                        note=(note or '').strip() or None, is_active=True)
+                        note=(note or '').strip() or None, is_active=True,
+                        category_id=(int(cat.id) if cat is not None else None))
     db.session.add(row)
     db.session.flush()
     return row, True
@@ -1445,6 +1472,10 @@ def ensure_party(name, party_type='other', phone=None, note=None, *, reactivate=
     is reactivated by default when new activity happens. Directory-only syncs
     should pass ``reactivate=False`` so an explicit deactivation sticks.
     Returns ``(row, created)``.
+
+    A party's **category** is only ever filled in when it has none: once the
+    operator has filed a party (say a lender into *Cement Dealers*), a rental
+    sync must not drag it back to the type-derived bucket.
     """
     nm = (name or '').strip()
     if not nm:
@@ -1461,10 +1492,13 @@ def ensure_party(name, party_type='other', phone=None, note=None, *, reactivate=
         current = (row.party_type or 'other').strip().lower() or 'other'
         if current == 'other' and ptype != 'other':
             row.party_type = ptype
+        ensure_party_has_category(row)
         db.session.flush()
         return row, False
+    cat = default_party_category_for_type(ptype)
     row = CashFlowParty(name=nm[:160], party_type=ptype, phone=(phone or '').strip() or None,
-                        note=(note or '').strip() or None, is_active=True)
+                        note=(note or '').strip() or None, is_active=True,
+                        category_id=(int(cat.id) if cat is not None else None))
     db.session.add(row)
     db.session.flush()
     return row, True
@@ -1645,8 +1679,13 @@ def update_cf_category(category, *, name=None, direction=None, notes=None, sort_
 
 
 def update_cf_party(party, *, name=None, party_type=None, phone=None, note=None,
-                    is_active=None, commit=True):
-    """Edit a register party (Settings → Cash Flow).  Only passed fields change."""
+                    is_active=None, category_id=None, commit=True):
+    """Edit a register party (Settings → Cash Flow).  Only passed fields change.
+
+    ``category_id`` follows the same rule as the other fields — ``None`` keeps
+    the current filing — except that an empty string **clears** it, which the
+    Party form uses for "Automatic (from the party type)".
+    """
     if party is None:
         raise ValueError('Party not found.')
     if name is not None:
@@ -1671,6 +1710,15 @@ def update_cf_party(party, *, name=None, party_type=None, phone=None, note=None,
         party.note = (note or '').strip()[:300] or None
     if is_active is not None:
         party.is_active = bool(is_active)
+    if category_id is not None:
+        from hdc.services.party_categories import category_by_id
+        if str(category_id).strip() == '':
+            party.category_id = None
+        else:
+            cat = category_by_id(category_id)
+            if cat is None:
+                raise ValueError('Choose a valid party category.')
+            party.category_id = int(cat.id)
     db.session.flush()
     if commit:
         db.session.commit()

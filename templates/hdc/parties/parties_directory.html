@@ -6,7 +6,9 @@
 {% from "shared/_combo_field.html" import combo_select %}
 {% from "parties/_party_form_fields.html" import party_fields %}
 
-{# KPI cards are also the category filter. The active card is the current view. #}
+{# KPI cards are also the category filter. Both come from the
+   hdc_party_category table: a category created in the card below is a card
+   and a filter here on the next render — nothing is hard-coded in the page. #}
 <div class="row g-3 mt-1 mb-3">
     <div class="col-6 col-md-4 col-lg-3 col-xxl-2">
         <a href="{{ url_for('hdc_parties', q=search, status=status) }}" class="text-decoration-none">
@@ -18,18 +20,31 @@
             </div>
         </a>
     </div>
-    {% for key, label, icon, colour, hint in categories %}
+    {% for cat in categories if cat.visible %}
     <div class="col-6 col-md-4 col-lg-3 col-xxl-2">
-        <a href="{{ url_for('hdc_parties', category=key, q=search, status=status) }}" class="text-decoration-none" title="{{ hint }}">
-            <div class="kpi-card {{ colour }} h-100{% if category == key %} kpi-filter-active{% endif %}">
-                <div class="kpi-icon"><i class="fas {{ icon }}"></i></div>
-                <div class="kpi-value">{{ counts[key] }}</div>
-                <div class="kpi-label">{{ label }}</div>
-                <div class="kpi-sub">Filter the ledger</div>
+        <a href="{{ url_for('hdc_parties', category=cat.key, q=search, status=status) }}"
+           class="text-decoration-none" title="{{ cat.description }}">
+            <div class="kpi-card {{ cat.colour }} h-100{% if category == cat.key %} kpi-filter-active{% endif %}">
+                <div class="kpi-icon"><i class="fas {{ cat.icon }}"></i></div>
+                <div class="kpi-value">{{ cat.count }}</div>
+                <div class="kpi-label">{{ cat.name }}</div>
+                <div class="kpi-sub">{% if cat.is_active %}Filter the ledger{% else %}Retired category{% endif %}</div>
             </div>
         </a>
     </div>
     {% endfor %}
+    {% if counts.uncategorised %}
+    <div class="col-6 col-md-4 col-lg-3 col-xxl-2">
+        <a href="{{ url_for('hdc_parties', category='uncategorised', q=search, status=status) }}" class="text-decoration-none">
+            <div class="kpi-card kpi-slate h-100{% if category == 'uncategorised' %} kpi-filter-active{% endif %}">
+                <div class="kpi-icon"><i class="fas fa-circle-question"></i></div>
+                <div class="kpi-value">{{ counts.uncategorised }}</div>
+                <div class="kpi-label">Uncategorised</div>
+                <div class="kpi-sub">No category available</div>
+            </div>
+        </a>
+    </div>
+    {% endif %}
 </div>
 
 <div class="row g-3">
@@ -43,11 +58,123 @@
                     <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
                     <input type="hidden" name="action" value="add_party">
                     {# The same macro the Edit window renders — one form, both uses. #}
-                    {{ party_fields(id_prefix='party', type_choices=type_choices, name_options=name_options) }}
+                    {{ party_fields(id_prefix='party', type_choices=type_choices,
+                                    name_options=name_options, categories=categories) }}
                     <button type="submit" class="btn btn-primary btn-sm w-100">
                         <i class="fas fa-plus me-1" aria-hidden="true"></i>Add Party
                     </button>
                 </form>
+            </div>
+        </div>
+
+        <div class="card hdc-card mt-3" id="party-categories">
+            <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-tags me-2" aria-hidden="true"></i>Party Categories</span>
+                <span class="badge bg-secondary">{{ categories|length }}</span>
+            </div>
+            <div class="card-body">
+                <p class="small text-muted mb-2">
+                    Categories are yours: name one anything, then file parties into it
+                    here, on the party form, or in bulk from the table.
+                </p>
+                <form method="post" action="{{ url_for('hdc_parties') }}" data-hdc-dialog>
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+                    <input type="hidden" name="action" value="add_category">
+                    <div class="mb-2">
+                        <label class="form-label" for="newCategoryName">New category</label>
+                        <input type="text" class="form-control form-control-sm" id="newCategoryName"
+                               name="name" required maxlength="120" autocomplete="off"
+                               placeholder="e.g. Cement Dealers, Steel Suppliers, Family…">
+                    </div>
+                    <div class="row g-2 mb-2">
+                        <div class="col-6">
+                            <label class="form-label" for="newCategoryIcon">Icon</label>
+                            <select class="form-select form-select-sm" id="newCategoryIcon" name="icon">
+                                {% for value, label in category_icons %}
+                                <option value="{{ value }}">{{ label }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label" for="newCategoryColour">Colour</label>
+                            <select class="form-select form-select-sm" id="newCategoryColour" name="colour">
+                                {% for value, label in category_colours %}
+                                <option value="{{ value }}" {% if value == 'kpi-teal' %}selected{% endif %}>{{ label }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label" for="newCategoryDescription">Description <span class="hdc-optional">optional</span></label>
+                        <input type="text" class="form-control form-control-sm" id="newCategoryDescription"
+                               name="description" maxlength="300" autocomplete="off"
+                               placeholder="What belongs in this folder?">
+                    </div>
+                    <button type="submit" class="btn btn-sm btn-outline-primary w-100">
+                        <i class="fas fa-plus me-1" aria-hidden="true"></i>Create Category
+                    </button>
+                </form>
+
+                <hr>
+                <div class="d-flex flex-column gap-2" id="categoryList">
+                    {% for cat in categories %}
+                    <div class="d-flex align-items-start gap-2 {% if not cat.is_active %}opacity-75{% endif %}">
+                        <span class="badge {{ cat.colour }} text-white mt-1" style="min-width:1.6rem">
+                            <i class="fas {{ cat.icon }}" aria-hidden="true"></i>
+                        </span>
+                        <div class="flex-grow-1 min-w-0">
+                            <a href="{{ url_for('hdc_parties', category=cat.key) }}"
+                               class="fw-semibold text-decoration-none">{{ cat.name }}</a>
+                            <span class="badge bg-light text-dark border">{{ cat.count }}</span>
+                            {% if not cat.is_active %}<span class="badge bg-secondary">Retired</span>{% endif %}
+                            <div class="small text-muted">{{ cat.description }}</div>
+                        </div>
+                        <div class="hdc-row-actions" role="group" aria-label="Category {{ cat.name }}">
+                            <button type="button" class="btn btn-sm btn-outline-secondary js-edit-category"
+                                    data-category-id="{{ cat.id }}"
+                                    data-category-name="{{ cat.name }}"
+                                    data-category-description="{{ cat.description }}"
+                                    data-category-icon="{{ cat.icon }}"
+                                    data-category-colour="{{ cat.colour }}"
+                                    title="Rename / recolour this category"
+                                    aria-label="Edit category {{ cat.name }}">
+                                <i class="fas fa-pen" aria-hidden="true"></i>
+                            </button>
+                            <form method="post" action="{{ url_for('hdc_parties') }}" data-hdc-dialog class="d-inline">
+                                <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+                                <input type="hidden" name="action" value="toggle_category">
+                                <input type="hidden" name="category_id" value="{{ cat.id }}">
+                                <button type="submit"
+                                        class="btn btn-sm {% if cat.is_active %}btn-outline-secondary{% else %}btn-outline-success{% endif %}"
+                                        title="{{ 'Retire — stop offering it for new filing' if cat.is_active else 'Activate — offer it in party forms again' }}"
+                                        aria-label="{{ 'Retire' if cat.is_active else 'Activate' }} category {{ cat.name }}">
+                                    <i class="fas {{ 'fa-eye-slash' if cat.is_active else 'fa-eye' }}" aria-hidden="true"></i>
+                                </button>
+                            </form>
+                            {% if cat.in_use %}
+                            <button type="button" class="btn btn-sm btn-outline-danger" disabled
+                                    title="Move the {{ cat.count }} party(ies) filed here first, or retire the category">
+                                <i class="fas fa-trash" aria-hidden="true"></i>
+                            </button>
+                            {% else %}
+                            <form method="post" action="{{ url_for('hdc_parties') }}" data-hdc-dialog class="d-inline">
+                                <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+                                <input type="hidden" name="action" value="delete_category">
+                                <input type="hidden" name="category_id" value="{{ cat.id }}">
+                                <button type="submit" class="btn btn-sm btn-outline-danger"
+                                        title="Delete this empty category"
+                                        aria-label="Delete category {{ cat.name }}">
+                                    <i class="fas fa-trash" aria-hidden="true"></i>
+                                </button>
+                            </form>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% endfor %}
+                    {% if not categories %}
+                    <div class="small text-muted">No categories yet — create the first one above.</div>
+                    {% endif %}
+                </div>
             </div>
         </div>
 
@@ -57,7 +184,7 @@
             </div>
             <div class="card-body">
                 <p class="small text-muted mb-2">
-                    <strong>Workers:</strong> {{ counts.worker }} worker parties / {{ counts.worker_total }} on the books.
+                    <strong>Workers:</strong> {{ counts.get('worker', 0) }} worker parties / {{ counts.worker_total }} on the books.
                 </p>
                 <form method="post" action="{{ url_for('hdc_parties') }}" class="mb-2" data-hdc-dialog>
                     <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
@@ -67,7 +194,7 @@
                     </button>
                 </form>
                 <p class="small text-muted mb-2">
-                    <strong>Project Clients:</strong> {{ counts.client }} client parties / {{ counts.client_total or 0 }} distinct clients from Projects.
+                    <strong>Project Clients:</strong> {{ counts.get('client', 0) }} client parties / {{ counts.client_total or 0 }} distinct clients from Projects.
                     {% if counts.client_auto_added %}Auto-added {{ counts.client_auto_added }} just now.{% endif %}
                 </p>
                 <form method="post" action="{{ url_for('hdc_parties') }}" data-hdc-dialog>
@@ -78,7 +205,7 @@
                     </button>
                 </form>
                 <div class="alert alert-info py-2 small mt-3 mb-0">
-                    <i class="fas fa-link me-1"></i><strong>Projects ↔ Parties:</strong> When you create a Project with a Client name, a Party of type <em>Client / Owner</em> is auto-created. That Party then shows all projects owned by that person and their combined receivable.
+                    <i class="fas fa-link me-1"></i><strong>Projects ↔ Parties:</strong> When you create a Project with a Client name, a Party of type <em>Client / Owner</em> is auto-created. That Party then shows all projects owned by that person and their combined receivable. Its <em>Category</em> can be changed at any time.
                 </div>
             </div>
         </div>
@@ -93,12 +220,15 @@
             <div class="card-body">
                 <form method="get" action="{{ url_for('hdc_parties') }}" class="row g-2">
                     <div class="col-md-3">
-                        <label class="form-label" for="partyCategory">Category</label>
-                        <select class="form-select" id="partyCategory" name="category">
+                        <label class="form-label" for="partyCategoryFilter">Category</label>
+                        <select class="form-select" id="partyCategoryFilter" name="category">
                             <option value="">All parties</option>
-                            {% for key, label, icon, colour, hint in categories %}
-                            <option value="{{ key }}" {% if category == key %}selected{% endif %}>{{ label }}</option>
+                            {% for cat in categories if cat.visible %}
+                            <option value="{{ cat.key }}" {% if category == cat.key %}selected{% endif %}>{{ cat.name }}{% if not cat.is_active %} (retired){% endif %}</option>
                             {% endfor %}
+                            {% if counts.uncategorised %}
+                            <option value="uncategorised" {% if category == 'uncategorised' %}selected{% endif %}>Uncategorised</option>
+                            {% endif %}
                         </select>
                     </div>
                     <div class="col-md-4">
@@ -142,10 +272,36 @@
                 </span>
                 <span class="small text-muted">Open a row for the dated transaction list + linked projects</span>
             </div>
+            {# The selected rows post through this form; the checkboxes inside the
+               table reference it with the HTML ``form`` attribute, so no form is
+               nested inside another. #}
+            <form id="bulkAssignForm" method="post" action="{{ url_for('hdc_parties') }}"
+                  class="d-flex align-items-center gap-2 flex-wrap px-3 py-2 border-bottom bg-light-subtle">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="action" value="assign_category">
+                <label class="small text-muted mb-0" for="bulkCategory">
+                    <i class="fas fa-tags me-1" aria-hidden="true"></i>File selected parties under
+                </label>
+                <select class="form-select form-select-sm w-auto" id="bulkCategory" name="category_id">
+                    <option value="">Automatic (by type)</option>
+                    {% for cat in categories if cat.is_active %}
+                    <option value="{{ cat.id }}">{{ cat.name }}</option>
+                    {% endfor %}
+                </select>
+                <button type="submit" class="btn btn-sm btn-outline-primary">
+                    Assign
+                </button>
+                <span class="small text-muted"><span id="bulkSelectedCount">0</span> selected</span>
+            </form>
             <div class="table-responsive">
                 <table class="table hdc-table table-sm mb-0 align-middle party-directory-table">
                     <thead>
                         <tr>
+                            <th class="text-center" style="width:2rem">
+                                <input type="checkbox" id="selectAllParties"
+                                       aria-label="Select every party in this view"
+                                       title="Select every party in this view">
+                            </th>
                             <th>Party</th>
                             <th>Category</th>
                             <th class="text-center">Entries</th>
@@ -160,7 +316,7 @@
                     <tbody>
                         {% if not rows %}
                         <tr>
-                            <td colspan="9" class="text-muted text-center py-4">
+                            <td colspan="10" class="text-muted text-center py-4">
                                 {% if search or selected_party_id %}
                                 No parties match these filters.
                                 {% elif category == 'loan' %}
@@ -172,6 +328,8 @@
                                 Create a Project and its client auto-appears here.
                                 {% elif category == 'supplier' %}
                                 No suppliers yet — add a material, tool or service vendor as Supplier / Vendor.
+                                {% elif category == 'uncategorised' %}
+                                Every party is filed under a category.
                                 {% else %}
                                 No parties in this view yet.
                                 {% endif %}
@@ -180,6 +338,12 @@
                         {% endif %}
                         {% for row in rows %}
                         <tr {{ row|hdc_row_attrs }} {% if not row.party.is_active %}class="table-secondary text-muted" style="opacity:.65"{% endif %}>
+                            <td class="text-center">
+                                <input type="checkbox" class="js-party-check"
+                                       form="bulkAssignForm" name="party_ids"
+                                       value="{{ row.party.id }}"
+                                       aria-label="Select {{ row.party.name }} for bulk category assignment">
+                            </td>
                             <td>
                                 <a href="{{ url_for('hdc_party_ledger', party_id=row.party.id) }}" class="fw-semibold text-decoration-none">{{ row.party.name }}</a>
                                 <div><span class="badge bg-light text-dark border">{{ row.type_label }}</span></div>
@@ -241,6 +405,7 @@
                                             data-party-id="{{ row.party.id }}"
                                             data-party-name="{{ row.party.name }}"
                                             data-party-type="{{ row.party.party_type or 'other' }}"
+                                            data-party-category="{{ row.category_id or '' }}"
                                             data-party-phone="{{ row.party.phone or '' }}"
                                             data-party-note="{{ row.party.note or '' }}"
                                             title="Edit every detail of this party"
@@ -275,6 +440,7 @@
 <style>
 .kpi-filter-active { box-shadow: 0 0 0 3px rgba(255,255,255,.55), 0 14px 34px rgba(2,6,23,.28); }
 .party-directory-table td, .party-directory-table th { vertical-align: middle; }
+#categoryList .hdc-row-actions { flex-wrap: nowrap; }
 </style>
 
 <div class="modal fade" id="editPartyModal" tabindex="-1" aria-labelledby="editPartyModalTitle" aria-hidden="true">
@@ -291,11 +457,63 @@
                 <div class="modal-body">
                     {# Exactly the Add Party fields — same macro, same labels, same
                        hints, filled from the row that was clicked. #}
-                    {{ party_fields(id_prefix='editParty', type_choices=type_choices, name_options=name_options) }}
+                    {{ party_fields(id_prefix='editParty', type_choices=type_choices,
+                                    name_options=name_options, categories=categories) }}
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
                     <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-save me-1" aria-hidden="true"></i>Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="editCategoryModal" tabindex="-1" aria-labelledby="editCategoryModalTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <form method="post" action="{{ url_for('hdc_parties') }}" id="editCategoryForm" data-hdc-dialog>
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="action" value="edit_category">
+                <input type="hidden" name="category_id" id="editCategoryId">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="editCategoryModalTitle"><i class="fas fa-tags me-2" aria-hidden="true"></i>Edit Category</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-2">
+                        <label class="form-label" for="editCategoryName">Name</label>
+                        <input type="text" class="form-control" id="editCategoryName" name="name"
+                               required maxlength="120" autocomplete="off">
+                        <div class="hdc-field-hint">Renaming keeps every party filed here and every saved filter link working.</div>
+                    </div>
+                    <div class="row g-2 mb-2">
+                        <div class="col-6">
+                            <label class="form-label" for="editCategoryIcon">Icon</label>
+                            <select class="form-select" id="editCategoryIcon" name="icon">
+                                {% for value, label in category_icons %}
+                                <option value="{{ value }}">{{ label }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label" for="editCategoryColour">Colour</label>
+                            <select class="form-select" id="editCategoryColour" name="colour">
+                                {% for value, label in category_colours %}
+                                <option value="{{ value }}">{{ label }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label" for="editCategoryDescription">Description <span class="hdc-optional">optional</span></label>
+                        <input type="text" class="form-control" id="editCategoryDescription"
+                               name="description" maxlength="300" autocomplete="off">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-save me-1" aria-hidden="true"></i>Save Category</button>
                 </div>
             </form>
         </div>
@@ -306,29 +524,77 @@
 {% block extra_js %}
 <script>
 (function(){
-    var modalEl = document.getElementById('editPartyModal');
-    if (!modalEl) return;
     function setValue(id, value) {
         var el = document.getElementById(id);
         if (el) el.value = value == null ? '' : value;
     }
-    document.querySelectorAll('.js-edit-party').forEach(function(btn){
-        btn.addEventListener('click', function(){
-            var name = btn.getAttribute('data-party-name') || '';
-            setValue('editPartyId', btn.getAttribute('data-party-id'));
-            // The combo widget reads the visible input; its hidden select holds
-            // the option that was chosen. Fill both so the name opens exactly
-            // as it was saved (and a renamed-away name still posts verbatim).
-            setValue('editPartyNameInput', name);
-            setValue('editPartyName', name);
-            setValue('editPartyType', btn.getAttribute('data-party-type') || 'other');
-            setValue('editPartyPhone', btn.getAttribute('data-party-phone'));
-            setValue('editPartyNote', btn.getAttribute('data-party-note'));
-            if (window.bootstrap && window.bootstrap.Modal) {
-                window.bootstrap.Modal.getOrCreateInstance(modalEl).show();
+
+    // ── Edit Party window ────────────────────────────────────────────────
+    var partyModalEl = document.getElementById('editPartyModal');
+    if (partyModalEl) {
+        document.querySelectorAll('.js-edit-party').forEach(function(btn){
+            btn.addEventListener('click', function(){
+                var name = btn.getAttribute('data-party-name') || '';
+                setValue('editPartyId', btn.getAttribute('data-party-id'));
+                // The combo widget reads the visible input; its hidden select holds
+                // the option that was chosen. Fill both so the name opens exactly
+                // as it was saved (and a renamed-away name still posts verbatim).
+                setValue('editPartyNameInput', name);
+                setValue('editPartyName', name);
+                setValue('editPartyType', btn.getAttribute('data-party-type') || 'other');
+                setValue('editPartyCategory', btn.getAttribute('data-party-category') || '');
+                setValue('editPartyPhone', btn.getAttribute('data-party-phone'));
+                setValue('editPartyNote', btn.getAttribute('data-party-note'));
+                if (window.bootstrap && window.bootstrap.Modal) {
+                    window.bootstrap.Modal.getOrCreateInstance(partyModalEl).show();
+                }
+            });
+        });
+    }
+
+    // ── Edit Category window ─────────────────────────────────────────────
+    var categoryModalEl = document.getElementById('editCategoryModal');
+    if (categoryModalEl) {
+        document.querySelectorAll('.js-edit-category').forEach(function(btn){
+            btn.addEventListener('click', function(){
+                setValue('editCategoryId', btn.getAttribute('data-category-id'));
+                setValue('editCategoryName', btn.getAttribute('data-category-name'));
+                setValue('editCategoryDescription', btn.getAttribute('data-category-description'));
+                setValue('editCategoryIcon', btn.getAttribute('data-category-icon'));
+                setValue('editCategoryColour', btn.getAttribute('data-category-colour'));
+                if (window.bootstrap && window.bootstrap.Modal) {
+                    window.bootstrap.Modal.getOrCreateInstance(categoryModalEl).show();
+                }
+            });
+        });
+    }
+
+    // ── Bulk assignment helpers ──────────────────────────────────────────
+    var checks = Array.prototype.slice.call(document.querySelectorAll('.js-party-check'));
+    var countEl = document.getElementById('bulkSelectedCount');
+    var bulkForm = document.getElementById('bulkAssignForm');
+    var all = document.getElementById('selectAllParties');
+    function refreshCount() {
+        var n = checks.filter(function(c){ return c.checked; }).length;
+        if (countEl) countEl.textContent = n;
+        if (all) all.checked = n > 0 && n === checks.length;
+    }
+    checks.forEach(function(c){ c.addEventListener('change', refreshCount); });
+    if (all) {
+        all.addEventListener('change', function(){
+            checks.forEach(function(c){ c.checked = all.checked; });
+            refreshCount();
+        });
+    }
+    if (bulkForm) {
+        bulkForm.addEventListener('submit', function(ev){
+            if (!checks.some(function(c){ return c.checked; })) {
+                ev.preventDefault();
+                alert('Tick at least one party in the table first.');
             }
         });
-    });
+    }
+    refreshCount();
 })();
 </script>
 {% endblock %}

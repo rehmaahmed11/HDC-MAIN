@@ -37,6 +37,7 @@ __all__ = [
     "CashFlowEntryItem",
     "CashFlowParty",
     "CashFlowSubcategory",
+    "PartyCategory",
 ]
 
 
@@ -161,6 +162,42 @@ class CashFlowSubcategory(db.Model):
         return f"<CashFlowSubcategory {self.id}:{self.name!r}>"
 
 
+class PartyCategory(db.Model):
+    """A user-managed folder in the Parties directory (e.g. *Cement Dealers*).
+
+    The six buckets the directory shipped with (Loan Parties, External
+    Customers, Workers, Clients / Owners, Suppliers / Vendors, Other Parties)
+    are seeded as ordinary rows in this table — they are **not** hard-coded
+    anywhere: the operator can rename them, recolour them, retire them or add
+    as many new ones as the business grows into.  The KPI cards, the filter
+    dropdown and every party form read this table, so a category created on
+    the Parties page exists immediately.
+
+    ``key`` is the stable, URL-safe identifier used by ``/hdc/parties?category=``
+    filters.  It is generated from the name when the category is created and
+    deliberately survives a rename, so bookmarks and links keep working.
+    ``is_active`` only controls whether the category is *offered* for new
+    assignments — parties already filed under it keep their filing.
+    """
+
+    __tablename__ = 'hdc_party_category'
+    id = db.Column(db.Integer, primary_key=True)
+    key = db.Column(db.String(60), nullable=False, unique=True, index=True)
+    name = db.Column(db.String(120), nullable=False, index=True)
+    description = db.Column(db.String(300))
+    icon = db.Column(db.String(60), default='fa-tag')
+    colour = db.Column(db.String(30), default='kpi-slate')
+    sort_order = db.Column(db.Integer, default=0)
+    is_active = db.Column(db.Boolean, default=True, index=True)
+    created_at = db.Column(db.DateTime, default=_pkt_now_naive)
+    updated_at = db.Column(db.DateTime, default=_pkt_now_naive, onupdate=_pkt_now_naive)
+
+    parties = db.relationship('CashFlowParty', back_populates='category', lazy=True)
+
+    def __repr__(self):  # pragma: no cover - debugging aid
+        return f"<PartyCategory {self.id}:{self.key!r}>"
+
+
 class CashFlowParty(db.Model):
     """Reusable counterparty names for the register (client, supplier, worker...).
 
@@ -170,24 +207,40 @@ class CashFlowParty(db.Model):
     ``+ Add New Party``), and deactivating a row hides it without touching the
     entries that already reference it.
 
+    Two independent classifications live on a party:
+
     ``party_type`` (``client | supplier | worker | staff | subcontractor |
-    lender | borrower | rental | other``) is the *criterion* the field rules
-    use: a category can allow only some types (a loan category allows
-    ``lender`` / ``borrower``, HDC Tools customers are ``rental``), which is
-    what makes the party list shorten itself to the people who make sense for
-    the transaction being booked.  The sidebar's Parties module
-    (/hdc/parties) is the directory for adding and maintaining them.
+    lender | borrower | rental | other``)
+        The *criterion* the field rules use: a category can allow only some
+        types (a loan category allows ``lender`` / ``borrower``, HDC Tools
+        customers are ``rental``), which is what makes the party list shorten
+        itself to the people who make sense for the transaction being booked.
+        This is behaviour, not grouping, and stays fixed by the app.
+
+    ``category_id`` → :class:`PartyCategory`
+        The operator's own filing.  Categories are database rows created on
+        the Parties page, so the directory can grow new buckets without a
+        deploy and a party can be moved to any of them at will.  NULL means
+        "not filed by hand" — the directory then falls back to the category
+        key that matches the party type.
+
+    The sidebar's Parties module (/hdc/parties) is the directory for adding
+    and maintaining both.
     """
 
     __tablename__ = 'hdc_cash_flow_party'
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(160), nullable=False, index=True)
     party_type = db.Column(db.String(40), default='other', index=True)
+    category_id = db.Column(db.Integer, db.ForeignKey('hdc_party_category.id'),
+                            nullable=True, index=True)
     phone = db.Column(db.String(40))
     note = db.Column(db.String(300))
     is_active = db.Column(db.Boolean, default=True, index=True)
     created_at = db.Column(db.DateTime, default=_pkt_now_naive)
     updated_at = db.Column(db.DateTime, default=_pkt_now_naive, onupdate=_pkt_now_naive)
+
+    category = db.relationship('PartyCategory', back_populates='parties')
 
     def __repr__(self):  # pragma: no cover - debugging aid
         return f"<CashFlowParty {self.id}:{self.name!r}>"

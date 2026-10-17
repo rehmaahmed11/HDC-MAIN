@@ -12,7 +12,7 @@ from sqlalchemy import func, inspect as sa_inspect
 
 from hdc.config import get_runtime_settings
 from hdc.core.flags import _runtime_flag_get, _runtime_flag_set
-from hdc.core.schema import _ensure_account_intent_schema, _ensure_accounts_schema, _ensure_cashflow_schema, _ensure_loan_schema, _ensure_material_category_schema, _ensure_owner_payment_void_schema, _ensure_purchase_v2_schema, _ensure_runtime_flags_table, _ensure_shared_expense_schema, _ensure_timeentry_attendance_day_schema, _ensure_timeentry_unique_indexes, _ensure_tool_rental_schema, _run_migrations
+from hdc.core.schema import _ensure_account_intent_schema, _ensure_accounts_schema, _ensure_cashflow_schema, _ensure_loan_schema, _ensure_material_category_schema, _ensure_owner_payment_void_schema, _ensure_party_category_schema, _ensure_purchase_v2_schema, _ensure_runtime_flags_table, _ensure_shared_expense_schema, _ensure_timeentry_attendance_day_schema, _ensure_timeentry_unique_indexes, _ensure_tool_rental_schema, _run_migrations
 from hdc.extensions import db
 from hdc.models.accounts import ExpenseCategory
 from hdc.models.auth import HDCUser
@@ -67,6 +67,10 @@ def _bootstrap_hdc():
     _ensure_owner_payment_void_schema()
     _ensure_subcontract_payment_void_schema()
     _ensure_accounts_schema()
+    # User-defined Parties categories: the table itself, the ``category_id``
+    # column on the party table, then the one-time seed of the six shipped
+    # buckets (further down, once the runtime flags table exists).
+    _ensure_party_category_schema()
     _ensure_cashflow_schema()
     _ensure_loan_schema()
     _ensure_account_intent_schema()
@@ -138,6 +142,18 @@ def _bootstrap_hdc():
         _ensure_cashflow_seed_data()
     except Exception as ex:
         current_app.logger.debug('Cash flow seed skipped: %s', ex)
+    # Parties categories: seed the six shipped buckets once (they become
+    # ordinary editable rows) and file any party that has no category yet
+    # under the bucket that matches its type.  An explicit filing is never
+    # touched, and deleting a category is not undone by a restart.
+    try:
+        from hdc.services.party_categories import (
+            backfill_party_categories, ensure_party_category_seed,
+        )
+        ensure_party_category_seed()
+        backfill_party_categories()
+    except Exception as ex:
+        current_app.logger.debug('Party categories seed skipped: %s', ex)
     # Shared Expenses: the FBM / HDC / Home heads, created once on an empty
     # module so the first visit already splits between the real heads.  It only
     # ever runs while the party list is empty, so it cannot resurrect a head

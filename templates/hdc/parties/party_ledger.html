@@ -9,7 +9,7 @@
             <span class="badge bg-light text-dark border">{{ type_label }}</span>
             <span class="ms-1">{{ category_label }}</span>
             {% if not party.is_active %}<span class="badge bg-secondary ms-1">Hidden</span>{% endif %}
-            {% if category == 'client' %}<span class="badge bg-indigo ms-1" style="background:#4f46e5"><i class="fas fa-link me-1"></i>Project Owner — unified ledger</span>{% endif %}
+            {% if is_project_owner %}<span class="badge bg-indigo ms-1" style="background:#4f46e5"><i class="fas fa-link me-1"></i>Project Owner — unified ledger</span>{% endif %}
         </div>
         {% if party.phone %}<div class="small text-muted mt-1"><i class="fas fa-phone me-1"></i>{{ party.phone }}</div>{% endif %}
         {% if party.note %}<div class="small text-muted">{{ party.note }}</div>{% endif %}
@@ -43,7 +43,7 @@
             <i class="fas fa-money-bill-transfer me-1"></i>{{ statement.loans_count }} Loan(s)
         </a>
         {% endif %}
-        {% if category == 'client' %}
+        {% if is_project_owner %}
         <a href="{{ url_for('hdc_add_project', client=party.name) }}" class="btn btn-sm btn-mint">
             <i class="fas fa-plus me-1"></i>New Project for this Client
         </a>
