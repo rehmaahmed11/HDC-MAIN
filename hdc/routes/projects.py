@@ -15,6 +15,7 @@ from werkzeug.utils import secure_filename
 from hdc.config import get_runtime_settings
 from hdc.extensions import _money_only, _money_write_required, db
 from hdc.models.accounts import Account, OwnerPayment
+from hdc.models.cashflow import CashFlowParty
 from hdc.models.materials import Material, SupplierSite
 from hdc.models.projects import Project, Stage, StageDefinition, StageDrawing, StageRateHistory
 from hdc.models.subcontract import Subcontractor
@@ -22,7 +23,10 @@ from hdc.models.workforce import TimeEntry, Worker
 from hdc.services.accounts import _ACCOUNT_COMPANY_TYPES, _accounts_post_owner_receipt, _accounts_set_void_by_source
 from hdc.services.aggregation import _apply_aggregated_project_costs, _apply_aggregated_stage_costs, _running_projects_receivable_rows
 from hdc.services.lookups import _next_project_code
-from hdc.services.parties import known_client_party_names, party_name_key
+from hdc.services.parties import (
+    known_client_party_names, link_project_to_party, party_by_name,
+    party_for_project, party_name_key,
+)
 from hdc.services.permissions import may_access_path, permission_for, permission_landing_url
 from hdc.services.record_permissions import record_allowed
 from hdc.services.purchase import _site_supplier_supplied_rows
@@ -33,27 +37,62 @@ from hdc.services.timekeeping import _has_recent_duplicate
 from hdc.utils.dates import _pkt_now_naive, _pkt_today
 from hdc.utils.format import _activity_at_for, _amount_to_words, _flt, _is_pdf_upload, _parse_date
 
-def _link_client_party(project, client_name):
-    """Ensure the project's client exists in Parties. Returns True on success.
+def _link_client_party(project, client_name, *, party_id=None, phone=None):
+    """Ensure the project's client exists in Parties and link the exact row.
 
-    Runs in a savepoint so a failure undoes only the party row, never the
+    ``party_id`` is the party the operator started from (Parties → New Project,
+    or the party ledger).  It is honoured only while the submitted client name
+    still describes the same person; a changed name is re-resolved, so a
+    project can never end up pointing at somebody it is not for.
+
+    Runs in a savepoint so a failure undoes only the party writes, never the
     project being saved; the failure is logged, not hidden.
+
+    Returns ``(ok, party, created)``.  ``ok`` is False only when the Party side
+    failed — the project itself is still saved and the operator is warned.
     """
     from flask import current_app
     from hdc.services.cashflow_register import ensure_party
+    from hdc.services.party_categories import ensure_party_has_category
+
+    name = (client_name or '').strip()
+    party = db.session.get(CashFlowParty, int(party_id)) if party_id else None
+    if party is not None and name and party_name_key(party.name) != party_name_key(name):
+        party = None  # the client was changed on the form — resolve the new name
+    if not name and party is not None:
+        name = (party.name or '').strip()
+        project.client = name[:100]
+    if not name:
+        project.client_party_id = None
+        return True, None, False
     try:
         with db.session.begin_nested():
-            ensure_party(
-                client_name,
-                party_type='client',
-                phone=(project.client_phone or '').strip() or None,
-                note=f"Client / Owner of project {project.project_code} — {project.name}"[:300],
-            )
-        return True
+            created = False
+            if party is None:
+                party, created = ensure_party(
+                    name,
+                    party_type='client',
+                    phone=(phone or project.client_phone or '').strip() or None,
+                    note=f"Client / Owner of project {project.project_code} — {project.name}"[:300],
+                )
+            else:
+                # Enrich, never overwrite: a hidden party is revived because a
+                # new project is real activity, an untyped party becomes the
+                # client it functionally is, and a missing category is filled
+                # exactly like the project-first flow does.
+                if phone and not (party.phone or '').strip():
+                    party.phone = phone.strip()[:40]
+                if not party.is_active:
+                    party.is_active = True
+                if (party.party_type or 'other').strip().lower() == 'other':
+                    party.party_type = 'client'
+                ensure_party_has_category(party)
+            link_project_to_party(project, party)
+        return True, party, created
     except Exception:
         current_app.logger.exception('Could not link client %r to Parties for project %s',
                                      client_name, project.project_code)
-        return False
+        return False, None, False
 
 
 def register(app):
@@ -103,8 +142,42 @@ def register(app):
         projects = q.offset((page - 1) * per_page).limit(per_page).all()
         if permission_for(current_user, 'project_financials') is not False:
             _apply_aggregated_project_costs(projects)
+        # Client → Party ledger links for this page: direct link first, then
+        # the case-insensitive name match legacy projects use.
+        client_party_links = {}
+        try:
+            linked_ids = {int(p.client_party_id) for p in projects
+                          if p.client_party_id}
+            if linked_ids:
+                for p in projects:
+                    if p.client_party_id:
+                        client_party_links[int(p.id)] = int(p.client_party_id)
+            name_keys = {}
+            for p in projects:
+                if p.client_party_id:
+                    continue
+                key = party_name_key(p.client or '')
+                if key:
+                    name_keys.setdefault(key, []).append(int(p.id))
+            if name_keys:
+                rows = (CashFlowParty.query
+                        .filter(func.lower(func.trim(CashFlowParty.name)).in_(list(name_keys)))
+                        .order_by(CashFlowParty.is_active.desc(), CashFlowParty.id.asc())
+                        .all())
+                by_key = {}
+                for row in rows:
+                    key = party_name_key(row.name)
+                    if key and key not in by_key:
+                        by_key[key] = int(row.id)
+                for key, ids in name_keys.items():
+                    if key in by_key:
+                        for project_id in ids:
+                            client_party_links[project_id] = by_key[key]
+        except Exception:
+            client_party_links = {}
         return render_template('projects/projects.html',
                                projects=projects,
+                               client_party_links=client_party_links,
                                pg_page=page,
                                pg_total_pages=pg_total_pages,
                                pg_total_items=pg_total_items,
@@ -122,10 +195,22 @@ def register(app):
             code = (request.form.get('project_code','') or '').strip().upper()
             if not code or Project.query.filter_by(project_code=code).first():
                 code = _next_project_code()
+            # The party the operator started from (Parties → New Project).
+            # A blank client name is filled from it, so the form can be opened
+            # with the party already chosen.
+            posted_party_id = request.form.get('party_id', type=int)
+            party_start = (db.session.get(CashFlowParty, int(posted_party_id))
+                           if posted_party_id else None)
+            client_name = (request.form.get('client','') or '').strip()
+            if not client_name and party_start is not None:
+                client_name = (party_start.name or '').strip()
+            client_phone = (request.form.get('client_phone','') or '').strip()
+            if not client_phone and party_start is not None:
+                client_phone = (party_start.phone or '').strip()
             name = (request.form.get('name','') or '').strip()
             if not name:
                 name = " ".join(x for x in [
-                    (request.form.get('client','') or '').strip(),
+                    client_name,
                     (request.form.get('location','') or '').strip()
                 ] if x) or code
             total_sqft = _flt(request.form.get('total_sqft'))
@@ -141,8 +226,8 @@ def register(app):
             p = Project(
                 project_code=code,
                 name=name,
-                client=request.form.get('client','').strip(),
-                client_phone=request.form.get('client_phone','').strip(),
+                client=client_name,
+                client_phone=client_phone,
                 location=request.form.get('location','').strip(),
                 total_constructed_sqft=total_sqft,
                 owner_rate_per_sqft=owner_rate,
@@ -154,11 +239,16 @@ def register(app):
                 planned_end=_parse_date(request.form.get('planned_end')) if request.form.get('planned_end') else None)
             db.session.add(p)
             db.session.flush()
-            # ── Integrate with Parties: ensure client exists as a party ──────
-            client_name = (p.client or '').strip()
-            linked = _link_client_party(p, client_name) if client_name else True
+            # ── Integrate with Parties: link the client's exact party row ────
+            linked, client_party, party_created = (
+                _link_client_party(p, client_name, party_id=posted_party_id, phone=client_phone)
+                if (client_name or posted_party_id) else (True, None, False))
             db.session.commit()
-            if client_name and linked:
+            if client_name and linked and client_party is not None:
+                how = ('created in Parties' if party_created
+                       else f'linked to the existing Party ledger ({client_party.name})')
+                flash(f'Project "{p.name}" added. Client "{client_name}" {how}.', 'success')
+            elif client_name and linked:
                 flash(f'Project "{p.name}" added. Client "{client_name}" linked to Parties.', 'success')
             elif client_name:
                 flash(f'Project "{p.name}" added, but client "{client_name}" could not be linked to '
@@ -168,9 +258,24 @@ def register(app):
             return redirect(url_for('hdc_project_detail', pid=p.id))
         client_options = known_client_party_names()
         initial_client = (request.args.get('client') or '').strip()
+        # Party-first creation: /hdc/projects/add?party_id=<id> (the Parties
+        # directory and ledger both link here) or ?client=<name>.
+        initial_party = None
+        party_id = request.args.get('party_id', type=int)
+        if party_id:
+            initial_party = db.session.get(CashFlowParty, int(party_id))
+        if initial_party is None and initial_client:
+            initial_party = party_by_name(initial_client)
+        initial_phone = ''
+        if initial_party is not None:
+            initial_client = (initial_party.name or '').strip()
+            initial_phone = (initial_party.phone or '').strip() or ''
         return render_template('projects/add_project.html', today=_pkt_today().isoformat(),
                                client_options=client_options,
-                               initial_client=initial_client)
+                               initial_client=initial_client,
+                               initial_party=initial_party,
+                               initial_party_id=(initial_party.id if initial_party is not None else ''),
+                               initial_phone=initial_phone)
 
 
     @app.route('/hdc/projects/<int:pid>')
@@ -223,24 +328,20 @@ def register(app):
                               .all()) if permission_for(current_user, 'project_receipts', 'write') is not False else []
         project_receivable_rows = _running_projects_receivable_rows() if permission_for(current_user, 'project_receipts') is not False else []
         # ── Resolve linked party for this project's client ─────────────────
+        # Direct link first (party-first creation / the sync backfill), then
+        # the case-insensitive name match used by legacy projects.
         client_party = None
         client_party_id = None
         client_statement = None
         try:
-            from hdc.models.cashflow import CashFlowParty
             from hdc.services.parties import party_ledger as _party_ledger
-            ckey = party_name_key(p.client or '')
-            if ckey:
-                client_party = (CashFlowParty.query
-                                .filter(func.lower(func.trim(func.coalesce(CashFlowParty.name, ''))) == ckey)
-                                .order_by(CashFlowParty.is_active.desc(), CashFlowParty.id.asc())
-                                .first())
-                if client_party:
-                    client_party_id = int(client_party.id)
-                    try:
-                        client_statement = _party_ledger(client_party, include_void=False)
-                    except Exception:
-                        client_statement = None
+            client_party = party_for_project(p)
+            if client_party:
+                client_party_id = int(client_party.id)
+                try:
+                    client_statement = _party_ledger(client_party, include_void=False)
+                except Exception:
+                    client_statement = None
         except Exception:
             client_party = None
             client_statement = None
@@ -343,15 +444,26 @@ def register(app):
                     p.contract_type = request.form['contract_type']
             if 'planned_end' in request.form:
                 p.planned_end = _parse_date(request.form.get('planned_end')) if request.form.get('planned_end') else None
-            # ── Keep Parties in sync when client name changes ────────────
+            # ── Keep Parties in sync when the client changes ─────────────
             new_client = (p.client or '').strip()
             linked = True
             refiled = 0
-            if new_client and new_client.lower() != old_client.lower():
-                linked = _link_client_party(p, new_client)
-                if linked and old_client:
+            name_changed = new_client.lower() != old_client.lower()
+            if new_client:
+                # Re-resolve when the name changed, or when a legacy project
+                # has no direct party link yet — the first edit backfills it.
+                if name_changed or p.client_party_id is None:
+                    linked, _party, _created = _link_client_party(
+                        p, new_client,
+                        # A changed name must resolve to the new owner, never
+                        # to the party the project previously pointed at.
+                        party_id=(None if name_changed else p.client_party_id),
+                        phone=(p.client_phone or '').strip() or None)
+                if linked and name_changed and old_client:
                     from hdc.services.parties import rename_owner_client
                     refiled = rename_owner_client(p, old_client, new_client)
+            else:
+                p.client_party_id = None
             db.session.commit()
             if linked:
                 note = f' {refiled} ledger row(s) moved to the new client name.' if refiled else ''
@@ -361,7 +473,8 @@ def register(app):
                       f'Check the server log and re-save the project.', 'warning')
             return redirect(url_for('hdc_project_detail', pid=pid))
         client_options = known_client_party_names()
-        return render_template('projects/edit_project.html', p=p, client_options=client_options)
+        return render_template('projects/edit_project.html', p=p, client_options=client_options,
+                               client_party=party_for_project(p))
 
 
     @app.route('/hdc/projects/<int:pid>/owner_payment', methods=['POST'])

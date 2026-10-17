@@ -50,8 +50,14 @@
             {% endif %}
             {% endif %}
         </div>
-        <div class="d-flex align-items-center gap-2">
+        <div class="d-flex align-items-center gap-2 flex-wrap justify-content-end">
             <span class="badge bg-secondary">{{ p.status }}</span>
+            {% if client_party and hdc_page_allowed('project_create', 'write') and hdc_record_allowed('hdc_project', none, 'create') %}
+            <a class="btn btn-sm btn-outline-success" href="{{ url_for('hdc_add_project', party_id=client_party.id) }}"
+               title="Open the Add Project form with {{ client_party.name }} already linked">
+                <i class="fas fa-folder-plus me-1"></i>Another project for this client
+            </a>
+            {% endif %}
             {% if hdc_page_allowed('project_detail', 'write') and hdc_record_allowed('hdc_project', p.id, 'write') %}<a class="btn btn-sm btn-outline-primary" href="{{ url_for('hdc_edit_project', pid=p.id) }}">Edit project</a>{% endif %}
         </div>
     </div>

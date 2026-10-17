@@ -22,7 +22,14 @@
         <td><strong><a href="{{ url_for('hdc_project_detail', pid=p.id) }}" class="text-decoration-none hdc-name-link" title="Open project detail">{{ p.name }}</a></strong></td>
         <td class="small">
             {% if p.client %}
+            {% if client_party_links.get(p.id) %}
+            <a href="{{ url_for('hdc_party_ledger', party_id=client_party_links[p.id]) }}"
+               class="fw-semibold text-decoration-none" title="Open this client's Party ledger">
+                <i class="fas fa-user-tie me-1 text-muted"></i>{{ p.client }}
+            </a>
+            {% else %}
             <span class="fw-semibold"><i class="fas fa-user-tie me-1 text-muted"></i>{{ p.client }}</span>
+            {% endif %}
             {% if p.client_phone %}<div class="text-muted">{{ p.client_phone }}</div>{% endif %}
             {% else %}<span class="text-muted">—</span>{% endif %}
         </td>
@@ -49,6 +56,6 @@
 {% include 'shared/_pagination.html' %}
 </div>
 <div class="alert alert-info small mt-3">
-    <i class="fas fa-link me-1"></i><strong>Projects ↔ Parties integration:</strong> Each project's Client / Owner is auto-linked to <a href="{{ url_for('hdc_parties', category='client') }}">Parties → Clients / Owners</a>. Creating a project creates the Party if missing, and the Party page shows all projects + combined receivable. Use <a href="{{ url_for('hdc_parties') }}">Sync Project Clients</a> to backfill old projects.
+    <i class="fas fa-link me-1"></i><strong>Projects ↔ Parties integration:</strong> Each project's Client / Owner is auto-linked to <a href="{{ url_for('hdc_parties', category='client') }}">Parties → Clients / Owners</a>. Creating a project creates the Party if missing; the Party page shows all projects + combined receivable. The reverse also works: open a party and choose <em>New Project</em> to create a project already linked to that client. Use <a href="{{ url_for('hdc_parties') }}">Sync Project Clients</a> to backfill old projects.
 </div>
 {% endblock %}

@@ -25,6 +25,13 @@
                    label='Client / Owner Name', placeholder='Search or type a client…',
                    value=(p.client or ''), hint='Pick from Parties → Clients / Owners. Changing creates/updates the Party link.',
                    max_items=80) }}
+                {% if client_party %}
+                <div class="small mt-1">
+                    <i class="fas fa-link text-success me-1" aria-hidden="true"></i>Linked to
+                    <a href="{{ url_for('hdc_party_ledger', party_id=client_party.id) }}">{{ client_party.name }}</a>
+                    — projects, receipts and the party ledger stay one record.
+                </div>
+                {% endif %}
             </div>
             <div class="col-md-6">
                 <label class="form-label">Phone Number</label>
@@ -72,7 +79,7 @@
             </div>
         </div>
         <div class="mt-3 alert alert-info py-2 small">
-            <i class="fas fa-link me-1"></i><strong>Integration:</strong> This client is linked to Parties. If you change the name, a new Party (Client / Owner) will be ensured, and the old Party keeps its history.
+            <i class="fas fa-link me-1"></i><strong>Integration:</strong> This client is linked to Parties. If you change the name, a new Party (Client / Owner) is ensured and this project is re-pointed at it; the old Party keeps its history.
             <a href="{{ url_for('hdc_parties', category='client') }}" class="ms-1">View all Clients in Parties</a>
         </div>
         <div class="mt-2 d-flex gap-2">

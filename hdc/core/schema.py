@@ -1377,6 +1377,21 @@ def _ensure_party_category_schema():
     })
 
 
+def _ensure_project_party_schema():
+    """Give ``hdc_project`` its direct pointer at the Parties directory.
+
+    Projects and Parties were linked by name only.  That works for the
+    project-first flow (the client name creates the party) but cannot say
+    *which* row a project started from a party belongs to when the client is
+    typed with a slightly different spelling.  The nullable ``client_party_id``
+    is that exact link; NULL means the project still matches by name, so
+    nothing on an upgraded database has to be rewritten before use.
+    """
+    _ensure_table_columns_sqlite('hdc_project', {
+        'client_party_id': "client_party_id INTEGER REFERENCES hdc_cash_flow_party(id)",
+    })
+
+
 def _ensure_cashflow_schema():
     """Create the Cash Flow v2 register / reconciliation tables.
 

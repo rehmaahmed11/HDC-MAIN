@@ -9,13 +9,52 @@ Previously:
 
 ## Solution — Name-keyed integration with unified owner ledger
 
-Integration is done **by case-insensitive name matching**, same pattern used for Workers → Parties sync. This keeps it idempotent and backward compatible, and now gives each owner a single ledger that answers "does this owner have any rent payment, loan, etc.?"
+Integration is done **by case-insensitive name matching**, same pattern used for Workers → Parties sync. This keeps it idempotent and backward compatible, and now gives each owner a single ledger that answers "does this owner have any rent payment, loan, etc.?" — plus a nullable `Project.client_party_id` direct link for projects created from a party (see *1b* below).
 
 ### 1. Auto-sync on Project create / edit
 `hdc/routes/projects.py`:
 - After `Project` flush, `ensure_party(client_name, party_type='client', phone=...)` is called.
 - Creates a `CashFlowParty` of type `client` if missing, reactivates if hidden, never downgrades a specific type to `other`.
 - Edit: if client name changes, new party is ensured; old party keeps history (immutable ledger rule).
+
+### 1b. Reverse flow — create a Project **from** a Party
+
+The integration now runs in both directions, using the same Add Project form:
+
+* **Parties directory → row action.** Every active row has a green
+  `fa-folder-plus` button — *New Project* for that party. It opens
+  `hdc_add_project?party_id=<id>`.
+* **Party ledger → New Project.** The ledger header (and the Projects section)
+  opens the same URL, so a client with no project shows a *Create the first
+  project* card instead of an empty page.
+* **Prefilled, not retyped.** GET resolves the party and prefills the client
+  name, phone and a hidden `party_id`; a banner confirms which party ledger the
+  project will land in.
+* **Exact link on save.** `_link_client_party()` honours the posted
+  `party_id` while the typed name still matches that party, then writes
+  `Project.client_party_id`. A changed name re-resolves (and creates the new
+  party), so a project can never point at the wrong owner. The party's own
+  spelling becomes `Project.client`.
+* **Same automatic filing.** A typed new client still goes through
+  `ensure_party(..., party_type='client')`, so it appears under
+  *Clients / Owners* exactly like the project-first flow.
+* **Links back.** The Projects list renders the client as a link to the party
+  ledger (direct link first, name fallback); project detail already did.
+* **Legacy backfill.** `sync_project_clients_as_parties()` now also fills
+  `client_party_id` for every project whose client matches an existing party,
+  so old rows join the exact-link model the next time the directory syncs or a
+  project is edited.
+
+| Situation | Resolution |
+|---|---|
+| Project created from a party | `client_party_id` → that row; `client` = party name |
+| Project created the old way | no id; matches by lower-cased trimmed `client` |
+| Party renamed, project not edited | FK still resolves the ledger (name-keyed receipts unchanged) |
+| Project edit with a new client | FK re-pointed to the new/ensured party |
+
+The FK is nullable, so an existing database is widened in place by
+`_ensure_project_party_schema()` at bootstrap; nothing is rewritten and the
+name fallback keeps old projects working.
 
 ### 2. Searchable combo in Project forms
 - `templates/hdc/projects/add_project.html` and `edit_project.html` now use `combo_field` macro with `client_options = known_client_party_names()`.
@@ -104,10 +143,16 @@ Project.client (free text)
    --party_ledger() aggregates all above by lower(name) key
 ```
 
-## Why name-keyed, not FK?
-- Existing data has only string, no FK. Adding FK would require migration.
-- Workers sync already uses name-keyed approach; consistent.
-- Future: could add nullable `client_party_id` FK for direct join and rename propagation, but name-key is sufficient and never breaks old DB.
+## Why name-keyed plus a nullable FK?
+- Existing data had only a string. The FK is **additive**: nullable, added in
+  place at bootstrap, with no rewrite of existing rows.
+- Name-key matching stays as the fallback, so a database whose migration has
+  not run (or a project created before this change) behaves exactly as before.
+- Workers sync already uses the name-keyed approach; the party → project flow
+  adds the exact pointer only where the operator actually chose a party, which
+  is stronger than guessing from a string without changing legacy behaviour.
+- The FK enables the party-first workflow, precise project counts on the party
+  ledger, and a safe place for future rename propagation.
 
 ## How to use — check if owner has rent etc.
 1. Create Project with client "Mr. Ahmed Khan" → Party auto-created as Client/Owner.
@@ -122,18 +167,21 @@ Project.client (free text)
 6. Old projects: Parties page → "Sync Project Clients" backfills all distinct clients.
 
 ## Files changed
-- `hdc/services/parties.py` — sync, project stats, rentals/loans detailed lists, unified ledger
-- `hdc/routes/parties.py` — sync_clients action, auto-sync
-- `hdc/routes/projects.py` — ensure party on create/edit, resolve party + statement on detail, client options, initial client prefill
-- `templates/hdc/projects/add_project.html` — combo + hint
-- `templates/hdc/projects/edit_project.html` — same
-- `templates/hdc/projects/project_detail.html` — linked party + rentals/loans badges + unified ledger alert
-- `templates/hdc/projects/projects.html` — client column
-- `templates/hdc/parties/parties_directory.html` — projects column, sync UI
-- `templates/hdc/parties/party_ledger.html` — unified owner ledger: projects, rentals (external+internal), loans, financials
+- `hdc/services/parties.py` — sync, project stats, rentals/loans detailed lists, unified ledger, party/project link helpers, `client_party_id` backfill
+- `hdc/routes/parties.py` — sync_clients action, auto-sync, client-added hint
+- `hdc/routes/projects.py` — ensure/link the exact party on create/edit, `party_id` prefill, resolve party + statement on detail, client options, client → party links on the list
+- `hdc/models/projects.py` — `Project.client_party_id` + `client_party` relationship
+- `hdc/core/schema.py` / `hdc/core/bootstrap.py` — `_ensure_project_party_schema()` migration
+- `templates/hdc/projects/add_project.html` — party prefill banner, hidden `party_id`, phone prefill, combo + hint
+- `templates/hdc/projects/edit_project.html` — linked-party badge + shared hint
+- `templates/hdc/projects/project_detail.html` — linked party, rentals/loans badges, unified ledger alert, “another project for this client”
+- `templates/hdc/projects/projects.html` — client column links to the party ledger
+- `templates/hdc/parties/parties_directory.html` — projects column, sync UI, per-row New Project action
+- `templates/hdc/parties/party_ledger.html` — unified owner ledger: projects, rentals (external+internal), loans, financials, New Project + first-project card
+- `tests/test_project_from_party.py` — reverse-flow coverage (prefill, exact link, renames, backfill, page actions)
 
 ## Future enhancements
-- Add `Project.client_party_id` FK for direct join and rename propagation
+- ~~Add `Project.client_party_id` FK for direct join~~ — done (nullable, migration + backfill)
 - Filter Projects list by party_id
 - On Party rename, offer to rename linked Project.client values
 - Show supplier purchases for supplier parties in same unified ledger

@@ -10,6 +10,22 @@
     <div class="card-header hdc-card-header"><i class="fas fa-plus-circle me-2"></i>New Project</div>
     <div class="card-body">
         <form method="POST" action="{{ url_for('hdc_add_project') }}" data-hdc-dialog>
+        {% if initial_party_id %}
+        <input type="hidden" name="party_id" value="{{ initial_party_id }}">
+        {% endif %}
+        {% if initial_party %}
+        <div class="alert alert-success py-2 small d-flex justify-content-between align-items-start gap-2 flex-wrap">
+            <div>
+                <i class="fas fa-user-check me-1"></i><strong>Starting from a Party:</strong>
+                this project will be linked to
+                <a href="{{ url_for('hdc_party_ledger', party_id=initial_party.id) }}" class="fw-semibold">{{ initial_party.name }}</a>
+                ({{ initial_party.party_type|replace('_', ' ')|title }}). Their ledger, projects and receivable update together.
+            </div>
+            <a href="{{ url_for('hdc_party_ledger', party_id=initial_party.id) }}" class="btn btn-sm btn-outline-secondary">
+                <i class="fas fa-arrow-left me-1"></i>Back to Party
+            </a>
+        </div>
+        {% endif %}
         <div class="row g-3">
             <div class="col-md-8">
                 <label class="form-label">Project Code *</label>
@@ -28,12 +44,15 @@
                 {{ combo_field('client', 'clientParty', client_options,
                    label='Client / Owner Name', placeholder='Search or type a client…',
                    value=(initial_client or ''),
-                   hint='Pick from Parties (Clients / Owners) or type a new client. New client auto-creates a Party.',
+                   hint=('Linked party — change the name only if this project is for a different client.'
+                         if initial_party else
+                         'Pick from Parties (Clients / Owners) or type a new client. New client auto-creates a Party.'),
                    max_items=80) }}
             </div>
             <div class="col-md-6">
                 <label class="form-label">Phone Number</label>
-                <input type="text" name="client_phone" class="form-control" placeholder="e.g. 03XXXXXXXXX">
+                <input type="text" name="client_phone" class="form-control" placeholder="e.g. 03XXXXXXXXX"
+                       value="{{ initial_phone or '' }}">
                 <small class="text-muted d-block">Saved to Party phone if new.</small>
             </div>
             <div class="col-md-6">
@@ -60,7 +79,8 @@
         </div>
         <div class="mt-3 alert alert-info py-2 small">
             <i class="fas fa-link me-1"></i><strong>Integration:</strong> Client name is linked to <a href="{{ url_for('hdc_parties', category='client') }}">Parties → Clients / Owners</a>.
-            When you save, a Party of type <em>Client / Owner</em> is auto-created if missing, so the same person appears in both Projects and Parties with shared financials.
+            When you save, a Party of type <em>Client / Owner</em> is auto-created if missing, and the project is pointed at that exact party row.
+            This is the same link the party ledger offers in reverse: a party → <em>New Project</em> opens this form with the client and phone already filled.
         </div>
         <div class="mt-2 d-flex gap-2">
             <button type="submit" class="btn btn-mint"><i class="fas fa-save me-1"></i>Save Project</button>

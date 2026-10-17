@@ -65,8 +65,10 @@ def register(app):
                     cat = effective_party_category(row)
                     filed = f' under "{cat.name}"' if cat is not None else ''
                     if created:
+                        hint = (' Use "New Project" on this ledger to create their first project.'
+                                if (row.party_type or '').strip().lower() == 'client' else '')
                         flash(f'Party "{row.name}" added as {label}{filed}. It is now '
-                              f'available in the Party / Person pickers.', 'success')
+                              f'available in the Party / Person pickers.{hint}', 'success')
                     else:
                         flash(f'That party already existed — it is listed as '
                               f'{label}{filed}.', 'info')
@@ -83,12 +85,14 @@ def register(app):
                         flash(f'All {total} workers are already in the directory.', 'info')
 
                 elif action == 'sync_clients':
-                    created, reactivated, total = sync_project_clients_as_parties()
+                    created, reactivated, total, linked = sync_project_clients_as_parties()
                     db.session.commit()
-                    if created or reactivated:
+                    linked_note = (f' {linked} project(s) gained their direct party link.'
+                                   if linked else '')
+                    if created or reactivated or linked:
                         flash(f'Project clients synced: {created} added, {reactivated} '
-                              f're-activated, out of {total} distinct clients on the books.',
-                              'success')
+                              f're-activated, out of {total} distinct clients on the books.'
+                              f'{linked_note}', 'success')
                     else:
                         flash(f'All {total} project clients are already in the directory.', 'info')
 
@@ -213,8 +217,8 @@ def register(app):
         party_id = request.args.get('party_id', type=int)
 
         auto_added, auto_revived, worker_total = sync_workers_as_parties()
-        c_added, c_revived, client_total = sync_project_clients_as_parties()
-        if auto_added or auto_revived or c_added or c_revived:
+        c_added, c_revived, client_total, c_linked = sync_project_clients_as_parties()
+        if auto_added or auto_revived or c_added or c_revived or c_linked:
             db.session.commit()
 
         directory = build_party_directory(
