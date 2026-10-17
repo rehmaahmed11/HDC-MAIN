@@ -1,5 +1,8 @@
 # HDC ERP — never commit databases, backups, archives, secrets or envs
 hdc_instance/
+# Tool photos are operator data, not code: they are written at runtime under
+# the static folder and must never make the deploy checkout look dirty.
+static/hdc/tool-images/
 *.db
 *.db-wal
 *.db-shm

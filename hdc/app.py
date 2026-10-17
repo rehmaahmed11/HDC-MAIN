@@ -73,6 +73,18 @@ _CSRF_FORM_RE = re.compile(
 )
 
 
+# A form rendered by an *imported macro* ({% from "x.html" import m %}) never
+# sees the context processor's ``csrf_token``, so it emits its hidden input
+# with an empty value — and the server then answers that submit with a 400.
+# The shared Purchase / Scrap dialogs on the tools pages were exactly this
+# case.  Filling the empty input is the same fix as adding a missing one.
+_CSRF_EMPTY_TOKEN_RE = re.compile(
+    r'<input\b(?=[^>]*\bname\s*=\s*["\']?_csrf_token\b)'
+    r'(?=[^>]*\bvalue\s*=\s*(["\'])\s*\1)[^>]*>',
+    re.IGNORECASE,
+)
+
+
 def _csrf_hidden_input(token):
     return '<input type="hidden" name="_csrf_token" value="%s">' % token
 
@@ -94,7 +106,8 @@ def _inject_csrf_into_forms(response):
         return response
     new_body, added = _CSRF_FORM_RE.subn(
         lambda m: m.group(0) + _csrf_hidden_input(token), body)
-    if added:
+    new_body, filled = _CSRF_EMPTY_TOKEN_RE.subn(_csrf_hidden_input(token), new_body)
+    if added or filled:
         response.set_data(new_body)
     return response
 
@@ -242,6 +255,12 @@ def create_app(config_overrides=None):
     # purchased / scrapped totals for one tool without a query per row.
     from hdc.services.tool_rental import stock_stats_for
     app.jinja_env.filters["stock_lookup"] = stock_stats_for
+
+    # Tool photos: ``{{ tool_photo_url(tool) }}`` is the one URL every tools
+    # screen uses for a tool's picture (None when it has none), stamped so a
+    # replaced photo is never served from the browser cache.
+    from hdc.services.tool_photos import tool_photo_url
+    app.jinja_env.globals["tool_photo_url"] = tool_photo_url
 
     # Cache-busting stamp for the layout-wide CSS / JS (see _layout_asset_stamp).
     app.jinja_env.globals["hdc_asset_stamp"] = _layout_asset_stamp()

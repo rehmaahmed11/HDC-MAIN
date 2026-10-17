@@ -372,7 +372,14 @@ body[data-hdc-custom-access="true"][data-hdc-page-write="false"] form[method="PO
     forms.forEach(function (f) {
         var method = (f.getAttribute('method') || 'GET').toUpperCase();
         if (method !== 'POST') return;
-        if (f.querySelector('input[name=\"_csrf_token\"]')) return;
+        var existing = f.querySelector('input[name=\"_csrf_token\"]');
+        if (existing) {
+            // A form rendered by an imported macro carries the input but not
+            // the token; fill it instead of skipping the form (server-side
+            // injection does the same for browsers without JavaScript).
+            if (!existing.value) existing.value = token;
+            return;
+        }
         var i = document.createElement('input');
         i.type = 'hidden';
         i.name = '_csrf_token';

@@ -4,16 +4,15 @@ Now includes Accounts integration: payment receiving in Cash/Bank accounts.
 
 from datetime import datetime
 from functools import wraps
-import os
+import posixpath
 
-from urllib.parse import quote, unquote
+from urllib.parse import quote, unquote, urlsplit
 from flask import (
     flash, g, jsonify, make_response, redirect, render_template, request, session, url_for,
 )
 from flask_login import current_user, login_required
 from sqlalchemy import func
 from sqlalchemy.orm import joinedload
-from PIL import Image, ImageOps, UnidentifiedImageError
 
 from hdc.extensions import _money_write_required, db
 from hdc.models.accounts import Account
@@ -62,6 +61,9 @@ from hdc.services.tool_audit import (
     audit_rows_for_json, audit_sheet, audit_summary, close_audit, open_audit_count,
     parse_location_key, pending_audit_for, plan_adjustments, post_adjustments,
     posted_adjustment_lines, reopen_audit, save_counts, start_audit, void_audit,
+)
+from hdc.services.tool_photos import (
+    discard_tool_photo, remove_tool_photo, save_tool_photo, tool_photo_path,
 )
 from hdc.services.tool_tracking import (
     LOC_CUSTOMER, LOC_OWN_PROJECT, LOC_STORE, WAREHOUSE_LABEL,
@@ -614,6 +616,29 @@ def _strict_form_date(raw, label):
         return None, f'{label} "{raw}" is not a valid date. Use the date picker (YYYY-MM-DD).'
 
 
+def _tool_photo_redirect_target(raw):
+    """Where the photo dialog returns to after saving: only another tools page.
+
+    The dialog is opened from three screens, so the form carries the page it
+    came from.  A posted ``next`` is a redirect an attacker could aim anywhere,
+    so anything that is not a same-app ``/hdc/tool-rental`` path is dropped and
+    the operator lands on the inventory list instead.
+    """
+    fallback = url_for('hdc_tool_rental_inventory')
+    path = (raw or '').strip()
+    if not path or any(ch in path for ch in '\\\r\n\t '):
+        return fallback
+    parts = urlsplit(path)
+    if parts.scheme or parts.netloc:
+        return fallback
+    # ``/hdc/tool-rental/../../hdc/settings`` starts with the right prefix but
+    # is not the right page once a browser folds the dot segments away.
+    folded = posixpath.normpath(parts.path)
+    if not (folded == '/hdc/tool-rental' or folded.startswith('/hdc/tool-rental/')):
+        return fallback
+    return folded + (f'?{parts.query}' if parts.query else '')
+
+
 def register(app):
 
     # Every tools page can tell the reader when the numbers are a filtered slice
@@ -647,6 +672,9 @@ def register(app):
             q=q,
             selected_category=category_id,
             today=_pkt_today().isoformat(),
+            # The photo dialog is offered only to a writer; a reader still gets
+            # the thumbnail and the full-size viewer.
+            can_write_tools=_rental_form_access_allowed(),
         )
 
     # ------------------ ONE TOOL: WHERE IS EVERY PIECE ------------------
@@ -682,6 +710,9 @@ def register(app):
             loc_store=LOC_STORE, loc_own=LOC_OWN_PROJECT, loc_customer=LOC_CUSTOMER,
             warehouse_label=WAREHOUSE_LABEL,
             today=_pkt_today().isoformat(),
+            # Decides whether the photo dialog offers "Change / remove photo"
+            # or only the full-size viewer.
+            can_write_tools=_rental_form_access_allowed(),
         )
 
     # ------------------ MAIN RENTALS HUB ------------------
@@ -826,34 +857,16 @@ def register(app):
                 db.session.flush()
 
                 image = request.files.get('tool_image')
+                photo_file = None
                 if image and image.filename:
-                    try:
-                        # Bound both the incoming upload and the decoded dimensions; a
-                        # compressed output is stored as WebP regardless of source type.
-                        image.stream.seek(0, os.SEEK_END)
-                        upload_bytes = image.stream.tell()
-                        image.stream.seek(0)
-                        if upload_bytes > 12 * 1024 * 1024:
-                            raise ValueError('Tool photo must be 12 MB or smaller.')
-                        Image.MAX_IMAGE_PIXELS = 25_000_000
-                        with Image.open(image.stream) as source:
-                            source = ImageOps.exif_transpose(source)
-                            source.thumbnail((640, 640), Image.Resampling.LANCZOS)
-                            if source.mode not in ('RGB', 'RGBA'):
-                                source = source.convert('RGB')
-                            elif source.mode == 'RGBA':
-                                # WebP supports alpha; preserve it where present.
-                                pass
-                            image_dir = os.path.join(app.static_folder or 'static', 'tool-images')
-                            os.makedirs(image_dir, exist_ok=True)
-                            image_path = os.path.join(image_dir, f'{tool.id}.webp')
-                            source.save(image_path, format='WEBP', quality=55, method=6)
-                            tool.image_path = f'tool-images/{tool.id}.webp'
-                    except (UnidentifiedImageError, OSError, ValueError) as exc:
+                    # One shared writer for every photo path (create, replace,
+                    # the photo dialog): see hdc/services/tool_photos.py.
+                    photo_ok, photo_message = save_tool_photo(tool, image, app=app)
+                    if not photo_ok:
                         db.session.rollback()
-                        flash(str(exc) if isinstance(exc, ValueError) else
-                              'Please upload a valid image file.', 'danger')
+                        flash(photo_message, 'danger')
                         return redirect(url_for('hdc_tool_rental_inventory'))
+                    photo_file = tool_photo_path(tool, app)
 
                 # opening stock is a real purchase: it keeps "why do we own 8?"
                 # answerable from the stock register instead of a magic number
@@ -880,6 +893,9 @@ def register(app):
                     )
                     if not ok_pur:
                         db.session.rollback()
+                        # The tool row is gone, so its picture must go too: a
+                        # rolled-back id can be reused by the next tool.
+                        discard_tool_photo(photo_file)
                         flash(msg_pur or 'Could not record opening stock.', 'danger')
                         return redirect(url_for('hdc_tool_rental_inventory'))
 
@@ -1045,6 +1061,30 @@ def register(app):
         db.session.commit()
         flash(f'Tool {tool.name} updated.', 'success')
         return redirect(url_for('hdc_tool_rental_inventory', q=tool.tool_code))
+
+    # ------------------ TOOL PHOTO: ADD / REPLACE / REMOVE ------------------
+    @app.route('/hdc/tool-rental/inventory/<int:tool_id>/photo', methods=['POST'])
+    @login_required
+    @_money_write_required()
+    def hdc_tool_rental_tool_photo(tool_id):
+        """Save or remove the photo of one tool.
+
+        The photo dialog lives on the inventory list, the tools dashboard and a
+        tool's position page, so it posts back to whichever page opened it
+        (``next``) — but only ever to a tools page (see
+        :func:`_tool_photo_redirect_target`).  A tool saved without a photo can
+        be given one here later; that was the gap the create form left.
+        """
+        tool = Tool.query.get_or_404(tool_id)
+        action = (request.form.get('action') or 'upload').strip().lower()
+        target = _tool_photo_redirect_target(request.form.get('next'))
+        if action == 'remove':
+            ok, message = remove_tool_photo(tool, app=app, commit=True)
+        else:
+            ok, message = save_tool_photo(tool, request.files.get('tool_image'),
+                                          app=app, commit=True)
+        flash(message, 'success' if ok else 'danger')
+        return redirect(target)
 
     @app.route('/hdc/tool-rental/inventory/<int:tool_id>/delete', methods=['POST'])
     @login_required
