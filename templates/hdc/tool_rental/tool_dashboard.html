@@ -9,7 +9,7 @@
    pages — nothing is repeated here. #}
 {% block content %}
 {% set tools_active = 'dashboard' %}
-{% from "tool_rental/_tool_photo.html" import tool_photo_thumb %}
+{% from "tool_rental/_tool_photo.html" import tool_photo_code %}
 {% include "tool_rental/_tools_nav.html" %}
 {% include "tool_rental/_scope_note.html" %}
 {% set t = totals %}
@@ -124,17 +124,9 @@
                     {% for r in rows %}
                     <tr {{ r|hdc_row_attrs }}>
                         <td class="fw-semibold">
-                            {# The picture travels with the name: one click shows it
-                               full size, and a missing one is obvious at a glance. #}
-                            <div class="tool-photo-cell">
-                                {{ tool_photo_thumb(r.tool, r.name, r.code,
-                                                    (r.category or 'No Category') ~ ' · ' ~ r.unit ~
-                                                    ' · owns ' ~ ("%g"|format(r.owned_qty)) ~ ' ' ~ r.unit,
-                                                    size=40, can_edit=can_write_tools) }}
-                                <a href="{{ url_for('hdc_tool_rental_tool_position', tool_id=r.tool_id) }}" class="text-decoration-none">{{ r.name }}</a>
-                            </div>
+                            <a href="{{ url_for('hdc_tool_rental_tool_position', tool_id=r.tool_id) }}" class="text-decoration-none">{{ r.name }}</a>
                         </td>
-                        <td><span class="badge bg-secondary">{{ r.code }}</span></td>
+                        <td>{{ tool_photo_code(r.tool, r.name, r.code, can_edit=can_write_tools) }}</td>
                         <td class="text-muted small">{{ r.category or '-' }}</td>
                         <td class="text-end fw-bold">{{ "%g"|format(r.owned_qty) }} {{ r.unit }}</td>
                         <td class="text-end text-success fw-semibold">{{ "%g"|format(r.in_store_qty) }}</td>

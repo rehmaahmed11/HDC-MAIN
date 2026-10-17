@@ -270,6 +270,22 @@ class ToolPhotoTestCase(unittest.TestCase):
         self.assertIn((str(tool.id), ), [(tool_id,) for tool_id, _stamp in urls],
                       'the row does not point at this tool\'s photo')
 
+    def test_list_photo_trigger_is_the_code_and_not_an_inline_picture(self):
+        tool = self._add_tool_with_photo()
+        for path in ('inventory', 'dashboard'):
+            page = self.client.get('/hdc/tool-rental/' + path).get_data(as_text=True)
+            table_body = page.split('<tbody>', 1)[1].split('</tbody>', 1)[0]
+            self.assertNotIn('tool-photo-thumb', table_body)
+            self.assertNotIn('<img', table_body)
+            self.assertRegex(table_body, r'data-photo-can-edit="1"\s*>\s*' + re.escape(tool.tool_code) + r'</button>')
+            self.assertNotRegex(table_body, r'>\s*data-tool-id=')
+
+    def test_thumbnail_metadata_is_in_attributes_not_visible_text(self):
+        tool = self._add_tool_with_photo()
+        page = self.client.get(f'/hdc/tool-rental/tool/{tool.id}').get_data(as_text=True)
+        self.assertRegex(page, r'data-photo-can-edit="1"\s*><img')
+        self.assertNotRegex(page, r'>\s*data-tool-id=')
+
     def test_stored_photo_is_served_as_an_image(self):
         tool = self._add_tool_with_photo()
         page = self.client.get('/hdc/tool-rental/inventory').get_data(as_text=True)

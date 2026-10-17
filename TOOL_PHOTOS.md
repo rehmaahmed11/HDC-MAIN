@@ -1,3 +1,17 @@
+## Compact photo access (latest correction)
+
+Inventory and dashboard rows no longer show thumbnails or an extra photo action.
+Click the existing tool code / serial badge to open the saved photo in the shared
+viewer. Codes without a photo remain plain badges; writers can add a photo from
+Edit or the tool position page. The eye button still opens position and history.
+
+Fixed malformed photo controls that printed `data-*` metadata as visible text:
+all metadata now belongs inside the button opening tag, including thumbnails in
+Edit and on the position page. Regression tests check both compact rows and valid
+attribute placement.
+
+---
+
 # Tool photos — see the picture you saved
 
 The request from the field, in its own words:
