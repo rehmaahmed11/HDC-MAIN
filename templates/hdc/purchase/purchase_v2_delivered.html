@@ -325,6 +325,7 @@
                     <th>Date</th>
                     <th>Recorded</th>
                     <th>Material</th>
+                    <th>Item Category</th>
                     <th>Supplier</th>
                     <th>Purchase Order</th>
                     <th>Project</th>
@@ -344,6 +345,11 @@
                     <td class="fw-semibold">
                         {{ r.material.name if r.material else '-' }}
                         {% if r.material %}<small class="text-muted">({{ r.material.unit or '' }})</small>{% endif %}
+                    </td>
+                    <td>
+                        {% set row_category = (r.purchase.category.name if r.purchase and r.purchase.category
+                                               else (r.material.category.name if (r.material and r.material.category) else 'Uncategorized')) %}
+                        <span class="badge {% if row_category == 'Uncategorized' %}bg-warning text-dark{% else %}bg-dark{% endif %}">{{ row_category }}</span>
                     </td>
                     <td class="small text-muted">
                         {{ r.purchase.supplier.name if (r.purchase and r.purchase.supplier) else '-' }}

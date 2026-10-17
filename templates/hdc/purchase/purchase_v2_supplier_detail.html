@@ -324,7 +324,17 @@
                     <td class="text-muted small">#{{ p.id }}</td>
                     <td class="small">{{ p.date or (p.created_at.strftime('%Y-%m-%d') if p.created_at else '-') }}{% if p.created_at %}<div class="text-muted" style="font-size:.75rem">{{ p.created_at.strftime('%H:%M') }}</div>{% endif %}</td>
                     <td>{{ p.material.name if p.material else '-' }} <small class="text-muted">({{ p.material.unit if p.material else '' }})</small></td>
-                    <td><span class="badge bg-dark">{{ material_category_names.get(p.id, 'Uncategorized') }}</span></td>
+                    <td>
+                        {% set row_cat = material_category_names.get(p.id, 'Uncategorized') %}
+                        <span class="badge {% if row_cat == 'Uncategorized' %}bg-warning text-dark{% else %}bg-dark{% endif %}">
+                            {{ row_cat }}
+                        </span>
+                        {% if material_own_category_names.get(p.id) and material_own_category_names.get(p.id) != row_cat %}
+                        <div class="small text-muted" title="The item's own type; this line was filed under another one">
+                            item type: {{ material_own_category_names.get(p.id) }}
+                        </div>
+                        {% endif %}
+                    </td>
                     <td class="text-end">{{ "{:,.2f}".format(p.quantity or 0) }}</td>
                     <td class="text-end">{{ "{:,.2f}".format(dq) }}</td>
                     <td class="text-end {% if (p.quantity or 0) - dq <= 0 %}text-muted{% else %}text-warning{% endif %}">

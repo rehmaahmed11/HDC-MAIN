@@ -20,6 +20,7 @@ from hdc.services.material_categories import (
     _ensure_material_category,
     _material_category_by_id,
     _material_category_choices,
+    _material_category_for_write,
 )
 from hdc.services.record_permissions import integrity_message, integrity_query
 from hdc.services.purchase import validate_delivery_reduction, _MATERIAL_V2_UNITS, _ensure_material_v2, _ensure_supplier_quick, _material_v2_available, _material_v2_delivered, _material_v2_scope_stock_rows, _material_v2_used, _purchase_v2_available_in_scope_qty, _purchase_v2_delivered_qty, _purchase_v2_delivered_to_scope_qty, _purchase_v2_scope_remaining_map, _purchase_v2_used_in_scope_qty, _supplier_balance, _sync_purchase_v2_ledger
@@ -206,8 +207,18 @@ def register(app):
                       .first())
             if exists:
                 return jsonify(ok=False, message='Another material already uses this name.'), 400
-            category = _material_category_by_id(payload.get('category_id') if payload else None,
-                                                active_only=True)
+            # The item type is only changed when the caller says so: an
+            # absent ``category_id`` means "leave the item's type alone", the
+            # same way an absent name or unit keeps the current value.  A
+            # retired type may be **kept**, never newly chosen.
+            raw_category_id = payload.get('category_id') if payload else None
+            if payload is not None and 'category_id' not in payload:
+                raw_category_id = row.category_id
+            category = _material_category_for_write(
+                raw_category_id,
+                current_category_id=(int(row.category_id) if row.category_id else None))
+            if category is None and raw_category_id not in (None, '', 0, '0'):
+                return jsonify(ok=False, message='Select a valid item type.'), 400
             category_name = _normalize_name_ci(payload.get('category_name') if payload else None)
             if category_name:
                 category = _ensure_material_category(category_name)

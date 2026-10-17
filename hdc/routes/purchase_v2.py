@@ -29,6 +29,7 @@ from hdc.services.material_categories import (
     _material_category_summary_rows,
     _material_category_usage_counts,
     _material_category_condition,
+    _material_category_for_write,
     _purchase_category_condition,
     _usage_category_condition,
     material_category_id,
@@ -70,6 +71,11 @@ def _category_filter_context(selected_category_id):
     """Everything a template's category filter needs, in one place."""
     return {
         'category_options': _material_category_choices(include_inactive=False),
+        # The **edit** dropdowns need the retired types as well: a category
+        # that was set inactive still sits on the records that use it, and an
+        # edit form that cannot show the record's own category would silently
+        # re-file the record under a different one.
+        'category_options_all': _material_category_choices(include_inactive=True),
         'selected_category_id': ('' if selected_category_id is None else int(selected_category_id)),
         'category_filter_label': ('All Categories' if selected_category_id is None
                                   else _material_category_label(selected_category_id)),
@@ -97,8 +103,9 @@ def register(app):
         # still unassigned, and the biggest categories by purchase value.
         category_summary = _material_category_summary_rows(include_inactive=False)
         category_count = len([c for c in category_summary if int(c['id']) != UNCATEGORIZED_ID])
-        uncategorized_material_count = len([m for m in MaterialV2.query.filter(MaterialV2.is_void == False).all()
-                                            if not m.category_id])
+        uncategorized_material_count = int(db.session.query(func.count(MaterialV2.id))
+                                           .filter(MaterialV2.is_void == False,
+                                                   MaterialV2.category_id.is_(None)).scalar() or 0)
         top_categories = sorted([c for c in category_summary if int(c['id']) != UNCATEGORIZED_ID],
                                 key=lambda c: -float(c['purchased_value'] or 0.0))[:6]
         supplier_site_count = int(db.session.query(func.count(SupplierSite.id)).scalar() or 0)
@@ -200,8 +207,10 @@ def register(app):
             materials=materials,
             material_units=_MATERIAL_V2_UNITS,
             totals=totals,
-            uncategorized_materials=[m for m in MaterialV2.query.filter(MaterialV2.is_void == False).all()
-                                     if not m.category_id],
+            uncategorized_materials=(MaterialV2.query
+                                     .filter(MaterialV2.is_void == False,
+                                             MaterialV2.category_id.is_(None))
+                                     .order_by(MaterialV2.name.asc()).all()),
             **_category_filter_context(category_id))
 
 
@@ -228,7 +237,17 @@ def register(app):
         if exists:
             flash('Another material already uses this name.', 'danger')
             return redirect(url_for('hdc_purchase_v2_materials'))
-        category = _material_category_by_id(request.form.get('category_id'), active_only=True)
+        raw_category = (request.form.get('category_id') or '').strip()
+        current_category_id = int(row.category_id) if row.category_id else None
+        category = None
+        if raw_category and raw_category != '0':
+            # An item keeps the type it already has, even when that type has
+            # been retired — clearing it is a separate, deliberate choice.
+            category = _material_category_for_write(raw_category,
+                                                   current_category_id=current_category_id)
+            if not category:
+                flash('Select a valid category.', 'danger')
+                return redirect(url_for('hdc_purchase_v2_materials'))
         new_category_name = _normalize_name_ci(request.form.get('category_new'))
         if new_category_name:
             category = _ensure_material_category(new_category_name)
@@ -320,7 +339,11 @@ def register(app):
                 raw_category = (row_categories[index] if index < len(row_categories) else '').strip()
                 category = None
                 if raw_category and raw_category != '0':
-                    category = _material_category_by_id(raw_category, active_only=True)
+                    # A retired item type may only be **kept** — the one the
+                    # item itself already sits in — never newly chosen.
+                    category = _material_category_for_write(
+                        raw_category,
+                        current_category_id=(int(material.category_id) if material.category_id else None))
                     if not category:
                         flash(f'Item {index + 1}: select a valid category.', 'danger')
                         return redirect(url_for('hdc_purchase_v2_purchases'))
@@ -504,11 +527,17 @@ def register(app):
         _notes   = (request.form.get('notes') or '').strip() or None
         _challan = (request.form.get('challan_no') or '').strip() or None
         # Category may be re-pointed on the line without touching the catalog.
+        # A type that was set inactive stays on the rows that already use it,
+        # so an edit that only touches the quantity must not re-file the line.
         raw_category = (request.form.get('category_id') or '').strip()
-        category = _material_category_by_id(raw_category, active_only=True) if raw_category else None
-        if raw_category and raw_category != '0' and not category:
-            flash('Select a valid category.', 'danger')
-            return redirect(url_for('hdc_purchase_v2_purchases'))
+        current_category_id = int(row.category_id) if row.category_id else None
+        category = None
+        if raw_category and raw_category != '0':
+            category = _material_category_for_write(raw_category,
+                                                   current_category_id=current_category_id)
+            if not category:
+                flash('Select a valid category.', 'danger')
+                return redirect(url_for('hdc_purchase_v2_purchases'))
         old_payment_status = (row.payment_status or 'unpaid').strip().lower()
         row.supplier_id = supplier.id
         row.material_id = material.id
@@ -670,13 +699,18 @@ def register(app):
 
         def _profile_matches(supplier_id):
             if filter_category_id is not None:
-                supplied = profile_map.get(int(supplier_id), {}).get('category_ids', [])
+                profile = profile_map.get(int(supplier_id), {})
+                supplied = profile.get('category_ids', [])
                 if filter_category_id == UNCATEGORIZED_ID:
-                    stated_has = any(int(c) == UNCATEGORIZED_ID for c in stated_category_map.get(int(supplier_id), []))
+                    # "Uncategorized" is a bucket, not a vocabulary entry: a
+                    # supplier can never *state* it, it can only have supplied
+                    # lines that fall into it.
+                    if not int(profile.get('uncategorized_count') or 0):
+                        return False
                 else:
                     stated_has = int(supplier_id) in stated_match_ids
-                if not stated_has and (not supplied or int(filter_category_id) not in [int(c) for c in supplied]):
-                    return False
+                    if not stated_has and (not supplied or int(filter_category_id) not in [int(c) for c in supplied]):
+                        return False
             if filter_material_id:
                 if int(supplier_id) not in material_match_ids:
                     return False
@@ -734,6 +768,10 @@ def register(app):
                                  for cid in stated_category_map.get(int(s.id), [])]
             supplied_categories = [_material_category_label(cid, category_map=category_map)
                                    for cid in profile.get('category_ids', [])]
+            if int(profile.get('uncategorized_count') or 0):
+                # Say so out loud — otherwise a supplier that only ever
+                # supplied legacy rows reads as having supplied nothing.
+                supplied_categories.append(UNCATEGORIZED_LABEL)
             site_rows_for_supplier = sorted(supplied_sites_by_supplier.get(int(s.id), []),
                                             key=lambda r: (-r['value'], r['project_name'].lower()))
             stated_sites = [project_names.get(pid, f'Site #{pid}')
@@ -909,7 +947,15 @@ def register(app):
             supplied_site_rows=supplied_site_rows,
             supplied_site_ids={int(r['project_id']) for r in supplied_site_rows},
             project_names=project_names,
+            # The **line's** item type, resolved by the one shared rule — the
+            # same number the Purchases register shows for the same row.  The
+            # item's own type is carried alongside so an override stays
+            # visible instead of silently disagreeing with the register.
             material_category_names={
+                int(p.id): _material_category_label(purchase_resolved_category_id(p), category_map=category_map)
+                for p in purchases
+            },
+            material_own_category_names={
                 int(p.id): _material_category_label(material_category_id(p.material), category_map=category_map)
                 for p in purchases if p.material
             },
@@ -1545,9 +1591,16 @@ def register(app):
         total_sent = float(sum(float(r.get('sent_qty') or 0.0) for r in summary_rows))
         total_used = float(sum(float(r.get('used_qty') or 0.0) for r in summary_rows))
         total_pending = float(sum(float(r.get('pending_qty') or 0.0) for r in summary_rows))
+        # The denominator must cover the **same items** as the numerator, or
+        # "Sent of Purchased" answers a question nobody asked: with a category
+        # filter on, the sent figure was narrowed to that item type while the
+        # purchased figure still counted every purchase in the book.
+        scope_material_ids = [int(m.id) for m in materials]
         pq = PurchaseV2.query.filter(PurchaseV2.is_void == False)
-        if material_id:
-            pq = pq.filter(PurchaseV2.material_id == material_id)
+        if scope_material_ids:
+            pq = pq.filter(PurchaseV2.material_id.in_(scope_material_ids))
+        else:
+            pq = pq.filter(PurchaseV2.material_id == -1)
         total_purchased_qty = float(pq.with_entities(func.coalesce(func.sum(PurchaseV2.quantity), 0.0)).scalar() or 0.0)
         total_purchased_amount = float(pq.with_entities(func.coalesce(func.sum(PurchaseV2.total_amount), 0.0)).scalar() or 0.0)
         sent_of_purchased_pct = float((total_sent / total_purchased_qty) * 100.0) if total_purchased_qty > 1e-9 else 0.0
@@ -1765,7 +1818,9 @@ def register(app):
                      .order_by(MaterialV2.name.asc()).all())
         uncategorized_materials = [m for m in materials if not m.category_id]
         totals = {
-            'categories': len(categories),
+            # The "Uncategorized" row is a bucket that points at missing data,
+            # not an item type — it must not be counted as one of them.
+            'categories': len([c for c in categories if int(c['id']) != UNCATEGORIZED_ID]),
             'materials': len(materials),
             'uncategorized_materials': len(uncategorized_materials),
             'purchased_value': float(sum(float(c.get('purchased_value') or 0.0) for c in categories)),
@@ -2001,6 +2056,15 @@ def register(app):
                                                               func.coalesce(func.sum(Delivery.quantity), 0.0))
                              .filter(Delivery.is_void == False).group_by(Delivery.material_id).all()} \
             if material_ids else {}
+        # "In store" is a **balance**, not a flow: what is physically on hand.
+        # It therefore always reads the full history — the same way the item
+        # ledger does — so a date or site filter (which narrows the flow
+        # columns) can never make the store look empty.
+        all_purchased_map = {int(mid): float(qty or 0.0)
+                             for mid, qty in db.session.query(PurchaseV2.material_id,
+                                                              func.coalesce(func.sum(PurchaseV2.quantity), 0.0))
+                             .filter(PurchaseV2.is_void == False).group_by(PurchaseV2.material_id).all()} \
+            if material_ids else {}
 
         category_map = _material_category_map()
         rows = []
@@ -2027,7 +2091,7 @@ def register(app):
                 'used_qty': used_qty,
                 'used_value': used_value,
                 'usage_count': usage_count,
-                'in_store_qty': max(0.0, purchased_qty - lifetime_delivered),
+                'in_store_qty': max(0.0, all_purchased_map.get(mid, 0.0) - lifetime_delivered),
                 'at_site_qty': max(0.0, delivered_qty - used_qty),
             })
         if sort_mode == 'name':
@@ -2136,9 +2200,10 @@ def register(app):
         used_cost = float(sum(float(r.cost or 0.0) for r in usages))
         lifetime_delivered = _material_v2_delivered(material.id)
         lifetime_used = _material_v2_used(material.id)
-        # Store-level numbers always read the full history (no site/date
-        # filter), so "in store" and "balance at site" cannot be misread as
-        # scoped totals when a filter is on.
+        # "In store" is a balance, so it always reads the full history (no
+        # site/date filter) — the same number the item-wise register shows.
+        # "Balance at site" *is* scoped, because a balance at a site is only
+        # meaningful for the site (and period) being looked at.
         lifetime_purchased = float(db.session.query(
             func.coalesce(func.sum(PurchaseV2.quantity), 0.0)
         ).filter(PurchaseV2.material_id == material.id,
@@ -2195,11 +2260,14 @@ def register(app):
         rows = _site_supplier_supplied_rows(
             project_id=project_id, category_id=category_id, material_id=material_id,
             supplier_id=supplier_id, date_from=date_from, date_to=date_to)
-        if q:
-            needle = q.lower()
+        needle = q.lower() if q else ''
+
+        def _matches(text):
+            return (not needle) or (needle in (text or '').lower())
+
+        if needle:
             rows = [r for r in rows
-                    if needle in (r['supplier_name'] or '').lower()
-                    or needle in (r['project_name'] or '').lower()]
+                    if _matches(r['supplier_name']) or _matches(r['project_name'])]
 
         category_map = _material_category_map()
         projects = {int(p.id): p.name for p in Project.query.order_by(Project.name.asc()).all()}
@@ -2234,9 +2302,14 @@ def register(app):
             supplier = suppliers.get(sid)
             if not supplier:
                 continue
+            site_name = projects.get(pid, f'Site #{pid}')
+            # The search box has to narrow the assignments too, otherwise a
+            # search that matches nothing still lists every assigned supplier.
+            if not (_matches(supplier.name) or _matches(site_name)):
+                continue
             site = sites.setdefault(pid, {
                 'project_id': pid,
-                'project_name': projects.get(pid, f'Site #{pid}'),
+                'project_name': site_name,
                 'rows': [], 'supplier_ids': set(), 'quantity': 0.0, 'value': 0.0, 'assigned': [],
             })
             if sid not in site['supplier_ids']:
@@ -2288,6 +2361,11 @@ def register(app):
                 continue
             if project_id and int(project_id) not in set(stated_sites.get(sid, [])):
                 continue
+            assigned_names = [projects.get(pid, f'Site #{pid}')
+                              for pid in stated_sites.get(sid, [])]
+            if needle and not (_matches(supplier.name)
+                               or any(_matches(name) for name in assigned_names)):
+                continue
             supplier_list.append({
                 'supplier_id': sid,
                 'supplier_name': supplier.name,
@@ -2297,8 +2375,7 @@ def register(app):
                 'site_names': [],
                 'site_count': 0,
                 'assigned_site_ids': set(stated_sites.get(sid, [])),
-                'assigned_site_names': sorted(projects.get(pid, f'Site #{pid}')
-                                              for pid in stated_sites.get(sid, [])),
+                'assigned_site_names': sorted(assigned_names),
                 'deals_in': [_material_category_label(cid, category_map=category_map)
                              for cid in stated_categories.get(sid, [])],
             })

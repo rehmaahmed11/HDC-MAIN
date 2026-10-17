@@ -99,21 +99,43 @@ def _material_category_by_id(category_id, active_only=False):
 
 
 def _material_category_by_name(name):
+    """The category row carrying this name, case- and space-insensitively.
+
+    A **live** row always wins over a voided one with the same name.  The
+    unique index only covers live rows (``WHERE is_void = 0``), so a voided
+    "Tile" and a live "tile" can legitimately sit side by side; without the
+    ordering below the voided row could be picked, revived, and then collide
+    with the live one on commit.
+    """
     text = (name or '').strip()
     if not text:
         return None
     return (_material_category_query(include_void=True)
             .filter(func.lower(func.trim(MaterialCategory.name)) == text.lower())
+            .order_by(MaterialCategory.is_void.asc(), MaterialCategory.id.asc())
             .first())
 
 
 def _ensure_material_category(name, *, commit=False):
-    """Find or create a category by name (case-insensitive), reviving voids."""
+    """Find or create a category by name (case-insensitive), reviving voids.
+
+    A live row with the same name is always reused; a voided row is only
+    revived when no live row carries that name, so this can never create two
+    live rows with the same name (the unique index would refuse the commit).
+    """
     text = (name or '').strip()
     if not text:
         return None
     row = _material_category_by_name(text)
     if row:
+        # A live row with this name must win: reviving a voided one while a
+        # live one exists would leave two live rows with the same name, and
+        # the unique index would refuse the commit.
+        live = (_material_category_query(include_void=False)
+                .filter(func.lower(func.trim(MaterialCategory.name)) == text.lower())
+                .first())
+        if live and int(live.id) != int(row.id):
+            return live
         changed = False
         if row.is_void:
             row.is_void = False
@@ -131,6 +153,38 @@ def _ensure_material_category(name, *, commit=False):
     if commit:
         db.session.commit()
     return row
+
+
+def _material_category_for_write(category_id, *, current_category_id=None):
+    """The category a write path is allowed to file a record under.
+
+    * an **active** category is always allowed;
+    * a category that was set **inactive** (because records still point at it)
+      may only be *kept* — never newly chosen, so nothing new is filed under a
+      retired item type;
+    * a **voided** category is never allowed.
+
+    ``current_category_id`` is the record's own category before the edit: it
+    is the one inactive category that may survive an edit, so saving an
+    unrelated field never silently re-files the record.
+    """
+    if category_id in (None, '', 0, '0'):
+        return None
+    try:
+        cid = int(category_id)
+    except (TypeError, ValueError):
+        return None
+    if cid <= 0:
+        return None
+    row = _material_category_query(include_void=True).filter(MaterialCategory.id == cid).first()
+    if not row or row.is_void:
+        return None
+    is_active = (row.status or 'active').strip().lower() == 'active'
+    if is_active:
+        return row
+    if current_category_id and int(current_category_id) == cid:
+        return row      # the record already sits here — keeping it is safe
+    return None
 
 
 def _ensure_material_category_seed():
@@ -355,8 +409,21 @@ def _material_category_summary_rows(include_inactive=True):
     deliveries = db.session.query(
         Delivery.purchase_id, Delivery.material_id, Delivery.project_id, Delivery.quantity
     ).filter(Delivery.is_void == False).all()
+    # A delivery is attributed to the item type of the purchase it came from.
+    # A purchase that was deleted still names the type the stock was bought
+    # under, so its deliveries must not fall out of every filter.
+    purchase_category_all = dict(purchase_category)
+    for pid, material_id, purchase_category_id, unit_price in db.session.query(
+        PurchaseV2.id, PurchaseV2.material_id, PurchaseV2.category_id, PurchaseV2.unit_price
+    ).filter(PurchaseV2.is_void.is_(True)).all():
+        purchase_category_all.setdefault(
+            int(pid),
+            int(purchase_category_id) if purchase_category_id
+            else material_category.get(int(material_id or 0)))
+        purchase_unit_price.setdefault(int(pid), float(unit_price or 0.0))
     for purchase_id, material_id, project_id, quantity in deliveries:
-        resolved = purchase_category.get(int(purchase_id or 0)) if purchase_id else material_category.get(int(material_id or 0))
+        resolved = (purchase_category_all.get(int(purchase_id or 0)) if purchase_id
+                    else material_category.get(int(material_id or 0)))
         row = bucket(resolved)
         qty = float(quantity or 0.0)
         row['delivered_qty'] += qty
@@ -369,7 +436,8 @@ def _material_category_summary_rows(include_inactive=True):
         UsageLogV2.quantity, UsageLogV2.cost
     ).filter(UsageLogV2.is_void == False).all()
     for purchase_id, material_id, project_id, quantity, cost in usages:
-        resolved = purchase_category.get(int(purchase_id or 0)) if purchase_id else material_category.get(int(material_id or 0))
+        resolved = (purchase_category_all.get(int(purchase_id or 0)) if purchase_id
+                    else material_category.get(int(material_id or 0)))
         row = bucket(resolved)
         row['used_qty'] += float(quantity or 0.0)
         row['used_value'] += float(cost or 0.0)
@@ -378,15 +446,20 @@ def _material_category_summary_rows(include_inactive=True):
 
     rows = [summary[cid] for cid in sorted(summary, key=lambda i: summary[i]['name'].lower())]
     rows = [r for r in rows if include_inactive or r['status'] == 'active']
+    # The site / supplier counts must be on **every** row: they are what the
+    # categories page shows next to each item type, and they used to be
+    # written only when the Uncategorized bucket happened to be empty — so a
+    # single uncategorised item silently reported "0 sites, 0 suppliers" for
+    # every real category.
+    for r in rows:
+        r['site_count'] = len(r['site_ids'])
+        r['supplier_count'] = len(r['supplier_ids'])
     if uncategorized['material_count'] or uncategorized['purchase_count']:
         uncategorized['site_ids'] = sorted(uncategorized['site_ids'])
         uncategorized['supplier_ids'] = sorted(uncategorized['supplier_ids'])
         uncategorized['site_count'] = len(uncategorized['site_ids'])
         uncategorized['supplier_count'] = len(uncategorized['supplier_ids'])
         return rows + [uncategorized]
-    for r in rows:
-        r['site_count'] = len(r['site_ids'])
-        r['supplier_count'] = len(r['supplier_ids'])
     return rows
 
 

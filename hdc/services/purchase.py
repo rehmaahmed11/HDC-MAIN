@@ -751,10 +751,17 @@ def _supplier_supplied_profile(date_from=None, date_to=None):
             'quantity': 0.0,
             'value': 0.0,
             'last_purchase_date': None,
+            # Lines that belong to no item type at all.  Kept apart from
+            # ``category_ids`` (which only ever holds real categories) so the
+            # "Uncategorized" filter can find the suppliers that still have
+            # legacy rows to be fixed.
+            'uncategorized_count': 0,
         })
         resolved = int(category_id) if category_id else material_rows.get(int(material_id or 0))
         if resolved:
             profile['category_ids'].add(int(resolved))
+        else:
+            profile['uncategorized_count'] = int(profile.get('uncategorized_count') or 0) + 1
         mid = int(material_id or 0)
         if mid:
             profile['material_ids'].add(mid)
@@ -935,7 +942,11 @@ def _site_supplier_supplied_rows(project_id=None, category_id=None, material_id=
         if resolved is None:
             material = material_rows.get(int(del_material_id or 0))
             resolved = int(material.category_id) if material and material.category_id else 0
-        if category_id and int(category_id) != int(resolved):
+        # ``category_id`` is None for "All Categories" and 0 for
+        # "Uncategorized" — a plain truth test would read 0 as "no filter" and
+        # hand back every row while the page claims to show the uncategorised
+        # ones only.
+        if category_id is not None and int(category_id) != int(resolved or 0):
             continue
         row = out.setdefault((pid, sid), {
             'project_id': pid,
