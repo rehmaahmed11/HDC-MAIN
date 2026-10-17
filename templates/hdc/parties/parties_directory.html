@@ -261,6 +261,15 @@
                                 <a href="{{ url_for('hdc_party_ledger', party_id=row.party.id) }}" class="btn btn-sm btn-outline-primary" aria-label="Open ledger for {{ row.party.name }}">
                                     <i class="fas fa-book-open me-1" aria-hidden="true"></i>Ledger
                                 </a>
+                                <button type="button" class="btn btn-sm btn-outline-secondary js-edit-party"
+                                        data-party-id="{{ row.party.id }}"
+                                        data-party-name="{{ row.party.name }}"
+                                        data-party-type="{{ row.party.party_type or 'other' }}"
+                                        data-party-phone="{{ row.party.phone or '' }}"
+                                        data-party-note="{{ row.party.note or '' }}"
+                                        title="Edit party">
+                                    <i class="fas fa-edit" aria-hidden="true"></i>
+                                </button>
                                 <form method="post" action="{{ url_for('hdc_parties') }}" class="d-inline" data-hdc-dialog>
                                     <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
                                     <input type="hidden" name="action" value="toggle_party">
@@ -287,4 +296,76 @@
 .kpi-filter-active { box-shadow: 0 0 0 3px rgba(255,255,255,.55), 0 14px 34px rgba(2,6,23,.28); }
 .party-directory-table td, .party-directory-table th { vertical-align: middle; }
 </style>
+
+<div class="modal fade" id="editPartyModal" tabindex="-1" aria-labelledby="editPartyModalTitle" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post" action="{{ url_for('hdc_parties') }}" id="editPartyForm" data-hdc-dialog>
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="action" value="edit_party">
+                <input type="hidden" name="party_id" id="editPartyId">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="editPartyModalTitle"><i class="fas fa-user-edit me-2" aria-hidden="true"></i>Edit Party</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-2">
+                        <label class="form-label" for="editPartyName">Name <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="editPartyName" name="name" maxlength="160" required>
+                        <div class="form-text">Renaming changes the name for new entries only — existing ledger rows keep the name they were recorded with.</div>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label" for="editPartyType">Type</label>
+                        <select class="form-select" id="editPartyType" name="party_type">
+                            {% for gkey, glabel, options in type_choices %}
+                            <optgroup label="{{ glabel }}">
+                                {% for value, label in options %}
+                                <option value="{{ value }}">{{ label }}</option>
+                                {% endfor %}
+                            </optgroup>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label" for="editPartyPhone">Phone</label>
+                        <input type="text" class="form-control" id="editPartyPhone" name="phone" maxlength="40">
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label" for="editPartyNote">Note</label>
+                        <input type="text" class="form-control" id="editPartyNote" name="note" maxlength="300">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary"><i class="fas fa-save me-1" aria-hidden="true"></i>Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function(){
+    var modalEl = document.getElementById('editPartyModal');
+    if (!modalEl) return;
+    function setValue(id, value) {
+        var el = document.getElementById(id);
+        if (el) el.value = value == null ? '' : value;
+    }
+    document.querySelectorAll('.js-edit-party').forEach(function(btn){
+        btn.addEventListener('click', function(){
+            setValue('editPartyId', btn.getAttribute('data-party-id'));
+            setValue('editPartyName', btn.getAttribute('data-party-name'));
+            setValue('editPartyType', btn.getAttribute('data-party-type'));
+            setValue('editPartyPhone', btn.getAttribute('data-party-phone'));
+            setValue('editPartyNote', btn.getAttribute('data-party-note'));
+            if (window.bootstrap && window.bootstrap.Modal) {
+                window.bootstrap.Modal.getOrCreateInstance(modalEl).show();
+            }
+        });
+    });
+})();
+</script>
 {% endblock %}
