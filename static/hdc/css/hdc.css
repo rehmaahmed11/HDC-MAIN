@@ -729,6 +729,45 @@ a .kpi-card:hover,
     padding-right: 14px;
 }
 
+/* ── Row action cluster ────────────────────────────────────────────────────
+   The buttons that act on one table record belong to one group: right
+   aligned, vertically centred, an even gap apart.  Loose inline anchors,
+   buttons and mini forms each keep their own line box, so a third control
+   added later sits a pixel off and reads as broken.  Wrap them once:
+
+       <td class="text-end">
+         <div class="hdc-row-actions">
+           <a class="btn btn-sm …">…</a>
+           <button class="btn btn-sm …">…</button>
+           <form …><button class="btn btn-sm …">…</button></form>
+         </div>
+       </td>
+
+   A POST control stays inside its own form; this rule sizes that form as a
+   flex item too, so all buttons share the same baseline and height. */
+.hdc-row-actions {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    max-width: 100%;
+    white-space: nowrap;
+    vertical-align: middle;
+}
+
+.hdc-row-actions > form {
+    display: inline-flex;
+    margin: 0;
+}
+
+.hdc-row-actions .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    white-space: nowrap;
+}
+
 .ledger-grid-center {
     border-collapse: collapse;
     border: 1px solid var(--card-border);

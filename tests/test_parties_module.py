@@ -256,6 +256,54 @@ class PartiesModuleTestCase(unittest.TestCase):
         with self.app.app_context():
             self.assertEqual(db.session.get(CashFlowParty, party_id).name, 'Second Name Co')
 
+    def test_edit_window_uses_the_exact_same_fields_as_the_add_form(self):
+        """Add and Edit render one field set — a detail cannot go missing.
+
+        Both windows are built from ``parties/_party_form_fields.html``.  The
+        test compares the *rendered* forms, so a field added to one wrapper by
+        hand (the way the old modal drifted) fails here.
+        """
+        html = self.client.get(PARTIES_URL).get_data(as_text=True)
+        forms = re.findall(r'<form\b[^>]*>(.*?)</form>', html, re.S)
+        add_form = next(body for body in forms
+                        if 'name="action" value="add_party"' in body)
+        edit_form = next(body for body in forms
+                         if 'name="action" value="edit_party"' in body)
+
+        def field_names(body):
+            names = re.findall(r'name="([^"]+)"', body)
+            return [name for name in names
+                    if name not in ('_csrf_token', 'action', 'party_id')]
+
+        self.assertEqual(field_names(add_form), field_names(edit_form))
+        self.assertEqual(field_names(add_form),
+                         ['name', 'party_type', 'phone', 'note'])
+        # The explanatory copy is part of the form, not decoration bolted on
+        # to one of the two windows.
+        for hint in ('Pick an existing name or type a new one.',
+                     'Loan Parties feed loan Money In / Out'):
+            self.assertIn(hint, add_form)
+            self.assertIn(hint, edit_form)
+
+    def test_edit_button_carries_every_saved_detail(self):
+        with self.app.app_context():
+            party, _ = save_cf_party(
+                'Every Detail Co', party_type='client',
+                phone='0300-7654321', note='Corner plot owner')
+            db.session.commit()
+            party_id = party.id
+
+        html = self.client.get(PARTIES_URL).get_data(as_text=True)
+        button = re.search(r'<button[^>]*data-party-id="%d"[^>]*>' % party_id, html)
+        self.assertIsNotNone(button, 'the row has no edit button')
+        markup = button.group(0)
+        for attribute, value in (
+                ('data-party-name', 'Every Detail Co'),
+                ('data-party-type', 'client'),
+                ('data-party-phone', '0300-7654321'),
+                ('data-party-note', 'Corner plot owner')):
+            self.assertIn('%s="%s"' % (attribute, value), markup)
+
     def test_toggle_party_hides_and_restores_it(self):
         with self.app.app_context():
             party, _ = save_cf_party('Hidden Supplier Co', party_type='supplier')
