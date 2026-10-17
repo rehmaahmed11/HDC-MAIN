@@ -42,9 +42,18 @@ those helpers — so the pages cannot disagree about what belongs to a category.
 Delivery and usage resolve through their PO, falling back to the material when
 no PO is linked.
 
+**A second rule sits next to it** (`_material_category_for_write`, same
+module): a category that was set *inactive* — because records still point at
+it — may be **kept** on those records but never newly chosen; a *voided*
+category is never allowed. This is what stops an unrelated edit (a quantity,
+a date) from silently re-filing a purchase under its item's type, and what
+stops the retired type from disappearing out of the edit form.
+
 **Deleting is safe.** A category in use is never deleted (its rows would lose
 their type): `_material_category_usage_counts()` decides, and the route sets it
-`inactive` instead. An unused category is voided.
+`inactive` instead. An unused category is voided. The name of a voided
+category may be typed again — the lookup prefers the live row, so the page
+never revives a deleted type into a collision.
 
 **Fixing old data.** `/hdc/purchase-v2/categories/assign` files many materials
 under one category in a single action (`material_ids[]`, value `0` clears), and
@@ -57,6 +66,8 @@ how those rows are found.
 * **`/hdc/purchase-v2/items`** — one row per item: category, unit, purchase
   rows/qty/value, delivery rows/sent qty, usage rows/used qty, **in store** and
   **balance at site**. Filters: category, item, site, stage, date range, sort.
+  "In store" is a **balance**, so it always reads the full history — the same
+  number the item ledger shows — while the flow columns follow the filters.
 * **`/hdc/purchase-v2/items/<material_id>`** — that item's own ledger: its
   purchases, its deliveries (with the site), its usage entries, and the stock
   arithmetic that ties them together.
@@ -125,7 +136,7 @@ has moved yet. Removing a link never touches purchases, deliveries or usage.
 
 | Piece | File |
 |-------|------|
-| Category vocabulary, seed, the shared category conditions, per-category totals | `hdc/services/material_categories.py` |
+| Category vocabulary, seed, the shared category conditions, the keep/choose write rule, per-category totals | `hdc/services/material_categories.py` |
 | Supplier ⇄ category / site helpers, supplied profiles, site/supplier roll-ups, `_sync_purchase_category` | `hdc/services/purchase.py` |
 | Category models and `category_id` columns | `hdc/models/materials.py` |
 | New tables, `category_id` columns, healing on boot | `hdc/core/schema.py`, `hdc/core/bootstrap.py` |
@@ -151,6 +162,15 @@ has moved yet. Removing a link never touches purchases, deliveries or usage.
   site ⇄ supplier rows read from deliveries, the by-site view shows both
   directions and "Assigned only", the project page lists its suppliers, and the
   material JSON API accepts `category_id` / `category_name`.
+* `tests/test_purchase_categories_audit_fixes.py` — the audit of the above
+  feature: the categories page must report real site / supplier counts, the
+  Uncategorized bucket must be reachable and must be narrow on the Suppliers
+  and Suppliers-by-site pages, the Stock page's "Sent of Purchased" must be
+  measured over the items on screen, "In store" must be the store balance on
+  both item pages, the by-site search must narrow the assigned rows too, one
+  purchase row must show one item type everywhere, a retired type must survive
+  an unrelated edit (and must not be newly chosen), and re-using a deleted
+  type's name must not crash the page. See `PURCHASE_CATEGORY_SUPPLIER_AUDIT.md`.
 * Existing suites that were extended or kept green: `tests/smoke_worker.py`
   (three new pages in the route sweep), `tests/test_purchase_entry_dialog.py`
   (the per-line category select is not a `required` cell, so a deliberately

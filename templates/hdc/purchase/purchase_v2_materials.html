@@ -174,8 +174,8 @@
                         <label class="form-label fw-semibold">Item Category</label>
                         <select name="category_id" id="matEditCategory" class="form-select">
                             <option value="">— Uncategorized —</option>
-                            {% for c in category_options %}
-                            <option value="{{ c.id }}">{{ c.name }}</option>
+                            {% for c in category_options_all %}
+                            <option value="{{ c.id }}" {% if c.status != 'active' %}data-retired="1"{% endif %}>{{ c.name }}{% if c.status != 'active' %} (retired){% endif %}</option>
                             {% endfor %}
                         </select>
                         <input type="text" name="category_new" class="form-control mt-2"
