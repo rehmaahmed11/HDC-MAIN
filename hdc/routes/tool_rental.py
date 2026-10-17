@@ -4,6 +4,8 @@ Now includes Accounts integration: payment receiving in Cash/Bank accounts.
 
 from datetime import datetime
 from functools import wraps
+import os
+
 from urllib.parse import quote, unquote
 from flask import (
     flash, g, jsonify, make_response, redirect, render_template, request, session, url_for,
@@ -11,6 +13,7 @@ from flask import (
 from flask_login import current_user, login_required
 from sqlalchemy import func
 from sqlalchemy.orm import joinedload
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from hdc.extensions import _money_write_required, db
 from hdc.models.accounts import Account
@@ -821,6 +824,36 @@ def register(app):
                 )
                 db.session.add(tool)
                 db.session.flush()
+
+                image = request.files.get('tool_image')
+                if image and image.filename:
+                    try:
+                        # Bound both the incoming upload and the decoded dimensions; a
+                        # compressed output is stored as WebP regardless of source type.
+                        image.stream.seek(0, os.SEEK_END)
+                        upload_bytes = image.stream.tell()
+                        image.stream.seek(0)
+                        if upload_bytes > 12 * 1024 * 1024:
+                            raise ValueError('Tool photo must be 12 MB or smaller.')
+                        Image.MAX_IMAGE_PIXELS = 25_000_000
+                        with Image.open(image.stream) as source:
+                            source = ImageOps.exif_transpose(source)
+                            source.thumbnail((640, 640), Image.Resampling.LANCZOS)
+                            if source.mode not in ('RGB', 'RGBA'):
+                                source = source.convert('RGB')
+                            elif source.mode == 'RGBA':
+                                # WebP supports alpha; preserve it where present.
+                                pass
+                            image_dir = os.path.join(app.static_folder or 'static', 'tool-images')
+                            os.makedirs(image_dir, exist_ok=True)
+                            image_path = os.path.join(image_dir, f'{tool.id}.webp')
+                            source.save(image_path, format='WEBP', quality=55, method=6)
+                            tool.image_path = f'tool-images/{tool.id}.webp'
+                    except (UnidentifiedImageError, OSError, ValueError) as exc:
+                        db.session.rollback()
+                        flash(str(exc) if isinstance(exc, ValueError) else
+                              'Please upload a valid image file.', 'danger')
+                        return redirect(url_for('hdc_tool_rental_inventory'))
 
                 # opening stock is a real purchase: it keeps "why do we own 8?"
                 # answerable from the stock register instead of a magic number
