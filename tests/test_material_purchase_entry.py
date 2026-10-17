@@ -292,3 +292,15 @@ class MaterialPurchaseEntryTest(IsolatedAppTest):
                                  str(html_path)], capture_output=True, text=True, timeout=60)
         self.assertEqual(result.returncode, 0, result.stdout + '\n' + result.stderr)
         self.assertIn('material purchase DOM checks passed', result.stdout)
+
+    def test_material_rows_compact_css_arrangement(self):
+        css = (ROOT / 'static/hdc/css/new_transaction.css').read_text(encoding='utf-8')
+        self.assertRegex(css, r'\.hdc-txn-material-rows\s*\{[^}]*max-height:\s*\d+px',
+                         'material rows list must cap vertical height when 4-5+ rows are added')
+        self.assertRegex(css, r'\.hdc-txn-material-rows\s*\{[^}]*overflow-y:\s*auto',
+                         'material rows list must scroll internally rather than pushing the form down')
+        self.assertRegex(css, r'\.hdc-txn-material-spec\s*\{\s*grid-column:\s*5;\s*grid-row:\s*1;\s*\}',
+                         'desktop/tablet material rows must keep specification on row 1')
+        self.assertIn('.hdc-txn-material-row + .hdc-txn-material-row > .hdc-field > .form-label', css,
+                      'repeated row labels must collapse visually on wide screens')
+
