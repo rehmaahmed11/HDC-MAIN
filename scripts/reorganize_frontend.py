@@ -68,8 +68,10 @@ DOMAIN_OF = {
                  "purchase_v2_suppliers_by_site.html"],
     "estimation": ["estimation.html", "project_estimation.html",
                    "formulas.html"],
-    # Parties — the counterparty directory (sidebar → Parties).
+    # Parties — the counterparty directory (sidebar → Parties), the shared
+    # Add/Edit field set, and the per-party ledger.
     "parties": ["parties_directory.html",
+                "_party_form_fields.html",
                 "party_ledger.html"],
     # Shared Expenses — ledgers, the party directory, settlements and report.
     # (``expenses.html`` lives in both this folder and the expenses domain;
