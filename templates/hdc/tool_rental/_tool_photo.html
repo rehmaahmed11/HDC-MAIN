@@ -33,14 +33,14 @@ data-photo-can-edit="{{ '1' if can_edit else '0' }}"
 <button type="button" class="tool-photo-thumb" data-tool-photo="view"
         style="width:{{ size }}px;height:{{ size }}px"
         title="Show photo — {{ name or tool.name }}"
-        aria-label="Show photo of {{ name or tool.name }}">{{ photo_data(tool, name, code, meta, can_edit) }}<img
+        aria-label="Show photo of {{ name or tool.name }}" {{ photo_data(tool, name, code, meta, can_edit) }}><img
         src="{{ src }}" alt="Photo of {{ name or tool.name }}" loading="lazy"
         width="{{ size }}" height="{{ size }}" data-tool-photo-img></button>
 {% elif can_edit %}
 <button type="button" class="tool-photo-thumb tool-photo-thumb-empty" data-tool-photo="edit"
         style="width:{{ size }}px;height:{{ size }}px"
         title="No photo yet — add one for {{ name or tool.name }}"
-        aria-label="Add a photo of {{ name or tool.name }}">{{ photo_data(tool, name, code, meta, can_edit) }}<i
+        aria-label="Add a photo of {{ name or tool.name }}" {{ photo_data(tool, name, code, meta, can_edit) }}><i
         class="fas fa-camera" aria-hidden="true"></i></button>
 {% endif %}
 {%- endmacro %}
@@ -50,13 +50,25 @@ data-photo-can-edit="{{ '1' if can_edit else '0' }}"
 {% macro tool_photo_button(tool, name='', code='', meta='', can_edit=false) -%}
 {% if tool_photo_url(tool) %}
 <button type="button" class="btn btn-sm btn-outline-info" data-tool-photo="view"
-        title="Show photo" aria-label="Show photo of {{ name or tool.name }}">
-    {{ photo_data(tool, name, code, meta, can_edit) }}<i class="fas fa-image" aria-hidden="true"></i>
+        title="Show photo" aria-label="Show photo of {{ name or tool.name }}"
+    {{ photo_data(tool, name, code, meta, can_edit) }}><i class="fas fa-image" aria-hidden="true"></i>
 </button>
 {% elif can_edit %}
 <button type="button" class="btn btn-sm btn-outline-secondary" data-tool-photo="edit"
-        title="Add photo" aria-label="Add a photo of {{ name or tool.name }}">
-    {{ photo_data(tool, name, code, meta, can_edit) }}<i class="fas fa-camera" aria-hidden="true"></i>
+        title="Add photo" aria-label="Add a photo of {{ name or tool.name }}"
+    {{ photo_data(tool, name, code, meta, can_edit) }}><i class="fas fa-camera" aria-hidden="true"></i>
 </button>
+{% endif %}
+{%- endmacro %}
+
+{# Keep list rows compact: the existing tool code is the photo trigger. #}
+{% macro tool_photo_code(tool, name='', code='', meta='', can_edit=false) -%}
+{% if tool_photo_url(tool) %}
+<button type="button" class="badge bg-secondary border-0 text-decoration-underline"
+        data-tool-photo="view" title="Show photo — {{ name or tool.name }}"
+        aria-label="Show photo of {{ name or tool.name }} ({{ code }})"
+        {{ photo_data(tool, name, code, meta, can_edit) }}>{{ code }}</button>
+{% else %}
+<span class="badge bg-secondary">{{ code }}</span>
 {% endif %}
 {%- endmacro %}

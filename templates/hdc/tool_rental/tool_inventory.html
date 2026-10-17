@@ -5,7 +5,7 @@
 {% block content %}
 {% set tools_active = 'inventory' %}
 {% from "tool_rental/_stock_forms.html" import purchase_modal, scrap_modal %}
-{% from "tool_rental/_tool_photo.html" import tool_photo_thumb, tool_photo_button, photo_data %}
+{% from "tool_rental/_tool_photo.html" import tool_photo_thumb, tool_photo_code, photo_data %}
 {% from "shared/_combo_field.html" import combo_field %}
 {% include "tool_rental/_tools_nav.html" %}
 {% include "tool_rental/_scope_note.html" %}
@@ -258,13 +258,11 @@
                         {% set st = stock_stats|stock_lookup(r.tool_id) %}
                         {% set sr = serial_lookup.get(r.tool_id) %}
                         <tr {{ r|hdc_row_attrs }}>
-                            <td><span class="badge bg-secondary">{{ r.code }}</span></td>
+                            <td>{{ tool_photo_code(r.tool, r.name, r.code, can_edit=can_write_tools) }}</td>
                             <td>
                                 {# One line for the photo dialog: what the picture is of. #}
                                 {% set photo_meta = r.category ~ ' · ' ~ r.unit ~ ' · ' ~ r.condition ~ ' · owns ' ~ ("%g"|format(r.owned_qty)) %}
                                 <div class="tool-photo-cell">
-                                    {{ tool_photo_thumb(r.tool, r.name, r.code, photo_meta,
-                                                        size=48, can_edit=can_write_tools) }}
                                     <div>
                                         <strong>{{ r.name }}</strong>
                                         <div><small class="text-muted">{{ r.category }} · {{ r.unit }}</small></div>
@@ -303,8 +301,6 @@
                                 <small>{{ "%.1f"|format(r.utilization_pct) }}%</small>
                             </td>
                             <td class="text-end text-nowrap">
-                                {{ tool_photo_button(r.tool, r.name, r.code, photo_meta,
-                                                     can_edit=can_write_tools) }}
                                 <a href="{{ url_for('hdc_tool_rental_tool_position', tool_id=r.tool_id) }}" class="btn btn-sm btn-outline-secondary" title="Position + history"><i class="fas fa-eye"></i></a>
                                 <button class="btn btn-sm btn-outline-success js-stock-btn" title="Purchase / add stock"
                                         data-bs-toggle="modal" data-bs-target="#purchaseModal"
