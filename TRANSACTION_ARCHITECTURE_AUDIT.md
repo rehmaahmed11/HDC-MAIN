@@ -67,7 +67,7 @@ inside the same posting operation.
 | Loan Received | In | Register cash receipt | `LoanMovement` via loan effect `take` | **Feature-aware.** Loan party/rules and loan service remain authoritative for the loan balance. |
 | Loan Recovery | In | Register cash receipt | `LoanMovement` via loan effect `recover` | **Feature-aware.** Requires the loan workflow's valid borrower/open-loan meaning. |
 | Other Income | In | Generic cash receipt | None | **Generic cash only.** |
-| Material & Purchase | Out | Generic cash payment | None | **Generic cash only.** A supplier name is context, not a `SupplierLedger` settlement. |
+| Material & Purchase | Out | Itemised cash payment | `CashFlowEntryItem` quantity / unit / price detail | **Itemised cash purchase only.** Project and supplier required; total is validated against the items. It is not a stock receipt or `SupplierLedger` settlement. |
 | Labour & Wages | Out | Generic cash payment | None | **Generic cash only.** It does not create a `LabourLedger` payment. |
 | Subcontractor Payment | Out | Generic cash payment | None | **Generic cash only.** It does not create a `SubcontractPayment`. |
 | Fuel & Transport | Out | Generic cash payment | None | **Generic cash only.** |
@@ -80,11 +80,11 @@ inside the same posting operation.
 | Internal Transfer | Transfer | One register document + one transfer ledger row | None | **Generic treasury movement.** Source and destination must be different active money accounts. |
 
 The generic category list deliberately does **not** promise that a selected
-party is a payable party. Existing acceptance tests allow a bare `Material &
-Purchase` entry and a generic entry with a supplier; that behaviour is retained.
-If the product later wants supplier settlement from this form, it must add an
-explicit source-ledger effect and settlement identity, not infer it from
-`party_type`.
+party is a payable party. As of 2026-10-17, `Material & Purchase` requires an
+itemised purchase (project, supplier, material, quantity, unit and price), rather
+than accepting a bare cash amount. It still does not settle an existing supplier
+bill or update stock. Those workflows remain in Purchase V2; settlement must
+never be inferred from `party_type`. See `RECORD_MONEY_ONE_FORM.md`.
 
 ### B. Feature-specific flows that must stay on their owning surfaces
 
@@ -165,6 +165,7 @@ Targeted coverage added in `tests/test_cashflow_register.py`:
 * `test_positive_project_receivable_cannot_be_over_received`;
 * `test_zero_contract_project_remains_permissive`.
 
-The pre-existing deep category tests continue to assert that generic
-`Material & Purchase` remains optional for party/project, while project receipts
-and loan categories retain their feature rules.
+The deep category tests now assert that `Material & Purchase` requires a
+project, supplier and itemised purchase details, including on databases with the
+old optional field settings. Project receipts and loan categories retain their
+existing feature rules.

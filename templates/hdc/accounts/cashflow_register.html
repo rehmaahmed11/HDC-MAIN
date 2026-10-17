@@ -185,6 +185,12 @@
                             <details class="cf-row-details">
                                 <summary>Details</summary>
                                 <div class="cf-row-detail-popover">
+                                    {% for item in r.material_items %}
+                                    <div><strong>{{ item.name }}</strong>{% if item.specification %} — {{ item.specification }}{% endif %}
+                                        {% if item.quantity %}<div>{{ item.quantity }} {{ item.unit }} × Rs. {{ '{:,.2f}'.format(item.unit_price) }} = Rs. {{ '{:,.2f}'.format(item.line_total) }}</div>
+                                        {% else %}<div class="text-muted">Quantity / price not recorded.</div>{% endif %}
+                                    </div>
+                                    {% endfor %}
                                     {% if r.reference %}<div><strong>Reference:</strong> {{ r.reference }}</div>{% endif %}
                                     {% if r.note %}<div><strong>Note:</strong> {{ r.note }}</div>{% endif %}
                                     {% if description and auto_description %}<div><strong>Description:</strong> {{ description }}</div>{% endif %}
@@ -269,9 +275,12 @@
                 </div>
                 <div class="modal-body row g-2">
                     <p class="small text-muted">A corrected copy is saved. The original stays in history.</p>
+                    {% if r.is_material_purchase %}
+                    <p class="small text-muted">Material quantities and prices are kept with this correction. To change the items or amount, cancel this transaction and record the corrected purchase with its full details.</p>
+                    {% endif %}
                     <div class="col-6 col-md-3">
                         <label class="form-label">Amount (Rs.)</label>
-                        <input type="text" name="amount" class="form-control" value="{{ '{:,.2f}'.format(r.amount) }}">
+                        <input type="text" name="amount" class="form-control" value="{{ '{:,.2f}'.format(r.amount) }}" {% if r.is_material_purchase %}readonly{% endif %}>
                     </div>
                     <div class="col-6 col-md-3">
                         <label class="form-label">Date</label>

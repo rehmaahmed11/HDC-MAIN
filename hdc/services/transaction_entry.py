@@ -34,6 +34,7 @@ Layer: ``services`` — may import models, utils and other services.
 from __future__ import annotations
 
 import secrets
+from itertools import zip_longest
 
 from flask import has_request_context, session
 from sqlalchemy import func
@@ -108,7 +109,14 @@ ENTRY_FORM_FIELDS = (
     'reference',
     'description',
     'note',
+    'material_quantities',
+    'material_units',
+    'material_unit_prices',
+    'material_specifications',
 )
+
+ENTRY_FORM_LIST_FIELDS = ('subcategory_ids', 'material_quantities', 'material_units',
+                          'material_unit_prices', 'material_specifications')
 
 DRAFT_SESSION_KEY = 'hdc_txn_entry_draft'
 DRAFT_ERROR_KEY = 'hdc_txn_entry_draft_error'
@@ -136,29 +144,42 @@ def posted_datetime_from_form_date(raw_date):
     return now.replace(year=d.year, month=d.month, day=d.day)
 
 
-def entry_form_values(form):
-    """Whitelist + trim the posted entry form into a plain ``dict``.
-
-    Only :data:`ENTRY_FORM_FIELDS` survive, so nothing a caller happens to put
-    in ``request.form`` can leak into the session draft.
-    """
-    values = {}
-    for name in ENTRY_FORM_FIELDS:
-        if name == 'subcategory_ids':
-            continue
-        values[name] = (form.get(name) or '').strip()
-
+def _form_list(form, name):
     getlist = getattr(form, 'getlist', None)
-    if callable(getlist):
-        raw_items = getlist('subcategory_ids')
-    else:
-        raw_items = form.get('subcategory_ids') or []
-        if not isinstance(raw_items, (list, tuple)):
-            raw_items = [raw_items]
-    values['subcategory_ids'] = [str(value).strip() for value in raw_items if str(value or '').strip()]
+    values = getlist(name) if callable(getlist) else form.get(name, [])
+    if not isinstance(values, (list, tuple)):
+        values = [values]
+    # Keep blank slots: dropping one would pair the next material with the
+    # wrong quantity on a rejected draft.
+    return [str(value or '').strip() for value in values]
+
+
+def entry_form_values(form):
+    """Whitelist posted fields, preserving the position of every material row."""
+    values = {name: (_form_list(form, name) if name in ENTRY_FORM_LIST_FIELDS
+                     else str(form.get(name) or '').strip()) for name in ENTRY_FORM_FIELDS}
     if values['subcategory_ids'] and not values.get('subcategory_id'):
         values['subcategory_id'] = values['subcategory_ids'][0]
     return values
+
+
+def material_items_from_form(form):
+    """Marshal repeated HTML controls into ordered, aligned detail rows.
+
+    None means an old/generic form supplied no purchase details; the engine
+    will require them for new material purchases rather than silently posting.
+    """
+    columns = [_form_list(form, name) for name in ENTRY_FORM_LIST_FIELDS]
+    if not any(columns[1:]):
+        return None
+    if not columns[0] and form.get('subcategory_id'):
+        columns[0] = [str(form.get('subcategory_id'))]
+    if any(len(column) != len(columns[0]) for column in columns[1:4]):
+        raise ValueError('Each material row needs a material, quantity, unit and unit price.')
+    if columns[4] and len(columns[4]) != len(columns[0]):
+        raise ValueError('Material names and brand / size rows must match.')
+    return [dict(zip(('subcategory_id', 'quantity', 'unit', 'unit_price', 'specification'), row))
+            for row in zip_longest(*columns, fillvalue='')]
 
 
 def create_entry_from_form(form, *, actor=None, commit=True):
@@ -185,6 +206,7 @@ def create_entry_from_form(form, *, actor=None, commit=True):
         category_name=(form.get('category_name') or '').strip() or None,
         subcategory_id=(_payload_int(form, 'subcategory_id') or None),
         subcategory_ids=subcategory_ids,
+        material_items=material_items_from_form(form),
         subcategory_name=(form.get('subcategory_name') or '').strip() or None,
         party_id=(_payload_int(form, 'party_id') or None),
         party_name=(form.get('party_name') or '').strip() or None,
@@ -237,19 +259,7 @@ def pop_entry_form():
         # draft, so a caller can merge something else underneath (a deep-link
         # pre-fill) without the blanks silently overwriting it.
         return {}, ''
-    clean = {}
-    for name in ENTRY_FORM_FIELDS:
-        raw = values.get(name, '')
-        if name == 'subcategory_ids':
-            if isinstance(raw, (list, tuple)):
-                clean[name] = [str(value).strip() for value in raw if str(value or '').strip()]
-            elif str(raw or '').strip():
-                clean[name] = [str(raw).strip()]
-            else:
-                clean[name] = []
-        else:
-            clean[name] = raw if isinstance(raw, str) else str(raw or '')
-    return clean, str(error)
+    return entry_form_values(values), str(error)
 
 
 def clear_entry_form():
@@ -365,6 +375,14 @@ def entry_form_context(form_values=None, error=None):
         project_id=_payload_int(values, 'project_id'),
     )
     selection['subcategory_ids'] = selected_item_ids
+    item_ids = _form_list(values, 'subcategory_ids')
+    if not item_ids and values.get('subcategory_id'):
+        item_ids = [str(values['subcategory_id'])]
+    material_rows = [
+        dict(zip(('subcategory_id', 'quantity', 'unit', 'unit_price', 'specification'), row))
+        for row in zip_longest(item_ids, *[_form_list(values, name)
+                                           for name in ENTRY_FORM_LIST_FIELDS[1:]], fillvalue='')
+    ][:MAX_CASH_FLOW_ENTRY_ITEMS]
     return {
         # A fresh key per render: the engine turns the second post of the same
         # key into a no-op, so a double-click can never post the money twice.
@@ -372,6 +390,7 @@ def entry_form_context(form_values=None, error=None):
         'txn_values': values,
         'txn_error': error or '',
         'txn_selection': selection,
+        'txn_material_rows': material_rows or [{}],
         'txn_date_value': values.get('date') or today,
         'txn_today': today,
         # The pickers' vocabulary.  Everything comes from the register tables —

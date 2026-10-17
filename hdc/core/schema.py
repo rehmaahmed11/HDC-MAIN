@@ -1615,6 +1615,14 @@ def _ensure_cashflow_schema():
         'amends_entry_id': "amends_entry_id INTEGER REFERENCES hdc_cash_flow_entry(id)",
         'superseded_by_entry_id': "superseded_by_entry_id INTEGER REFERENCES hdc_cash_flow_entry(id)",
     })
+    # Additive upgrade: historical name-only items keep NULL detail fields.
+    _ensure_table_columns_sqlite('hdc_cash_flow_entry_item', {
+        'quantity': "quantity NUMERIC(18, 3)",
+        'unit': "unit VARCHAR(30)",
+        'unit_price_minor': "unit_price_minor BIGINT",
+        'line_total_minor': "line_total_minor BIGINT",
+        'specification': "specification VARCHAR(120)",
+    })
     # Field rules per category (Settings → Cash Flow): which of party / project
     # the entry form must ask for, which party types are allowed, and whether
     # the category is one of the four loan movements.  Defaults are applied by

@@ -247,7 +247,8 @@ def register(app):
         w = csv.writer(buf)
         w.writerow(['Date', 'Direction', 'Category', 'Subcategory', 'Account', 'Destination',
                     'Party', 'Description', 'Reference', 'Project', 'Amount (PKR)',
-                    'Status', 'Void Reason', 'Entered By', 'Entry ID', 'Ledger Txn ID'])
+                    'Status', 'Void Reason', 'Entered By', 'Entry ID', 'Ledger Txn ID',
+                    'Material Details'])
         for r in rows:
             w.writerow([
                 (r['date'].isoformat() if r['date'] else ''),
@@ -266,6 +267,12 @@ def register(app):
                 r['created_by'],
                 r['id'],
                 (r['account_tx_id'] or ''),
+                ' | '.join(
+                    f"{item['name']}"
+                    + (f" ({item['specification']})" if item['specification'] else '')
+                    + (f": {item['quantity']} {item['unit']} x {item['unit_price']:.2f}"
+                       f" = {item['line_total']:.2f} PKR" if item['quantity'] else ': quantity / price not recorded')
+                    for item in r['material_items']),
             ])
         fname = f"cashflow_register_{_pkt_today().isoformat()}.csv"
         return Response(buf.getvalue(), mimetype='text/csv',

@@ -29,6 +29,8 @@ Layer: ``services`` — may import models, utils and core.
 from __future__ import annotations
 
 import json
+import re
+from decimal import Decimal, InvalidOperation
 from datetime import datetime, timedelta
 
 from flask import current_app
@@ -325,6 +327,11 @@ def _cf_snapshot(entry):
                 'subcategory_id': item.subcategory_id,
                 'name': item.item_name,
                 'sort_order': item.sort_order,
+                'quantity': str(item.quantity) if item.quantity is not None else None,
+                'unit': item.unit,
+                'unit_price_minor': item.unit_price_minor,
+                'line_total_minor': item.line_total_minor,
+                'specification': item.specification,
             }
             for item in (entry.items or [])
         ],
@@ -653,9 +660,61 @@ def _cf_build_tx_payload(direction, amount, account, destination, description, n
     }
 
 
+def _cf_material_details(items, subcategories, amount):
+    """Validate/price every material row before any money is posted.
+
+    Unit prices round half-up to paisa, then each quantity × price rounds once
+    to paisa. The sum must match the payment; browser totals are never trusted.
+    """
+    if not items or not subcategories:
+        raise ValueError('Add at least one material with its quantity, unit and unit price.')
+    if len(items) != len(subcategories):
+        raise ValueError('Each material row needs a material, quantity, unit and unit price.')
+    details = []
+    total_minor = 0
+    for index, item in enumerate(items, 1):
+        label = f'Material row {index}'
+        raw_quantity = str(item.get('quantity') or '').strip().replace(',', '')
+        try:
+            if not re.fullmatch(r'\+?(?:\d+(?:\.\d*)?|\.\d+)', raw_quantity):
+                raise InvalidOperation
+            quantity = Decimal(raw_quantity)
+            if (not quantity.is_finite() or quantity <= 0 or quantity > 1_000_000_000
+                    or quantity != quantity.quantize(Decimal('0.001'))):
+                raise InvalidOperation
+        except (InvalidOperation, ValueError):
+            raise ValueError(f'{label}: quantity must be greater than zero, with at most '
+                             '3 decimal places (maximum 1,000,000,000).') from None
+        unit = str(item.get('unit') or '').strip()
+        if not unit or len(unit) > 30:
+            raise ValueError(f'{label}: enter a unit, such as bags, kg or cft (up to 30 characters).')
+        try:
+            price_minor = to_minor(item.get('unit_price'))
+        except ValueError:
+            raise ValueError(f'{label}: unit price must be a valid number.') from None
+        if price_minor <= 0 or price_minor > 100_000_000_000_000:
+            raise ValueError(f'{label}: unit price must be greater than zero and no more than '
+                             '1,000,000,000,000 PKR.')
+        line_minor = to_minor(quantity * from_minor(price_minor))
+        if line_minor <= 0:
+            raise ValueError(f'{label}: line total must be at least 0.01 PKR.')
+        total_minor += line_minor
+        if total_minor > 100_000_000_000_000:
+            raise ValueError('Material total cannot exceed 1,000,000,000,000 PKR.')
+        specification = str(item.get('specification') or '').strip()
+        if len(specification) > 120:
+            raise ValueError(f'{label}: brand / size must be 120 characters or fewer.')
+        details.append(dict(quantity=quantity, unit=unit, unit_price_minor=price_minor,
+                            line_total_minor=line_minor, specification=specification or None))
+    if total_minor != to_minor(amount):
+        raise ValueError(f'Amount must match the material total of {from_minor(total_minor):,.2f} PKR. '
+                         'Check the quantities and unit prices.')
+    return details
+
+
 def save_manual_cash_flow_entry(*, direction, amount, account_id, destination_account_id=None,
                                 category_id=None, category_name=None, subcategory_id=None,
-                                subcategory_ids=None, subcategory_name=None,
+                                subcategory_ids=None, subcategory_name=None, material_items=None,
                                 party_id=None, party_name=None,
                                 party_type=None, description=None, note=None, reference=None,
                                 date_posted=None, idempotency_key=None, actor=None,
@@ -679,7 +738,11 @@ def save_manual_cash_flow_entry(*, direction, amount, account_id, destination_ac
     refused.  The form hides those fields for a reason; this is the same rule
     enforced where it counts. ``subcategory_ids`` is the optional ordered list
     of item types on one purchase (one amount / one ledger posting); every id
-    is resolved and checked against the selected category here.
+    is resolved and checked against the selected category here. Material
+    purchases additionally require ``material_items`` (subcategory_id, quantity,
+    unit, unit_price, optional specification), a project and a supplier. Only
+    internal wrappers that explicitly disable category rules retain cash-only
+    semantics; user-facing entry routes never disable them.
     """
     from hdc.utils.sqlite import begin_sqlite_write
     begin_sqlite_write(db.session.connection())
@@ -723,21 +786,41 @@ def save_manual_cash_flow_entry(*, direction, amount, account_id, destination_ac
     cat = None
     sub = None
     selected_subcategories = []
+    item_details = []
+    if material_items is not None:
+        if (not isinstance(material_items, (list, tuple))
+                or any(not isinstance(item, dict) for item in material_items)):
+            raise ValueError('Material items must be a list of purchase details.')
+        if len(material_items) > MAX_CASH_FLOW_ENTRY_ITEMS:
+            raise ValueError(f'Choose no more than {MAX_CASH_FLOW_ENTRY_ITEMS} items.')
+        if direction == CF_DIR_TRANSFER:
+            raise ValueError('Material items are only allowed for a material purchase.')
     if direction != CF_DIR_TRANSFER:
         cat = _cf_resolve_category(direction, category_id, category_name,
                                    required=True, create_if_missing=create_missing)
         raw_item_ids = (list(subcategory_ids) if isinstance(subcategory_ids, (list, tuple))
                         else ([subcategory_ids] if subcategory_ids not in (None, '') else []))
+        if material_items is not None:
+            if not _supports_multiple_subcategories(cat) or direction != CF_DIR_OUT:
+                raise ValueError('Material items are only allowed for a material purchase.')
+            material_ids = [str(item.get('subcategory_id') or '').strip() for item in material_items]
+            if raw_item_ids and [str(value or '').strip() for value in raw_item_ids] != material_ids:
+                raise ValueError('Material names and purchase detail rows must match.')
+            raw_item_ids = material_ids
         if raw_item_ids:
             if len(raw_item_ids) > MAX_CASH_FLOW_ENTRY_ITEMS:
                 raise ValueError(f'Choose no more than {MAX_CASH_FLOW_ENTRY_ITEMS} items.')
             seen_item_ids = set()
-            for raw_item_id in raw_item_ids:
+            for row_number, raw_item_id in enumerate(raw_item_ids, 1):
                 raw_item_id = str(raw_item_id or '').strip()
                 if not raw_item_id:
+                    if material_items is not None:
+                        raise ValueError(f'Material row {row_number}: choose a material name.')
                     continue
                 try:
                     item_id = int(raw_item_id)
+                    if item_id <= 0:
+                        raise ValueError
                 except (TypeError, ValueError) as exc:
                     raise ValueError('Choose an item from the searchable list.') from exc
                 if item_id in seen_item_ids:
@@ -799,7 +882,7 @@ def save_manual_cash_flow_entry(*, direction, amount, account_id, destination_ac
         rules = category_field_rules(cat)
         if rules['project_mode'] == 'required' and not project_id:
             raise ValueError(f'"{cat.name}" needs a project — pick one.')
-        if rules['party_mode'] == 'required' and not (party_name or '').strip() and not party_id:
+        if rules['party_mode'] == 'required' and not (party_name or '').strip():
             raise ValueError(
                 f'"{cat.name}" needs a party — choose who this transaction is for.')
         if not party_type_allowed(rules, ptype):
@@ -807,6 +890,10 @@ def save_manual_cash_flow_entry(*, direction, amount, account_id, destination_ac
             raise ValueError(
                 f'"{cat.name}" is for {wanted} — pick that kind of party '
                 f'(the selected party is classified as {party_type_label(ptype)}).')
+
+    if (_supports_multiple_subcategories(cat) and direction == CF_DIR_OUT
+            and (enforce_category_rules or material_items is not None)):
+        item_details = _cf_material_details(material_items, selected_subcategories, amount)
 
     desc = (description or '').strip()
     if not desc:
@@ -885,6 +972,7 @@ def save_manual_cash_flow_entry(*, direction, amount, account_id, destination_ac
         entry.items.append(CashFlowEntryItem(
             subcategory_id=int(item.id),
             item_name=(item.name or '')[:120],
+            **(item_details[index] if item_details else {}),
             sort_order=index,
             created_at=_pkt_now_naive(),
         ))
@@ -1023,7 +1111,7 @@ def _cf_sync_project_effect_void(entry, *, make_void, reason=None):
 def amend_manual_cash_flow_entry(entry, *, direction=None, amount=None, account_id=None,
                                  destination_account_id=None, category_id=None, category_name=None,
                                  subcategory_id=None, subcategory_ids=None,
-                                 subcategory_name=None, party_id=None,
+                                 subcategory_name=None, material_items=None, party_id=None,
                                  party_name=None, party_type=None, description=None, note=None,
                                  reference=None, date_posted=None, reason=None, actor=None,
                                  project_id=None, stage_id=None, create_missing=True, commit=True):
@@ -1040,6 +1128,11 @@ def amend_manual_cash_flow_entry(entry, *, direction=None, amount=None, account_
     old_snapshot = _cf_snapshot(entry)
     reason_txt = (reason or '').strip() or 'Amended'
     replacement_subcategory_ids = subcategory_ids
+    if material_items is not None and replacement_subcategory_ids is None:
+        if (not isinstance(material_items, (list, tuple))
+                or any(not isinstance(item, dict) for item in material_items)):
+            raise ValueError('Material items must be a list of purchase details.')
+        replacement_subcategory_ids = [item.get('subcategory_id') for item in material_items]
     if replacement_subcategory_ids is None and entry.items:
         # The existing correction form edits one category/subcategory pair. If
         # it leaves the legacy first item selected, retain the complete item
@@ -1049,8 +1142,29 @@ def amend_manual_cash_flow_entry(entry, *, direction=None, amount=None, account_
                                int(subcategory_id) == int(entry.subcategory_id or 0))
         except (TypeError, ValueError):
             unchanged_first = False
-        if unchanged_first:
+        unchanged_category = category_id is None or int(category_id) == int(entry.category_id or 0)
+        if unchanged_first and unchanged_category:
             replacement_subcategory_ids = [item.subcategory_id for item in entry.items]
+    if (material_items is None and replacement_subcategory_ids
+            and [str(value) for value in replacement_subcategory_ids]
+            == [str(item.subcategory_id) for item in entry.items]
+            and all(item.quantity is not None for item in entry.items)):
+        material_items = [dict(subcategory_id=item.subcategory_id, quantity=str(item.quantity),
+                               unit=item.unit, unit_price=str(from_minor(item.unit_price_minor)),
+                               specification=item.specification) for item in entry.items]
+
+    # Older amount-only history may still have its date/reference/description
+    # corrected without inventing purchase quantities. A monetary or category
+    # change is a new purchase and must supply the full details.
+    legacy_metadata_correction = (
+        _supports_multiple_subcategories(entry.category)
+        and material_items is None
+        and not any(item.quantity is not None for item in entry.items)
+        and (amount is None or to_minor(amount) == to_minor(entry.amount))
+        and (category_id is None or int(category_id) == int(entry.category_id or 0))
+        and (subcategory_id is None or int(subcategory_id) == int(entry.subcategory_id or 0))
+        and subcategory_ids is None
+    )
 
     # 1. Reverse the old posting.
     void_manual_cash_flow_entry(
@@ -1073,6 +1187,7 @@ def amend_manual_cash_flow_entry(entry, *, direction=None, amount=None, account_
         subcategory_id=(subcategory_id if subcategory_id is not None else entry.subcategory_id),
         subcategory_ids=replacement_subcategory_ids,
         subcategory_name=subcategory_name,
+        material_items=material_items,
         party_id=(party_id if party_id is not None else entry.party_id),
         party_name=(party_name if party_name is not None else entry.party_name),
         party_type=(party_type or entry.party_type),
@@ -1090,6 +1205,7 @@ def amend_manual_cash_flow_entry(entry, *, direction=None, amount=None, account_
         # as-is; a deliberately re-picked one still goes through the normal
         # form path (and therefore through scope validation).
         validate_scope=(project_id is not None),
+        enforce_category_rules=not legacy_metadata_correction,
     )
     new_entry.amends_entry_id = int(entry.id)
     db.session.flush()
@@ -1238,7 +1354,9 @@ def register_rows(*, date_from=None, date_to=None, account_id=None, direction=No
         q = q.filter(or_(CashFlowEntry.description.ilike(like),
                          CashFlowEntry.note.ilike(like),
                          CashFlowEntry.reference.ilike(like),
-                         CashFlowEntry.party_name.ilike(like)))
+                         CashFlowEntry.party_name.ilike(like),
+                         CashFlowEntry.items.any(or_(CashFlowEntryItem.item_name.ilike(like),
+                                                     CashFlowEntryItem.specification.ilike(like)))))
     q = q.order_by(CashFlowEntry.date_posted.desc(), CashFlowEntry.id.desc())
     if limit:
         q = q.limit(int(limit))
@@ -1272,6 +1390,19 @@ def register_summary(rows):
     }
 
 
+def cash_flow_item_dicts(items):
+    """Item snapshots for history, export and printable receipts (legacy-safe)."""
+    return [dict(subcategory_id=item.subcategory_id, name=item.item_name,
+                 quantity=(format(item.quantity, '.3f').rstrip('0').rstrip('.')
+                           if item.quantity is not None else ''),
+                 unit=item.unit or '',
+                 unit_price=(from_minor(item.unit_price_minor)
+                             if item.unit_price_minor is not None else None),
+                 line_total=(from_minor(item.line_total_minor)
+                             if item.line_total_minor is not None else None),
+                 specification=item.specification or '') for item in (items or [])]
+
+
 def register_row_dicts(rows):
     """Rows shaped for templates / CSV (amounts resolved from the minor mirror)."""
     out = []
@@ -1298,8 +1429,10 @@ def register_row_dicts(rows):
             'destination_account_id': r.destination_account_id,
             'category': (r.category.name if r.category else ''),
             'category_id': r.category_id,
+            'is_material_purchase': r.direction == CF_DIR_OUT and _supports_multiple_subcategories(r.category),
             'subcategory': ' · '.join(item_names),
             'subcategories': item_names,
+            'material_items': cash_flow_item_dicts(r.items),
             'party_name': (r.party_name or ''),
             'party_type': (r.party_type or ''),
             'description': (r.description or ''),
@@ -1373,16 +1506,16 @@ def category_field_rules(category):
             'multiple_subcategories': False,
         }
     effect = category.project_effect_value
+    material_purchase = _supports_multiple_subcategories(category)
     return {
-        'party_mode': category.party_mode_value,
-        # A project-receipt category *is* the project: the entry has no meaning
-        # without one, so the rule is forced here rather than relying on every
-        # database having been seeded with project_mode='required'.
-        'project_mode': ('required' if effect == 'receipt' else category.project_mode_value),
-        'party_types': tuple(category.allowed_party_types),
+        'party_mode': ('required' if material_purchase else category.party_mode_value),
+        # Required on both receipts and material purchases, even if an older
+        # database still has the previous optional/hidden field settings.
+        'project_mode': ('required' if effect == 'receipt' or material_purchase else category.project_mode_value),
+        'party_types': ('supplier',) if material_purchase else tuple(category.allowed_party_types),
         'loan_effect': (category.loan_effect or '').strip().lower(),
         'project_effect': effect,
-        'multiple_subcategories': _supports_multiple_subcategories(category),
+        'multiple_subcategories': material_purchase,
     }
 
 
@@ -2202,19 +2335,15 @@ _DEFAULT_CATEGORIES = [
 _DEFAULT_CATEGORY_RULES = {
     # The four loan movements are the only categories that *require* a party:
     # "Loan Given" to nobody is not a loan.  Everything else keeps the app's
-    # existing behaviour (party/project optional) — but the two fields are
-    # hidden outright where they make no sense, which is what stops the form
-    # asking a question that has no answer.  An operator can tighten any of
-    # these to "required" in Settings → Cash Flow without a deploy.
-    # The owner receipt is the one category whose *project* is mandatory: the
-    # money is a project's client paying for that project, so the project is
-    # the subject and the owner name is derived from it (project_effect below).
+    # existing behaviour (party/project optional) except project receipts and
+    # itemised material purchases. Irrelevant context is hidden; the mandatory
+    # purchase/receipt rules also apply to older databases via category_field_rules.
     'Owner / Client Receipt': ('optional', 'required', 'client', '', 'receipt'),
     'Scrap & Salvage Sale': ('none', 'none', '', '', ''),
     'Loan Received': ('required', 'none', 'lender', 'take', ''),
     'Loan Recovery': ('required', 'none', 'borrower', 'recover', ''),
     'Other Income': ('optional', 'none', '', '', ''),
-    'Material & Purchase': ('optional', 'optional', 'supplier', '', ''),
+    'Material & Purchase': ('required', 'required', 'supplier', '', ''),
     'Labour & Wages': ('optional', 'optional', 'worker', '', ''),
     'Subcontractor Payment': ('optional', 'optional', 'subcontractor', '', ''),
     'Fuel & Transport': ('optional', 'optional', '', '', ''),

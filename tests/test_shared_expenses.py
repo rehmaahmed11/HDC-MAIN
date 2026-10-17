@@ -384,7 +384,7 @@ class SharedExpenseAppTestCase(unittest.TestCase):
         cats = {c.name: c for c in category_options()}
         entry, _ = save_manual_cash_flow_entry(
             direction='out', amount=5000, account_id=self.cash.id,
-            category_id=cats['Material & Purchase'].id,
+            category_id=cats['Fuel & Transport'].id,
             description='Car fuel (paid in Accounts)', actor=self.actor)
         db.session.commit()
         link_accounts_entry(expense, cf_entry_id=entry.id)
@@ -396,7 +396,7 @@ class SharedExpenseAppTestCase(unittest.TestCase):
         cats = {c.name: c for c in category_options()}
         entry, _ = save_manual_cash_flow_entry(
             direction='out', amount=1000, account_id=self.cash.id,
-            category_id=cats['Material & Purchase'].id, actor=self.actor)
+            category_id=cats['Fuel & Transport'].id, actor=self.actor)
         db.session.commit()
         first = self._expense(title='First', total_amount='1000')
         link_accounts_entry(first, cf_entry_id=entry.id)

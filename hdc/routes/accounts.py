@@ -20,7 +20,7 @@ from hdc.models.workforce import Worker
 from hdc.services.accounts import _ACCOUNT_LOAN_INTENTS, _ACCOUNT_TXN_CATEGORIES, _ACCOUNT_TXN_FORM_OPTIONS, _ACCOUNT_TXN_TYPES, _ACCOUNT_TYPES, _account_dashboard_kpis, _account_dashboard_subgroups, _account_entity_label, _account_group_mode_for_row, _account_intent_field_matrix, _account_kpi_detail_context, _account_ledger_rows, _account_reverse_transaction_group, _account_running_balance_rows, _account_transaction_history, _account_tx_direction_for_type, _account_txn_group_rows, _accounts_reconciliation_findings, _accounts_set_void_by_source, _accounts_toggle_transaction_void_state, _accounts_update_manual_transaction, _create_account, _create_accounts_transaction_with_sync, _list_accounts_with_balances, _resolve_account_type
 from hdc.services.aggregation import _running_projects_receivable_rows
 from hdc.services.ledger import _office_staff_ledger_snapshot, _personal_expense_month, _personal_expense_total
-from hdc.services.receipts import _account_receipt_recent_entries, _receipt_company_profile
+from hdc.services.receipts import _account_receipt_recent_entries, _receipt_company_profile, cash_flow_receipt_details
 from hdc.utils.dates import _pkt_now_naive, _pkt_today
 from hdc.utils.format import _amount_to_words, _flt, _parse_date
 from hdc.utils.money import sync_money_fields
@@ -1060,6 +1060,7 @@ def register(app):
             is_void=bool(getattr(txn, 'is_void', False)),
             txn_id=int(txn.id),
             split_rows=split_rows,
+            material_items=cash_flow_receipt_details(txn.id),
             split_total=float(group_total or 0.0),
             recent_entries=recent_entries,
             recent_entries_title=recent_title,

@@ -336,7 +336,8 @@ class MoneyCenterRegressionTestCase(unittest.TestCase):
         entry, _ = save_manual_cash_flow_entry(
             direction='out', amount=5000.0,
             account_id=self.cash.id, destination_account_id=self.counterparty.id,
-            category_id=int(categories[0].id), description='regression out')
+            category_id=next(c.id for c in categories if c.name == 'Miscellaneous'),
+            description='regression out')
         db.session.commit()
         txn_id = int(entry.account_tx_id)
         self.assertFalse(entry.is_void)

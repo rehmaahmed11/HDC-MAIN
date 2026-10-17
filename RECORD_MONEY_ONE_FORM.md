@@ -88,6 +88,41 @@ a project receipt when a positive receivable is established. Generic
 project-linked outflows remain cash tags only until an explicit project-cost
 effect is designed.
 
+## Material purchase details (2026-10-17)
+
+**Spent → Material & Purchase is no longer an amount-only entry.** Selecting it
+shows Project and Supplier / vendor outside the collapsed optional details.
+Every purchase requires those two fields plus at least one searchable material
+row with quantity, unit and unit price. Up to 20 rows are supported, with optional
+brand/size, invoice/reference and transaction notes. Quantities allow three
+decimal places; unit prices and line totals use half-up paisa rounding. The
+payment amount is calculated from the rows and independently checked by the
+server, so missing details or a forged total cannot post money.
+
+`CashFlowEntryItem` stores the quantity, unit, unit price, line total and optional
+specification alongside its name snapshot. The upgrade adds nullable columns;
+old name-only history is not assigned invented quantities. Details survive a
+rejected form, appear in history, CSV exports, audit snapshots and printable
+receipts, and remain attached through void/restore and metadata corrections.
+To change purchase quantities/prices in the UI, cancel the original and record
+the corrected purchase; the simple correction dialog keeps the itemised total
+read-only. Legacy entries can still have metadata corrected without fabricating
+missing purchase details.
+
+This remains **one fully paid cash/bank movement**, not a Purchase V2 stock
+receipt or a supplier bill settlement. The form explains that distinction and
+links to Purchases for credit purchases, stock/delivery tracking and payments
+against existing bills. No second cash posting, supplier ledger settlement or
+project-cost source record is silently created.
+
+Regression coverage: `tests/test_material_purchase_entry.py` and
+`tests/material_purchase_harness.js` exercise all three entry surfaces, required
+fields, exact arithmetic, rejected-draft row alignment, history/receipts/exports,
+idempotency, void/restore/correction, additive schema upgrades and the actual
+rendered HTML with the real controller and comboboxes. The wider suite passed
+**1,100 tests**; a real Chromium desktop/mobile walkthrough also saved a two-item
+purchase and verified one ledger payment with the saved quantity/price details.
+
 ## Tests
 
 * `tests/test_money_center.py` — rewritten around the new contract: the page

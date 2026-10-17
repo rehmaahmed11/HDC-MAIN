@@ -55,10 +55,24 @@
         if (body.charAt(0) === '-') { negative = true; body = body.slice(1); }
         if (body.charAt(0) === '+') { body = body.slice(1); }
         if (!/^\d*(\.\d*)?$/.test(body) || !/\d/.test(body)) return { ok: false };
-        var value = Math.round(parseFloat(body) * 100);
-        if (!isFinite(value)) return { ok: false };
+        // Decimal half-up, without the 1.005 × 100 binary-float rounding bug.
+        var parts = body.split('.');
+        var fraction = (parts[1] || '') + '000';
+        var value = Number(parts[0] || '0') * 100 + Number(fraction.slice(0, 2));
+        if (Number(fraction.charAt(2)) >= 5) value += 1;
+        if (!Number.isSafeInteger(value)) return { ok: false };
         if (negative) value = -value;
         return { ok: true, minor: value };
+    }
+
+    function parseQuantity(raw) {
+        var text = String(raw || '').trim().replace(/,/g, '');
+        if (!/^\+?(?:\d+(?:\.\d*)?|\.\d+)$/.test(text)) return null;
+        var parts = text.replace(/^\+/, '').split('.');
+        var fraction = parts[1] || '';
+        if (/[1-9]/.test(fraction.slice(3))) return null;
+        var milli = Number(parts[0] || '0') * 1000 + Number((fraction + '000').slice(0, 3));
+        return Number.isSafeInteger(milli) && milli > 0 && milli <= 1000000000000 ? milli : null;
     }
 
     function formatAmount(minor) {
@@ -151,6 +165,10 @@
         var addMaterialItemButton = byId('txnAddMaterialItem');
         var materialRowCounter = 0;
         var maxMaterialItems = 20;
+        var materialTotal = byId('txnMaterialTotal');
+        var amountHint = byId('txnAmountHint');
+        var materialMode = false;
+        var manualAmount = '';
         var moreDetails = byId('txnMoreDetails');
         var whoBlock = byId('txnWhoBlock');
         var partyField = byId('txnPartyField');
@@ -218,6 +236,7 @@
                     actionHint.hidden = true;
                 }
                 if (resetButton) resetButton.hidden = true;
+                filterSubcategories();
                 return;
             }
             if (resetButton) resetButton.hidden = false;
@@ -309,6 +328,10 @@
 
         function categorySupportsMultipleSubcategories() {
             return categoryRule('multiple-subcategories', 'false') === 'true';
+        }
+
+        function isMaterialPurchase() {
+            return currentDirection() === DIRECTION_OUT && categorySupportsMultipleSubcategories();
         }
 
         function allowedPartyTypes() {
@@ -477,7 +500,8 @@
                typed differently from the project master. */
             var receipt = hasCategory && isProjectReceipt();
             if (partyLabelText) {
-                partyLabelText.textContent = receipt ? 'Client (from project)' : 'Person / business';
+                partyLabelText.textContent = receipt ? 'Client (from project)'
+                    : (isMaterialPurchase() ? 'Supplier / vendor' : 'Person / business');
             }
             if (receipt) {
                 filterPartyTypes(['client']);
@@ -497,7 +521,8 @@
             }
             setFieldHint(projectHint, receipt
                 ? 'Required. The client is filled from this project.'
-                : (projectRequired ? 'Choose a project for this transaction.' : ''));
+                : (isMaterialPurchase() ? 'Choose the project this material purchase is for.'
+                    : (projectRequired ? 'Choose a project for this transaction.' : '')));
             if (rulesHelp) {
                 if (receipt) {
                     rulesHelp.textContent = 'This updates the project’s received total.';
@@ -516,6 +541,55 @@
             return materialItemsList
                 ? Array.prototype.slice.call(materialItemsList.querySelectorAll('[data-material-item-row]'))
                 : [];
+        }
+
+        function clearMaterialRowFeedback(row) {
+            var message = row.querySelector('[data-material-error]');
+            if (message) { message.textContent = ''; message.hidden = true; }
+            row.querySelectorAll('[aria-invalid]').forEach(function (control) {
+                control.removeAttribute('aria-invalid');
+            });
+        }
+
+        function materialDetail(row, name) {
+            return row.querySelector('[data-material-detail="' + name + '"]');
+        }
+
+        function materialLine(row) {
+            var qty = materialDetail(row, 'quantity');
+            var price = materialDetail(row, 'unit_price');
+            var quantity = parseQuantity(qty ? qty.value : '');
+            var rate = parseAmount(price ? price.value : '');
+            if (quantity === null || !rate.ok || rate.minor <= 0 || rate.minor > 100000000000000) return null;
+            // Quantity is thousandths, price is paisa. BigInt keeps the product
+            // exact; +500 implements half-up rounding back to whole paisa.
+            var total = (BigInt(quantity) * BigInt(rate.minor) + BigInt(500)) / BigInt(1000);
+            return total > 0 && total <= BigInt(100000000000000) ? Number(total) : null;
+        }
+
+        function updateMaterialTotals() {
+            var enabled = isMaterialPurchase();
+            if (amountInput) {
+                if (enabled && !materialMode) manualAmount = amountInput.value;
+                if (!enabled && materialMode) amountInput.value = manualAmount;
+                amountInput.readOnly = enabled;
+            }
+            materialMode = enabled;
+            if (amountHint) amountHint.textContent = enabled
+                ? 'Calculated from quantity × unit price for each material below.' : 'Commas are okay.';
+            if (!enabled) return;
+            var total = 0;
+            var valid = true;
+            materialItemRows().forEach(function (row) {
+                var minor = materialLine(row);
+                var output = row.querySelector('[data-material-line-total]');
+                if (output) output.textContent = minor === null ? '—' : formatAmount(minor);
+                if (minor === null) valid = false;
+                else total += minor;
+            });
+            valid = valid && total > 0 && total <= 100000000000000;
+            if (materialTotal) materialTotal.textContent = valid ? 'Rs. ' + formatAmount(total) : '—';
+            if (amountInput) amountInput.value = valid ? formatAmount(total) : '';
         }
 
         function filterMaterialItemRows(enabled, categoryId) {
@@ -541,12 +615,18 @@
                         if (input) input.value = '';
                     }
                     select.disabled = !enabled;
+                    select.required = enabled;
                     if (input && input.__hdcMaterialCombo && input.__hdcMaterialCombo.syncFromSelect) {
                         input.__hdcMaterialCombo.syncFromSelect();
                     }
                 }
-                if (input) input.disabled = !enabled;
+                if (input) { input.disabled = !enabled; input.required = enabled; }
+                row.querySelectorAll('[data-material-detail]').forEach(function (control) {
+                    control.disabled = !enabled;
+                    control.required = enabled && control.getAttribute('data-material-detail') !== 'specification';
+                });
             });
+            updateMaterialTotals();
             if (addMaterialItemButton) {
                 addMaterialItemButton.disabled = !enabled || rows.length >= maxMaterialItems;
                 addMaterialItemButton.setAttribute('aria-disabled', addMaterialItemButton.disabled ? 'true' : 'false');
@@ -574,8 +654,7 @@
             if (selected && selected.value && (selected.hidden || selected.disabled)) {
                 subcategorySelect.value = '';
             }
-            var multiItems = categorySupportsMultipleSubcategories()
-                && currentDirection() !== DIRECTION_TRANSFER;
+            var multiItems = isMaterialPurchase();
             if (subcategoryField) {
                 subcategoryField.hidden = !visible || currentDirection() === DIRECTION_TRANSFER || multiItems;
             }
@@ -640,6 +719,16 @@
             var input = row.querySelector('[data-material-input]');
             var select = row.querySelector('[data-material-select]');
             var remove = row.querySelector('[data-remove-material-item]');
+            row.querySelectorAll('[data-material-detail]').forEach(function (control) {
+                if (control.__hdcMaterialDetailWired) return;
+                control.__hdcMaterialDetailWired = true;
+                function refreshDetail() {
+                    clearMaterialRowFeedback(row);
+                    updateMaterialTotals();
+                }
+                control.addEventListener('input', refreshDetail);
+                control.addEventListener('change', refreshDetail);
+            });
             if (input && select && !input.__hdcMaterialCombo) {
                 input.__hdcMaterialCombo = attachCombo(input, select, {
                     strict: true,
@@ -657,7 +746,8 @@
             if (select && !select.__hdcMaterialChangeWired) {
                 select.__hdcMaterialChangeWired = true;
                 select.addEventListener('change', function () {
-                    setFieldError(form, 'subcategory_ids', '');
+                    setFieldError(form, 'subcategory_ids', '', input);
+                    clearMaterialRowFeedback(row);
                 });
             }
             if (remove && !remove.__hdcMaterialRemoveWired) {
@@ -708,6 +798,18 @@
                 select.disabled = false;
                 select.__hdcMaterialChangeWired = false;
             }
+            row.querySelectorAll('[data-material-detail]').forEach(function (control) {
+                var oldId = control.id;
+                control.id = oldId.replace(/\d+$/, '') + rowIndex;
+                var fieldLabel = row.querySelector('label[for="' + oldId + '"]');
+                if (fieldLabel) fieldLabel.setAttribute('for', control.id);
+                control.value = '';
+                control.defaultValue = '';
+                control.removeAttribute('aria-invalid');
+            });
+            if (input) input.removeAttribute('aria-invalid');
+            var rowError = row.querySelector('[data-material-error]');
+            if (rowError) { rowError.textContent = ''; rowError.hidden = true; }
             if (remove) remove.hidden = false;
             row.setAttribute('data-row-index', rowIndex);
             materialItemsList.appendChild(row);
@@ -732,6 +834,9 @@
                 var input = first.querySelector('[data-material-input]');
                 var select = first.querySelector('[data-material-select]');
                 if (input) input.value = '';
+                first.querySelectorAll('[data-material-detail]').forEach(function (control) {
+                    control.value = '';
+                });
                 if (select) {
                     select.value = '';
                     if (input && input.__hdcMaterialCombo
@@ -994,10 +1099,11 @@
 
             if (!dateInput || !dateInput.value) fail('date', 'Date is required.', dateInput);
 
+            updateMaterialTotals();
             var amount = parseAmount(amountInput ? amountInput.value : '');
-            if (!amount.ok) {
+            if (!isMaterialPurchase() && !amount.ok) {
                 fail('amount', amount.empty ? 'Amount is required.' : 'Amount must be a valid number.', amountInput);
-            } else if (amount.minor <= 0) {
+            } else if (!isMaterialPurchase() && amount.minor <= 0) {
                 fail('amount', 'Amount must be greater than 0.', amountInput);
             }
 
@@ -1017,7 +1123,7 @@
                 if (categorySelect && !categorySelect.value) {
                     fail('category_id', 'Choose a category.', categorySelect);
                 }
-                if (categorySupportsMultipleSubcategories()) {
+                if (isMaterialPurchase()) {
                     var seenMaterialIds = Object.create(null);
                     materialItemRows().forEach(function (row) {
                         var input = row.querySelector('[data-material-input]');
@@ -1025,7 +1131,7 @@
                         var itemId = select ? select.value : '';
                         var option = select && select.selectedIndex >= 0
                             ? select.options[select.selectedIndex] : null;
-                        if (!itemId && input && input.value.trim()) {
+                        if (!itemId) {
                             fail('subcategory_ids', 'Choose a material name from the search list.', input);
                         } else if (itemId && option && categorySelect
                                 && option.getAttribute('data-category') !== categorySelect.value) {
@@ -1034,7 +1140,32 @@
                             fail('subcategory_ids', 'Remove duplicate material items.', input);
                         }
                         if (itemId) seenMaterialIds[itemId] = true;
+                        var rowError = row.querySelector('[data-material-error]');
+                        var quantity = materialDetail(row, 'quantity');
+                        var unit = materialDetail(row, 'unit');
+                        var price = materialDetail(row, 'unit_price');
+                        var message = '';
+                        var bad = null;
+                        if (!quantity || parseQuantity(quantity.value) === null) {
+                            message = 'Enter a quantity greater than zero (up to 3 decimal places; maximum 1,000,000,000).';
+                            bad = quantity;
+                        } else if (!unit || !unit.value.trim() || unit.value.trim().length > 30) {
+                            message = 'Enter a unit, such as bags, kg or cft (up to 30 characters).';
+                            bad = unit;
+                        } else if (materialLine(row) === null) {
+                            message = 'Enter a valid unit price greater than zero; check that the line total is at least Rs. 0.01 and no more than Rs. 1,000,000,000,000.';
+                            bad = price;
+                        }
+                        if (message) {
+                            if (rowError) { rowError.textContent = message; rowError.hidden = false; }
+                            if (bad) bad.setAttribute('aria-invalid', 'true');
+                            if (!firstBad) firstBad = bad || input;
+                        }
                     });
+                    if (!firstBad && (!amount.ok || amount.minor <= 0)) {
+                        fail('subcategory_ids', 'Check the material total (maximum Rs. 1,000,000,000,000).',
+                            materialItemsList);
+                    }
                 } else {
                     var sub = subcategorySelect && subcategorySelect.value
                         ? subcategorySelect.options[subcategorySelect.selectedIndex] : null;
@@ -1056,7 +1187,7 @@
                     }
                     if (option.getAttribute('data-party-mode') === 'required'
                         && (!partySelect || !partySelect.value)) {
-                        fail('party_name', 'Choose a person or business.', partyInput);
+                        fail('party_name', isMaterialPurchase() ? 'Choose a supplier / vendor.' : 'Choose a person or business.', partyInput);
                     }
                 }
             }
@@ -1102,6 +1233,24 @@
             });
         }
 
+        // A corrected field must not keep showing the previous rejection.
+        [
+            [accountSelect, 'account_id', accountInput],
+            [partySelect, 'party_name', partyInput],
+            [projectSelect, 'project_id', projectInput],
+            [dateInput, 'date', dateInput],
+            [amountInput, 'amount', amountInput]
+        ].forEach(function (binding) {
+            if (!binding[0]) return;
+            binding[0].addEventListener('change', function () {
+                setFieldError(form, binding[1], '', binding[2]);
+            });
+        });
+        form.addEventListener('input', function () {
+            if (actionHint) actionHint.hidden = true;
+        });
+        window.addEventListener('pageshow', function () { submitState(false); });
+
         directionSelect.addEventListener('change', applyDirection);
         if (addMaterialItemButton) {
             addMaterialItemButton.addEventListener('click', addMaterialItemRow);
@@ -1135,6 +1284,9 @@
         if (resetButton) {
             resetButton.addEventListener('click', function () {
                 form.reset();
+                submitState(false);
+                manualAmount = '';
+                materialMode = false;
                 clearMaterialItemRows();
                 if (moreDetails) moreDetails.open = false;
                 clearErrors(form);
@@ -1152,6 +1304,7 @@
 
         form.addEventListener('submit', function (event) {
             event.preventDefault();
+            if (saveButton && saveButton.disabled) return;
             if (!validate()) {
                 flashPickerMessage(form, 'Check the highlighted fields.');
                 return;
@@ -1188,6 +1341,8 @@
             });
         }
 
+        form.noValidate = true;
+        form.setAttribute('data-own-submit', 'true');
         ensureCombos();
         applyDirection();
         applyCategoryRules();
