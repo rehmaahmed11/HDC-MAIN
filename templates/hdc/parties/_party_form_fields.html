@@ -11,10 +11,13 @@
                   combo widget keys off these ids
      type_choices type_choice_groups() — grouped like the KPI buckets
      name_options searchable names for the Name combo
+     categories   the operator's PartyCategory rows (KPI cards / filters);
+                  the Category select is built from this list, never from a
+                  hard-coded tuple.
 #}
 {% from "shared/_combo_field.html" import combo_field %}
 
-{% macro party_fields(party=None, id_prefix='party', type_choices=[], name_options=[]) %}
+{% macro party_fields(party=None, id_prefix='party', type_choices=[], name_options=[], categories=[]) %}
     <div class="mb-2">
         {{ combo_field('name', id_prefix ~ 'Name', name_options,
            label='Name', placeholder='Search or type a party…',
@@ -37,8 +40,25 @@
         </select>
         <div class="hdc-field-hint">
             Loan Parties feed loan Money In / Out; External Customers feed HDC Tools.
-            The type you pick also decides which category card this party is filed under.
             <strong>Client / Owner</strong> is linked to Projects — a project client auto-creates a party here.
+            Type controls behaviour; Category (below) controls how the directory groups it.
+        </div>
+    </div>
+    <div class="mb-2">
+        <label class="form-label" for="{{ id_prefix }}Category">Category</label>
+        <select class="form-select" id="{{ id_prefix }}Category" name="category_id">
+            <option value="" {% if not party or not party.category_id %}selected{% endif %}>Automatic — from the party type</option>
+            {% for cat in categories %}
+            {# A retired category is not offered for new filing, but stays
+               visible when it is where this party is already filed. #}
+            {% if cat.is_active or (party and party.category_id == cat.id) %}
+            <option value="{{ cat.id }}" {% if party and party.category_id == cat.id %}selected{% endif %}>{{ cat.name }}{% if not cat.is_active %} (retired){% endif %}</option>
+            {% endif %}
+            {% endfor %}
+        </select>
+        <div class="hdc-field-hint">
+            Your own grouping — create, rename or retire categories in the
+            <strong>Party Categories</strong> card. Parties can be moved here or in bulk from the directory.
         </div>
     </div>
     <div class="mb-2">

@@ -277,7 +277,7 @@ class PartiesModuleTestCase(unittest.TestCase):
 
         self.assertEqual(field_names(add_form), field_names(edit_form))
         self.assertEqual(field_names(add_form),
-                         ['name', 'party_type', 'phone', 'note'])
+                         ['name', 'party_type', 'category_id', 'phone', 'note'])
         # The explanatory copy is part of the form, not decoration bolted on
         # to one of the two windows.
         for hint in ('Pick an existing name or type a new one.',

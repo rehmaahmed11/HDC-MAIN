@@ -7,8 +7,11 @@ the party page and Accounts → All Entries cannot disagree.
 
 This module:
 
-* groups parties into filterable categories (loan / rental / worker / client /
-  supplier / other);
+* groups parties into **user-defined** categories stored in
+  ``hdc_party_category`` (the six shipped buckets are seeded rows, not code —
+  see :mod:`hdc.services.party_categories`);
+* falls back to the legacy ``party_type`` bucket only for a party nobody has
+  filed by hand, so an upgraded database keeps the grouping it had;
 * batches In / Out / balance per name from the ledger (no N+1);
 * builds the chronological party statement (date+time, running balance).
 """
@@ -30,10 +33,20 @@ from hdc.services.cashflow_register import (
     party_type_label,
 )
 from hdc.services.ledger import _worker_payable_snapshots
+from hdc.services.party_categories import (
+    category_maps, effective_party_category, list_party_categories,
+)
 from hdc.utils.dates import _pkt_today
 from hdc.utils.normalize import _normalize_name_ci
 
-#: ``(key, label, icon, kpi colour, hint)`` — KPI cards and the category filter.
+#: ``(key, label, icon, kpi colour, hint)`` — **legacy** type→bucket map.
+#:
+#: These are no longer the directory's category list: that is the
+#: ``hdc_party_category`` table, seeded from
+#: :data:`hdc.services.party_categories.DEFAULT_PARTY_CATEGORIES` and editable
+#: on the Parties page.  This tuple survives because ``party_category()`` is
+#: the fallback for a party nobody has filed by hand, and because existing
+#: ``?category=<key>`` links and saved filters must keep working.
 PARTY_CATEGORIES = (
     ('loan', 'Loan Parties', 'fa-money-bill-transfer', 'kpi-blue',
      'Loan Money In / Out in the CF Register offer only these people.'),
@@ -81,10 +94,62 @@ def party_category(party_type):
 
 
 def category_label(key):
+    """Legacy label for a type-derived bucket key (fallback only)."""
     for item in PARTY_CATEGORIES:
         if item[0] == key:
             return item[1]
     return 'All Parties'
+
+
+def party_category_key(party, *, by_id=None, by_key=None):
+    """The key of the category a party is filed under (``''`` if unfiled).
+
+    An explicit assignment wins; otherwise the party falls back to the
+    seeded bucket that matches its ``party_type``.
+    """
+    cat = effective_party_category(party, by_id=by_id, by_key=by_key)
+    return (cat.key or '').strip().lower() if cat is not None else ''
+
+
+def party_category_name(party, *, by_id=None, by_key=None):
+    """Display name for a party's category (used by the ledger header)."""
+    cat = effective_party_category(party, by_id=by_id, by_key=by_key)
+    return cat.name if cat is not None else 'Uncategorised'
+
+
+def _category_cards(parties):
+    """KPI/filter descriptors built from the **table**, not a constant."""
+    cats = list_party_categories()
+    by_id, by_key = category_maps()
+    counts = {}
+    for cat in cats:
+        counts[int(cat.id)] = 0
+    unfiled = 0
+    for party in parties:
+        if not party.is_active:
+            continue
+        cat = effective_party_category(party, by_id=by_id, by_key=by_key)
+        if cat is not None:
+            counts[int(cat.id)] = counts.get(int(cat.id), 0) + 1
+        else:
+            unfiled += 1
+    cards = []
+    for cat in cats:
+        cards.append({
+            'id': int(cat.id),
+            'key': (cat.key or '').strip().lower(),
+            'name': cat.name,
+            'icon': cat.icon or 'fa-tag',
+            'colour': cat.colour or 'kpi-slate',
+            'description': cat.description or f'Parties filed under {cat.name}.',
+            'count': int(counts.get(int(cat.id), 0)),
+            'is_active': bool(cat.is_active),
+            # Retired categories stay on the page while they still hold
+            # parties, so nobody's filing disappears with the card.
+            'visible': bool(cat.is_active) or int(counts.get(int(cat.id), 0)) > 0,
+            'in_use': int(counts.get(int(cat.id), 0)) > 0,
+        })
+    return cards, (by_id, by_key), unfiled
 
 
 def _txn_direction(tx_type):
@@ -376,13 +441,18 @@ def known_client_party_names():
 
 
 def party_combo_options(parties=None, category=''):
-    """``(id, label)`` pairs for the directory name combo."""
+    """``(id, label)`` pairs for the directory name combo.
+
+    Filtering follows the same rule as the table: explicit category first,
+    then the type-derived fallback.
+    """
     rows = parties if parties is not None else (
         CashFlowParty.query.order_by(CashFlowParty.name.asc()).all())
     cat = (category or '').strip().lower()
+    by_id, by_key = category_maps()
     options = []
     for party in rows:
-        if cat and cat in PARTY_CATEGORY_KEYS and party_category(party.party_type) != cat:
+        if cat and party_category_key(party, by_id=by_id, by_key=by_key) != cat:
             continue
         label = f'{party.name} ({party_type_label(party.party_type)})'
         if not party.is_active:
@@ -405,12 +475,16 @@ def party_id_by_name():
 
 
 def build_party_directory(*, search='', category='', party_id=None, status=''):
-    """Assemble the ledger-style directory rows + KPI counts."""
+    """Assemble the ledger-style directory rows + category KPI cards.
+
+    Categories come from ``hdc_party_category`` — a category created on the
+    page is a filter and a KPI card on the very next render, with no code
+    change.  ``?category=`` values are the category's stable ``key`` (the
+    six seeded buckets kept their old keys).
+    """
     search = (search or '').strip()
     needle = search.lower()
     category = (category or '').strip().lower()
-    if category not in PARTY_CATEGORY_KEYS:
-        category = ''
     status = (status or '').strip().lower()
     try:
         party_id = int(party_id or 0) or None
@@ -424,26 +498,25 @@ def build_party_directory(*, search='', category='', party_id=None, status=''):
     worker_stats = _worker_stats()
     project_stats = _project_stats_by_name()
 
-    def _count(bucket):
-        return sum(1 for p in parties
-                   if p.is_active and party_category(p.party_type) == bucket)
+    cards, (by_id, by_key), unfiled = _category_cards(parties)
+    known_keys = {card['key'] for card in cards}
+    if category and category not in known_keys and category != 'uncategorised':
+        category = ''  # stale bookmark → show everything rather than nothing
 
-    counts = {
-        'loan': _count('loan'),
-        'rental': _count('rental'),
-        'worker': _count('worker'),
-        'client': _count('client'),
-        'supplier': _count('supplier'),
-        'other': _count('other'),
+    counts = {card['key']: card['count'] for card in cards}
+    counts.update({
         'active_total': sum(1 for p in parties if p.is_active),
         'all': len(parties),
         'hidden': sum(1 for p in parties if not p.is_active),
-    }
+        'uncategorised': unfiled,
+    })
 
     rows = []
     for party in parties:
-        cat = party_category(party.party_type)
-        if category and cat != category:
+        cat = effective_party_category(party, by_id=by_id, by_key=by_key)
+        cat_key = (cat.key or '').strip().lower() if cat is not None else 'uncategorised'
+        cat_name = cat.name if cat is not None else 'Uncategorised'
+        if category and cat_key != category:
             continue
         if party_id and int(party.id) != int(party_id):
             continue
@@ -454,7 +527,7 @@ def build_party_directory(*, search='', category='', party_id=None, status=''):
         if needle:
             hay = ' '.join([
                 party.name or '', party.phone or '', party.note or '',
-                party_type_label(party.party_type), cat,
+                party_type_label(party.party_type), cat_key, cat_name,
             ]).lower()
             if needle not in hay:
                 continue
@@ -464,8 +537,10 @@ def build_party_directory(*, search='', category='', party_id=None, status=''):
         proj = project_stats.get(key, {'count': 0, 'projects': [], 'contract_value': 0.0, 'received': 0.0, 'receivable': 0.0})
         rows.append({
             'party': party,
-            'category': cat,
-            'category_label': category_label(cat),
+            'category': cat_key,
+            'category_id': int(cat.id) if cat is not None else None,
+            'category_label': cat_name,
+            'category_obj': cat,
             'type_label': party_type_label(party.party_type),
             'money_in': float(cash.get('in') or 0.0),
             'money_out': float(cash.get('out') or 0.0),
@@ -485,6 +560,7 @@ def build_party_directory(*, search='', category='', party_id=None, status=''):
     return {
         'rows': rows,
         'counts': counts,
+        'categories': cards,
         'parties': parties,
         'party_options': party_combo_options(parties, category=category),
         'name_options': known_party_names(),

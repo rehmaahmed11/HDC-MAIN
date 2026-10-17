@@ -1343,6 +1343,40 @@ def _ensure_accounts_schema():
     })
 
 
+def _ensure_party_category_schema():
+    """Create the user-defined Parties categories and widen the party table.
+
+    Categories used to be six buckets compiled into
+    ``hdc.services.parties``; they are now rows in ``hdc_party_category`` so
+    the operator can add, rename and retire them from the Parties page.  The
+    ``category_id`` column is added in place on an existing database; rows
+    left NULL are filed by the boot-time backfill (see
+    :func:`hdc.services.party_categories.backfill_party_categories`).
+    """
+    with db.engine.connect() as conn:
+        try:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS hdc_party_category (
+                    id INTEGER PRIMARY KEY,
+                    key VARCHAR(60) NOT NULL UNIQUE,
+                    name VARCHAR(120) NOT NULL,
+                    description VARCHAR(300),
+                    icon VARCHAR(60),
+                    colour VARCHAR(30),
+                    sort_order INTEGER DEFAULT 0,
+                    is_active BOOLEAN DEFAULT 1,
+                    created_at DATETIME,
+                    updated_at DATETIME
+                )
+            """))
+            conn.commit()
+        except Exception:
+            pass
+    _ensure_table_columns_sqlite('hdc_cash_flow_party', {
+        'category_id': "category_id INTEGER REFERENCES hdc_party_category(id)",
+    })
+
+
 def _ensure_cashflow_schema():
     """Create the Cash Flow v2 register / reconciliation tables.
 
