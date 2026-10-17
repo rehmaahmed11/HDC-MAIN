@@ -3,7 +3,8 @@
 {% block page_heading %}Parties — Directory &amp; Ledger{% endblock %}
 
 {% block content %}
-{% from "shared/_combo_field.html" import combo_field, combo_select %}
+{% from "shared/_combo_field.html" import combo_select %}
+{% from "parties/_party_form_fields.html" import party_fields %}
 
 {# KPI cards are also the category filter. The active card is the current view. #}
 <div class="row g-3 mt-1 mb-3">
@@ -41,41 +42,8 @@
                 <form method="post" action="{{ url_for('hdc_parties') }}" data-hdc-dialog>
                     <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
                     <input type="hidden" name="action" value="add_party">
-                    <div class="mb-2">
-                        {{ combo_field('name', 'partyName', name_options,
-                           label='Name', placeholder='Search or type a party…',
-                           required=true,
-                           hint='Pick an existing name or type a new one.',
-                           max_items=80) }}
-                    </div>
-                    <div class="mb-2">
-                        <label class="form-label" for="partyType">Type</label>
-                        <select class="form-select" id="partyType" name="party_type">
-                            {% for gkey, glabel, options in type_choices %}
-                            <optgroup label="{{ glabel }}">
-                                {% for value, label in options %}
-                                <option value="{{ value }}"
-                                        {% if value == 'lender' %}selected{% endif %}>{{ label }}</option>
-                                {% endfor %}
-                            </optgroup>
-                            {% endfor %}
-                        </select>
-                        <div class="hdc-field-hint">
-                            Loan Parties feed loan Money In / Out; External Customers feed HDC Tools.
-                            The type you pick also decides which category card this party is filed under.
-                            <strong>Client / Owner</strong> is now linked to Projects — a project client auto-creates a party here.
-                        </div>
-                    </div>
-                    <div class="mb-2">
-                        <label class="form-label" for="partyPhone">Phone <span class="hdc-optional">optional</span></label>
-                        <input type="text" class="form-control" id="partyPhone" name="phone"
-                               maxlength="40" autocomplete="off" placeholder="03xx-xxxxxxx">
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label" for="partyNote">Note <span class="hdc-optional">optional</span></label>
-                        <input type="text" class="form-control" id="partyNote" name="note"
-                               maxlength="300" autocomplete="off" placeholder="Anything worth remembering">
-                    </div>
+                    {# The same macro the Edit window renders — one form, both uses. #}
+                    {{ party_fields(id_prefix='party', type_choices=type_choices, name_options=name_options) }}
                     <button type="submit" class="btn btn-primary btn-sm w-100">
                         <i class="fas fa-plus me-1" aria-hidden="true"></i>Add Party
                     </button>
@@ -186,7 +154,7 @@
                             <th class="text-end">Balance</th>
                             <th class="text-center">Projects</th>
                             <th class="text-center">Status</th>
-                            <th class="text-end">Open</th>
+                            <th class="text-end">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -258,31 +226,43 @@
                                 {% endif %}
                             </td>
                             <td class="text-end">
-                                <a href="{{ url_for('hdc_party_ledger', party_id=row.party.id) }}" class="btn btn-sm btn-outline-primary" aria-label="Open ledger for {{ row.party.name }}">
-                                    <i class="fas fa-book-open me-1" aria-hidden="true"></i>Ledger
-                                </a>
-                                <button type="button" class="btn btn-sm btn-outline-secondary js-edit-party"
-                                        data-party-id="{{ row.party.id }}"
-                                        data-party-name="{{ row.party.name }}"
-                                        data-party-type="{{ row.party.party_type or 'other' }}"
-                                        data-party-phone="{{ row.party.phone or '' }}"
-                                        data-party-note="{{ row.party.note or '' }}"
-                                        title="Edit party">
-                                    <i class="fas fa-edit" aria-hidden="true"></i>
-                                </button>
-                                <form method="post" action="{{ url_for('hdc_parties') }}" class="d-inline" data-hdc-dialog>
-                                    <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
-                                    <input type="hidden" name="action" value="toggle_party">
-                                    <input type="hidden" name="party_id" value="{{ row.party.id }}">
-                                    <button type="submit" class="btn btn-sm {% if row.party.is_active %}btn-outline-secondary{% else %}btn-outline-success{% endif %}"
-                                            title="{{ 'Deactivate — hide from new transactions' if row.party.is_active else 'Reactivate — offer in pickers again' }}">
-                                        {% if row.party.is_active %}
-                                        <i class="fas fa-eye-slash" aria-hidden="true"></i>
-                                        {% else %}
-                                        <i class="fas fa-eye" aria-hidden="true"></i>
-                                        {% endif %}
+                                {# One flex cluster: every control shares a line box and a
+                                   gap, so the row cannot read as three differently-spaced
+                                   buttons. `hdc-row-actions` lives in hdc.css. #}
+                                <div class="hdc-row-actions" role="group"
+                                     aria-label="Actions for {{ row.party.name }}">
+                                    <a href="{{ url_for('hdc_party_ledger', party_id=row.party.id) }}"
+                                       class="btn btn-sm btn-outline-primary"
+                                       title="Ledger — dated transactions"
+                                       aria-label="Open ledger for {{ row.party.name }}">
+                                        <i class="fas fa-book-open" aria-hidden="true"></i>
+                                    </a>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary js-edit-party"
+                                            data-party-id="{{ row.party.id }}"
+                                            data-party-name="{{ row.party.name }}"
+                                            data-party-type="{{ row.party.party_type or 'other' }}"
+                                            data-party-phone="{{ row.party.phone or '' }}"
+                                            data-party-note="{{ row.party.note or '' }}"
+                                            title="Edit every detail of this party"
+                                            aria-label="Edit {{ row.party.name }}">
+                                        <i class="fas fa-pen" aria-hidden="true"></i>
                                     </button>
-                                </form>
+                                    <form method="post" action="{{ url_for('hdc_parties') }}" data-hdc-dialog>
+                                        <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+                                        <input type="hidden" name="action" value="toggle_party">
+                                        <input type="hidden" name="party_id" value="{{ row.party.id }}">
+                                        <button type="submit"
+                                                class="btn btn-sm {% if row.party.is_active %}btn-outline-secondary{% else %}btn-outline-success{% endif %}"
+                                                title="{{ 'Hide — keep history, remove from new-entry pickers' if row.party.is_active else 'Reactivate — offer in pickers again' }}"
+                                                aria-label="{{ 'Hide ' ~ row.party.name if row.party.is_active else 'Reactivate ' ~ row.party.name }}">
+                                            {% if row.party.is_active %}
+                                            <i class="fas fa-eye-slash" aria-hidden="true"></i>
+                                            {% else %}
+                                            <i class="fas fa-eye" aria-hidden="true"></i>
+                                            {% endif %}
+                                        </button>
+                                    </form>
+                                </div>
                             </td>
                         </tr>
                         {% endfor %}
@@ -298,7 +278,7 @@
 </style>
 
 <div class="modal fade" id="editPartyModal" tabindex="-1" aria-labelledby="editPartyModalTitle" aria-hidden="true">
-    <div class="modal-dialog">
+    <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
             <form method="post" action="{{ url_for('hdc_parties') }}" id="editPartyForm" data-hdc-dialog>
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
@@ -309,35 +289,13 @@
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
-                    <div class="mb-2">
-                        <label class="form-label" for="editPartyName">Name <span class="text-danger">*</span></label>
-                        <input type="text" class="form-control" id="editPartyName" name="name" maxlength="160" required>
-                        <div class="form-text">Renaming changes the name for new entries only — existing ledger rows keep the name they were recorded with.</div>
-                    </div>
-                    <div class="mb-2">
-                        <label class="form-label" for="editPartyType">Type</label>
-                        <select class="form-select" id="editPartyType" name="party_type">
-                            {% for gkey, glabel, options in type_choices %}
-                            <optgroup label="{{ glabel }}">
-                                {% for value, label in options %}
-                                <option value="{{ value }}">{{ label }}</option>
-                                {% endfor %}
-                            </optgroup>
-                            {% endfor %}
-                        </select>
-                    </div>
-                    <div class="mb-2">
-                        <label class="form-label" for="editPartyPhone">Phone</label>
-                        <input type="text" class="form-control" id="editPartyPhone" name="phone" maxlength="40">
-                    </div>
-                    <div class="mb-2">
-                        <label class="form-label" for="editPartyNote">Note</label>
-                        <input type="text" class="form-control" id="editPartyNote" name="note" maxlength="300">
-                    </div>
+                    {# Exactly the Add Party fields — same macro, same labels, same
+                       hints, filled from the row that was clicked. #}
+                    {{ party_fields(id_prefix='editParty', type_choices=type_choices, name_options=name_options) }}
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-primary"><i class="fas fa-save me-1" aria-hidden="true"></i>Save Changes</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-save me-1" aria-hidden="true"></i>Save Changes</button>
                 </div>
             </form>
         </div>
@@ -356,9 +314,14 @@
     }
     document.querySelectorAll('.js-edit-party').forEach(function(btn){
         btn.addEventListener('click', function(){
+            var name = btn.getAttribute('data-party-name') || '';
             setValue('editPartyId', btn.getAttribute('data-party-id'));
-            setValue('editPartyName', btn.getAttribute('data-party-name'));
-            setValue('editPartyType', btn.getAttribute('data-party-type'));
+            // The combo widget reads the visible input; its hidden select holds
+            // the option that was chosen. Fill both so the name opens exactly
+            // as it was saved (and a renamed-away name still posts verbatim).
+            setValue('editPartyNameInput', name);
+            setValue('editPartyName', name);
+            setValue('editPartyType', btn.getAttribute('data-party-type') || 'other');
             setValue('editPartyPhone', btn.getAttribute('data-party-phone'));
             setValue('editPartyNote', btn.getAttribute('data-party-note'));
             if (window.bootstrap && window.bootstrap.Modal) {

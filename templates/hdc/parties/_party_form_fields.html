@@ -1,0 +1,56 @@
+{# ── One Party form ─────────────────────────────────────────────────────────
+   The single field set used both to *create* a party and to *edit* one.
+   The Add Party card and the Edit Party window include this exact macro, in
+   this exact order, with the same labels, hints and controls.  A detail that
+   can be captured at creation is therefore always visible and editable later;
+   the two forms cannot drift apart when a field is added.
+
+   Parameters
+     party        the CashFlowParty being edited (None on the Add form)
+     id_prefix    prefix for every control id ('party' / 'editParty'); the
+                  combo widget keys off these ids
+     type_choices type_choice_groups() — grouped like the KPI buckets
+     name_options searchable names for the Name combo
+#}
+{% from "shared/_combo_field.html" import combo_field %}
+
+{% macro party_fields(party=None, id_prefix='party', type_choices=[], name_options=[]) %}
+    <div class="mb-2">
+        {{ combo_field('name', id_prefix ~ 'Name', name_options,
+           label='Name', placeholder='Search or type a party…',
+           required=true,
+           hint='Pick an existing name or type a new one.',
+           value=(party.name if party and party.name else ''),
+           max_items=80) }}
+    </div>
+    <div class="mb-2">
+        <label class="form-label" for="{{ id_prefix }}Type">Type</label>
+        <select class="form-select" id="{{ id_prefix }}Type" name="party_type">
+            {% for gkey, glabel, options in type_choices %}
+            <optgroup label="{{ glabel }}">
+                {% for value, label in options %}
+                <option value="{{ value }}"
+                        {% if party and (party.party_type or 'other') == value %}selected{% elif not party and value == 'lender' %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </optgroup>
+            {% endfor %}
+        </select>
+        <div class="hdc-field-hint">
+            Loan Parties feed loan Money In / Out; External Customers feed HDC Tools.
+            The type you pick also decides which category card this party is filed under.
+            <strong>Client / Owner</strong> is linked to Projects — a project client auto-creates a party here.
+        </div>
+    </div>
+    <div class="mb-2">
+        <label class="form-label" for="{{ id_prefix }}Phone">Phone <span class="hdc-optional">optional</span></label>
+        <input type="text" class="form-control" id="{{ id_prefix }}Phone" name="phone"
+               value="{{ party.phone if party and party.phone else '' }}"
+               maxlength="40" autocomplete="off" placeholder="03xx-xxxxxxx">
+    </div>
+    <div class="mb-2">
+        <label class="form-label" for="{{ id_prefix }}Note">Note <span class="hdc-optional">optional</span></label>
+        <input type="text" class="form-control" id="{{ id_prefix }}Note" name="note"
+               value="{{ party.note if party and party.note else '' }}"
+               maxlength="300" autocomplete="off" placeholder="Anything worth remembering">
+    </div>
+{% endmacro %}
