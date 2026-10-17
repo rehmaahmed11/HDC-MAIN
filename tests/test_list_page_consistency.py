@@ -97,6 +97,23 @@ class ListPageTemplateTest(unittest.TestCase):
             self.assertIn('data-bs-target="#', source,
                           '%s must name the modal it opens' % title)
 
+    def test_page_head_keeps_its_actions_in_one_group(self):
+        """A page may have two header controls (Personal: Back + Add).
+
+        They belong in one group that the adaptive layer can widen as a unit;
+        without it the phone kept a shrunken inline pair while every sibling
+        list showed a full-width Add bar under the heading.
+        """
+        source = read(os.path.join(TEMPLATES, 'shared', '_page_head.html'))
+        self.assertIn('hdc-page-head-actions', source,
+                      'the shared page head must group its action(s)')
+        css = ''
+        for name in os.listdir(os.path.join(REPO_ROOT, 'static', 'hdc', 'css')):
+            if name.endswith('.css'):
+                css += read(os.path.join(REPO_ROOT, 'static', 'hdc', 'css', name))
+        self.assertIn('.hdc-page-head-actions', css,
+                      'no stylesheet sizes the shared page-head action group')
+
     def test_no_undefined_purple_classes(self):
         """`btn-purple` / `text-purple` were never in any stylesheet."""
         css = ''

@@ -18,6 +18,12 @@
   A page that adopts this macro therefore cannot drift from the others by
   accident.
 
+  The action(s) sit in `.hdc-page-head-actions`, one flex group.  Pages with a
+  single button still get the full-width phone action through the rule above;
+  pages with two (Personal Expense Categories: Back + Add) keep them together
+  on the right at every width and get the same full-width line on a phone
+  through `.hdc-page-head-actions` itself.
+
   Usage:
 
       {% from "shared/_page_head.html" import page_head %}
@@ -35,6 +41,8 @@
 {% macro page_head(title, icon, count=None, icon_class='text-mint') -%}
 <div class="d-flex justify-content-between align-items-center mt-2 mb-3">
     <h5 class="mb-0"><i class="fas {{ icon }} me-2 {{ icon_class }}" aria-hidden="true"></i>{{ title }}{% if count is not none %} ({{ count }}){% endif %}</h5>
-    {% if caller is defined %}{{ caller() }}{% endif %}
+    <div class="hdc-page-head-actions d-flex align-items-center gap-2 flex-wrap">
+        {% if caller is defined %}{{ caller() }}{% endif %}
+    </div>
 </div>
 {%- endmacro %}
