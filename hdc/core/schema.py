@@ -2148,7 +2148,8 @@ def _ensure_tool_rental_schema():
     # add columns if legacy
     _ensure_table_columns_sqlite('hdc_tool', {
         'tool_code': "tool_code VARCHAR(30)",
-        'purchase_cost': "purchase_cost FLOAT DEFAULT 0",
+        'image_path': "image_path VARCHAR(255)",
+        'purchase_cost: "purchase_cost FLOAT DEFAULT 0",
         'rental_rate_per_day': "rental_rate_per_day FLOAT DEFAULT 0",
         'is_void': "is_void BOOLEAN DEFAULT 0",
     })

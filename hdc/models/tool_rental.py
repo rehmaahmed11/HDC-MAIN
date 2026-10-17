@@ -65,6 +65,7 @@ class Tool(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     tool_code = db.Column(db.String(30), unique=True, nullable=False)
     name = db.Column(db.String(150), nullable=False)
+    image_path = db.Column(db.String(255))
     category_id = db.Column(db.Integer, db.ForeignKey('hdc_tool_category.id'), nullable=True)
     description = db.Column(db.String(500))
     unit = db.Column(db.String(30), default='pcs')
