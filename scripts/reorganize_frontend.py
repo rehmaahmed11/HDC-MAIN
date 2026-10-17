@@ -22,7 +22,7 @@ STATIC_JS = os.path.join(BASE, "static", "hdc", "js")
 
 DOMAIN_OF = {
     "shared": ["base.html", "_pagination.html", "_combo_field.html", "forbidden.html",
-               "_result_dialog.html"],
+               "_result_dialog.html", "_page_head.html"],
     "auth": ["login.html", "access_home.html"],
     "dashboard": ["dashboard.html", "kpi_detail.html"],
     "projects": ["projects.html", "add_project.html", "edit_project.html",
