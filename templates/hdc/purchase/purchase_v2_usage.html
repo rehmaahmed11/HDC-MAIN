@@ -115,6 +115,16 @@
             <div class="card-body">
                 <form method="get" class="row g-2 align-items-end" id="usageFilterForm">
                     <div class="col-md-3">
+                        <label class="form-label small fw-semibold">Item Category</label>
+                        <select name="category_id" class="form-select form-select-sm">
+                            <option value="">All Categories</option>
+                            {% for c in category_options %}
+                            <option value="{{ c.id }}" {% if selected_category_id == c.id %}selected{% endif %}>{{ c.name }}</option>
+                            {% endfor %}
+                            <option value="{{ uncategorized_id }}" {% if selected_category_id == uncategorized_id %}selected{% endif %}>Uncategorized</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
                         <label class="form-label small fw-semibold">PO #</label>
                         <input type="number" name="po_number" class="form-control form-control-sm"
                                placeholder="e.g. 12" min="1" value="{{ filter_po_number or '' }}">
@@ -193,7 +203,7 @@
                 <table class="table hdc-table table-sm align-middle mb-0">
                     <thead>
                         <tr>
-                            <th>#</th><th>Date</th><th>Recorded</th><th>Material</th><th>PO</th><th>Project</th><th>Stage</th>
+                            <th>#</th><th>Date</th><th>Recorded</th><th>Material</th><th>Item Category</th><th>PO</th><th>Project</th><th>Stage</th>
                             <th class="text-end">Qty</th><th class="text-end">Cost</th>
                             <th>Notes</th><th style="width:90px">Actions</th>
                         </tr>
@@ -206,6 +216,13 @@
                             <td class="small text-muted" title="Entry created at">{{ r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at else '-' }}</td>
                             <td>{{ r.material.name if r.material else '-' }}
                                 {% if r.material %}<small class="text-muted">({{ r.material.unit or '' }})</small>{% endif %}
+                            </td>
+                            <td>
+                                {% set row_category = (r.purchase.category.name if r.purchase and r.purchase.category
+                                                       else (r.material.category.name if (r.material and r.material.category) else 'Uncategorized')) %}
+                                <span class="badge {% if row_category == 'Uncategorized' %}bg-warning text-dark{% else %}bg-dark{% endif %}">
+                                    {{ row_category }}
+                                </span>
                             </td>
                             <td class="small">
                                 <span class="fw-semibold">{% if r.purchase_id %}PO #{{ r.purchase_id }}{% else %}-{% endif %}</span>
@@ -233,7 +250,7 @@
                             </td>
                         </tr>
                         {% else %}
-                        <tr {{ r|hdc_row_attrs }}><td colspan="11" class="text-center text-muted py-4">
+                        <tr {{ r|hdc_row_attrs }}><td colspan="12" class="text-center text-muted py-4">
                             <i class="fas fa-inbox fa-2x mb-2 d-block opacity-30"></i>No usage records yet.
                         </td></tr>
                         {% endfor %}

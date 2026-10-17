@@ -2,7 +2,8 @@
 
 from hdc.models.accounts import Account, AccountIntentRule, AccountTransaction, Alert, Expense, ExpenseCategory, OwnerPayment, PersonalExpense, PersonalExpenseCategory
 from hdc.models.auth import ActivityLog, HDCUser, UserActivity
-from hdc.models.materials import Delivery, Material, MaterialUsage, MaterialV2, Purchase, PurchaseV2, Supplier, SupplierLedger, UsageLogV2
+from hdc.models.materials import (Delivery, Material, MaterialCategory, MaterialUsage, MaterialV2, Purchase,
+                          PurchaseV2, Supplier, SupplierCategory, SupplierLedger, SupplierSite, UsageLogV2)
 from hdc.models.office import AllowanceCategory, OfficeExpense, OfficeExpenseCategory, OfficeStaff, OfficeStaffAttendance, OfficeStaffLedger, StaffAllowance
 from hdc.models.projects import CustomFormula, Estimation, EstimationStage, Project, Stage, StageDefinition, StageDrawing, StageRateHistory
 from hdc.models.shared_expenses import SharedExpense, SharedExpenseShare, SharedParty, SharedSettlement
@@ -46,6 +47,7 @@ __all__ = [
     "Loan",
     "LoanMovement",
     "Material",
+    "MaterialCategory",
     "MaterialUsage",
     "MaterialV2",
     "OfficeExpense",
@@ -79,7 +81,9 @@ __all__ = [
     "SubcontractPayment",
     "SubcontractTeamAttendance",
     "Supplier",
+    "SupplierCategory",
     "SupplierLedger",
+    "SupplierSite",
     "TimeEntry",
     "Tool",
     "ToolAudit",

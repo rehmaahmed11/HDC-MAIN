@@ -14,7 +14,28 @@
     <span class="badge bg-primary">Sent: {{ "{:,.2f}".format((totals.delivered_qty if totals else 0) or 0) }}</span>
     <span class="badge bg-danger">Used: {{ "{:,.2f}".format((totals.used_qty if totals else 0) or 0) }}</span>
     <span class="badge bg-success">Balance at Site: {{ "{:,.2f}".format((totals.available_qty if totals else 0) or 0) }}</span>
+    <a href="{{ url_for('hdc_purchase_v2_categories') }}" class="btn btn-sm btn-outline-dark ms-auto">
+        <i class="fas fa-tags me-1"></i>Manage Categories
+    </a>
+    <form method="GET" class="d-flex gap-2 align-items-center">
+        <select name="category_id" class="form-select form-select-sm" style="min-width:190px"
+                onchange="this.form.submit()" title="Show one item type, or all">
+            <option value="">All Categories</option>
+            {% for c in category_options %}
+            <option value="{{ c.id }}" {% if selected_category_id == c.id %}selected{% endif %}>{{ c.name }}</option>
+            {% endfor %}
+            <option value="{{ uncategorized_id }}" {% if selected_category_id == uncategorized_id %}selected{% endif %}>Uncategorized</option>
+        </select>
+        <noscript><button class="btn btn-sm btn-mint" type="submit">Filter</button></noscript>
+    </form>
 </div>
+{% if selected_category_id != '' %}
+<div class="alert alert-info py-2 mb-3 d-flex flex-wrap justify-content-between align-items-center gap-2">
+    <span><i class="fas fa-filter me-1"></i>Showing <strong>{{ category_filter_label }}</strong> only —
+        {{ materials|length }} item(s).</span>
+    <a href="{{ url_for('hdc_purchase_v2_materials') }}" class="btn btn-sm btn-outline-secondary">Show all categories</a>
+</div>
+{% endif %}
 
 <!-- Add Material -->
 <div class="card hdc-card mb-4">
@@ -25,13 +46,26 @@
                 <label class="form-label fw-semibold">Material Name <span class="text-danger">*</span></label>
                 <input class="form-control" name="name" placeholder="e.g. Cement OPC, Steel Bar 12mm" required>
             </div>
-            <div class="col-md-3">
+            <div class="col-md-2">
                 <label class="form-label fw-semibold">Unit <span class="text-danger">*</span></label>
                 <select name="unit" class="form-select" required>
                     {% for u in material_units %}
                     <option value="{{ u }}">{{ u }}</option>
                     {% endfor %}
                 </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label fw-semibold">Item Category</label>
+                <select name="category_id" class="form-select">
+                    <option value="">— Uncategorized —</option>
+                    {% for c in category_options %}
+                    <option value="{{ c.id }}" {% if selected_category_id == c.id %}selected{% endif %}>{{ c.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label fw-semibold">…or new one</label>
+                <input class="form-control" name="category_new" placeholder="e.g. Electric Materials">
             </div>
             <div class="col-md-2 d-flex align-items-end">
                 <button class="btn btn-mint w-100" type="submit"><i class="fas fa-save me-1"></i>Add</button>
@@ -51,6 +85,7 @@
             <thead>
                 <tr>
                     <th>Material</th>
+                    <th>Item Category</th>
                     <th>Unit</th>
                     <th>Status</th>
                     <th class="text-end">Purchased</th>
@@ -65,7 +100,20 @@
                 {% for item in materials %}
                 {% set m = item.row %}
                 <tr {{ item|hdc_row_attrs }}>
-                    <td class="fw-semibold">{{ m.name }}</td>
+                    <td class="fw-semibold">
+                        {{ m.name }}
+                        <div class="small text-muted">
+                            <a href="{{ url_for('hdc_purchase_v2_item_detail', material_id=m.id) }}"
+                               class="text-decoration-none">
+                                <i class="fas fa-book-open me-1"></i>item ledger
+                            </a>
+                        </div>
+                    </td>
+                    <td>
+                        <a href="{{ url_for('hdc_purchase_v2_materials', category_id=item.category_id) }}"
+                           class="badge text-decoration-none {% if item.category_id == uncategorized_id %}bg-warning text-dark{% else %}bg-dark{% endif %}"
+                           title="Show this category only">{{ item.category_name }}</a>
+                    </td>
                     <td><span class="badge bg-secondary">{{ m.unit }}</span></td>
                     <td>
                         <span class="badge {% if (m.status or 'active') == 'active' %}bg-success{% else %}bg-warning text-dark{% endif %}">
@@ -81,7 +129,7 @@
                     </td>
                     <td>
                         <button class="btn btn-sm btn-outline-primary me-1" title="Edit"
-                            onclick="openMatEditModal({{ m.id }}, '{{ m.name|replace("'","\\'") }}', '{{ m.unit }}', '{{ m.status or 'active' }}')">
+                            onclick="openMatEditModal({{ m.id }}, '{{ m.name|replace("'","\\'") }}', '{{ m.unit }}', '{{ m.status or 'active' }}', '{{ m.category_id or '' }}')">
                             <i class="fas fa-edit"></i>
                         </button>
                         <form method="POST" action="{{ url_for('hdc_purchase_v2_material_delete', material_id=m.id) }}"
@@ -91,7 +139,7 @@
                     </td>
                 </tr>
                 {% else %}
-                <tr {{ item|hdc_row_attrs }}><td colspan="9" class="text-center text-muted py-4">
+                <tr {{ item|hdc_row_attrs }}><td colspan="10" class="text-center text-muted py-4">
                     <i class="fas fa-inbox fa-2x mb-2 d-block opacity-30"></i>No materials yet.
                 </td></tr>
                 {% endfor %}
@@ -123,6 +171,17 @@
                         </select>
                     </div>
                     <div class="mb-3">
+                        <label class="form-label fw-semibold">Item Category</label>
+                        <select name="category_id" id="matEditCategory" class="form-select">
+                            <option value="">— Uncategorized —</option>
+                            {% for c in category_options %}
+                            <option value="{{ c.id }}">{{ c.name }}</option>
+                            {% endfor %}
+                        </select>
+                        <input type="text" name="category_new" class="form-control mt-2"
+                               placeholder="…or type a new category name">
+                    </div>
+                    <div class="mb-3">
                         <label class="form-label fw-semibold">Status</label>
                         <select name="status" id="matEditStatus" class="form-select">
                             <option value="active">Active</option>
@@ -142,12 +201,13 @@
 
 {% block extra_js %}
 <script>
-function openMatEditModal(id, name, unit, status) {
+function openMatEditModal(id, name, unit, status, categoryId) {
     var form = document.getElementById('matEditForm');
     form.action = '/hdc/purchase-v2/materials/' + id + '/edit';
     document.getElementById('matEditName').value = name;
     setSelectVal('matEditUnit', unit);
     setSelectVal('matEditStatus', status);
+    setSelectVal('matEditCategory', categoryId || '');
     new bootstrap.Modal(document.getElementById('matEditModal')).show();
 }
 function setSelectVal(id, val) {

@@ -318,10 +318,50 @@ def _run_migrations():
             pass
         try:
             conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS hdc_material_category (
+                    id INTEGER PRIMARY KEY,
+                    name VARCHAR(120) NOT NULL,
+                    status VARCHAR(20) DEFAULT 'active',
+                    is_void BOOLEAN DEFAULT 0,
+                    created_at DATETIME,
+                    updated_at DATETIME
+                )
+            """))
+            conn.commit()
+        except Exception:
+            pass
+        try:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS hdc_supplier_category (
+                    id INTEGER PRIMARY KEY,
+                    supplier_id INTEGER NOT NULL REFERENCES hdc_supplier(id),
+                    category_id INTEGER NOT NULL REFERENCES hdc_material_category(id),
+                    created_at DATETIME
+                )
+            """))
+            conn.commit()
+        except Exception:
+            pass
+        try:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS hdc_supplier_site (
+                    id INTEGER PRIMARY KEY,
+                    supplier_id INTEGER NOT NULL REFERENCES hdc_supplier(id),
+                    project_id INTEGER NOT NULL REFERENCES hdc_project(id),
+                    note VARCHAR(200),
+                    created_at DATETIME
+                )
+            """))
+            conn.commit()
+        except Exception:
+            pass
+        try:
+            conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS hdc_material_v2 (
                     id INTEGER PRIMARY KEY,
                     name VARCHAR(120) NOT NULL,
                     unit VARCHAR(20) DEFAULT 'KG',
+                    category_id INTEGER REFERENCES hdc_material_category(id),
                     status VARCHAR(20) DEFAULT 'active',
                     is_void BOOLEAN DEFAULT 0,
                     created_at DATETIME,
@@ -337,6 +377,7 @@ def _run_migrations():
                     id INTEGER PRIMARY KEY,
                     supplier_id INTEGER NOT NULL REFERENCES hdc_supplier(id),
                     material_id INTEGER NOT NULL REFERENCES hdc_material_v2(id),
+                    category_id INTEGER REFERENCES hdc_material_category(id),
                     unit_price FLOAT DEFAULT 0,
                     quantity FLOAT DEFAULT 0,
                     total_amount FLOAT DEFAULT 0,
@@ -1041,6 +1082,13 @@ def _ensure_purchase_v2_schema():
         'date':       "date DATE",
         'notes':      "notes VARCHAR(300)",
         'challan_no': "challan_no VARCHAR(80)",
+        'category_id': "category_id INTEGER REFERENCES hdc_material_category(id)",
+    })
+    _ensure_table_columns_sqlite('hdc_material_v2', {
+        # Item type: Electric Materials / Plumbing Materials / Cement / Steel …
+        # Legacy rows keep NULL, which the pages read as "Uncategorized" and
+        # offer a one-click assign for.
+        'category_id': "category_id INTEGER REFERENCES hdc_material_category(id)",
     })
     _ensure_table_columns_sqlite('hdc_delivery', {
         'date':  "date DATE",
@@ -1069,6 +1117,70 @@ def _ensure_purchase_v2_schema():
             db.session.rollback()
         except Exception:
             pass
+
+
+def _ensure_material_category_schema():
+    """Item-type categories + the supplier ⇄ category / supplier ⇄ site links.
+
+    Runs on every boot: creates the join tables and their unique guards for
+    databases created before this feature, and makes sure the two columns the
+    registers filter on (``hdc_material_v2.category_id`` and
+    ``hdc_purchase_v2.category_id``) exist.
+    """
+    _ensure_table_columns_sqlite('hdc_material_v2', {
+        'category_id': "category_id INTEGER REFERENCES hdc_material_category(id)",
+    })
+    _ensure_table_columns_sqlite('hdc_purchase_v2', {
+        'category_id': "category_id INTEGER REFERENCES hdc_material_category(id)",
+    })
+    for ddl in (
+        """CREATE TABLE IF NOT EXISTS hdc_material_category (
+               id INTEGER PRIMARY KEY,
+               name VARCHAR(120) NOT NULL,
+               status VARCHAR(20) DEFAULT 'active',
+               is_void BOOLEAN DEFAULT 0,
+               created_at DATETIME,
+               updated_at DATETIME
+           )""",
+        """CREATE TABLE IF NOT EXISTS hdc_supplier_category (
+               id INTEGER PRIMARY KEY,
+               supplier_id INTEGER NOT NULL REFERENCES hdc_supplier(id),
+               category_id INTEGER NOT NULL REFERENCES hdc_material_category(id),
+               created_at DATETIME
+           )""",
+        """CREATE TABLE IF NOT EXISTS hdc_supplier_site (
+               id INTEGER PRIMARY KEY,
+               supplier_id INTEGER NOT NULL REFERENCES hdc_supplier(id),
+               project_id INTEGER NOT NULL REFERENCES hdc_project(id),
+               note VARCHAR(200),
+               created_at DATETIME
+           )""",
+    ):
+        with db.engine.connect() as conn:
+            try:
+                conn.execute(text(ddl))
+                conn.commit()
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+    for ddl in (
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_material_category_name_ci ON hdc_material_category(lower(trim(name))) WHERE is_void = 0",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_supplier_category_pair ON hdc_supplier_category(supplier_id, category_id)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_supplier_site_pair ON hdc_supplier_site(supplier_id, project_id)",
+        "CREATE INDEX IF NOT EXISTS idx_material_v2_category ON hdc_material_v2(category_id)",
+        "CREATE INDEX IF NOT EXISTS idx_purchase_v2_category ON hdc_purchase_v2(category_id)",
+    ):
+        with db.engine.connect() as conn:
+            try:
+                conn.execute(text(ddl))
+                conn.commit()
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
 
 
 def _ensure_owner_payment_void_schema():

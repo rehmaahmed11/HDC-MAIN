@@ -1,0 +1,259 @@
+{% extends "shared/base.html" %}
+{% block title %}Item Categories{% endblock %}
+{% block page_heading %}Item Categories &amp; Item Types{% endblock %}
+
+{% block content %}
+{# The vocabulary behind every register: Electric Materials, Plumbing
+   Materials, Cement, Steel …  One page owns it, and every other Purchase page
+   (purchases, delivery, usage, stock, items, suppliers) filters by it. #}
+<div class="d-flex flex-wrap gap-2 align-items-center mt-1 mb-3">
+    <a href="{{ url_for('hdc_purchase_v2_page') }}" class="btn btn-sm btn-outline-secondary">
+        <i class="fas fa-arrow-left me-1"></i>Back
+    </a>
+    <span class="badge bg-secondary">{{ totals.categories }} categories</span>
+    <span class="badge bg-info text-dark">{{ totals.materials }} materials</span>
+    <span class="badge bg-warning text-dark">Rs {{ "{:,.0f}".format(totals.purchased_value or 0) }} purchased</span>
+    <a href="{{ url_for('hdc_purchase_v2_items') }}" class="btn btn-sm btn-outline-primary">
+        <i class="fas fa-list-check me-1"></i>Item-wise register
+    </a>
+    {% if totals.uncategorized_materials %}
+    <a href="{{ url_for('hdc_purchase_v2_materials', category_id=uncategorized_id) }}"
+       class="btn btn-sm btn-outline-danger">
+        <i class="fas fa-triangle-exclamation me-1"></i>{{ totals.uncategorized_materials }} item(s) with no category
+    </a>
+    {% endif %}
+</div>
+
+{# "All Categories" and "one category at a time" — the same two choices every
+   register offers, stated once here where the vocabulary is owned. #}
+<div class="card hdc-card mb-3">
+    <div class="card-body d-flex flex-wrap gap-2 align-items-center">
+        <span class="fw-semibold me-1"><i class="fas fa-globe me-1"></i>All Categories</span>
+        <a href="{{ url_for('hdc_purchase_v2_purchases') }}" class="btn btn-sm btn-outline-success">Purchases</a>
+        <a href="{{ url_for('hdc_purchase_v2_delivered') }}" class="btn btn-sm btn-outline-primary">Delivery</a>
+        <a href="{{ url_for('hdc_purchase_v2_usage_page') }}" class="btn btn-sm btn-outline-warning">Usage</a>
+        <a href="{{ url_for('hdc_purchase_v2_items') }}" class="btn btn-sm btn-outline-primary">Item-wise</a>
+        <a href="{{ url_for('hdc_purchase_v2_stock') }}" class="btn btn-sm btn-outline-dark">Stock</a>
+        <a href="{{ url_for('hdc_purchase_v2_suppliers') }}" class="btn btn-sm btn-outline-secondary">Suppliers</a>
+        <a href="{{ url_for('hdc_purchase_v2_suppliers_by_site') }}" class="btn btn-sm btn-outline-secondary">Suppliers by site</a>
+        <span class="badge bg-secondary ms-auto">{{ totals.categories }} categories · {{ totals.materials }} items</span>
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-lg-5">
+        <div class="card hdc-card h-100">
+            <div class="card-header hdc-card-header"><i class="fas fa-plus me-2"></i>Add Category</div>
+            <div class="card-body">
+                <form method="POST" class="row g-2 align-items-end" data-hdc-dialog>
+                    <div class="col-8">
+                        <label class="form-label fw-semibold">Category Name <span class="text-danger">*</span></label>
+                        <input class="form-control" name="name" placeholder="e.g. Electric Materials" required>
+                    </div>
+                    <div class="col-4">
+                        <button class="btn btn-mint w-100" type="submit"><i class="fas fa-save me-1"></i>Add</button>
+                    </div>
+                </form>
+                <div class="form-text mt-2">
+                    The name is matched without case, so adding “cement” twice is refused instead of duplicated.
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-7">
+        <div class="card hdc-card h-100">
+            <div class="card-header hdc-card-header">
+                <i class="fas fa-tags me-2"></i>Assign Items To A Category
+            </div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('hdc_purchase_v2_categories_assign') }}"
+                      class="row g-2 align-items-end" id="assignCategoryForm" data-hdc-dialog>
+                    <div class="col-md-6">
+                        <label class="form-label fw-semibold">Items <span class="text-danger">*</span></label>
+                        <select name="material_ids[]" class="form-select" multiple size="6" required
+                                title="Ctrl / Cmd-click to pick several items">
+                            {% for m in materials %}
+                            <option value="{{ m.id }}" {% if not m.category_id %}selected{% endif %}>
+                                {{ m.name }}{% if not m.category_id %} — no category{% endif %}
+                            </option>
+                            {% endfor %}
+                        </select>
+                        <div class="form-text">Everything still uncategorized is pre-selected.</div>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label fw-semibold">Category <span class="text-danger">*</span></label>
+                        <select name="category_id" class="form-select">
+                            {% for c in category_options %}
+                            <option value="{{ c.id }}">{{ c.name }}</option>
+                            {% endfor %}
+                            <option value="{{ uncategorized_id }}">— Clear category —</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <button class="btn btn-outline-primary w-100" type="submit">
+                            <i class="fas fa-wand-magic-sparkles me-1"></i>Assign
+                        </button>
+                    </div>
+                </form>
+                <hr>
+                <form method="POST" action="{{ url_for('hdc_purchase_v2_categories_sync_purchases') }}"
+                      class="d-flex flex-wrap align-items-center gap-2">
+                    <button class="btn btn-sm btn-outline-secondary" type="submit">
+                        <i class="fas fa-rotate me-1"></i>Re-apply categories to purchase lines
+                    </button>
+                    <span class="small text-muted">
+                        A purchase line keeps the category it was recorded under; this moves them all onto
+                        their item's current category.
+                    </span>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card hdc-card">
+    <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+        <span><i class="fas fa-layer-group me-2"></i>Categories — Purchased / Sent / Used</span>
+        <small class="text-muted">Each row carries its own filter links: all categories, or that one alone</small>
+    </div>
+    <div class="table-responsive">
+        <table class="table hdc-table table-sm align-middle mb-0">
+            <thead>
+                <tr>
+                    <th>Category</th>
+                    <th>Status</th>
+                    <th class="text-end">Items</th>
+                    <th class="text-end">Purchase Rows</th>
+                    <th class="text-end">Purchased Qty</th>
+                    <th class="text-end">Purchased Value</th>
+                    <th class="text-end">Sent Qty</th>
+                    <th class="text-end">Used Qty</th>
+                    <th class="text-end">Sites</th>
+                    <th class="text-end">Suppliers</th>
+                    <th style="min-width:210px">Filters / Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for c in categories %}
+                <tr>
+                    <td>
+                        <span class="fw-semibold">{{ c.name }}</span>
+                        {% if c.material_names %}
+                        <div class="small text-muted">{{ c.material_names|join(', ') }}{% if c.material_count > c.material_names|length %} …{% endif %}</div>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if c.id == uncategorized_id %}
+                        <span class="badge bg-warning text-dark">Needs a category</span>
+                        {% elif (c.status or 'active') == 'active' %}
+                        <span class="badge bg-success">Active</span>
+                        {% else %}
+                        <span class="badge bg-secondary">Inactive</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-end">{{ c.material_count }}</td>
+                    <td class="text-end">{{ c.purchase_count }}</td>
+                    <td class="text-end">{{ "{:,.2f}".format(c.purchased_qty or 0) }}</td>
+                    <td class="text-end fw-semibold">Rs {{ "{:,.0f}".format(c.purchased_value or 0) }}</td>
+                    <td class="text-end">{{ "{:,.2f}".format(c.delivered_qty or 0) }}</td>
+                    <td class="text-end">{{ "{:,.2f}".format(c.used_qty or 0) }}</td>
+                    <td class="text-end">{{ c.site_count or 0 }}</td>
+                    <td class="text-end">{{ c.supplier_count or 0 }}</td>
+                    <td>
+                        <div class="d-flex gap-1 flex-wrap">
+                            <a href="{{ url_for('hdc_purchase_v2_purchases', category_id=c.id) }}"
+                               class="btn btn-sm btn-outline-success" title="Purchases in this category">
+                                <i class="fas fa-cart-shopping"></i>
+                            </a>
+                            <a href="{{ url_for('hdc_purchase_v2_delivered', category_id=c.id) }}"
+                               class="btn btn-sm btn-outline-primary" title="Deliveries in this category">
+                                <i class="fas fa-dolly"></i>
+                            </a>
+                            <a href="{{ url_for('hdc_purchase_v2_usage_page', category_id=c.id) }}"
+                               class="btn btn-sm btn-outline-warning" title="Usage in this category">
+                                <i class="fas fa-tools"></i>
+                            </a>
+                            <a href="{{ url_for('hdc_purchase_v2_items', category_id=c.id) }}"
+                               class="btn btn-sm btn-outline-info" title="Item-wise view of this category">
+                                <i class="fas fa-list-check"></i>
+                            </a>
+                            <a href="{{ url_for('hdc_purchase_v2_suppliers', category_id=c.id) }}"
+                               class="btn btn-sm btn-outline-dark" title="Suppliers for this category">
+                                <i class="fas fa-truck-loading"></i>
+                            </a>
+                            {% if c.id != uncategorized_id %}
+                            <button class="btn btn-sm btn-outline-secondary" title="Edit category"
+                                    data-id="{{ c.id }}"
+                                    data-name="{{ (c.name or '')|replace('"', '&quot;') }}"
+                                    data-status="{{ c.status or 'active' }}"
+                                    onclick="openCategoryEditModal(this)">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                            <form method="POST" class="d-inline"
+                                  action="{{ url_for('hdc_purchase_v2_category_delete', category_id=c.id) }}"
+                                  onsubmit="return confirm('Delete {{ c.name }}? If records use it, it will be set inactive instead.');">
+                                <button class="btn btn-sm btn-outline-danger" type="submit" title="Delete">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </form>
+                            {% endif %}
+                        </div>
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="11" class="text-center text-muted py-4">
+                    <i class="fas fa-inbox fa-2x mb-2 d-block opacity-30"></i>No categories yet.
+                </td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Edit Category Modal -->
+<div class="modal fade" id="categoryEditModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header hdc-card-header">
+                <h5 class="modal-title"><i class="fas fa-tag me-2"></i>Edit Category</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" id="categoryEditForm" data-hdc-dialog>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Category Name</label>
+                        <input type="text" name="name" id="categoryEditName" class="form-control" required>
+                    </div>
+                    <div class="mb-0">
+                        <label class="form-label fw-semibold">Status</label>
+                        <select name="status" id="categoryEditStatus" class="form-select">
+                            <option value="active">Active</option>
+                            <option value="inactive">Inactive</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-mint"><i class="fas fa-save me-1"></i>Update</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function openCategoryEditModal(btn) {
+    var form = document.getElementById('categoryEditForm');
+    form.action = '/hdc/purchase-v2/categories/' + btn.getAttribute('data-id') + '/edit';
+    document.getElementById('categoryEditName').value = btn.getAttribute('data-name') || '';
+    var status = document.getElementById('categoryEditStatus');
+    var wanted = btn.getAttribute('data-status') || 'active';
+    for (var i = 0; i < status.options.length; i++) {
+        if (status.options[i].value === wanted) { status.selectedIndex = i; break; }
+    }
+    new bootstrap.Modal(document.getElementById('categoryEditModal')).show();
+}
+</script>
+{% endblock %}

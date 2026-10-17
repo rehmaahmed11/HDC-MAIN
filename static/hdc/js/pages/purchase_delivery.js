@@ -38,6 +38,7 @@
                 .filter(function (s) { return s !== ''; }),
             materialId: el.getAttribute('data-material-id') || '',
             supplierId: el.getAttribute('data-supplier-id') || '',
+            categoryId: el.getAttribute('data-category-id') || '',
             search: (el.getAttribute('data-search') || '').toLowerCase(),
             pendingQty: parseFloat(el.getAttribute('data-pending-qty') || '0') || 0
         };
@@ -50,6 +51,10 @@
             return false;
         }
         if (criteria.materialId && String(row.materialId) !== String(criteria.materialId)) {
+            return false;
+        }
+        // Item type of the pending PO: "All Categories" (empty) or one id.
+        if (criteria.categoryId && String(row.categoryId) !== String(criteria.categoryId)) {
             return false;
         }
         if (criteria.supplierId && String(row.supplierId) !== String(criteria.supplierId)) {
@@ -97,6 +102,7 @@
         var siteSel = doc.getElementById('pendingSiteFilter');
         var materialSel = doc.getElementById('pendingMaterialFilter');
         var supplierSel = doc.getElementById('pendingSupplierFilter');
+        var categorySel = doc.getElementById('pendingCategoryFilter');
         var searchBox = doc.getElementById('pendingSearch');
         var noMatch = doc.getElementById('pendingPONoMatch');
         var summary = doc.getElementById('pendingPOSummary');
@@ -110,6 +116,7 @@
                 siteId: siteSel ? siteSel.value : '',
                 materialId: materialSel ? materialSel.value : '',
                 supplierId: supplierSel ? supplierSel.value : '',
+                categoryId: categorySel ? categorySel.value : '',
                 term: searchBox ? searchBox.value : ''
             };
         }
@@ -134,13 +141,13 @@
             }
             return result;
         }
-        [siteSel, materialSel, supplierSel].forEach(function (el) {
+        [siteSel, materialSel, supplierSel, categorySel].forEach(function (el) {
             if (el) el.addEventListener('change', apply);
         });
         if (searchBox) searchBox.addEventListener('input', apply);
         if (resetBtn) {
             resetBtn.addEventListener('click', function () {
-                [siteSel, materialSel, supplierSel].forEach(function (el) {
+                [siteSel, materialSel, supplierSel, categorySel].forEach(function (el) {
                     if (el) el.value = '';
                 });
                 if (searchBox) searchBox.value = '';

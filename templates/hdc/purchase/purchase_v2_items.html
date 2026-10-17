@@ -1,0 +1,211 @@
+{% extends "shared/base.html" %}
+{% block title %}Item-wise Register{% endblock %}
+{% block page_heading %}Purchase · Delivery · Usage — On Item Basis{% endblock %}
+
+{% block content %}
+{# The field's request in one screen: every item with what was bought for it,
+   what was sent to sites and what was used — with the item type (category)
+   beside it, filterable as "All Categories" or one category at a time. #}
+<div class="d-flex flex-wrap gap-2 align-items-center mt-1 mb-3">
+    <a href="{{ url_for('hdc_purchase_v2_page') }}" class="btn btn-sm btn-outline-secondary">
+        <i class="fas fa-arrow-left me-1"></i>Back
+    </a>
+    <span class="badge bg-secondary">{{ totals.items }} items</span>
+    <span class="badge bg-info text-dark">Site scope: {{ scope_label }}</span>
+    <span class="badge bg-success">Purchased: Rs {{ "{:,.0f}".format(totals.purchased_value or 0) }}</span>
+    <span class="badge bg-primary">Sent: {{ "{:,.2f}".format(totals.delivered_qty or 0) }}</span>
+    <span class="badge bg-danger">Used: {{ "{:,.2f}".format(totals.used_qty or 0) }}</span>
+    <a href="{{ url_for('hdc_purchase_v2_categories') }}" class="btn btn-sm btn-outline-dark ms-auto">
+        <i class="fas fa-tags me-1"></i>Manage categories
+    </a>
+</div>
+
+<!-- Category strip: all categories at a glance, each one clickable -->
+<div class="card hdc-card mb-3">
+    <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+        <span><i class="fas fa-layer-group me-2"></i>Categories</span>
+        <span class="small text-muted">
+            {% if selected_category_id == '' %}All Categories{% else %}{{ category_filter_label }}{% endif %}
+        </span>
+    </div>
+    <div class="card-body py-2">
+        <div class="d-flex flex-wrap gap-2">
+            <a href="{{ url_for('hdc_purchase_v2_items', project_id=selected_project_id or '', stage_id=selected_stage_id or '',
+                                date_from=filter_date_from, date_to=filter_date_to, sort=sort_mode) }}"
+               class="btn btn-sm {% if selected_category_id == '' %}btn-dark{% else %}btn-outline-dark{% endif %}">
+                <i class="fas fa-globe me-1"></i>All Categories
+                <span class="badge bg-light text-dark ms-1">{{ totals.items }}</span>
+            </a>
+            {% for c in category_strip %}
+            <a href="{{ url_for('hdc_purchase_v2_items', category_id=c.category_id,
+                                project_id=selected_project_id or '', stage_id=selected_stage_id or '',
+                                date_from=filter_date_from, date_to=filter_date_to, sort=sort_mode) }}"
+               class="btn btn-sm {% if selected_category_id != '' and selected_category_id == c.category_id %}btn-primary{% else %}btn-outline-primary{% endif %}"
+               title="Rs {{ '{:,.0f}'.format(c.purchased_value or 0) }} purchased · {{ '{:,.2f}'.format(c.delivered_qty or 0) }} sent · {{ '{:,.2f}'.format(c.used_qty or 0) }} used">
+                {{ c.category_name }}
+                <span class="badge bg-light text-dark ms-1">{{ c.items }}</span>
+                <span class="ms-1 small">Rs {{ "{:,.0f}".format(c.purchased_value or 0) }}</span>
+            </a>
+            {% endfor %}
+            {% if not category_strip %}
+            <span class="text-muted small">No items in this scope yet.</span>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Filters: category / item / site / stage / dates / arrange -->
+<div class="card hdc-card mb-3">
+    <div class="card-body py-2">
+        <form method="get" class="d-flex flex-wrap gap-2 align-items-end">
+            <div>
+                <label class="form-label small fw-semibold mb-1">Category</label>
+                <select name="category_id" class="form-select form-select-sm" style="min-width:180px">
+                    <option value="">All Categories</option>
+                    {% for c in category_options %}
+                    <option value="{{ c.id }}" {% if selected_category_id == c.id %}selected{% endif %}>{{ c.name }}</option>
+                    {% endfor %}
+                    <option value="{{ uncategorized_id }}" {% if selected_category_id == uncategorized_id %}selected{% endif %}>Uncategorized</option>
+                </select>
+            </div>
+            <div>
+                <label class="form-label small fw-semibold mb-1">Item</label>
+                <select name="material_id" class="form-select form-select-sm" style="min-width:170px">
+                    <option value="">All Items</option>
+                    {% for m in materials %}
+                    <option value="{{ m.id }}" {% if selected_material_id == m.id %}selected{% endif %}>{{ m.name }} ({{ m.unit or '' }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="form-label small fw-semibold mb-1">Site</label>
+                <select name="project_id" class="form-select form-select-sm" style="min-width:160px">
+                    <option value="">All Sites</option>
+                    {% for p in projects %}
+                    <option value="{{ p.id }}" {% if selected_project_id == p.id %}selected{% endif %}>{{ p.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="form-label small fw-semibold mb-1">Stage</label>
+                <select name="stage_id" class="form-select form-select-sm" style="min-width:150px">
+                    <option value="">All Stages</option>
+                    {% for s in stages %}
+                    <option value="{{ s.id }}" {% if selected_stage_id == s.id %}selected{% endif %}>
+                        {{ s.name }}{% if s.project %} — {{ s.project.name }}{% endif %}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="form-label small fw-semibold mb-1">From / To</label>
+                <div class="input-group input-group-sm">
+                    <input type="date" name="date_from" class="form-control" value="{{ filter_date_from }}">
+                    <span class="input-group-text">to</span>
+                    <input type="date" name="date_to" class="form-control" value="{{ filter_date_to }}">
+                </div>
+            </div>
+            <div>
+                <label class="form-label small fw-semibold mb-1">Arrange</label>
+                <select name="sort" class="form-select form-select-sm">
+                    <option value="value" {% if sort_mode == 'value' %}selected{% endif %}>Highest value first</option>
+                    <option value="qty" {% if sort_mode == 'qty' %}selected{% endif %}>Highest quantity first</option>
+                    <option value="name" {% if sort_mode == 'name' %}selected{% endif %}>Item name (A–Z)</option>
+                </select>
+            </div>
+            <button type="submit" class="btn btn-sm btn-mint"><i class="fas fa-filter me-1"></i>Filter</button>
+            <a href="{{ url_for('hdc_purchase_v2_items') }}" class="btn btn-sm btn-outline-secondary">Clear</a>
+            <a href="{{ url_for('hdc_purchase_v2_items', sort=sort_mode) }}" class="btn btn-sm btn-outline-dark">All Sites</a>
+            <a href="{{ url_for('hdc_purchase_v2_items', sort=sort_mode) }}" class="btn btn-sm btn-outline-dark">All Stages</a>
+        </form>
+    </div>
+</div>
+
+<div class="card hdc-card">
+    <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+        <span><i class="fas fa-table-list me-2"></i>Items — Purchase / Delivery / Usage</span>
+        <small class="text-muted">Open an item to see its own purchase, delivery and usage entries</small>
+    </div>
+    <div class="table-responsive">
+        <table class="table hdc-table table-sm align-middle mb-0">
+            <thead>
+                <tr>
+                    <th>Item</th>
+                    <th>Category</th>
+                    <th>Unit</th>
+                    <th class="text-end">Purchase Rows</th>
+                    <th class="text-end">Purchased Qty</th>
+                    <th class="text-end">Purchased Value</th>
+                    <th class="text-end">Delivery Rows</th>
+                    <th class="text-end">Sent Qty</th>
+                    <th class="text-end">Usage Rows</th>
+                    <th class="text-end">Used Qty</th>
+                    <th class="text-end">In Store</th>
+                    <th class="text-end">Balance at Site</th>
+                    <th style="width:110px">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in rows %}
+                <tr {{ r|hdc_row_attrs }}>
+                    <td class="fw-semibold">
+                        {{ r.name }}
+                        {% if r.status != 'active' %}<span class="badge bg-warning text-dark ms-1">Inactive</span>{% endif %}
+                    </td>
+                    <td>
+                        <a href="{{ url_for('hdc_purchase_v2_items', category_id=r.category_id) }}"
+                           class="badge {% if r.category_id == uncategorized_id %}bg-warning text-dark{% else %}bg-secondary{% endif %} text-decoration-none">
+                            {{ r.category_name }}
+                        </a>
+                    </td>
+                    <td class="small text-muted">{{ r.unit or '-' }}</td>
+                    <td class="text-end">{{ r.purchase_count }}</td>
+                    <td class="text-end">{{ "{:,.2f}".format(r.purchased_qty or 0) }}</td>
+                    <td class="text-end fw-semibold">Rs {{ "{:,.0f}".format(r.purchased_value or 0) }}</td>
+                    <td class="text-end">{{ r.delivery_count }}</td>
+                    <td class="text-end">{{ "{:,.2f}".format(r.delivered_qty or 0) }}</td>
+                    <td class="text-end">{{ r.usage_count }}</td>
+                    <td class="text-end">{{ "{:,.2f}".format(r.used_qty or 0) }}</td>
+                    <td class="text-end text-warning fw-semibold">{{ "{:,.2f}".format(r.in_store_qty or 0) }}</td>
+                    <td class="text-end {% if (r.at_site_qty or 0) <= 0 %}text-danger{% else %}text-success{% endif %} fw-semibold">
+                        {{ "{:,.2f}".format(r.at_site_qty or 0) }}
+                    </td>
+                    <td>
+                        <a href="{{ url_for('hdc_purchase_v2_item_detail', material_id=r.id, project_id=selected_project_id or '',
+                                            stage_id=selected_stage_id or '', date_from=filter_date_from, date_to=filter_date_to) }}"
+                           class="btn btn-sm btn-outline-primary" title="Open this item's ledger">
+                            <i class="fas fa-book-open"></i>
+                        </a>
+                        <a href="{{ url_for('hdc_purchase_v2_stock', material_id=r.id, project_id=selected_project_id or '',
+                                            stage_id=selected_stage_id or '') }}"
+                           class="btn btn-sm btn-outline-dark" title="Stock for this item">
+                            <i class="fas fa-warehouse"></i>
+                        </a>
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="13" class="text-center text-muted py-4">
+                    <i class="fas fa-inbox fa-2x mb-2 d-block opacity-30"></i>No items match these filters.
+                </td></tr>
+                {% endfor %}
+            </tbody>
+            {% if rows %}
+            <tfoot class="table-light fw-semibold">
+                <tr>
+                    <td colspan="4">Totals ({{ totals.items }} items)</td>
+                    <td class="text-end">{{ "{:,.2f}".format(totals.purchased_qty or 0) }}</td>
+                    <td class="text-end">Rs {{ "{:,.0f}".format(totals.purchased_value or 0) }}</td>
+                    <td></td>
+                    <td class="text-end">{{ "{:,.2f}".format(totals.delivered_qty or 0) }}</td>
+                    <td></td>
+                    <td class="text-end">{{ "{:,.2f}".format(totals.used_qty or 0) }}</td>
+                    <td class="text-end">{{ "{:,.2f}".format(totals.in_store_qty or 0) }}</td>
+                    <td class="text-end">{{ "{:,.2f}".format(totals.at_site_qty or 0) }}</td>
+                    <td></td>
+                </tr>
+            </tfoot>
+            {% endif %}
+        </table>
+    </div>
+</div>
+{% endblock %}

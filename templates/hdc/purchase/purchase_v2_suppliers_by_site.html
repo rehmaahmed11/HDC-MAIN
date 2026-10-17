@@ -1,0 +1,201 @@
+{% extends "shared/base.html" %}
+{% block title %}Suppliers by Site{% endblock %}
+{% block page_heading %}Supplier ⇄ Site Tracking{% endblock %}
+
+{% block content %}
+{# Both directions of the same question:
+     site → which suppliers supplied it (and which are only assigned), and
+     supplier → which sites it supplied.
+   Quantities and values come from the deliveries themselves, so a purchase
+   that never moved is never credited to a site. #}
+<div class="d-flex flex-wrap gap-2 align-items-center mt-1 mb-3">
+    <a href="{{ url_for('hdc_purchase_v2_suppliers') }}" class="btn btn-sm btn-outline-secondary">
+        <i class="fas fa-arrow-left me-1"></i>Suppliers
+    </a>
+    <span class="badge bg-secondary">{{ totals.sites }} sites</span>
+    <span class="badge bg-info text-dark">{{ totals.suppliers }} suppliers supplied</span>
+    <span class="badge bg-success">Delivered value: Rs {{ "{:,.0f}".format(totals.value or 0) }}</span>
+    <a href="{{ url_for('hdc_purchase_v2_suppliers') }}" class="btn btn-sm btn-outline-primary ms-auto">
+        <i class="fas fa-truck-loading me-1"></i>Supplier list by material
+    </a>
+</div>
+
+<!-- Filters: category / item / site / supplier / search / dates -->
+<div class="card hdc-card mb-3">
+    <div class="card-body py-2">
+        <form method="get" class="d-flex flex-wrap gap-2 align-items-end">
+            <div>
+                <label class="form-label small fw-semibold mb-1">Category</label>
+                <select name="category_id" class="form-select form-select-sm" style="min-width:180px">
+                    <option value="">All Categories</option>
+                    {% for c in category_options %}
+                    <option value="{{ c.id }}" {% if selected_category_id == c.id %}selected{% endif %}>{{ c.name }}</option>
+                    {% endfor %}
+                    <option value="{{ uncategorized_id }}" {% if selected_category_id == uncategorized_id %}selected{% endif %}>Uncategorized</option>
+                </select>
+            </div>
+            <div>
+                <label class="form-label small fw-semibold mb-1">Item</label>
+                <select name="material_id" class="form-select form-select-sm" style="min-width:170px">
+                    <option value="">All Items</option>
+                    {% for m in materials %}
+                    <option value="{{ m.id }}" {% if selected_material_id == m.id %}selected{% endif %}>{{ m.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="form-label small fw-semibold mb-1">Site</label>
+                <select name="project_id" class="form-select form-select-sm" style="min-width:170px">
+                    <option value="">All Sites</option>
+                    {% for p in projects %}
+                    <option value="{{ p.id }}" {% if selected_project_id == p.id %}selected{% endif %}>{{ p.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="form-label small fw-semibold mb-1">Supplier</label>
+                <select name="supplier_id" class="form-select form-select-sm" style="min-width:170px">
+                    <option value="">All Suppliers</option>
+                    {% for s in supplier_options %}
+                    <option value="{{ s.id }}" {% if selected_supplier_id == s.id %}selected{% endif %}>{{ s.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="form-label small fw-semibold mb-1">Search</label>
+                <input type="text" name="q" class="form-control form-control-sm" style="min-width:170px"
+                       placeholder="Supplier or site name" value="{{ q or '' }}">
+            </div>
+            <div>
+                <label class="form-label small fw-semibold mb-1">From / To</label>
+                <div class="input-group input-group-sm">
+                    <input type="date" name="date_from" class="form-control" value="{{ filter_date_from }}">
+                    <span class="input-group-text">to</span>
+                    <input type="date" name="date_to" class="form-control" value="{{ filter_date_to }}">
+                </div>
+            </div>
+            <button type="submit" class="btn btn-sm btn-mint"><i class="fas fa-filter me-1"></i>Filter</button>
+            <a href="{{ url_for('hdc_purchase_v2_suppliers_by_site') }}" class="btn btn-sm btn-outline-secondary">Clear</a>
+        </form>
+    </div>
+</div>
+
+<!-- Site → Suppliers -->
+<div class="card hdc-card mb-3">
+    <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+        <span><i class="fas fa-building me-2"></i>Site → Suppliers</span>
+        <small class="text-muted">Which supplier supplied this site, and what is still only assigned</small>
+    </div>
+    <div class="table-responsive">
+        <table class="table hdc-table table-sm align-middle mb-0">
+            <thead>
+                <tr>
+                    <th>Site</th><th>Supplier</th><th>Categories Supplied</th>
+                    <th class="text-end">Items</th><th class="text-end">Deliveries</th>
+                    <th class="text-end">Qty Sent</th><th class="text-end">Value Sent</th>
+                    <th>Last Delivery</th><th>State</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for site in site_rows %}
+                {% for r in site.rows %}
+                <tr>
+                    <td class="fw-semibold">
+                        {{ site.project_name }}
+                        <div class="small text-muted">{{ site.supplier_count }} supplier(s) · Rs {{ "{:,.0f}".format(site.value or 0) }}</div>
+                    </td>
+                    <td>
+                        <a href="{{ url_for('hdc_purchase_v2_supplier_detail', supplier_id=r.supplier_id) }}"
+                           class="text-decoration-none fw-semibold">{{ r.supplier_name }}</a>
+                    </td>
+                    <td>
+                        {% for name in r.category_names %}
+                        <span class="badge bg-secondary me-1">{{ name }}</span>
+                        {% endfor %}
+                    </td>
+                    <td class="text-end">{{ r.material_count }}</td>
+                    <td class="text-end">{{ r.delivery_count }}</td>
+                    <td class="text-end">{{ "{:,.2f}".format(r.quantity or 0) }}</td>
+                    <td class="text-end fw-semibold">Rs {{ "{:,.0f}".format(r.value or 0) }}</td>
+                    <td class="small text-muted">{{ r.last_delivery_date or '-' }}</td>
+                    <td><span class="badge bg-success">Supplied</span></td>
+                </tr>
+                {% endfor %}
+                {% for a in site.assigned %}
+                <tr class="table-warning">
+                    <td class="fw-semibold">{{ site.project_name }}</td>
+                    <td>
+                        <a href="{{ url_for('hdc_purchase_v2_supplier_detail', supplier_id=a.supplier_id) }}"
+                           class="text-decoration-none fw-semibold">{{ a.supplier_name }}</a>
+                    </td>
+                    <td class="small text-muted">{{ a.note or '—' }}</td>
+                    <td class="text-end">0</td>
+                    <td class="text-end">0</td>
+                    <td class="text-end">0.00</td>
+                    <td class="text-end">Rs 0</td>
+                    <td class="small text-muted">—</td>
+                    <td><span class="badge bg-warning text-dark">Assigned only</span></td>
+                </tr>
+                {% endfor %}
+                {% if not site.rows and not site.assigned %}
+                <tr><td colspan="9" class="text-center text-muted py-3">No supplier link for {{ site.project_name }}.</td></tr>
+                {% endif %}
+                {% else %}
+                <tr><td colspan="9" class="text-center text-muted py-4">
+                    <i class="fas fa-inbox fa-2x mb-2 d-block opacity-30"></i>No site/supplier activity matches these filters.
+                </td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Supplier → Sites -->
+<div class="card hdc-card">
+    <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+        <span><i class="fas fa-truck-loading me-2"></i>Supplier → Sites</span>
+        <small class="text-muted">“Assigned” is the stated selection; “supplied” is what actually moved</small>
+    </div>
+    <div class="table-responsive">
+        <table class="table hdc-table table-sm align-middle mb-0">
+            <thead>
+                <tr>
+                    <th>Supplier</th><th>Deals In (stated)</th><th>Categories Supplied</th>
+                    <th class="text-end">Sites Supplied</th><th>Sites Supplied (names)</th>
+                    <th>Assigned Sites</th><th class="text-end">Qty Sent</th><th class="text-end">Value Sent</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for s in supplier_rows %}
+                <tr>
+                    <td>
+                        <a href="{{ url_for('hdc_purchase_v2_supplier_detail', supplier_id=s.supplier_id) }}"
+                           class="fw-semibold text-decoration-none">{{ s.supplier_name }}</a>
+                    </td>
+                    <td>
+                        {% for name in s.deals_in %}<span class="badge bg-info text-dark me-1">{{ name }}</span>{% else %}<span class="text-muted small">—</span>{% endfor %}
+                    </td>
+                    <td>
+                        {% for name in s.supplied_category_names %}<span class="badge bg-secondary me-1">{{ name }}</span>{% else %}<span class="text-muted small">—</span>{% endfor %}
+                    </td>
+                    <td class="text-end">{{ s.site_count }}</td>
+                    <td class="small">{{ s.site_names|join(', ') if s.site_names else '—' }}</td>
+                    <td class="small">
+                        {% if s.assigned_site_names %}
+                        <span class="badge bg-warning text-dark">{{ s.assigned_site_names|length }}</span>
+                        {{ s.assigned_site_names|join(', ') }}
+                        {% else %}<span class="text-muted">—</span>{% endif %}
+                    </td>
+                    <td class="text-end">{{ "{:,.2f}".format(s.quantity or 0) }}</td>
+                    <td class="text-end fw-semibold">Rs {{ "{:,.0f}".format(s.value or 0) }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="8" class="text-center text-muted py-4">
+                    <i class="fas fa-inbox fa-2x mb-2 d-block opacity-30"></i>No suppliers match these filters.
+                </td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

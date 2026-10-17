@@ -15,7 +15,7 @@ from werkzeug.utils import secure_filename
 from hdc.config import get_runtime_settings
 from hdc.extensions import _money_only, _money_write_required, db
 from hdc.models.accounts import Account, OwnerPayment
-from hdc.models.materials import Material
+from hdc.models.materials import Material, SupplierSite
 from hdc.models.projects import Project, Stage, StageDefinition, StageDrawing, StageRateHistory
 from hdc.models.subcontract import Subcontractor
 from hdc.models.workforce import TimeEntry, Worker
@@ -25,6 +25,7 @@ from hdc.services.lookups import _next_project_code
 from hdc.services.parties import known_client_party_names, party_name_key
 from hdc.services.permissions import may_access_path, permission_for, permission_landing_url
 from hdc.services.record_permissions import record_allowed
+from hdc.services.purchase import _site_supplier_supplied_rows
 from hdc.services.receipts import _owner_payment_recent_entries, _receipt_company_profile
 from hdc.services.reporting import _build_stage_event_ledger
 from hdc.services.subcontract import _log_subcontract_event, assign_subcontractors_from_form, selected_subcontractor_ids
@@ -244,8 +245,30 @@ def register(app):
             client_party = None
             client_statement = None
 
+        # Site ⇄ supplier tracking, read the other way round: the Purchase
+        # section knows which suppliers this project drew material from, and
+        # which are only assigned to it so far.
+        site_supplier_rows = _site_supplier_supplied_rows(project_id=p.id)
+        site_assigned_suppliers = []
+        try:
+            for link in SupplierSite.query.filter(SupplierSite.project_id == p.id).all():
+                supplier = link.supplier
+                if not supplier or supplier.is_void:
+                    continue
+                site_assigned_suppliers.append({
+                    'id': supplier.id,
+                    'name': supplier.name,
+                    'phone': supplier.phone or '',
+                    'note': link.note or '',
+                    'supplied': any(int(r['supplier_id']) == int(supplier.id) for r in site_supplier_rows),
+                })
+        except Exception:
+            site_assigned_suppliers = []
+        site_assigned_suppliers.sort(key=lambda r: r['name'].lower())
         return render_template('projects/project_detail.html',
             p=p, workers=workers, stages=stages,
+            site_supplier_rows=site_supplier_rows,
+            site_assigned_suppliers=site_assigned_suppliers,
             stage_defs=stage_defs, materials=materials,
             subcontractor_pool=subcontractor_pool,
             receiving_accounts=receiving_accounts,

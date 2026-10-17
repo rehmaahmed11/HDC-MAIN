@@ -6,8 +6,17 @@ See MODULARIZATION_PLAN.md for the module map.
 from sqlalchemy import and_, func
 
 from hdc.extensions import db
-from hdc.models.materials import Delivery, Material, MaterialUsage, MaterialV2, Purchase, PurchaseV2, Supplier, SupplierLedger, UsageLogV2
+from hdc.models.materials import (Delivery, Material, MaterialCategory, MaterialUsage, MaterialV2, Purchase,
+                              PurchaseV2, Supplier, SupplierCategory, SupplierLedger, SupplierSite,
+                              UsageLogV2)
 from hdc.models.projects import Project
+from hdc.services.material_categories import (
+    _material_category_by_id,
+    _material_category_label,
+    _material_category_map,
+    purchase_resolved_category_id,
+    purchase_resolved_category_name,
+)
 from hdc.services.record_permissions import integrity_query
 from hdc.utils.dates import _pkt_now_naive, _pkt_today
 from hdc.utils.normalize import _normalize_name_ci
@@ -585,6 +594,7 @@ def _purchase_v2_pending_rows(material_id=None, supplier_id=None, project_id=Non
         Delivery.purchase_id.in_(purchase_ids)
     ).group_by(Delivery.purchase_id, Delivery.project_id).all())
     site_ids = sorted({int(pid) for _, pid, _ in site_rows if pid})
+    category_map = _material_category_map()
     site_names = (dict(db.session.query(Project.id, Project.name)
                        .filter(Project.id.in_(site_ids)).all())
                   if site_ids else {})
@@ -622,6 +632,8 @@ def _purchase_v2_pending_rows(material_id=None, supplier_id=None, project_id=Non
             'material_id': int(p.material_id or 0),
             'material_name': (p.material.name if p.material else '-'),
             'unit': (p.material.unit if p.material else ''),
+            'category_id': int(purchase_resolved_category_id(p) or 0),
+            'category_name': purchase_resolved_category_name(p, category_map=category_map),
             'ordered_qty': ordered,
             'delivered_qty': delivered,
             'pending_qty': pending,
@@ -633,3 +645,347 @@ def _purchase_v2_pending_rows(material_id=None, supplier_id=None, project_id=Non
             'site_ids': ','.join(str(int(s['id'])) for s in sites if s['id'])
         })
     return out
+
+
+# ── Supplier ⇄ item-category / site tracking ────────────────────────────────
+#
+# Two questions the field asked to answer from both ends:
+#
+#   * "make the supplier list based on material" — which suppliers deal in
+#     Cement / Steel / Electric Materials, and which have actually supplied
+#     them;
+#   * "supplier that selected on each site" — which supplier is assigned to a
+#     site, and which suppliers have actually delivered to it.
+#
+# The *stated* side lives in ``hdc_supplier_category`` / ``hdc_supplier_site``
+# (set on the supplier page, so it is useful before the first purchase), the
+# *actual* side is derived from purchases and deliveries.  Every helper below
+# keeps the two apart: ``..._stated_...`` vs ``..._supplied_...`` — the pages
+# show both, never merged into one number.
+
+
+def _supplier_category_ids(supplier_id):
+    """Categories this supplier is on record as dealing in (stated)."""
+    if not supplier_id:
+        return []
+    rows = (db.session.query(SupplierCategory.category_id)
+            .filter(SupplierCategory.supplier_id == int(supplier_id))
+            .all())
+    return sorted({int(r[0]) for r in rows if r[0]})
+
+
+def _supplier_site_ids(supplier_id):
+    """Sites/projects this supplier is assigned to (stated)."""
+    if not supplier_id:
+        return []
+    rows = (db.session.query(SupplierSite.project_id)
+            .filter(SupplierSite.supplier_id == int(supplier_id))
+            .all())
+    return sorted({int(r[0]) for r in rows if r[0]})
+
+
+def _supplier_category_ids_map(category_id=None):
+    """``{supplier_id: [category_id, …]}`` for the supplier list, one read."""
+    query = db.session.query(SupplierCategory.supplier_id, SupplierCategory.category_id)
+    if category_id:
+        query = query.filter(SupplierCategory.category_id == int(category_id))
+    out = {}
+    for supplier_id, cat_id in query.all():
+        if not supplier_id or not cat_id:
+            continue
+        out.setdefault(int(supplier_id), set()).add(int(cat_id))
+    return {sid: sorted(v) for sid, v in out.items()}
+
+
+def _supplier_site_ids_map(project_id=None):
+    """``{supplier_id: [project_id, …]}`` for the supplier list, one read."""
+    query = db.session.query(SupplierSite.supplier_id, SupplierSite.project_id)
+    if project_id:
+        query = query.filter(SupplierSite.project_id == int(project_id))
+    out = {}
+    for supplier_id, proj_id in query.all():
+        if not supplier_id or not proj_id:
+            continue
+        out.setdefault(int(supplier_id), set()).add(int(proj_id))
+    return {sid: sorted(v) for sid, v in out.items()}
+
+
+def _supplier_supplied_profile(date_from=None, date_to=None):
+    """What each supplier has actually supplied, from its purchase lines.
+
+    Returns ``{supplier_id: {...}}`` where the value carries the resolved
+    category ids, the material ids, purchase count, quantity, value and the
+    newest purchase date — the numbers the supplier list and the
+    "suppliers by material" filter are built on.
+    """
+    query = db.session.query(
+        PurchaseV2.id,
+        PurchaseV2.supplier_id,
+        PurchaseV2.material_id,
+        PurchaseV2.category_id,
+        PurchaseV2.quantity,
+        PurchaseV2.total_amount,
+        PurchaseV2.date
+    ).filter(PurchaseV2.is_void == False)
+    if date_from:
+        query = query.filter(PurchaseV2.date >= date_from)
+    if date_to:
+        query = query.filter(PurchaseV2.date <= date_to)
+    rows = query.all()
+    if not rows:
+        return {}
+    material_rows = dict(db.session.query(MaterialV2.id, MaterialV2.category_id).all())
+    material_names = dict(db.session.query(MaterialV2.id, MaterialV2.name).all())
+    names_by_id = {int(mid): (name or '-') for mid, name in material_names.items()}
+    out = {}
+    for _pid, supplier_id, material_id, category_id, quantity, total_amount, date_value in rows:
+        if not supplier_id:
+            continue
+        sid = int(supplier_id)
+        profile = out.setdefault(sid, {
+            'supplier_id': sid,
+            'category_ids': set(),
+            'material_ids': set(),
+            'material_names': [],
+            'purchase_count': 0,
+            'quantity': 0.0,
+            'value': 0.0,
+            'last_purchase_date': None,
+        })
+        resolved = int(category_id) if category_id else material_rows.get(int(material_id or 0))
+        if resolved:
+            profile['category_ids'].add(int(resolved))
+        mid = int(material_id or 0)
+        if mid:
+            profile['material_ids'].add(mid)
+            name = names_by_id.get(mid)
+            if name and name not in profile['material_names']:
+                profile['material_names'].append(name)
+        profile['purchase_count'] += 1
+        profile['quantity'] += float(quantity or 0.0)
+        profile['value'] += float(total_amount or 0.0)
+        if date_value and (profile['last_purchase_date'] is None or date_value > profile['last_purchase_date']):
+            profile['last_purchase_date'] = date_value
+    for profile in out.values():
+        profile['category_ids'] = sorted(profile['category_ids'])
+        profile['material_ids'] = sorted(profile['material_ids'])
+        profile['material_names'] = sorted(profile['material_names'], key=lambda n: n.lower())
+    return out
+
+
+def _supplier_site_supplied_rows(supplier_id, date_from=None, date_to=None):
+    """The sites a supplier has actually delivered to, with qty and value.
+
+    Built from the deliveries themselves (``Delivery`` → its purchase's
+    supplier), so a purchase that never moved is not credited to a site.
+    """
+    if not supplier_id:
+        return []
+    query = (db.session.query(
+        Delivery.project_id,
+        Delivery.purchase_id,
+        Delivery.quantity,
+        Delivery.date,
+        PurchaseV2.unit_price,
+    )
+        .join(PurchaseV2, Delivery.purchase_id == PurchaseV2.id)
+        .filter(Delivery.is_void == False,
+                PurchaseV2.is_void == False,
+                PurchaseV2.supplier_id == int(supplier_id)))
+    if date_from:
+        query = query.filter(Delivery.date >= date_from)
+    if date_to:
+        query = query.filter(Delivery.date <= date_to)
+    rows = query.all()
+    out = {}
+    for project_id, purchase_id, quantity, date_value, unit_price in rows:
+        if not project_id:
+            continue
+        pid = int(project_id)
+        row = out.setdefault(pid, {
+            'project_id': pid,
+            'quantity': 0.0,
+            'value': 0.0,
+            'delivery_count': 0,
+            'purchase_ids': set(),
+            'last_delivery_date': None,
+        })
+        qty = float(quantity or 0.0)
+        row['quantity'] += qty
+        row['value'] += qty * float(unit_price or 0.0)
+        row['delivery_count'] += 1
+        if purchase_id:
+            row['purchase_ids'].add(int(purchase_id))
+        if date_value and (row['last_delivery_date'] is None or date_value > row['last_delivery_date']):
+            row['last_delivery_date'] = date_value
+    projects = {int(p.id): p.name for p in Project.query.all()}
+    out_rows = []
+    for pid, row in out.items():
+        row['project_name'] = projects.get(pid, f'Site #{pid}')
+        row['purchase_count'] = len(row['purchase_ids'])
+        del row['purchase_ids']
+        out_rows.append(row)
+    out_rows.sort(key=lambda r: (-r['value'], r['project_name'].lower()))
+    return out_rows
+
+
+def _supplier_category_supplied_rows(supplier_id, date_from=None, date_to=None):
+    """What a supplier supplied, one row per category (item type)."""
+    if not supplier_id:
+        return []
+    query = (db.session.query(
+        PurchaseV2.id,
+        PurchaseV2.material_id,
+        PurchaseV2.category_id,
+        PurchaseV2.quantity,
+        PurchaseV2.total_amount,
+        PurchaseV2.date,
+        MaterialV2.name,
+    )
+        .outerjoin(MaterialV2, PurchaseV2.material_id == MaterialV2.id)
+        .filter(PurchaseV2.is_void == False, PurchaseV2.supplier_id == int(supplier_id)))
+    if date_from:
+        query = query.filter(PurchaseV2.date >= date_from)
+    if date_to:
+        query = query.filter(PurchaseV2.date <= date_to)
+    rows = query.all()
+    if not rows:
+        return []
+    category_map = _material_category_map()
+    material_categories = dict(db.session.query(MaterialV2.id, MaterialV2.category_id).all())
+    out = {}
+    for _pid, material_id, category_id, quantity, total_amount, date_value, material_name in rows:
+        resolved = int(category_id) if category_id else material_categories.get(int(material_id or 0))
+        key = int(resolved) if resolved else 0
+        row = out.setdefault(key, {
+            'category_id': key,
+            'category_name': (_material_category_label(key, category_map=category_map) if key else 'Uncategorized'),
+            'purchase_count': 0,
+            'quantity': 0.0,
+            'value': 0.0,
+            'material_ids': set(),
+            'material_names': [],
+            'last_purchase_date': None,
+        })
+        row['purchase_count'] += 1
+        row['quantity'] += float(quantity or 0.0)
+        row['value'] += float(total_amount or 0.0)
+        if material_id:
+            row['material_ids'].add(int(material_id))
+            if material_name and material_name not in row['material_names']:
+                row['material_names'].append(material_name)
+        if date_value and (row['last_purchase_date'] is None or date_value > row['last_purchase_date']):
+            row['last_purchase_date'] = date_value
+    out_rows = []
+    for row in out.values():
+        row['material_count'] = len(row['material_ids'])
+        del row['material_ids']
+        row['material_names'] = sorted(row['material_names'], key=lambda n: n.lower())
+        out_rows.append(row)
+    out_rows.sort(key=lambda r: (-r['value'], r['category_name'].lower()))
+    return out_rows
+
+
+def _site_supplier_supplied_rows(project_id=None, category_id=None, material_id=None,
+                                 supplier_id=None, date_from=None, date_to=None):
+    """``Delivery`` rolled up to (site, supplier) — the site → supplier view.
+
+    One row per pair: quantity sent, value sent, delivery count, categories and
+    materials involved, newest delivery date.  This is what answers "which
+    suppliers supplied this site" and, read the other way, "which sites did
+    this supplier supply".
+    """
+    query = (db.session.query(
+        Delivery.project_id,
+        Delivery.material_id,
+        Delivery.quantity,
+        Delivery.date,
+        PurchaseV2.id,
+        PurchaseV2.supplier_id,
+        PurchaseV2.unit_price,
+        PurchaseV2.category_id,
+    )
+        .join(PurchaseV2, Delivery.purchase_id == PurchaseV2.id)
+        .filter(Delivery.is_void == False, PurchaseV2.is_void == False))
+    if project_id:
+        query = query.filter(Delivery.project_id == int(project_id))
+    if supplier_id:
+        query = query.filter(PurchaseV2.supplier_id == int(supplier_id))
+    if material_id:
+        query = query.filter(Delivery.material_id == int(material_id))
+    if date_from:
+        query = query.filter(Delivery.date >= date_from)
+    if date_to:
+        query = query.filter(Delivery.date <= date_to)
+    rows = query.all()
+
+    category_map = _material_category_map()
+    material_rows = {int(m.id): m for m in MaterialV2.query.all()}
+    projects = {int(p.id): p.name for p in Project.query.all()}
+    suppliers = {int(s.id): s.name for s in Supplier.query.all()}
+
+    out = {}
+    for (project_row_id, del_material_id, quantity, date_value, purchase_id,
+         po_supplier_id, unit_price, po_category_id) in rows:
+        if not project_row_id or not po_supplier_id:
+            continue
+        pid = int(project_row_id)
+        sid = int(po_supplier_id)
+        resolved = int(po_category_id) if po_category_id else None
+        if resolved is None:
+            material = material_rows.get(int(del_material_id or 0))
+            resolved = int(material.category_id) if material and material.category_id else 0
+        if category_id and int(category_id) != int(resolved):
+            continue
+        row = out.setdefault((pid, sid), {
+            'project_id': pid,
+            'project_name': projects.get(pid, f'Site #{pid}'),
+            'supplier_id': sid,
+            'supplier_name': suppliers.get(sid, f'Supplier #{sid}'),
+            'quantity': 0.0,
+            'value': 0.0,
+            'delivery_count': 0,
+            'category_ids': set(),
+            'material_ids': set(),
+            'last_delivery_date': None,
+        })
+        qty = float(quantity or 0.0)
+        row['quantity'] += qty
+        row['value'] += qty * float(unit_price or 0.0)
+        row['delivery_count'] += 1
+        row['category_ids'].add(int(resolved or 0))
+        if del_material_id:
+            row['material_ids'].add(int(del_material_id))
+        if date_value and (row['last_delivery_date'] is None or date_value > row['last_delivery_date']):
+            row['last_delivery_date'] = date_value
+
+    out_rows = []
+    for row in out.values():
+        row['category_names'] = [
+            _material_category_label(cid, category_map=category_map) for cid in sorted(row['category_ids'])
+        ]
+        row['material_count'] = len(row['material_ids'])
+        row['material_names'] = sorted(
+            (material_rows[mid].name for mid in row['material_ids'] if mid in material_rows),
+            key=lambda n: n.lower()
+        )
+        del row['category_ids']
+        del row['material_ids']
+        out_rows.append(row)
+    out_rows.sort(key=lambda r: (r['project_name'].lower(), -r['value'], r['supplier_name'].lower()))
+    return out_rows
+
+
+def _sync_purchase_category(purchase, material=None, category_id=None):
+    """Keep a purchase line's category filled in.
+
+    Called on create and edit: an explicitly chosen category wins, otherwise
+    the line follows its material.  Returns the category id the line ended up
+    with (or None).
+    """
+    material = material if material is not None else getattr(purchase, 'material', None)
+    if category_id:
+        purchase.category_id = int(category_id)
+    elif category_id == 0 or category_id is None:
+        purchase.category_id = (int(material.category_id) if material and material.category_id else None)
+    return purchase.category_id

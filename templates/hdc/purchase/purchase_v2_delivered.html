@@ -381,9 +381,9 @@
                     </td>
                 </tr>
                 {% else %}
-                <tr {{ r|hdc_row_attrs }}><td colspan="12" class="text-center text-muted py-4">
+                <tr {{ r|hdc_row_attrs }}><td colspan="13" class="text-center text-muted py-4">
                     <i class="fas fa-inbox fa-2x mb-2 d-block opacity-30"></i>
-                    {% if filter_po_number or selected_material_id or selected_supplier_id or selected_project_id or selected_stage_id or filter_date_from or filter_date_to %}
+                    {% if filter_po_number or selected_material_id or selected_supplier_id or selected_project_id or selected_stage_id or selected_category_id != '' or filter_date_from or filter_date_to %}
                     No deliveries match these filters.
                     {% else %}
                     No deliveries recorded yet.
@@ -422,6 +422,17 @@
                         <div class="form-text">POs that already delivered to this site</div>
                     </div>
                     <div class="col-6 col-md-3">
+                        <label class="form-label small fw-semibold">Item Category</label>
+                        <select id="pendingCategoryFilter" class="form-select form-select-sm">
+                            <option value="">All Categories</option>
+                            {% for c in category_options %}
+                            <option value="{{ c.id }}">{{ c.name }}</option>
+                            {% endfor %}
+                            <option value="{{ uncategorized_id }}">Uncategorized</option>
+                        </select>
+                        <div class="form-text">Item type of the pending PO</div>
+                    </div>
+                    <div class="col-6 col-md-3">
                         <label class="form-label small fw-semibold">Material</label>
                         <select id="pendingMaterialFilter" class="form-select form-select-sm">
                             <option value="">All Materials</option>
@@ -454,6 +465,7 @@
                                 <th>Date</th>
                                 <th>Supplier</th>
                                 <th>Material</th>
+                                <th>Item Category</th>
                                 <th class="text-end">Ordered</th>
                                 <th class="text-end">Delivered</th>
                                 <th class="text-end">Pending</th>
@@ -469,9 +481,10 @@
                                 data-po-id="{{ p.id }}"
                                 data-material-id="{{ p.material_id }}"
                                 data-supplier-id="{{ p.supplier_id }}"
+                                data-category-id="{{ p.category_id }}"
                                 data-site-ids="{{ p.site_ids }}"
                                 data-pending-qty="{{ p.pending_qty }}"
-                                data-search="{{ ('po ' ~ p.id ~ ' ' ~ p.supplier_name ~ ' ' ~ p.material_name ~ ' ' ~ p.challan_no)|lower|e }}">
+                                data-search="{{ ('po ' ~ p.id ~ ' ' ~ p.supplier_name ~ ' ' ~ p.material_name ~ ' ' ~ p.category_name ~ ' ' ~ p.challan_no)|lower|e }}">
                                 <td class="text-muted small">
                                     <span class="fw-semibold text-body">#{{ p.id }}</span>
                                     {% if p.challan_no %}<div>Bill: {{ p.challan_no }}</div>{% endif %}
@@ -480,6 +493,9 @@
                                 <td class="small">{{ p.supplier_name }}</td>
                                 <td class="fw-semibold">{{ p.material_name }}
                                     <small class="text-muted">({{ p.unit or '' }})</small>
+                                </td>
+                                <td>
+                                    <span class="badge {% if p.category_id %}bg-dark{% else %}bg-warning text-dark{% endif %}">{{ p.category_name }}</span>
                                 </td>
                                 <td class="text-end small">{{ "{:,.2f}".format(p.ordered_qty or 0) }}</td>
                                 <td class="text-end small">{{ "{:,.2f}".format(p.delivered_qty or 0) }}</td>
@@ -503,14 +519,14 @@
                             </tr>
                             {% else %}
                             <tr>
-                                <td colspan="11" class="text-center text-muted py-4">
+                                <td colspan="12" class="text-center text-muted py-4">
                                     <i class="fas fa-check-circle fa-2x mb-2 d-block opacity-30"></i>
                                     Nothing pending — every purchase order is fully delivered.
                                 </td>
                             </tr>
                             {% endfor %}
                             <tr id="pendingPONoMatch" style="display:none">
-                                <td colspan="11" class="text-center text-muted py-4">
+                                <td colspan="12" class="text-center text-muted py-4">
                                     <i class="fas fa-filter-circle-xmark fa-2x mb-2 d-block opacity-30"></i>
                                     No pending purchase matches these filters.
                                 </td>

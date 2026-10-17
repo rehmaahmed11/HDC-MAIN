@@ -56,6 +56,74 @@
     </div>
 </div>
 
+<!-- Item types: the vocabulary every register below is filtered by. -->
+<div class="row g-3 mb-4">
+    <div class="col-6 col-md-3">
+        <a href="{{ url_for('hdc_purchase_v2_categories') }}" class="text-decoration-none">
+            <div class="kpi-card kpi-blue h-100">
+                <div class="kpi-icon"><i class="fas fa-tags"></i></div>
+                <div class="kpi-value">{{ category_count }}</div>
+                <div class="kpi-label">Item Categories</div>
+                <div class="kpi-sub">
+                    Electric · Plumbing · Cement · Steel{% if uncategorized_material_count %} · {{ uncategorized_material_count }} item(s) unassigned{% endif %}
+                </div>
+            </div>
+        </a>
+    </div>
+    <div class="col-6 col-md-3">
+        <a href="{{ url_for('hdc_purchase_v2_items') }}" class="text-decoration-none">
+            <div class="kpi-card kpi-green h-100">
+                <div class="kpi-icon"><i class="fas fa-list-check"></i></div>
+                <div class="kpi-value">Item-wise</div>
+                <div class="kpi-label">Purchase · Delivery · Usage</div>
+                <div class="kpi-sub">One line per item, with its category</div>
+            </div>
+        </a>
+    </div>
+    <div class="col-6 col-md-3">
+        <a href="{{ url_for('hdc_purchase_v2_suppliers_by_site') }}" class="text-decoration-none">
+            <div class="kpi-card kpi-blue h-100">
+                <div class="kpi-icon"><i class="fas fa-diagram-project"></i></div>
+                <div class="kpi-value">{{ supplier_site_count }}</div>
+                <div class="kpi-label">Supplier ⇄ Site Links</div>
+                <div class="kpi-sub">Who supplies which site, both ways</div>
+            </div>
+        </a>
+    </div>
+    <div class="col-6 col-md-3">
+        <a href="{{ url_for('hdc_purchase_v2_suppliers') }}" class="text-decoration-none">
+            <div class="kpi-card kpi-green h-100">
+                <div class="kpi-icon"><i class="fas fa-truck-loading"></i></div>
+                <div class="kpi-value">By Material</div>
+                <div class="kpi-label">Supplier List</div>
+                <div class="kpi-sub">Filter suppliers by item type, item and site</div>
+            </div>
+        </a>
+    </div>
+</div>
+
+{% if top_categories %}
+<div class="card hdc-card mb-4">
+    <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
+        <span><i class="fas fa-layer-group me-2"></i>Biggest Categories</span>
+        <a href="{{ url_for('hdc_purchase_v2_items') }}" class="btn btn-sm btn-outline-primary">Item-wise register</a>
+    </div>
+    <div class="card-body py-2">
+        <div class="d-flex flex-wrap gap-2">
+            {% for c in top_categories %}
+            <a href="{{ url_for('hdc_purchase_v2_purchases', category_id=c.id) }}"
+               class="btn btn-sm btn-outline-secondary"
+               title="{{ c.material_count }} item(s) · {{ '{:,.2f}'.format(c.purchased_qty or 0) }} purchased">
+                {% if c.id == uncategorized_id %}<i class="fas fa-triangle-exclamation me-1 text-warning"></i>{% endif %}
+                {{ c.name }}
+                <span class="badge bg-light text-dark ms-1">Rs {{ "{:,.0f}".format(c.purchased_value or 0) }}</span>
+            </a>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endif %}
+
 <div class="card hdc-card mb-4 {% if integrity and not integrity.ok %}border-danger{% endif %}">
     <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
         <span><i class="fas fa-shield-halved me-2"></i>Data Integrity Check</span>
@@ -118,6 +186,21 @@
             <div class="col-6 col-sm-4 col-md-3 col-lg-2">
                 <a href="{{ url_for('hdc_purchase_v2_stock') }}" class="btn btn-outline-dark w-100 py-3 d-flex flex-column align-items-center gap-1">
                     <i class="fas fa-warehouse fa-lg"></i><span class="small">Stock View</span>
+                </a>
+            </div>
+            <div class="col-6 col-sm-4 col-md-3 col-lg-2">
+                <a href="{{ url_for('hdc_purchase_v2_categories') }}" class="btn btn-outline-primary w-100 py-3 d-flex flex-column align-items-center gap-1">
+                    <i class="fas fa-tags fa-lg"></i><span class="small">Categories</span>
+                </a>
+            </div>
+            <div class="col-6 col-sm-4 col-md-3 col-lg-2">
+                <a href="{{ url_for('hdc_purchase_v2_items') }}" class="btn btn-outline-success w-100 py-3 d-flex flex-column align-items-center gap-1">
+                    <i class="fas fa-list-check fa-lg"></i><span class="small">Item-wise View</span>
+                </a>
+            </div>
+            <div class="col-6 col-sm-4 col-md-3 col-lg-2">
+                <a href="{{ url_for('hdc_purchase_v2_suppliers_by_site') }}" class="btn btn-outline-warning w-100 py-3 d-flex flex-column align-items-center gap-1">
+                    <i class="fas fa-diagram-project fa-lg"></i><span class="small">Suppliers by Site</span>
                 </a>
             </div>
         </div>

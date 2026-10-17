@@ -12,7 +12,7 @@ from sqlalchemy import func, inspect as sa_inspect
 
 from hdc.config import get_runtime_settings
 from hdc.core.flags import _runtime_flag_get, _runtime_flag_set
-from hdc.core.schema import _ensure_account_intent_schema, _ensure_accounts_schema, _ensure_cashflow_schema, _ensure_loan_schema, _ensure_owner_payment_void_schema, _ensure_purchase_v2_schema, _ensure_runtime_flags_table, _ensure_shared_expense_schema, _ensure_timeentry_attendance_day_schema, _ensure_timeentry_unique_indexes, _ensure_tool_rental_schema, _run_migrations
+from hdc.core.schema import _ensure_account_intent_schema, _ensure_accounts_schema, _ensure_cashflow_schema, _ensure_loan_schema, _ensure_material_category_schema, _ensure_owner_payment_void_schema, _ensure_purchase_v2_schema, _ensure_runtime_flags_table, _ensure_shared_expense_schema, _ensure_timeentry_attendance_day_schema, _ensure_timeentry_unique_indexes, _ensure_tool_rental_schema, _run_migrations
 from hdc.extensions import db
 from hdc.models.accounts import ExpenseCategory
 from hdc.models.auth import HDCUser
@@ -20,6 +20,7 @@ from hdc.models.workforce import WorkerTrade
 from hdc.services.account_classification import backfill_account_classification
 from hdc.services.accounts import _backfill_accounts_scope_from_references, _backfill_owner_payment_receiving_accounts, _bootstrap_accounts_backfill_once, _mark_auto_generated_person_accounts
 from hdc.services.cashflow_register import _ensure_cashflow_seed_data
+from hdc.services.material_categories import _ensure_material_category_seed
 from hdc.services.password_vault import assign_password
 from hdc.services.subcontract import _ensure_subcontract_labour_attendance_schema, _ensure_subcontract_payment_void_schema
 from hdc.services.timekeeping import _migrate_attendance_to_time_entries, _reconcile_all_time_entries_once
@@ -60,6 +61,9 @@ def _bootstrap_hdc():
     _ensure_timeentry_attendance_day_schema()
     _ensure_subcontract_labour_attendance_schema()
     _ensure_purchase_v2_schema()
+    # Item-type categories (Cement / Steel / Electric Materials / …) and the
+    # supplier ⇄ category / supplier ⇄ site links the field asked for.
+    _ensure_material_category_schema()
     _ensure_owner_payment_void_schema()
     _ensure_subcontract_payment_void_schema()
     _ensure_accounts_schema()
@@ -113,6 +117,10 @@ def _bootstrap_hdc():
             else:
                 db.session.add(ExpenseCategory(name=cat, active_status=True))
         db.session.commit()
+    # Item-type categories: seed the default vocabulary (Cement, Steel,
+    # Electric Materials, Plumbing Materials …) the first time only.  An
+    # operator's own list is never touched once the table has rows.
+    _ensure_material_category_seed()
     _bootstrap_accounts_backfill_once()
     _backfill_owner_payment_receiving_accounts()
     _backfill_accounts_scope_from_references()

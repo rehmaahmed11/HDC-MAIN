@@ -56,6 +56,11 @@ _LABELS = {
     'hdc_owner_payment': 'Owner receipts', 'hdc_expense': 'Project expenses',
     'hdc_purchase_v2': 'Purchase orders', 'hdc_material_v2': 'Purchase materials',
     'hdc_usage_log_v2': 'Material usage entries', 'hdc_supplier': 'Suppliers',
+    # Item types and the two supplier links added with the Purchase category
+    # work.  They are rows of their own, so a strict user can be granted one
+    # supplier's site list without seeing the supplier directory.
+    'hdc_material_category': 'Item categories', 'hdc_supplier_category': 'Supplier item types',
+    'hdc_supplier_site': 'Supplier site assignments',
     'hdc_subcontractor': 'Subcontractors', 'hdc_cash_flow_entry': 'Cash flow entries',
     'hdc_shared_expense': 'Shared expenses', 'hdc_shared_share': 'Shared expense shares',
 }
