@@ -62,9 +62,12 @@
                             <input type="text" name="tool_code" class="form-control" placeholder="TOOL-0001">
                         </div>
                         <div class="col-12">
-                            <label class="form-label">Tool photo (optional)</label>
+                            <label class="form-label">Tool type photo (optional)</label>
                             <input type="file" name="tool_image" class="form-control" accept="image/*">
-                            <small class="text-muted">Images are automatically resized and converted to compact WebP format (max 640 px).</small>
+                            <small class="text-muted">The picture of this kind of tool. Every serial piece
+                                (Shovel No 1, Shovel No 2, …) can carry its own photo afterwards — add them on
+                                the tool's position page. Images are automatically resized and converted to
+                                compact WebP format (max 640 px).</small>
                         </div>
                         <div class="col-12">
                             <label class="form-label" for="toolCategoryInput">Category</label>
@@ -289,6 +292,18 @@
                                         title="View serial status">
                                     <i class="fas fa-qrcode"></i>
                                 </button>
+                                {# Every piece can carry its own picture: "3 of 5
+                                   photographed" says what is still missing. #}
+                                {% set pp = piece_photos.get(r.tool_id) %}
+                                {% if pp and pp[1] %}
+                                <a href="{{ url_for('hdc_tool_rental_tool_position', tool_id=r.tool_id) }}#pieces"
+                                   class="d-block mt-1 small text-decoration-none"
+                                   title="Photo of each serial piece of this tool">
+                                    <span class="badge {% if pp[0] >= pp[1] %}bg-info-subtle text-info-emphasis border border-info-subtle{% else %}bg-light text-muted border{% endif %}">
+                                        <i class="fas fa-camera me-1"></i>{{ pp[0] }}/{{ pp[1] }}
+                                    </span>
+                                </a>
+                                {% endif %}
                                 {% else %}
                                 <span class="text-muted small">–</span>
                                 {% endif %}

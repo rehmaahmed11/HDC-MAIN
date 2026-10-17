@@ -4,6 +4,7 @@
 
 {% block content %}
 {% set tools_active = 'inventory' %}
+{% from "tool_rental/_tool_photo.html" import serial_photo_thumb %}
 {% include "tool_rental/_tools_nav.html" %}
 
 <div class="row g-3 mt-3">
@@ -83,6 +84,7 @@
                     <thead>
                         <tr>
                             <th>Tool No / Serial Marking</th>
+                            <th>Photo</th>
                             <th>Availability</th>
                             <th>Current Location</th>
                             <th>Condition</th>
@@ -93,6 +95,13 @@
                         {% for s in serials %}
                         <tr {{ s|hdc_row_attrs }}>
                             <td><span class="badge bg-dark">{{ s.serial_number }}</span></td>
+                            <td class="text-center">
+                                {# Every piece carries its own picture: the
+                                   shovel in the store, not the tool type. #}
+                                {{ serial_photo_thumb(s, s.serial_number, tool.tool_code,
+                                      'Serial piece · ' ~ tool.tool_code, size=36,
+                                      can_edit=can_write_tools) }}
+                            </td>
                             <td>
                                 {% if s.is_in_store %}
                                 <span class="badge bg-success-subtle text-success border border-success-subtle">In Store</span>
@@ -105,12 +114,28 @@
                         </tr>
                         {% endfor %}
                     {% else %}
-                        <tr><td colspan="4" class="text-center text-muted py-4">No serial markings registered yet.</td></tr>
+                        <tr><td colspan="5" class="text-center text-muted py-4">No serial markings registered yet.</td></tr>
                     {% endif %}
                     </tbody>
                 </table>
             </div>
+            {% if serials %}
+            <div class="card-footer hdc-card-footer small text-muted">
+                <i class="fas fa-camera me-1"></i>
+                {{ piece_photos_done }} of {{ piece_photos_total }} pieces photographed —
+                each marking keeps its own picture, so five shovels of one type can
+                each be told apart.
+            </div>
+            {% endif %}
         </div>
     </div>
 </div>
+
+{# ---------------------------------------------- tool photo viewer + saver -- #}
+{% set tool_photo_can_edit = can_write_tools %}
+{% include "tool_rental/_tool_photo_dialogs.html" %}
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/pages/tool_photos.js') }}?v={{ hdc_asset_stamp }}"></script>
 {% endblock %}

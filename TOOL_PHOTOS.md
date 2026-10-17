@@ -1,4 +1,49 @@
-## Compact photo access (latest correction)
+## One photo per serial piece (latest)
+
+> "last pr solved almost every problem but its adding photo for tool item not
+> serial of that like we have a item shivel but we have 5 shivel that are in
+> serial so we need photos for all 5 not 1. item type ok, shovel-1 shovel-2 are
+> serials like that"
+
+A tool has two levels and the picture now follows the **piece**:
+
+* the **item type** — `Shovel` as a kind of thing. One picture answers "what
+  does this look like?" and stays exactly as it was.
+* the **serial piece** — `Shovel No 1` … `Shovel No 5`, the five physical
+  shovels. Each one can look different in the yard (new handle, paint mark,
+  bent blade), so **each piece keeps its own picture**.
+
+| Screen | Path | What you get |
+|--------|------|--------------|
+| Tool Position | `/hdc/tool-rental/tool/<id>` | A camera next to **every** marking, plus "3 of 5 pieces photographed" |
+| Track by Serial | `/hdc/tool-rental/serials` | A **Photo** column — one picture per piece |
+| Manage Markings | `/hdc/tool-rental/inventory/<id>/serials/create` | A photo cell per registered marking |
+| Tool Inventory | `/hdc/tool-rental/inventory` | The row shows "📷 3/5" and links to the pieces |
+
+How it is built:
+
+* `ToolSerial.image_path` (new column, migrated by `hdc/core/schema.py`) holds
+  the piece's picture; `Tool.image_path` still holds the type's.
+* `hdc/services/tool_photos.py` now writes for **either** kind of target: the
+  file name decides it — `<tool id>.webp` for the type, `serial-<serial id>.webp`
+  for a piece — and everything else (validation, EXIF rotation, 640 px resize,
+  WebP re-encode, cache stamp) is the same code as before.
+* `POST /hdc/tool-rental/serial/<serial id>/photo` saves or removes a piece's
+  picture, behind the same `@login_required` + `@_money_write_required()` gate
+  as every other tool write, and returns only to a tools page.
+* The shared macros in `templates/hdc/tool_rental/_tool_photo.html` work out
+  which level they were given and point the one shared dialog at the right
+  route — so the page still carries **one** viewer and **one** uploader, not
+  one per row.
+
+`tests/test_tool_serial_photos.py` (15 cases) — a piece's picture stored on the
+piece only, five pieces with five pictures, the type picture untouched, the
+three screens that name a piece, removal of one picture, a reader refused, the
+`next` open-redirect guard, and refused uploads leaving the piece as it was.
+
+---
+
+## Compact photo access
 
 Inventory and dashboard rows no longer show thumbnails or an extra photo action.
 Click the existing tool code / serial badge to open the saved photo in the shared

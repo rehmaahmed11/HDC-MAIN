@@ -529,6 +529,13 @@ class ToolSerial(db.Model):
     serial_number = db.Column(db.String(80), nullable=False)
     tool_id = db.Column(db.Integer, db.ForeignKey('hdc_tool.id'), nullable=False, index=True)
 
+    # One picture per *piece*, not per item type.  A tool type ("Shovel") owns
+    # five pieces, and every one of them can look different on site (a new
+    # handle, a different blade, a paint mark), so the photo belongs to the
+    # serial marking.  The tool type keeps its own picture as the "what does
+    # this kind of tool look like" reference.
+    image_path = db.Column(db.String(255))
+
     # current location of this exact piece
     is_in_store = db.Column(db.Boolean, default=True)     # True = still in warehouse
     is_scrapped = db.Column(db.Boolean, default=False)    # True = written off / scrapped

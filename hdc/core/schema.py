@@ -2069,6 +2069,7 @@ def _ensure_tool_rental_schema():
             id INTEGER PRIMARY KEY,
             serial_number VARCHAR(80) NOT NULL,
             tool_id INTEGER NOT NULL REFERENCES hdc_tool(id),
+            image_path VARCHAR(255),
             is_in_store BOOLEAN DEFAULT 1,
             is_scrapped BOOLEAN DEFAULT 0,
             current_rental_id INTEGER REFERENCES hdc_tool_rental(id),
@@ -2197,6 +2198,8 @@ def _ensure_tool_rental_schema():
         'current_rental_item_id': "current_rental_item_id INTEGER REFERENCES hdc_tool_rental_item(id)",
         'created_by': "created_by INTEGER REFERENCES hdc_user(id)",
         'updated_by': "updated_by INTEGER REFERENCES hdc_user(id)",
+        # One photo per serial piece (see ToolSerial.image_path).
+        'image_path': "image_path VARCHAR(255)",
     })
     # A cancelled rental and an archived tool both need to say why and when, so
     # the reversal (restore / un-cancel) can be audited later.
