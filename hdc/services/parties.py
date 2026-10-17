@@ -18,7 +18,7 @@ This module:
 
 from datetime import datetime
 
-from sqlalchemy import and_, func
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import joinedload
 
 from hdc.extensions import db
@@ -257,7 +257,14 @@ def _worker_stats():
 
 
 def _project_stats_by_name():
-    """``{name_key: {count, projects, contract_value, received, receivable}}`` from Project.client."""
+    """``{name_key: {count, projects, contract_value, received, receivable}}``.
+
+    A project that carries a ``client_party_id`` is counted under that party's
+    current name — the direct link is authoritative, so a project created from
+    a party is still its project after the client text is edited.  Legacy
+    projects without the link keep matching by ``Project.client`` exactly as
+    before.
+    """
     try:
         from hdc.models.projects import Project
         from hdc.services.aggregation import _apply_aggregated_project_costs
@@ -272,12 +279,24 @@ def _project_stats_by_name():
         _apply_aggregated_project_costs(projects)
     except Exception:
         pass
+    # Resolve linked parties in one query instead of one per project.
+    linked_ids = {int(p.client_party_id) for p in projects
+                  if getattr(p, 'client_party_id', None)}
+    party_keys = {}
+    if linked_ids:
+        try:
+            for party_id, name in (db.session.query(CashFlowParty.id, CashFlowParty.name)
+                                   .filter(CashFlowParty.id.in_(linked_ids))
+                                   .all()):
+                party_keys[int(party_id)] = party_name_key(name)
+        except Exception:
+            party_keys = {}
     stats = {}
     for p in projects:
-        raw_client = (getattr(p, 'client', '') or '').strip()
-        if not raw_client:
-            continue
-        key = party_name_key(raw_client)
+        key = party_keys.get(int(p.client_party_id)) if getattr(p, 'client_party_id', None) else ''
+        if not key:
+            raw_client = (getattr(p, 'client', '') or '').strip()
+            key = party_name_key(raw_client) if raw_client else ''
         if not key:
             continue
         bucket = stats.setdefault(key, {
@@ -311,18 +330,20 @@ def sync_project_clients_as_parties(*, reactivate=False):
     hidden rows.  A project client is the person who owes us for a project, so
     they belong in the same directory as lenders, suppliers and workers.
 
-    Returns ``(created, reactivated, total_clients)``.
+    Returns ``(created, reactivated, total_clients, linked_projects)`` where
+    ``linked_projects`` counts the legacy rows that gained their direct
+    ``client_party_id`` pointer in this pass.
     """
     try:
         from hdc.models.projects import Project
         from hdc.services.cashflow_register import ensure_party
     except Exception:
-        return 0, 0, 0
+        return 0, 0, 0, 0
 
     try:
         projects = Project.query.all()
     except Exception:
-        return 0, 0, 0
+        return 0, 0, 0, 0
 
     # One pass: first spelling seen per client key, and the projects per key
     # (for the project count and the latest phone).
@@ -338,6 +359,7 @@ def sync_project_clients_as_parties(*, reactivate=False):
 
     created = 0
     reactivated = 0
+    linked = 0
 
     # Now ensure each distinct client name exists as a party
     for key, nm in seen_keys.items():
@@ -363,6 +385,12 @@ def sync_project_clients_as_parties(*, reactivate=False):
             # Enrich phone if missing
             if not is_new and latest_phone and not (_party.phone or '').strip():
                 _party.phone = latest_phone
+            # Backfill the direct link for projects that only matched by name.
+            # A project explicitly linked to another party is never re-pointed.
+            for pr in grouped.get(key, []):
+                if not getattr(pr, 'client_party_id', None):
+                    pr.client_party_id = int(_party.id)
+                    linked += 1
             if is_new:
                 created += 1
             elif was_hidden and reactivate:
@@ -370,20 +398,32 @@ def sync_project_clients_as_parties(*, reactivate=False):
         except Exception:
             continue
 
-    return created, reactivated, len(seen_keys)
+    return created, reactivated, len(seen_keys), linked
 
 
 def projects_for_party(party):
-    """Return list of Project rows where Project.client matches party.name (case-insensitive)."""
+    """Projects owned by ``party`` — direct link first, name match for old rows.
+
+    ``Project.client_party_id`` is the exact link written when a project is
+    created from the party (or backfilled by the directory sync).  Legacy
+    projects have no link, so the case-insensitive name match is kept as the
+    fallback — the two are OR-ed and a project appears once even if both hit.
+    """
     if party is None:
         return []
+    from hdc.models.projects import Project
     key = party_name_key(party.name)
-    if not key:
+    conditions = []
+    if getattr(party, 'id', None):
+        conditions.append(Project.client_party_id == int(party.id))
+    if key:
+        conditions.append(
+            func.lower(func.trim(func.coalesce(Project.client, ''))) == key)
+    if not conditions:
         return []
     try:
-        from hdc.models.projects import Project
         rows = (Project.query
-                .filter(func.lower(func.trim(func.coalesce(Project.client, ''))) == key)
+                .filter(or_(*conditions))
                 .order_by(Project.created_at.desc(), Project.id.desc())
                 .all())
         # Apply aggregated costs if possible for totals
@@ -395,6 +435,49 @@ def projects_for_party(party):
         return rows
     except Exception:
         return []
+
+
+def party_by_name(name, *, active_first=True):
+    """The Parties row for ``name`` (case-insensitive), or ``None``."""
+    key = party_name_key(name)
+    if not key:
+        return None
+    q = CashFlowParty.query.filter(
+        func.lower(func.trim(CashFlowParty.name)) == key)
+    if active_first:
+        q = q.order_by(CashFlowParty.is_active.desc(), CashFlowParty.id.asc())
+    return q.first()
+
+
+def party_for_project(project):
+    """The Party behind a project's client: direct link first, then name.
+
+    Used by the project pages so a project created from a party keeps pointing
+    at that exact ledger even if its ``client`` text was edited afterwards.
+    """
+    if project is None:
+        return None
+    party_id = getattr(project, 'client_party_id', None)
+    if party_id:
+        row = db.session.get(CashFlowParty, int(party_id))
+        if row is not None:
+            return row
+    return party_by_name(getattr(project, 'client', '') or '')
+
+
+def link_project_to_party(project, party):
+    """Point ``project`` at ``party`` and make the party name the display name.
+
+    Keeps ``Project.client`` (what receipts, reports and the owner-receipt
+    engine read) in step with the party the project was created from.
+    """
+    if project is None or party is None:
+        return project
+    project.client_party_id = int(party.id)
+    name = (party.name or '').strip()
+    if name:
+        project.client = name[:100]
+    return project
 
 
 def known_party_names():
@@ -577,7 +660,7 @@ def party_ledger(party, *, include_void=False):
 
     For a project owner, this is now the *unified* owner ledger:
     - All ledger postings where party_name matches (owner receipts, rent receipts, loan movements, etc.)
-    - Projects owned (where Project.client == party name)
+    - Projects owned (direct client_party_id link, or Project.client name for legacy rows)
     - External tool rentals where customer_name == party name
     - Internal tool rentals for projects owned by this party (company using tools on their sites)
     - Loans where party_name == party name (open + closed)
@@ -586,9 +669,14 @@ def party_ledger(party, *, include_void=False):
     """
     from hdc.services.accounts import _account_reference_links
 
-    from sqlalchemy import or_
     from hdc.models.projects import Project
     key = party_name_key(party.name)
+    # A project receipt belongs to this owner when the project is linked to
+    # their party row or, for legacy rows, when the client name matches.
+    project_owner_match = [
+        func.lower(func.trim(func.coalesce(Project.client, ''))) == key]
+    if getattr(party, 'id', None):
+        project_owner_match.append(Project.client_party_id == int(party.id))
     q = (AccountTransaction.query
          .options(joinedload(AccountTransaction.from_account),
                   joinedload(AccountTransaction.to_account),
@@ -598,9 +686,7 @@ def party_ledger(party, *, include_void=False):
              func.lower(func.trim(func.coalesce(AccountTransaction.party_name, ''))) == key,
              and_(
                  AccountTransaction.type == 'project_income',
-                 AccountTransaction.project.has(
-                     func.lower(func.trim(func.coalesce(Project.client, ''))) == key
-                 ),
+                 AccountTransaction.project.has(or_(*project_owner_match)),
                  AccountTransaction.project_id != None,
              )
          )))

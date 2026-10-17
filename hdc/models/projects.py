@@ -39,6 +39,13 @@ class Project(db.Model):
     project_code          = db.Column(db.String(20), unique=True, nullable=False)
     name                  = db.Column(db.String(100), nullable=False)
     client                = db.Column(db.String(100))
+    # The Parties row this project's owner was created from / linked to.
+    # ``client`` stays the human-readable name used across receipts and
+    # reports; this nullable pointer is the exact link, so a project started
+    # from a party keeps pointing at that party even if the name is typed
+    # slightly differently. NULL means "matched by name only" (legacy rows).
+    client_party_id       = db.Column(db.Integer, db.ForeignKey('hdc_cash_flow_party.id'),
+                                      nullable=True, index=True)
     client_phone          = db.Column(db.String(30))
     location              = db.Column(db.String(200))
     total_constructed_sqft= db.Column(db.Float, default=0.0)
@@ -54,6 +61,7 @@ class Project(db.Model):
     created_at            = db.Column(db.DateTime, default=_pkt_now_naive)
 
     stages           = db.relationship('Stage', backref='project', lazy=True, cascade='all, delete-orphan')
+    client_party     = db.relationship('CashFlowParty', foreign_keys=[client_party_id])
     owner_payments   = db.relationship('OwnerPayment', backref='project', lazy=True, cascade='all, delete-orphan')
     expenses         = db.relationship('Expense', backref='project', lazy=True, cascade='all, delete-orphan')
     attendance_records = db.relationship('Attendance', backref='project', lazy=True, cascade='all, delete-orphan')
