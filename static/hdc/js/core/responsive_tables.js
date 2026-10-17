@@ -96,6 +96,19 @@
         return !!PLACEHOLDERS[String(text).trim().toLowerCase()];
     }
 
+    /* A cell that holds only controls has no text, but it is not empty: the
+       Actions cell of a list row is exactly that.  Treating it as empty hid
+       every View / Edit / Rename / Delete button on a phone — the record card
+       showed the values and offered no way to act on them. */
+    function hasControls(cell) {
+        return !!(cell && cell.querySelector(
+            'button, a.btn, .btn, input[type="submit"], select, textarea, form'));
+    }
+
+    function cellIsEmpty(cell, text) {
+        return isEmptyText(text) && !hasControls(cell);
+    }
+
     /* Which cell reads best as the card title: the first one that has text,
        is short, and is not a bank of buttons or a checkbox. */
     function markLead(row) {
@@ -126,7 +139,7 @@
             var cell = cells[i];
             var text = clean(cell.textContent);
             cell.setAttribute('data-hdc-label', labels[i] || '');
-            cell.setAttribute('data-hdc-rt-empty', isEmptyText(text) ? '1' : '0');
+            cell.setAttribute('data-hdc-rt-empty', cellIsEmpty(cell, text) ? '1' : '0');
             cell.removeAttribute('data-hdc-rt-lead');
         }
         markLead(row);
@@ -142,7 +155,7 @@
             cells[i].removeAttribute('data-hdc-label');
             cells[i].removeAttribute('data-hdc-rt-lead');
             cells[i].setAttribute('data-hdc-rt-empty',
-                isEmptyText(clean(cells[i].textContent)) ? '1' : '0');
+                cellIsEmpty(cells[i], clean(cells[i].textContent)) ? '1' : '0');
         }
     }
 

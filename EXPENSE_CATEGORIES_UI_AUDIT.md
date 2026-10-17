@@ -95,6 +95,52 @@ already does this (`hdc.css` `.stage-form-card .form-control` /
 
 ---
 
+## 2b. Follow-up (2026-10-17): the page was aligned to the app, not beside it
+
+The rebuild above fixed the *table*, but it also gave the page a private
+"workspace" shell that no other screen used: a centred 840px column, a hero
+tile, a count pill and a one-line quick-add bar. Trades had been cloned from
+the same recipe, so the app's two newest list screens looked like a different
+product from Projects, Workers, Materials, Allowance Categories and
+Personal Expense Categories — which all use:
+
+* a page head that is a **direct child of `<main class="main-content">`**
+  (`d-flex justify-content-between align-items-center mt-2 mb-3`), with the
+  title + row count in an `<h5>` and the page's one action as its own child
+  (so `responsive.css` can make that action full-width on a phone);
+* one full-width `card hdc-card` holding a `table hdc-table` in a
+  `.table-responsive` wrapper;
+* the add form in a Bootstrap modal, like Workers / Allowance Categories /
+  Personal Expense Categories.
+
+That shape is now a macro, `templates/hdc/shared/_page_head.html`, and both
+name lists render through it. No page CSS sets a shell width any more.
+
+| | Before (this follow-up) | After |
+|---|---|---|
+| shell | 840px centred, unique to two pages | full width, same as every other list |
+| heading | hero icon tile + subtitle + count pill | standard `<h5>` + icon + `(N)` |
+| add form | always-open one-line bar | modal, opened by the page-head action |
+| table | `expense-category-*` custom names | shared `hdc-table`; `hdc-rename-*` row hooks |
+| Trades | its own duplicate of the same shell | same macro, same row component |
+
+**Bugs fixed while aligning them**
+
+* **Personal Expense Categories** — the heading row spread the title, the Back
+  link and the Add button across the full page width (Back landed mid-page).
+  Back and Add are now one right-aligned button group.
+* **Allowance Categories** — the Add/Create buttons used `btn-purple` /
+  `text-purple`, classes that exist in no stylesheet, so the Add button
+  rendered unstyled. Both now use `btn-mint` and the shared page head.
+* **Phone record cards hid every row action.** `responsive_tables.js` marked a
+  cell `data-hdc-rt-empty` from its *text* alone; the Actions cell of a list
+  row holds only icon buttons, so it was treated as blank and
+  `responsive.css` (`td[data-hdc-rt-empty="1"] { display: none }`) removed all
+  of View / Edit / Rename / Delete from every record card in the app. A cell
+  now counts as empty only when it has neither text **nor** controls.
+
+---
+
 ## 3. What changed
 
 `templates/hdc/expenses/expense_categories.html` — rebuilt on the Trades idiom;
@@ -102,7 +148,7 @@ already does this (`hdc.css` `.stage-form-card .form-control` /
 
 | | After (1440px) |
 |---|---|
-| shell | `max-width: 52.5rem` (840px) — same shell width as `.trades-shell` |
+| shell | `max-width: 52.5rem` (840px) — **retired in §2b**: the page now uses the standard full-width list shell |
 | hero | icon tile + title + "N active" pill (the heading row previously held one `<h5>` inside a `justify-content-between` with nothing to justify) |
 | add card + table | identical 840px edges (both are children of the shell) |
 | quick add | one flex line: uppercase label → field → button, `gap:10px`, wraps on phones |
@@ -139,9 +185,9 @@ EOF
 
 # which rule wins, at which viewport
 python scripts/css_cascade_probe.py --html /tmp/page.html \
-    --selector ".expense-category-new-name" \
-    --selector ".expense-category-row-actions" \
-    --selector ".expense-category-icon-btn" --width 1440 --width 390
+    --selector ".hdc-rename-actions" \
+    --selector ".hdc-rename-form .form-control" \
+    --selector ".hdc-rename-icon-btn" --width 1440 --width 390
 ```
 
 `scripts/css_cascade_probe.py` resolves origin order, specificity, source order
@@ -151,6 +197,13 @@ It does not run layout — text-dependent widths still need a browser
 
 ## 5. Verification
 
+* `tests/test_list_page_consistency.py` — the four category lists (Expense,
+  Trades, Allowance, Personal) must all import and call the shared page-head
+  macro, use `card hdc-card` + `table hdc-table` + `.table-responsive`, open
+  their add form in a modal, never re-introduce a retired workspace class, and
+  never use a class no stylesheet defines. The rendered-page half checks the
+  served HTML: exactly one page head inside `<main>`, the standard shell, and
+  the shared row-rename hooks on both name lists.
 * `tests/test_expense_batch.py` — add/rename/delete round trip plus a structural
   test: both row actions must live inside the Actions cell, and a row must not
   ship a live text box behind its name.
@@ -158,6 +211,8 @@ It does not run layout — text-dependent widths still need a browser
   the real page under jsdom: every row starts read-only, the pencil opens the
   field focused and selected, one row at a time, Escape and ✕ restore the old
   name, Save stays inside the form, and both row buttons share the Actions cell.
+  The harness now loads the same `core/row_rename.js` Trades loads, and a test
+  asserts both templates carry the same hooks.
 * `tests/test_responsive_layer.py` — the test that pinned the global 36rem cap is
   replaced by one that keeps the **shared** `.form-control`/`.form-select` rule
   free of any width cap, so the app-wide side effect cannot come back unnoticed.

@@ -1,14 +1,18 @@
 {% extends "shared/base.html" %}
+{% from "shared/_page_head.html" import page_head %}
 {% block title %}Allowance Categories{% endblock %}
 {% block page_heading %}Allowance Categories{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mt-2 mb-3">
-    <h5 class="mb-0"><i class="fas fa-tags me-2 text-purple"></i>Allowance Categories ({{ categories|length }})</h5>
-    <button class="btn btn-purple btn-sm" data-bs-toggle="modal" data-bs-target="#addAllowanceCategoryModal">
-        <i class="fas fa-plus me-1"></i>Add Category
-    </button>
-</div>
+{# The shared page head, so this list lines up with the other category lists
+   (Expense Categories, Personal Expense Categories) and with every other list
+   screen.  The classes here used to be btn-purple / text-purple, which no
+   stylesheet defined — that is why the Add button rendered unstyled. #}
+{% call page_head('Allowance Categories', 'fa-tags', categories|length) %}
+<button type="button" class="btn btn-mint btn-sm" data-bs-toggle="modal" data-bs-target="#addAllowanceCategoryModal">
+    <i class="fas fa-plus me-1" aria-hidden="true"></i>Add Category
+</button>
+{% endcall %}
 
 <!-- Add Category Modal -->
 <div class="modal fade" id="addAllowanceCategoryModal" tabindex="-1">
@@ -16,7 +20,7 @@
         <div class="modal-content hdc-modal">
             <div class="modal-header">
                 <h5 class="modal-title"><i class="fas fa-plus me-2"></i>Add Allowance Category</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <form method="POST" data-hdc-dialog>
                 <div class="modal-body row g-3">
@@ -31,7 +35,7 @@
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-purple btn-sm"><i class="fas fa-save me-1"></i>Create Category</button>
+                    <button type="submit" class="btn btn-mint btn-sm"><i class="fas fa-save me-1" aria-hidden="true"></i>Create Category</button>
                 </div>
             </form>
         </div>
