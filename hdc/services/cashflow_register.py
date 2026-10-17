@@ -1441,12 +1441,14 @@ def save_cf_party(name, party_type='other', phone=None, note=None,
             if cat is None:
                 raise ValueError('Choose a valid party category.')
             row.category_id = int(cat.id)
+            row.category_auto = False
         else:
             ensure_party_has_category(row)
         db.session.flush()
         return row, False
     cat = None
-    if category_id not in (None, ''):
+    explicit_category = category_id not in (None, '')
+    if explicit_category:
         from hdc.services.party_categories import category_by_id
         cat = category_by_id(category_id)
         if cat is None:
@@ -1455,7 +1457,8 @@ def save_cf_party(name, party_type='other', phone=None, note=None,
         cat = default_party_category_for_type(ptype)
     row = CashFlowParty(name=nm[:160], party_type=ptype, phone=(phone or '').strip() or None,
                         note=(note or '').strip() or None, is_active=True,
-                        category_id=(int(cat.id) if cat is not None else None))
+                        category_id=(int(cat.id) if cat is not None else None),
+                        category_auto=not explicit_category)
     db.session.add(row)
     db.session.flush()
     return row, True
@@ -1473,9 +1476,10 @@ def ensure_party(name, party_type='other', phone=None, note=None, *, reactivate=
     should pass ``reactivate=False`` so an explicit deactivation sticks.
     Returns ``(row, created)``.
 
-    A party's **category** is only ever filled in when it has none: once the
-    operator has filed a party (say a lender into *Cement Dealers*), a rental
-    sync must not drag it back to the type-derived bucket.
+    A party's **category** is only ever changed while it is automatic: an
+    unfiled row (or one still following its type) is kept in step with the
+    type bucket, but once the operator has filed a party by hand (say a lender
+    into *Cement Dealers*), a rental sync must not drag it back.
     """
     nm = (name or '').strip()
     if not nm:
@@ -1498,7 +1502,8 @@ def ensure_party(name, party_type='other', phone=None, note=None, *, reactivate=
     cat = default_party_category_for_type(ptype)
     row = CashFlowParty(name=nm[:160], party_type=ptype, phone=(phone or '').strip() or None,
                         note=(note or '').strip() or None, is_active=True,
-                        category_id=(int(cat.id) if cat is not None else None))
+                        category_id=(int(cat.id) if cat is not None else None),
+                        category_auto=True)
     db.session.add(row)
     db.session.flush()
     return row, True
@@ -1714,11 +1719,13 @@ def update_cf_party(party, *, name=None, party_type=None, phone=None, note=None,
         from hdc.services.party_categories import category_by_id
         if str(category_id).strip() == '':
             party.category_id = None
+            party.category_auto = True
         else:
             cat = category_by_id(category_id)
             if cat is None:
                 raise ValueError('Choose a valid party category.')
             party.category_id = int(cat.id)
+            party.category_auto = False
     db.session.flush()
     if commit:
         db.session.commit()

@@ -1374,6 +1374,9 @@ def _ensure_party_category_schema():
             pass
     _ensure_table_columns_sqlite('hdc_cash_flow_party', {
         'category_id': "category_id INTEGER REFERENCES hdc_party_category(id)",
+        # 1 = the filing is the app's own and follows a party-type change;
+        # 0 = a human filed it, so automatic syncs must leave it alone.
+        'category_auto': "category_auto BOOLEAN DEFAULT 1",
     })
 
 

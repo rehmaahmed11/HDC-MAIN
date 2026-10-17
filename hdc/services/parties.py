@@ -541,6 +541,7 @@ def build_party_directory(*, search='', category='', party_id=None, status=''):
             'category_id': int(cat.id) if cat is not None else None,
             'category_label': cat_name,
             'category_obj': cat,
+            'category_is_auto': party.category_auto is not False,
             'type_label': party_type_label(party.party_type),
             'money_in': float(cash.get('in') or 0.0),
             'money_out': float(cash.get('out') or 0.0),

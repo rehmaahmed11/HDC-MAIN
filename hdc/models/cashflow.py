@@ -224,6 +224,12 @@ class CashFlowParty(db.Model):
         "not filed by hand" — the directory then falls back to the category
         key that matches the party type.
 
+    ``category_auto``
+        True while the filing is the app's own (derived from ``party_type``),
+        so a later type upgrade (``other`` → ``supplier``) keeps the card in
+        step.  False once the operator files the party by hand — from then on
+        only a human move changes its category.
+
     The sidebar's Parties module (/hdc/parties) is the directory for adding
     and maintaining both.
     """
@@ -234,6 +240,7 @@ class CashFlowParty(db.Model):
     party_type = db.Column(db.String(40), default='other', index=True)
     category_id = db.Column(db.Integer, db.ForeignKey('hdc_party_category.id'),
                             nullable=True, index=True)
+    category_auto = db.Column(db.Boolean, default=True)
     phone = db.Column(db.String(40))
     note = db.Column(db.String(300))
     is_active = db.Column(db.Boolean, default=True, index=True)
