@@ -123,6 +123,25 @@
             </tbody>
         </table>
 
+        {% if material_items %}
+        <div class="rx-section-title">Material Purchase Details</div>
+        <div class="rx-split-wrap">
+            <table class="rx-split-table">
+                <thead><tr><th>Material</th><th>Quantity</th><th>Unit</th><th class="text-end">Unit price (PKR)</th><th class="text-end">Line total (PKR)</th></tr></thead>
+                <tbody>
+                    {% for item in material_items %}
+                    <tr>
+                        <td>{{ item.name }}{% if item.specification %}<div class="small text-muted">{{ item.specification }}</div>{% endif %}</td>
+                        <td>{{ item.quantity or 'Not recorded' }}</td><td>{{ item.unit or '—' }}</td>
+                        <td class="text-end">{{ '{:,.2f}'.format(item.unit_price) if item.unit_price is not none else 'Not recorded' }}</td>
+                        <td class="text-end">{{ '{:,.2f}'.format(item.line_total) if item.line_total is not none else 'Not recorded' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+
         <div class="rx-section-title">Cash Movement</div>
         <table class="rx-detail-table">
             <tbody>

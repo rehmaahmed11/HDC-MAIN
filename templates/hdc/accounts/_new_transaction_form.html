@@ -5,32 +5,59 @@
 {% set err = txn_error or '' %}
 {% set selected_rules = (category_rules or {}).get(sel.get('category_id'), {}) %}
 {% set more_has_values = v.get('party_name') or v.get('project_id') or v.get('subcategory_id') or v.get('subcategory_ids') or v.get('reference') or v.get('description') or v.get('note') or selected_rules.get('party_mode') == 'required' or selected_rules.get('project_mode') == 'required' %}
-{% set txn_item_ids = sel.get('subcategory_ids') or [] %}
-{% if not txn_item_ids and sel.get('subcategory_id') %}{% set txn_item_ids = [sel.get('subcategory_id')] %}{% endif %}
-{% if not txn_item_ids %}{% set txn_item_ids = [''] %}{% endif %}
+{% set material_active = dir == 'out' and selected_rules.get('multiple_subcategories') %}
 
-{% macro txn_material_item_row(index, selected_id, category_rows) %}
+{% macro txn_material_item_row(index, item, category_rows) %}
 <div class="hdc-txn-material-row" data-material-item-row data-row-index="{{ index }}">
     <div class="hdc-field hdc-txn-material-picker">
-        <label class="form-label" for="txnMaterialItemInput{{ index }}">Material name <span class="hdc-optional">optional</span></label>
+        <label class="form-label" for="txnMaterialItemInput{{ index }}">Material name <span class="hdc-req" aria-hidden="true">*</span></label>
         <input type="text" id="txnMaterialItemInput{{ index }}" class="form-control"
                data-material-input data-combo-input placeholder="Search material name"
                autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list">
         <select name="subcategory_ids" id="txnMaterialItemSelect{{ index }}"
-                class="form-select" data-material-select disabled>
+                class="form-select" data-material-select {% if material_active %}required{% else %}disabled{% endif %}>
             <option value="">Choose material…</option>
             {% for c in category_rows %}
                 {% for s in c.subcategories if s.is_active %}
                 <option value="{{ s.id }}" data-category="{{ c.id }}"
-                        {% if selected_id and selected_id|string == s.id|string %}selected{% endif %}>{{ s.name }}</option>
+                        {% if item.get('subcategory_id')|string == s.id|string %}selected{% endif %}>{{ s.name }}</option>
                 {% endfor %}
             {% endfor %}
         </select>
+    </div>
+    <div class="hdc-field">
+        <label class="form-label" for="txnMaterialQty{{ index }}">Quantity <span class="hdc-req" aria-hidden="true">*</span></label>
+        <input type="text" inputmode="decimal" name="material_quantities" id="txnMaterialQty{{ index }}"
+               data-material-detail="quantity" class="form-control" placeholder="e.g. 100" maxlength="24"
+               value="{{ item.get('quantity', '') }}" {% if material_active %}required{% else %}disabled{% endif %}>
+    </div>
+    <div class="hdc-field">
+        <label class="form-label" for="txnMaterialUnit{{ index }}">Unit <span class="hdc-req" aria-hidden="true">*</span></label>
+        <input type="text" name="material_units" id="txnMaterialUnit{{ index }}" list="txnMaterialUnits"
+               data-material-detail="unit" class="form-control" placeholder="bags, kg…" maxlength="30"
+               value="{{ item.get('unit', '') }}" {% if material_active %}required{% else %}disabled{% endif %}>
+    </div>
+    <div class="hdc-field">
+        <label class="form-label" for="txnMaterialPrice{{ index }}">Unit price (Rs) <span class="hdc-req" aria-hidden="true">*</span></label>
+        <input type="text" inputmode="decimal" name="material_unit_prices" id="txnMaterialPrice{{ index }}"
+               data-material-detail="unit_price" class="form-control" placeholder="e.g. 1,250" maxlength="30"
+               value="{{ item.get('unit_price', '') }}" {% if material_active %}required{% else %}disabled{% endif %}>
+    </div>
+    <div class="hdc-field hdc-txn-material-line">
+        <span class="form-label">Line total (Rs)</span>
+        <output data-material-line-total aria-live="polite">—</output>
     </div>
     <button type="button" class="btn btn-outline-secondary hdc-txn-material-remove"
             data-remove-material-item aria-label="Remove material item" title="Remove item" hidden>
         <i class="fas fa-xmark" aria-hidden="true"></i><span class="visually-hidden">Remove item</span>
     </button>
+    <div class="hdc-field hdc-txn-material-spec">
+        <label class="form-label" for="txnMaterialSpec{{ index }}">Brand / size <span class="hdc-optional">optional</span></label>
+        <input type="text" name="material_specifications" id="txnMaterialSpec{{ index }}"
+               data-material-detail="specification" class="form-control" placeholder="e.g. Bestway OPC, 50 kg bag" maxlength="120"
+               value="{{ item.get('specification', '') }}" {% if not material_active %}disabled{% endif %}>
+    </div>
+    <div class="hdc-field-error hdc-txn-material-error" data-material-error hidden></div>
 </div>
 {% endmacro %}
 
@@ -154,41 +181,21 @@
             <div class="hdc-field-error" data-error-for="category_id" hidden></div>
         </div>
 
-        <div class="hdc-txn-material-items" id="txnMaterialItemsField" hidden>
-            <div class="hdc-txn-material-heading">
-                <div>
-                    <div class="form-label mb-1">Material items</div>
-                    <div class="hdc-field-hint mt-0">Search and add each material on the same purchase. Enter the total amount above.</div>
-                </div>
-                <button type="button" class="btn btn-outline-primary hdc-txn-add-material"
-                        id="txnAddMaterialItem">
-                    <i class="fas fa-plus me-1" aria-hidden="true"></i>Add item
-                </button>
-            </div>
-            <div class="hdc-txn-material-rows" id="txnMaterialItemsList">
-                {% for item_id in txn_item_ids %}
-                    {{ txn_material_item_row(loop.index0, item_id, categories) }}
-                {% endfor %}
-            </div>
-            <div class="hdc-field-error" data-error-for="subcategory_ids" hidden></div>
-        </div>
-
-        <details class="hdc-txn-more" id="txnMoreDetails"
-                 data-has-values="{{ 'true' if more_has_values else 'false' }}" open>
-            <summary><span><i class="fas fa-plus me-1" aria-hidden="true"></i>More details</span></summary>
-            <div class="hdc-txn-grid hdc-txn-extra-grid">
-                <div class="hdc-field" id="txnSubcategoryField" hidden>
-                    <label class="form-label" for="txnSubcategory">Item / type <span class="hdc-optional">optional</span></label>
-                    <select name="subcategory_id" id="txnSubcategory" class="form-select">
-                        <option value="">Choose item…</option>
-                        {% for c in categories %}
-                            {% for s in c.subcategories if s.is_active %}
-                            <option value="{{ s.id }}" data-category="{{ c.id }}"
-                                    {% if sel.get('subcategory_id') == s.id %}selected{% endif %}>{{ s.name }}</option>
-                            {% endfor %}
+        <div class="hdc-txn-grid hdc-txn-scope" id="txnWhoBlock">
+                <div class="hdc-field" id="txnProjectField" data-field="project">
+                    <label class="form-label" for="txnProjectInput">Project <span class="hdc-req" id="txnProjectReq" hidden aria-hidden="true">*</span></label>
+                    <input type="text" id="txnProjectInput" class="form-control" data-combo-input
+                           placeholder="Search project" autocomplete="off"
+                           role="combobox" aria-expanded="false" aria-autocomplete="list">
+                    <select name="project_id" id="txnProject" class="form-select">
+                        <option value="">Choose project…</option>
+                        {% for p in projects %}
+                        <option value="{{ p.id }}" data-client="{{ (project_clients or {}).get(p.id, '') }}"
+                                {% if sel.get('project_id') == p.id %}selected{% endif %}>{{ p.name }}</option>
                         {% endfor %}
                     </select>
-                    <div class="hdc-field-error" data-error-for="subcategory_id" hidden></div>
+                    <div class="hdc-field-hint" id="txnProjectHint" hidden></div>
+                    <div class="hdc-field-error" data-error-for="project_id" hidden></div>
                 </div>
 
                 <div class="hdc-field" id="txnPartyField" data-field="party">
@@ -211,26 +218,57 @@
                     <div class="hdc-field-error" data-error-for="party_name" hidden></div>
                 </div>
 
-                <div class="hdc-field" id="txnProjectField" data-field="project">
-                    <label class="form-label" for="txnProjectInput">Project <span class="hdc-req" id="txnProjectReq" hidden aria-hidden="true">*</span></label>
-                    <input type="text" id="txnProjectInput" class="form-control" data-combo-input
-                           placeholder="Search project" autocomplete="off"
-                           role="combobox" aria-expanded="false" aria-autocomplete="list">
-                    <select name="project_id" id="txnProject" class="form-select">
-                        <option value="">Choose project…</option>
-                        {% for p in projects %}
-                        <option value="{{ p.id }}" data-client="{{ (project_clients or {}).get(p.id, '') }}"
-                                {% if sel.get('project_id') == p.id %}selected{% endif %}>{{ p.name }}</option>
+        </div>
+
+        <div class="hdc-txn-material-items" id="txnMaterialItemsField" {% if not material_active %}hidden{% endif %}>
+            <div class="hdc-txn-material-heading">
+                <div>
+                    <div class="form-label mb-1">Material items</div>
+                    <div class="hdc-field-hint mt-0">Enter each material, quantity, unit and unit price. The amount is calculated from these items.</div>
+                </div>
+                <button type="button" class="btn btn-outline-primary hdc-txn-add-material"
+                        id="txnAddMaterialItem">
+                    <i class="fas fa-plus me-1" aria-hidden="true"></i>Add item
+                </button>
+            </div>
+            <div class="hdc-txn-material-rows" id="txnMaterialItemsList">
+                {% for item in txn_material_rows %}
+                    {{ txn_material_item_row(loop.index0, item, categories) }}
+                {% endfor %}
+            </div>
+            <datalist id="txnMaterialUnits">
+                {% for unit in ('bags', 'kg', 'ton', 'cft', 'sft', 'm', 'litres', 'pieces', 'loads') %}
+                <option value="{{ unit }}"></option>
+                {% endfor %}
+            </datalist>
+            <div class="hdc-txn-material-total">Purchase total <strong id="txnMaterialTotal" role="status">—</strong></div>
+            <div class="hdc-field-error" data-error-for="subcategory_ids" hidden></div>
+            <div class="hdc-txn-help">Records a fully paid cash purchase, not stock received or an existing supplier bill settlement.
+                For stock, deliveries, credit purchases or bill payments, use <a href="{{ url_for('hdc_purchase_v2_purchases') }}">Purchases</a> instead. Do not record the same payment in both places.</div>
+        </div>
+
+        <details class="hdc-txn-more" id="txnMoreDetails"
+                 data-has-values="{{ 'true' if more_has_values else 'false' }}" open>
+            <summary><span><i class="fas fa-plus me-1" aria-hidden="true"></i>More details</span></summary>
+            <div class="hdc-txn-grid hdc-txn-extra-grid">
+                <div class="hdc-field" id="txnSubcategoryField" hidden>
+                    <label class="form-label" for="txnSubcategory">Item / type <span class="hdc-optional">optional</span></label>
+                    <select name="subcategory_id" id="txnSubcategory" class="form-select">
+                        <option value="">Choose item…</option>
+                        {% for c in categories %}
+                            {% for s in c.subcategories if s.is_active %}
+                            <option value="{{ s.id }}" data-category="{{ c.id }}"
+                                    {% if sel.get('subcategory_id') == s.id %}selected{% endif %}>{{ s.name }}</option>
+                            {% endfor %}
                         {% endfor %}
                     </select>
-                    <div class="hdc-field-hint" id="txnProjectHint" hidden></div>
-                    <div class="hdc-field-error" data-error-for="project_id" hidden></div>
+                    <div class="hdc-field-error" data-error-for="subcategory_id" hidden></div>
                 </div>
 
                 <div class="hdc-field">
-                    <label class="form-label" for="txnReference">Reference <span class="hdc-optional">optional</span></label>
+                    <label class="form-label" for="txnReference">Invoice / reference <span class="hdc-optional">optional</span></label>
                     <input type="text" name="reference" id="txnReference" class="form-control"
-                           maxlength="80" autocomplete="off" placeholder="Cheque or receipt number"
+                           maxlength="80" autocomplete="off" placeholder="Invoice, cheque or receipt number"
                            value="{{ v.get('reference', '') }}">
                     <div class="hdc-field-error" data-error-for="reference" hidden></div>
                 </div>

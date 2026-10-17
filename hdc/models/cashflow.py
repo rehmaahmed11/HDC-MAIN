@@ -348,12 +348,12 @@ class CashFlowEntry(db.Model):
 class CashFlowEntryItem(db.Model):
     """A named item/type included in one cash-flow entry.
 
-    A material purchase is still one cash movement with one amount and one
-    ledger posting.  These detail rows let the operator tag that movement with
-    several material types while preserving the historical single
-    ``CashFlowEntry.subcategory_id`` field (which points at the first item).
-    ``item_name`` is a snapshot so later renaming/deactivating a subcategory
-    cannot rewrite what an old receipt contained.
+    A material purchase is one cash movement, itemised by quantity, unit and
+    unit price. Money is stored in exact paisa; quantity has three decimal
+    places. Nullable detail columns preserve old name-only entries honestly
+    (unknown quantities/prices are not backfilled with invented values).
+    ``item_name`` snapshots the selected material; ``specification`` can record
+    its brand/size. The parent's subcategory_id remains the first-item alias.
     """
 
     __tablename__ = 'hdc_cash_flow_entry_item'
@@ -364,6 +364,11 @@ class CashFlowEntryItem(db.Model):
                                db.ForeignKey('hdc_cash_flow_subcategory.id'),
                                nullable=False)
     item_name = db.Column(db.String(120), nullable=False)
+    quantity = db.Column(db.Numeric(18, 3), nullable=True)
+    unit = db.Column(db.String(30), nullable=True)
+    unit_price_minor = db.Column(db.BigInteger, nullable=True)
+    line_total_minor = db.Column(db.BigInteger, nullable=True)
+    specification = db.Column(db.String(120), nullable=True)
     sort_order = db.Column(db.Integer, default=0, nullable=False)
     created_at = db.Column(db.DateTime, default=_pkt_now_naive)
 

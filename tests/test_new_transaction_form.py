@@ -259,6 +259,8 @@ class NewTransactionTestCase(unittest.TestCase):
         self._submit({
             'direction': 'out', 'date': '2026-09-21', 'amount': '1,25,000.50',
             'account_id': self.cash.id, 'category_id': cat.id, 'subcategory_id': sub.id,
+            'material_quantities': ['1'], 'material_units': ['load'],
+            'material_unit_prices': ['125000.50'],
             'party_name': 'Ahmed Cement Supplier', 'project_id': self.project.id,
             'reference': 'SLIP-1', 'description': 'Cement 100 bags', 'note': 'journey',
         })
@@ -285,6 +287,8 @@ class NewTransactionTestCase(unittest.TestCase):
             'account_id': self.cash.id, 'category_id': cat.id,
             'subcategory_ids': [subs['Cement'].id, subs['Steel / Saria'].id],
             'party_name': 'Zubair Transport', 'project_id': self.project.id,
+            'material_quantities': ['10', '100'], 'material_units': ['bags', 'kg'],
+            'material_unit_prices': ['1250', '300'],
             'reference': 'MAT-42',
         }, url=MONEY_CENTER_URL)
         self.assertEqual(response.status_code, 302)

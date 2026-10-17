@@ -9,6 +9,7 @@ from flask import has_request_context, url_for
 from sqlalchemy import and_, func, or_
 
 from hdc.models.accounts import Account, AccountTransaction, OwnerPayment
+from hdc.models.cashflow import CashFlowEntry
 from hdc.services.accounts import _ACCOUNT_TXN_PAY_TYPES, _ACCOUNT_TXN_RECEIVE_TYPES, _account_entity_label, _account_tx_direction_for_type
 from hdc.utils.normalize import _normalize_name_ci, _normalize_related_entity_type
 
@@ -126,3 +127,10 @@ def _owner_payment_recent_entries(project_id, exclude_id=None, limit=5):
             'receipt_url': url_for('hdc_owner_payment_receipt', pid=int(project_id), oid=r.id),
         })
     return out
+
+
+def cash_flow_receipt_details(txn_id):
+    """Use the cash-flow document's item snapshots, not the current vocabulary."""
+    from hdc.services.cashflow_register import cash_flow_item_dicts
+    entry = CashFlowEntry.query.filter_by(account_tx_id=txn_id).first()
+    return cash_flow_item_dicts(entry.items) if entry else []

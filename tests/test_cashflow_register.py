@@ -201,7 +201,7 @@ class CashFlowRegisterTestCase(unittest.TestCase):
                            category_id=cats['Other Income'].id,
                            party_name='Mr. Akram')
         e_out = self._entry('out', '4,500.25', account=self.cash,
-                            category_id=cats['Material & Purchase'].id,
+                            category_id=cats['Miscellaneous'].id,
                             party_name='Al-Kabir Store')
         e_tr = self._entry('transfer', 10000, account=self.cash,
                            destination_account_id=self.bank.id)
@@ -226,7 +226,7 @@ class CashFlowRegisterTestCase(unittest.TestCase):
         cats = self._categories()
         entry = self._entry(
             'out', 1250.50, account=self.cash,
-            category_id=cats['Material & Purchase'].id,
+            category_id=cats['Miscellaneous'].id,
             reference='VCHR-2026-001',
         )
         tx = db.session.get(AccountTransaction, entry.account_tx_id)
@@ -334,7 +334,7 @@ class CashFlowRegisterTestCase(unittest.TestCase):
     def test_amend_voids_and_replaces_without_editing_the_original(self):
         cats = self._categories()
         original = self._entry('out', 4500.25,
-                               category_id=cats['Material & Purchase'].id,
+                               category_id=cats['Miscellaneous'].id,
                                party_name='Al-Kabir Store')
         original_amount = float(original.amount)
         original_tx_id = original.account_tx_id
@@ -435,7 +435,7 @@ class CashFlowRegisterTestCase(unittest.TestCase):
                                     date_posted=datetime.combine(d, datetime.min.time()),
                                     actor=self.actor)
         save_manual_cash_flow_entry(direction='out', amount=750.50, account_id=self.cash.id,
-                                    category_id=cats['Material & Purchase'].id,
+                                    category_id=cats['Miscellaneous'].id,
                                     date_posted=datetime.combine(d, datetime.min.time()),
                                     actor=self.actor)
         db.session.commit()
@@ -645,11 +645,11 @@ class CashFlowRegisterTestCase(unittest.TestCase):
 
     def test_row_dicts_carry_party_and_category_labels(self):
         cats = self._categories()
-        self._entry('out', 100, category_id=cats['Material & Purchase'].id,
+        self._entry('out', 100, category_id=cats['Miscellaneous'].id,
                     party_name='Al-Kabir Store')
         row = register_row_dicts(register_rows())[0]
         self.assertEqual(row['party_name'], 'Al-Kabir Store')
-        self.assertEqual(row['category'], 'Material & Purchase')
+        self.assertEqual(row['category'], 'Miscellaneous')
         self.assertEqual(row['account'], 'Test Cash')
         self.assertEqual(row['direction_label'], 'Spent')
         self.assertEqual(row['amount'], 100.0)
@@ -695,7 +695,7 @@ class CashFlowRegisterTestCase(unittest.TestCase):
             'direction': 'out',
             'amount': '1,250.75',
             'account_id': self.cash.id,
-            'category_id': cats['Material & Purchase'].id,
+            'category_id': cats['Miscellaneous'].id,
             'party_name': 'Route Party',
             'description': 'Cement',
         })

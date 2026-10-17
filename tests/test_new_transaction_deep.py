@@ -252,20 +252,23 @@ class DeepCategoryRulesTestCase(unittest.TestCase):
                         % error_msg)
         self.assertEqual(CashFlowEntry.query.count(), before)
 
-    def test_material_purchase_does_not_require_party_or_project(self):
-        """The default rules for 'Material & Purchase' keep both optional,
-        so the form must allow a bare entry (only category + amount + account)."""
+    def test_material_purchase_requires_party_project_and_item_details(self):
+        """A cash purchase must not be accepted as a bare amount-only payment."""
         cat = CashFlowCategory.query.filter_by(name='Material & Purchase').first()
+        # Existing databases may still have the old optional settings.
+        cat.party_mode = 'optional'
+        cat.project_mode = 'optional'
+        db.session.commit()
         rules = category_field_rules(cat)
-        self.assertEqual(rules['party_mode'], 'optional')
-        self.assertEqual(rules['project_mode'], 'optional')
-        # A minimal entry should succeed
+        self.assertEqual(rules['party_mode'], 'required')
+        self.assertEqual(rules['project_mode'], 'required')
+        before = CashFlowEntry.query.count()
         response = self._submit({
             'direction': 'out', 'date': '2026-09-21', 'amount': '1000',
             'account_id': self.cash.id, 'category_id': cat.id,
-        })
-        self.assertEqual(response.status_code, 302,
-                         'minimal expense entry must succeed')
+        }, follow=True)
+        self.assertIn('needs a project', self._error_text(response))
+        self.assertEqual(CashFlowEntry.query.count(), before)
 
     def test_office_expense_hides_both_party_and_project(self):
         """Categories with ``party_mode='none'`` and ``project_mode='none'``
