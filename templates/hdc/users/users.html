@@ -93,7 +93,7 @@
                         <td class="text-muted small">{{ u.created_at.strftime('%Y-%m-%d') if u.created_at else '—' }}</td>
                         <td class="text-nowrap">
                             <button class="btn btn-sm btn-outline-primary" type="button" data-bs-toggle="collapse" data-bs-target="#access-{{ u.id }}" aria-expanded="false" aria-controls="access-{{ u.id }}"><i class="fas fa-sliders me-1"></i>Access</button>
-                            <button class="btn btn-sm btn-outline-warning" type="button" data-bs-toggle="collapse" data-bs-target="#password-settings-{{ u.id }}" aria-expanded="false" aria-controls="password-settings-{{ u.id }}" title="Set a new password for this account"><i class="fas fa-key me-1"></i>Password / reset</button>
+                            <button class="btn btn-sm btn-outline-warning btn-wrap" type="button" data-bs-toggle="collapse" data-bs-target="#password-settings-{{ u.id }}" aria-expanded="false" aria-controls="password-settings-{{ u.id }}" title="Set a new password for this account"><i class="fas fa-key me-1"></i>Password / reset</button>
                             {% if u.id != current_user.id %}
                             <form method="POST" class="d-inline ms-1" onsubmit="{% if u.is_active %}return confirm('Suspend this account? The user will be signed out.');{% else %}return true;{% endif %}">
                                 <input type="hidden" name="action" value="set_status"><input type="hidden" name="user_id" value="{{ u.id }}">

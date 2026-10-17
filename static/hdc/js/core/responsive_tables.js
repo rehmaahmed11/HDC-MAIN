@@ -96,13 +96,38 @@
         return !!PLACEHOLDERS[String(text).trim().toLowerCase()];
     }
 
+    /* A control that the operator cannot see must not count as content.
+       The row-rename lists (Trades, Expense Categories) keep their Save/Cancel
+       buttons inside a `d-none` form until the pencil is pressed: counting
+       those hidden buttons as "this cell has controls" disqualified the NAME
+       cell and promoted the Created date to the card title, so a phone showed
+       "CATEGORY NAME / Cement" followed by a big bold "2026-10-17" as the
+       heading.  Display is checked without layout (classes / attributes /
+       inline style) so the result is the same in every browser and in tests. */
+    function controlIsShown(node) {
+        for (var el = node; el && el.nodeType === 1; el = el.parentElement) {
+            if (el.hasAttribute('hidden')) return false;
+            if (el.classList && el.classList.contains('d-none')) return false;
+            if (el.classList && el.classList.contains('collapse') &&
+                !el.classList.contains('show')) return false;
+            if (el.style && el.style.display === 'none') return false;
+        }
+        return true;
+    }
+
     /* A cell that holds only controls has no text, but it is not empty: the
        Actions cell of a list row is exactly that.  Treating it as empty hid
        every View / Edit / Rename / Delete button on a phone — the record card
        showed the values and offered no way to act on them. */
+    var CONTROL_SELECTOR = 'button, a.btn, .btn, input[type="submit"], select, textarea';
+
     function hasControls(cell) {
-        return !!(cell && cell.querySelector(
-            'button, a.btn, .btn, input[type="submit"], select, textarea, form'));
+        if (!cell) return false;
+        var controls = cell.querySelectorAll(CONTROL_SELECTOR);
+        for (var i = 0; i < controls.length; i++) {
+            if (controlIsShown(controls[i])) return true;
+        }
+        return false;
     }
 
     function cellIsEmpty(cell, text) {
@@ -119,7 +144,13 @@
             if (!cell) continue;
             var text = clean(cell.textContent);
             if (!text || text.length > LEAD_MAX_LEN) continue;
-            if (cell.querySelector('input[type="checkbox"], input[type="radio"], .btn, button, a.btn')) continue;
+            var controls = cell.querySelectorAll(
+                'input[type="checkbox"], input[type="radio"], .btn, button, a.btn');
+            var blocking = false;
+            for (var c = 0; c < controls.length; c++) {
+                if (controlIsShown(controls[c])) { blocking = true; break; }
+            }
+            if (blocking) continue;
             cell.setAttribute('data-hdc-rt-lead', '1');
             return;
         }

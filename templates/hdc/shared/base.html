@@ -273,7 +273,7 @@ body[data-hdc-custom-access="true"][data-hdc-page-write="false"] form[method="PO
                     aria-label="Toggle navigation menu" aria-controls="sidebar" aria-expanded="false">
                 <i class="fas fa-bars" id="sidebarToggleIcon" aria-hidden="true"></i>
             </button>
-            <div class="topbar-title">{% block page_heading %}{% endblock %}</div>
+            <div class="topbar-title" title="{{ self.page_heading()|striptags|trim }}">{% block page_heading %}{% endblock %}</div>
             <div class="topbar-right">
                 {% if hdc_page_allowed('alerts', 'read') %}
                 <a href="{{ url_for('hdc_alerts') }}" class="btn-theme position-relative" title="Alerts">

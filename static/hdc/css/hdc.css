@@ -57,6 +57,18 @@
     --modal-bg: #0f172a;
     --shadow: 0 12px 30px rgba(2, 6, 23, 0.5);
     --shadow-card: 0 16px 38px rgba(2, 6, 23, 0.48);
+
+    /* Bootstrap 5.3 keeps its own colour tokens, and the ERP switches theme
+       with `data-theme`, not `data-bs-theme`.  Without this mapping its
+       utilities stayed on the light palette inside the dark app: a muted
+       "No records yet" line rendered near-black on the dark card, and
+       `.table` painted every cell #fff.  Point the handful of Bootstrap
+       tokens the templates actually use at the app tokens. */
+    --bs-body-color: var(--text);
+    --bs-secondary-color: var(--text-muted);
+    --bs-secondary-bg: var(--card-header-bg);
+    --bs-tertiary-bg: var(--card-header-bg);
+    --bs-border-color: var(--card-border);
 }
 
 * { box-sizing: border-box; }
@@ -668,6 +680,26 @@ a .kpi-card:hover,
     margin-bottom: 0;
 }
 
+/* ── Tables follow the theme ──────────────────────────────────────────────
+   `.hdc-table` is also a Bootstrap `.table`, and Bootstrap 5.3 paints every
+   cell from its own `--bs-table-*` variables, which resolve to the LIGHT
+   Bootstrap body colour (#fff).  The ERP's dark mode only swaps its own
+   tokens (`data-theme`, not `data-bs-theme`), so every table body rendered as
+   a white sheet with black text inside a dark card.  Point Bootstrap's table
+   variables at the app tokens: the card's own background shows through, the
+   text uses --text, and zebra / hover keep their app colours. */
+[data-theme="dark"] .table {
+    --bs-table-color: var(--text);
+    --bs-table-bg: transparent;
+    --bs-table-border-color: var(--card-border);
+    --bs-table-striped-color: var(--text);
+    --bs-table-striped-bg: rgba(148, 163, 184, 0.06);
+    --bs-table-active-color: var(--text);
+    --bs-table-active-bg: var(--accent-soft);
+    --bs-table-hover-color: var(--text);
+    --bs-table-hover-bg: var(--table-hover);
+}
+
 .hdc-table thead th {
     background: var(--table-head);
     border-bottom: 1px solid var(--card-border);
@@ -821,6 +853,37 @@ a .kpi-card:hover,
     background: var(--accent-strong);
     border-color: var(--accent-strong);
     color: #ffffff;
+}
+
+/* ── Button labels stay on one line ───────────────────────────────────────
+   A button states one thing; splitting its label across two lines is never
+   what the operator asked for.  Two app-wide rules used to combine to do
+   exactly that:
+
+     • `body { overflow-wrap: break-word }` (responsive.css) is inherited by
+       every button, so a squeezed button breaks INSIDE a word — "Clear"
+       became "Clea / r" at every width on /hdc/expenses, "Load" became
+       "Lo / ad" in the Timekeeping header;
+     • `.d-flex > * { min-width: 0 }` (responsive.css) lets the flex row
+       shrink the button below its label instead of letting the other
+       controls (the date field, the filter <select>) give up width.
+
+   `white-space: nowrap` stops the break; `flex-shrink: 0` stops the squeeze
+   so the row's other, flexible controls absorb it — which is what they are
+   there for.  A genuinely long label that must wrap on a phone opts back in
+   with `.btn-wrap` (the shared-expense empty state and the user-access
+   "Password / reset" action use it), so long copy still fits a 320px screen
+   without overflowing it. */
+.btn {
+    white-space: nowrap;
+    flex-shrink: 0;
+    overflow-wrap: normal;
+}
+
+.btn-wrap,
+.btn.w-100 {
+    white-space: normal;
+    overflow-wrap: break-word;
 }
 
 /* NOTE: no global width cap here.  `.form-control`/`.form-select` are used by

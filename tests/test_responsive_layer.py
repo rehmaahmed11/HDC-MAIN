@@ -99,6 +99,82 @@ class LayoutContractTest(unittest.TestCase):
         )
 
 
+class ButtonLabelTest(unittest.TestCase):
+    """A button says one thing on one line.
+
+    ``body { overflow-wrap: break-word }`` is inherited by every control, and
+    ``.d-flex > * { min-width: 0 }`` lets a flex row shrink a button below its
+    own label.  Together they split "Clear" into "Clea / r" and "Load" into
+    "Lo / ad" at laptop widths.  The design system fixes it once: labels do
+    not wrap and the button does not shrink; a genuinely long label opts into
+    wrapping with ``.btn-wrap``.
+    """
+
+    def setUp(self):
+        self.css = _read('static', 'hdc', 'css', 'hdc.css')
+        self.responsive = _read('static', 'hdc', 'css', 'responsive.css')
+
+    def test_button_labels_do_not_wrap(self):
+        rule = re.search(r'(?m)^\.btn \{(?P<body>[^}]*)\}', self.css)
+        self.assertIsNotNone(rule, '.btn base rule missing from hdc.css')
+        body = rule.group('body')
+        self.assertIn('white-space: nowrap', body,
+                      'a button label must stay on one line')
+        self.assertIn('flex-shrink: 0', body,
+                      'a flex row may not squeeze a button below its label')
+        self.assertIn('overflow-wrap: normal', body,
+                      'a button must not break inside a word')
+
+    def test_long_labels_opt_back_into_wrapping(self):
+        self.assertRegex(self.css, r'\.btn-wrap[^{]*\{[^}]*white-space:\s*normal',
+                         '.btn-wrap must be available as the explicit exception')
+
+    def test_shared_expense_empty_state_uses_the_wrap_exception(self):
+        markup = _read('templates', 'hdc', 'shared_expenses', 'ledger.html')
+        self.assertIn('btn-wrap', markup,
+                      'the long empty-state CTA must wrap instead of overflowing')
+
+    def test_topbar_title_keeps_the_full_page_name(self):
+        base = _read('templates', 'hdc', 'shared', 'base.html')
+        self.assertRegex(base, r'<div class="topbar-title" title="\{\{[^"]*page_heading',
+                         'a title that the bar has to ellipsise must still be '
+                         'readable; expose the full page heading as a tooltip')
+
+    def test_dark_theme_maps_bootstrap_table_colours(self):
+        block = re.search(r'\[data-theme="dark"\] \.table \{(?P<body>[^}]*)\}',
+                          self.css)
+        self.assertIsNotNone(block, 'dark theme does not retune .table')
+        body = block.group('body')
+        self.assertIn('--bs-table-bg: transparent', body,
+                      'Bootstrap paints every cell #fff from --bs-table-bg; the '
+                      'ERP dark theme must clear it so the card shows through')
+        self.assertIn('--bs-table-color: var(--text)', body)
+
+    def test_dark_theme_maps_bootstrap_text_tokens(self):
+        block = re.search(r'\[data-theme="dark"\] \{(?P<body>.*?)\n\}',
+                          self.css, re.S)
+        self.assertIsNotNone(block)
+        self.assertIn('--bs-secondary-color: var(--text-muted)', block.group('body'),
+                      'Bootstrap .text-muted must not stay near-black on a '
+                      'dark card')
+
+    def test_desktop_nowrap_is_released_inside_a_card(self):
+        self.assertRegex(
+            self.responsive,
+            r'table\.hdc-rt-stack > tbody > tr > td\.text-nowrap \{\s*'
+            r'white-space: normal !important;',
+            'a card may not inherit the desktop `text-nowrap` utility: it '
+            'keeps a row of action buttons on one line past the card edge')
+
+    def test_an_empty_table_becomes_a_card_on_a_phone(self):
+        self.assertIn('table[data-hdc-rt="empty"]', self.responsive,
+                      'the "No records yet" cell must not keep ten desktop '
+                      'columns on a phone')
+        self.assertRegex(
+            self.responsive,
+            r'table\[data-hdc-rt="empty"\] > thead \{ display: none; \}')
+
+
 class RenderedPageTest(IsolatedAppTest):
     """A real page must actually ship the layer, stamped against staleness."""
 
