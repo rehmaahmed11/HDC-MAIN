@@ -1470,6 +1470,18 @@ tr[data-hdc-void="1"] > td .text-warning {
 .tool-photo-thumb-missing:hover { color: var(--text); }
 .tool-photo-thumb-missing { cursor: default; opacity: 0.65; }
 
+/* A serial piece's own picture, shown next to its marking.  It is small, so
+   the corners are rounder and the dashed "no photo yet" outline is thinner. */
+.tool-photo-thumb-serial {
+    border-radius: 6px;
+}
+
+.tool-photo-thumb-serial.tool-photo-thumb-empty,
+.tool-photo-thumb-serial.tool-photo-thumb-missing {
+    font-size: 0.7rem;
+    border-width: 1px;
+}
+
 /* Keeps the picture and the tool name on one line inside a dense table cell. */
 .tool-photo-cell {
     display: flex;

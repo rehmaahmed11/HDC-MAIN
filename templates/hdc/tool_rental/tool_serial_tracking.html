@@ -5,6 +5,7 @@
 {% block content %}
 {% set tools_active = 'serials' %}
 {% from "shared/_combo_field.html" import combo_select %}
+{% from "tool_rental/_tool_photo.html" import serial_photo_thumb %}
 {% include "tool_rental/_tools_nav.html" %}
 {% include "tool_rental/_scope_note.html" %}
 
@@ -69,13 +70,14 @@
 <div class="card hdc-card mt-3">
     <div class="card-header hdc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
         <span><i class="fas fa-barcode me-2"></i>Individual Serial Pieces</span>
-        <small class="text-muted">One row per serial-numbered piece · View opens its full movement log</small>
+        <small class="text-muted">One row per serial-numbered piece · every piece keeps its own photo · View opens its full movement log</small>
     </div>
     <div class="table-responsive">
         <table class="table hdc-table table-sm mb-0 tool-serial-tracking-table">
             <thead>
                 <tr>
                     <th>Serial Piece</th>
+                    <th>Photo</th>
                     <th>Tool</th>
                     <th>Current Location</th>
                     <th class="text-center">Status</th>
@@ -91,6 +93,13 @@
                     <td>
                         <strong>{{ row.serial_number }}</strong>
                         <small class="d-block text-muted">{{ row.tool_code }}</small>
+                    </td>
+                    <td class="text-center">
+                        {# The picture of this exact piece — not of the tool
+                           type it belongs to. #}
+                        {{ serial_photo_thumb(s, row.serial_number, row.tool_code,
+                                              'Serial piece · ' ~ row.tool_code ~ ' · ' ~ row.category_name,
+                                              size=36, can_edit=can_write_tools) }}
                     </td>
                     <td>
                         {% if row.tool %}<a href="{{ url_for('hdc_tool_rental_tool_position', tool_id=row.tool.id) }}" class="fw-bold text-decoration-none">{{ row.tool_name }}</a>{% else %}{{ row.tool_name }}{% endif %}
@@ -151,7 +160,7 @@
                     </td>
                 </tr>
             {% else %}
-                <tr><td colspan="7" class="text-center text-muted py-4">No serial pieces match these filters.</td></tr>
+                <tr><td colspan="8" class="text-center text-muted py-4">No serial pieces match these filters.</td></tr>
             {% endfor %}
             </tbody>
         </table>
@@ -222,4 +231,12 @@
     </div>
 </div>
 {% endfor %}
+
+{# ---------------------------------------------- tool photo viewer + saver -- #}
+{% set tool_photo_can_edit = can_write_tools %}
+{% include "tool_rental/_tool_photo_dialogs.html" %}
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/pages/tool_photos.js') }}?v={{ hdc_asset_stamp }}"></script>
 {% endblock %}

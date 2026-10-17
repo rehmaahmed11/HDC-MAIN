@@ -4,71 +4,118 @@
    thumbnail inside the inventory table's "Tool" cell, with no way to enlarge
    it and no way to add one to a tool that already existed.  These macros are
    the single place the picture is rendered, so the inventory list, the tools
-   dashboard and a tool's position page all behave the same:
+   dashboard, a tool's position page and the serial list all behave the same:
 
-     {{ tool_photo_thumb(tool, r.name, r.code, meta, size=44, can_edit=can_write_tools) }}
-     {{ tool_photo_button(tool, r.name, r.code, meta, can_edit=can_write_tools) }}
+     {{ tool_photo_thumb(target, r.name, r.code, meta, size=44, can_edit=can_write_tools) }}
+     {{ tool_photo_button(target, r.name, r.code, meta, can_edit=can_write_tools) }}
+
+   `target` is either a **tool type** ("Shovel" as a kind of thing) or one
+   **serial piece** ("Shovel No 3", the third actual shovel).  The macros work
+   out which one they were given and point the dialog at the right save
+   route, so the same button serves both levels:
+
+     tool type   →  POST /hdc/tool-rental/inventory/<tool id>/photo
+     serial piece → POST /hdc/tool-rental/serial/<serial id>/photo
 
    Both are buttons, not links: `pages/tool_photos.js` opens the viewer dialog
    (`data-tool-photo="view"`) or the upload dialog (`data-tool-photo="edit"`).
    Pages that render either macro must also include
    `tool_rental/_tool_photo_dialogs.html` once, plus the script. #}
 
-{% macro photo_data(tool, name='', code='', meta='', can_edit=false) -%}
-data-tool-id="{{ tool.id }}"
-data-photo-src="{{ tool_photo_url(tool) or '' }}"
-data-photo-title="{{ name or tool.name }}{% if code %} · {{ code }}{% endif %}"
+{# What the picture is of, when the caller did not say: the serial marking for
+   a piece, the tool name for a type. #}
+{% macro photo_label(target, name='') -%}
+{%- if name -%}{{ name }}
+{%- elif target.serial_number is defined -%}{{ target.serial_number }}
+{%- else -%}{{ target.name }}
+{%- endif -%}
+{%- endmacro %}
+
+{# The data every photo button carries.  The upload URL decides whether the
+   picture lands on the tool type or on one serial piece. #}
+{% macro photo_data(target, name='', code='', meta='', can_edit=false) -%}
+{%- set serial = target.serial_number is defined -%}
+{%- set upload_url = url_for('hdc_tool_rental_serial_photo', serial_id=target.id) if serial else url_for('hdc_tool_rental_tool_photo', tool_id=target.id) -%}
+{%- set position_url = url_for('hdc_tool_rental_tool_position', tool_id=(target.tool_id if serial else target.id)) -%}
+data-photo-kind="{{ 'serial' if serial else 'tool' }}"
+data-photo-target-id="{{ target.id }}"{% if not serial %} data-tool-id="{{ target.id }}"{% endif %}
+data-photo-src="{{ tool_photo_url(target) or '' }}"
+data-photo-title="{{ photo_label(target, name) }}{% if code %} · {{ code }}{% endif %}"
 data-photo-meta="{{ meta }}"
-data-photo-upload-url="{{ url_for('hdc_tool_rental_tool_photo', tool_id=tool.id) }}"
-data-photo-position-url="{{ url_for('hdc_tool_rental_tool_position', tool_id=tool.id) }}"
+data-photo-upload-url="{{ upload_url }}"
+data-photo-position-url="{{ position_url }}"
 data-photo-can-edit="{{ '1' if can_edit else '0' }}"
 {%- endmacro %}
 
 {# The picture, small, next to the tool name. Clicking it opens the viewer.
    A tool with no photo shows a camera the writer can click to add one — so
    "did my upload work?" is answered by looking at the row. #}
-{% macro tool_photo_thumb(tool, name='', code='', meta='', size=44, can_edit=false) -%}
-{% set src = tool_photo_url(tool) -%}
+{% macro tool_photo_thumb(target, name='', code='', meta='', size=44, can_edit=false) -%}
+{% set src = tool_photo_url(target) -%}
+{% set label = photo_label(target, name) -%}
 {% if src %}
 <button type="button" class="tool-photo-thumb" data-tool-photo="view"
         style="width:{{ size }}px;height:{{ size }}px"
-        title="Show photo — {{ name or tool.name }}"
-        aria-label="Show photo of {{ name or tool.name }}" {{ photo_data(tool, name, code, meta, can_edit) }}><img
-        src="{{ src }}" alt="Photo of {{ name or tool.name }}" loading="lazy"
+        title="Show photo — {{ label }}"
+        aria-label="Show photo of {{ label }}" {{ photo_data(target, name, code, meta, can_edit) }}><img
+        src="{{ src }}" alt="Photo of {{ label }}" loading="lazy"
         width="{{ size }}" height="{{ size }}" data-tool-photo-img></button>
 {% elif can_edit %}
 <button type="button" class="tool-photo-thumb tool-photo-thumb-empty" data-tool-photo="edit"
         style="width:{{ size }}px;height:{{ size }}px"
-        title="No photo yet — add one for {{ name or tool.name }}"
-        aria-label="Add a photo of {{ name or tool.name }}" {{ photo_data(tool, name, code, meta, can_edit) }}><i
+        title="No photo yet — add one for {{ label }}"
+        aria-label="Add a photo of {{ label }}" {{ photo_data(target, name, code, meta, can_edit) }}><i
         class="fas fa-camera" aria-hidden="true"></i></button>
 {% endif %}
 {%- endmacro %}
 
 {# The actions-column button: "Show photo" when there is one, "Add photo"
    when the reader is allowed to save one. #}
-{% macro tool_photo_button(tool, name='', code='', meta='', can_edit=false) -%}
-{% if tool_photo_url(tool) %}
+{% macro tool_photo_button(target, name='', code='', meta='', can_edit=false) -%}
+{% set label = photo_label(target, name) -%}
+{% if tool_photo_url(target) %}
 <button type="button" class="btn btn-sm btn-outline-info" data-tool-photo="view"
-        title="Show photo" aria-label="Show photo of {{ name or tool.name }}"
-    {{ photo_data(tool, name, code, meta, can_edit) }}><i class="fas fa-image" aria-hidden="true"></i>
+        title="Show photo" aria-label="Show photo of {{ label }}"
+    {{ photo_data(target, name, code, meta, can_edit) }}><i class="fas fa-image" aria-hidden="true"></i>
 </button>
 {% elif can_edit %}
 <button type="button" class="btn btn-sm btn-outline-secondary" data-tool-photo="edit"
-        title="Add photo" aria-label="Add a photo of {{ name or tool.name }}"
-    {{ photo_data(tool, name, code, meta, can_edit) }}><i class="fas fa-camera" aria-hidden="true"></i>
+        title="Add photo" aria-label="Add a photo of {{ label }}"
+    {{ photo_data(target, name, code, meta, can_edit) }}><i class="fas fa-camera" aria-hidden="true"></i>
 </button>
 {% endif %}
 {%- endmacro %}
 
 {# Keep list rows compact: the existing tool code is the photo trigger. #}
-{% macro tool_photo_code(tool, name='', code='', meta='', can_edit=false) -%}
-{% if tool_photo_url(tool) %}
+{% macro tool_photo_code(target, name='', code='', meta='', can_edit=false) -%}
+{% if tool_photo_url(target) %}
 <button type="button" class="badge bg-secondary border-0 text-decoration-underline"
-        data-tool-photo="view" title="Show photo — {{ name or tool.name }}"
-        aria-label="Show photo of {{ name or tool.name }} ({{ code }})"
-        {{ photo_data(tool, name, code, meta, can_edit) }}>{{ code }}</button>
+        data-tool-photo="view" title="Show photo — {{ photo_label(target, name) }}"
+        aria-label="Show photo of {{ photo_label(target, name) }} ({{ code }})"
+        {{ photo_data(target, name, code, meta, can_edit) }}>{{ code }}</button>
 {% else %}
 <span class="badge bg-secondary">{{ code }}</span>
+{% endif %}
+{%- endmacro %}
+
+{# One serial piece next to its marking: the piece's own picture, so five
+   shovels of the same type can each be told apart by the eye.  A piece
+   without a picture shows a camera (writers only) so it can be added. #}
+{% macro serial_photo_thumb(target, name='', code='', meta='', size=26, can_edit=false) -%}
+{% set src = tool_photo_url(target) -%}
+{% set label = photo_label(target, name) -%}
+{% if src %}
+<button type="button" class="tool-photo-thumb tool-photo-thumb-serial" data-tool-photo="view"
+        style="width:{{ size }}px;height:{{ size }}px"
+        title="Show photo — {{ label }}"
+        aria-label="Show photo of {{ label }}" {{ photo_data(target, name, code, meta, can_edit) }}><img
+        src="{{ src }}" alt="Photo of {{ label }}" loading="lazy"
+        width="{{ size }}" height="{{ size }}" data-tool-photo-img></button>
+{% elif can_edit %}
+<button type="button" class="tool-photo-thumb tool-photo-thumb-empty tool-photo-thumb-serial" data-tool-photo="edit"
+        style="width:{{ size }}px;height:{{ size }}px"
+        title="No photo yet — add one for {{ label }}"
+        aria-label="Add a photo of {{ label }}" {{ photo_data(target, name, code, meta, can_edit) }}><i
+        class="fas fa-camera" aria-hidden="true"></i></button>
 {% endif %}
 {%- endmacro %}

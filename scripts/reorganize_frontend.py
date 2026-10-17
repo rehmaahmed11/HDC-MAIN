@@ -112,6 +112,9 @@ DOMAIN_OF = {
                     "tool_reports.html", "_tools_nav.html", "_scope_note.html",
                     "tool_serial_tracking.html", "tool_serials_create.html",
                     "_stock_forms.html",
+                    # Tools > photos — the shared photo macros (tool type and
+                    # serial piece) and the one viewer / uploader pair
+                    "_tool_photo.html", "_tool_photo_dialogs.html",
                     # Tools > Audit — the count overview, one sheet, and the
                     # line partial shared by the sheet and the zero-count preview
                     "tool_audit.html", "tool_audit_sheet.html",

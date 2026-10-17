@@ -63,7 +63,8 @@ from hdc.services.tool_audit import (
     posted_adjustment_lines, reopen_audit, save_counts, start_audit, void_audit,
 )
 from hdc.services.tool_photos import (
-    discard_tool_photo, remove_tool_photo, save_tool_photo, tool_photo_path,
+    discard_tool_photo, photo_progress, remove_photo, remove_tool_photo,
+    save_photo, save_tool_photo, stored_photo_names, tool_photo_path,
 )
 from hdc.services.tool_tracking import (
     LOC_CUSTOMER, LOC_OWN_PROJECT, LOC_STORE, WAREHOUSE_LABEL,
@@ -687,6 +688,11 @@ def register(app):
             return redirect(url_for('hdc_tool_rental_dashboard'))
         row = position['row']
         tool = row['tool']
+        # Each serial piece can carry its own picture — the shovel on the rack,
+        # not the idea of a shovel.  The count tells the storekeeper how many
+        # pieces still have no picture.
+        piece_photos_done, piece_photos_total = photo_progress(
+            tool.active_serials, app=app)
         # Read-only: serial markings are maintained by the stock write paths.
         return render_template('tool_rental/tool_position.html',
             row=row,
@@ -694,6 +700,8 @@ def register(app):
             serials=tool.active_serials,
             in_store_serials=tool.in_store_serials,
             out_serials=tool.out_serials,
+            piece_photos_done=piece_photos_done,
+            piece_photos_total=piece_photos_total,
             recon={
                 'owned': row['owned_qty'], 'in_store': row['in_store_qty'],
                 'own_project': row['own_project_qty'], 'customer': row['customer_qty'],
@@ -913,6 +921,12 @@ def register(app):
                             serial_hint = f" [{serial_list[0].serial_number} .. {serial_list[-1].serial_number}]"
                     flash(f'Tool {tool.name} ({code}) added with {total_qty:g} {unit} '
                           f'opening stock ({purchase.purchase_code}){serial_hint}.', 'success')
+                    # The type has one picture; every piece gets its own on
+                    # the position page, so say where that happens.
+                    if serial_list:
+                        flash(f'Add a photo for each of the {len(serial_list)} pieces '
+                              f'(each marking carries its own picture) on the tool\'s '
+                              f'position page.', 'info')
                 else:
                     flash(f'Tool {tool.name} ({code}) added with 0 qty — '
                           f'use "Add Stock" when it arrives.', 'success')
@@ -949,6 +963,14 @@ def register(app):
         # Serial page has an explicit "Rebuild missing markings" action.
         serial_summary = get_all_tool_serials_summary()
         serial_lookup = {s['tool_id']: s for s in serial_summary}
+        # How many of each tool's pieces carry their own picture — the row
+        # shows "3/5 photographed" so the storekeeper knows what is still
+        # missing.  One directory read answers it for the whole page.
+        photo_names = stored_photo_names(app)
+        piece_photos = {}
+        for entry in serial_summary:
+            piece_photos[int(entry['tool_id'])] = photo_progress(
+                entry['serials'], names=photo_names)
         in_store_serials_by_tool = {}
         for s in ToolSerial.query.filter_by(is_in_store=True).all():
             if getattr(s, 'is_scrapped', False) or s.status == 'scrapped':
@@ -973,6 +995,7 @@ def register(app):
             focus=(request.args.get('focus') or '').strip(),
             serial_lookup=serial_lookup,
             in_store_serials_by_tool=in_store_serials_by_tool,
+            piece_photos=piece_photos,
             can_write_tools=_rental_form_access_allowed(),
         )
 
@@ -1083,6 +1106,34 @@ def register(app):
         else:
             ok, message = save_tool_photo(tool, request.files.get('tool_image'),
                                           app=app, commit=True)
+        flash(message, 'success' if ok else 'danger')
+        return redirect(target)
+
+    # ------------------ SERIAL PHOTO: ONE PICTURE PER PIECE ------------------
+    @app.route('/hdc/tool-rental/serial/<int:serial_id>/photo', methods=['POST'])
+    @login_required
+    @_money_write_required()
+    def hdc_tool_rental_serial_photo(serial_id):
+        """Save or remove the photo of one *serial piece*.
+
+        A tool type is a kind of thing; a serial piece is the actual shovel
+        in the store.  Five shovels of the same type are five different
+        objects on site, so each of them keeps its own picture: this route
+        stores one file for one marking (``Shovel No 3``) and leaves the tool
+        type's picture alone.
+
+        Same rules as the tool-type photo route: the write gate is the same,
+        the answer goes back to the page that opened the dialog (``next``) and
+        only ever to a tools page (see :func:`_tool_photo_redirect_target`).
+        """
+        serial = ToolSerial.query.get_or_404(serial_id)
+        action = (request.form.get('action') or 'upload').strip().lower()
+        target = _tool_photo_redirect_target(request.form.get('next'))
+        if action == 'remove':
+            ok, message = remove_photo(serial, app=app, commit=True)
+        else:
+            ok, message = save_photo(serial, request.files.get('tool_image'),
+                                     app=app, commit=True)
         flash(message, 'success' if ok else 'danger')
         return redirect(target)
 
@@ -4722,9 +4773,13 @@ def register(app):
 
         # GET: show the management page without writing anything
         serials = tool.active_serials
+        piece_photos_done, piece_photos_total = photo_progress(serials, app=app)
         return render_template('tool_rental/tool_serials_create.html',
             tool=tool,
             serials=serials,
             existing_serials=len(serials),
             today=_pkt_today().isoformat(),
+            piece_photos_done=piece_photos_done,
+            piece_photos_total=piece_photos_total,
+            can_write_tools=_rental_form_access_allowed(),
         )
