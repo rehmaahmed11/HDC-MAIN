@@ -371,6 +371,9 @@ def rental_picker_rows(eligible_for, limit=RENTAL_PICKER_LIMIT):
             'amount': f'{amount_due:.2f}',
             'tools': f'{tools_out:.2f}',
             'holder': holder,
+            'holder-key': (f'project:{rental.project_id}'
+                           if rental.renter_type == 'internal' and rental.project_id
+                           else 'customer:' + holder.strip().casefold()),
             'renter_type': rental.renter_type or '',
             'billing-type': rental.billing_type or '',
         }))

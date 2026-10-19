@@ -302,6 +302,20 @@ class TxnFormTestCase(unittest.TestCase):
         return self._post(f'/hdc/tool-rental/{rental.id}/return', data, follow=True)
 
     # ------------------------------------------------------------ the page
+    def test_return_starts_with_holder_before_issue_and_tools(self):
+        response = self.client.get('/hdc/tool-rental/transaction')
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        self.assertIn('Return from — client or project / site', html)
+        self.assertLess(html.index('id="returnHolderSelect"'), html.index('id="returnRentalSelect"'))
+        self.assertLess(html.index('id="returnRentalSelect"'), html.index('id="returnItemRows"'))
+        self.assertIn('return tools from one issue at a time', html)
+        with open(os.path.join(os.path.dirname(__file__), '..', 'static', 'hdc', 'js', 'pages', 'tool_txn.js')) as source:
+            script = source.read()
+        self.assertIn('option.dataset.holderKey === holder.value', script)
+        self.assertIn('return-tool-check', script)
+        self.assertIn("toolCheck.checked ? String(item.qty_pending) : ''", script)
+
     def test_page_offers_three_groups_and_every_transaction(self):
         response = self.client.get('/hdc/tool-rental/transaction')
         self.assertEqual(response.status_code, 200)

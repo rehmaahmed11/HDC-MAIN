@@ -428,9 +428,20 @@
                 <input type="hidden" name="return_date" id="returnDateHidden" value="{{ today }}">
                 <div class="row g-3">
                     <div class="col-md-8">
-                        {{ combo_select('rental_id', 'returnRentalSelect', rental_picker_options[tools_out],
-                                        label='Original issue / rental reference',
-                                        placeholder='Search rental code or holder') }}
+                        <label class="form-label" for="returnHolderSelect">Return from — client or project / site</label>
+                        <select id="returnHolderSelect" class="form-select">
+                            <option value="">Choose who is returning the tools</option>
+                        </select>
+                        <div class="mt-2 d-none" id="returnReferenceField">
+                            <label class="form-label" for="returnRentalSelect">Original issue / rental reference</label>
+                            <select name="rental_id" id="returnRentalSelect" class="form-select">
+                                <option value="">Choose an issue / rental</option>
+                                {% for value, label, attrs in rental_picker_options[tools_out] %}
+                                <option value="{{ value }}" {% for key, val in attrs.items() %}data-{{ key }}="{{ val }}" {% endfor %}>{{ label }}</option>
+                                {% endfor %}
+                            </select>
+                            <small class="text-muted">If this holder has several issues, return tools from one issue at a time.</small>
+                        </div>
                         <small class="text-muted d-block" id="returnRentalInfo"></small>
                     </div>
                     <div class="col-md-4">
@@ -440,7 +451,7 @@
                     </div>
                 </div>
                 <div id="returnItemRows" class="mt-3">
-                    <div class="small text-muted">Choose a rental to see the tools still out.</div>
+                    <div class="small text-muted">Choose a client or project / site first, then tick the tools to return.</div>
                 </div>
             </div>
 
