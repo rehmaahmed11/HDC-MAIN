@@ -55,6 +55,7 @@ import hmac
 import json
 import os
 import subprocess
+import sys
 import time
 
 VAR_WWW = "/var/www"
@@ -263,12 +264,40 @@ def _handle_get(start_response):
 # --------------------------------------------------------------------------
 # Deploy (POST from GitHub)
 # --------------------------------------------------------------------------
+def _pre_deploy_backup():
+    """Snapshot the database before the code underneath it changes.
+
+    Opt-in (``HDC_PRE_DEPLOY_BACKUP=1``, set for you by the installer) so a
+    mocked or test deploy can never accidentally touch a real database, and
+    best-effort: a backup problem is reported into the deploy log and must
+    never stop the deploy itself.
+    """
+    if os.environ.get("HDC_PRE_DEPLOY_BACKUP", "").strip().lower() not in (
+            "1", "true", "yes", "on"):
+        return None
+    try:
+        if REPO_DIR not in sys.path:
+            sys.path.insert(0, REPO_DIR)
+        from hdc.services.backups import _create_preflight_backup
+        info = _create_preflight_backup("deploy")
+    except Exception as exc:
+        _log(f"WARN: pre-deploy backup skipped: {exc}")
+        return None
+    if info.get("ok"):
+        _log(f"pre-deploy backup: {info['name']}")
+    else:
+        _log(f"WARN: pre-deploy backup failed: {info.get('error')}")
+    return info
+
+
 def _deploy():
     """Run the pull + reload. Returns (http_status, body_text)."""
     if not os.path.isdir(REPO_DIR):
         return "500 Internal Server Error", f"repo dir missing: {REPO_DIR}"
     if not _is_git_checkout():
         return "500 Internal Server Error", f"{REPO_DIR} is not a git checkout"
+
+    _pre_deploy_backup()
 
     try:
         _run_git("fetch", "--quiet", "origin", BRANCH)

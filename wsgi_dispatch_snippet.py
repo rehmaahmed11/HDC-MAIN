@@ -24,6 +24,11 @@ import os
 import sys
 import traceback
 
+# Take a database snapshot before every deploy (the installer copies this line
+# into your WSGI file).  HDC_PRE_DEPLOY_BACKUP is what arms it; without it a
+# deploy pulls code and leaves the data untouched.
+os.environ.setdefault("HDC_PRE_DEPLOY_BACKUP", "1")
+
 # --- repo detection -------------------------------------------------------
 def _username():
     """Username from this WSGI file's own name, else from the environment."""

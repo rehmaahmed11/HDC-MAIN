@@ -50,7 +50,7 @@ Most operational cash events create linked unified-Accounts entries. A source re
 
 - Preserve traceability. Where the screen offers **Void** with a reason, use the approved void-and-re-enter procedure rather than silently editing history or creating a second entry. Confirm the void also reverses its linked Accounts posting.
 - Some records have Delete controls or administrator-only repair tools. Do not use them to correct live financial history without the supervisor/administrator.
-- Settings includes backup/restore, maintenance/backfill, and permanent-wipe operations. **Never use restore, backfill, or wipe as an operator test, and never experiment with them against live data.**
+- Settings includes backup/restore, maintenance/backfill, and permanent-wipe operations. **Never use restore, backfill, or wipe as an operator test, and never experiment with them against live data.** Restore and wipe now save their own safety backup first (`hdc_preflight_…`), which is a recovery net and not permission to experiment.
 - Do not lock a production cash day while testing. A cash-day lock carries the counted balances forward and rejects back-dated entries. A variance above PKR 5,000 requires a written reason and explicit confirmation; investigate it before approval.
 
 ## 4. Application workflow chart
