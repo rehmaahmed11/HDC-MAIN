@@ -3,12 +3,55 @@
 {% block page_heading %}Settings{% endblock %}
 
 {% block content %}
+{% if backup_health %}
+<div class="row g-3 mt-1">
+    <div class="col-12">
+        <div class="card hdc-card">
+            <div class="card-header hdc-card-header"><i class="fas fa-shield-halved me-2"></i>Backup status</div>
+            <div class="card-body py-2">
+                <div class="d-flex flex-wrap gap-3 align-items-center">
+                    <span class="small">
+                        <strong>{{ backup_health.count }}</strong> saved backup(s) &middot;
+                        {{ "{:,.1f}".format((backup_health.total_bytes or 0) / 1048576.0) }} MB total
+                    </span>
+                    {% if backup_health.newest %}
+                    <span class="small">
+                        Newest: <strong>{{ backup_health.newest.strftime('%Y-%m-%d %H:%M') }} PKT</strong>
+                        &middot; {{ backup_health.age_hours }} h ago
+                    </span>
+                    {% endif %}
+                    <span class="badge {{ 'bg-danger' if backup_health.stale else 'bg-success' }}">
+                        {{ 'Needs attention' if backup_health.stale else 'Up to date' }}
+                    </span>
+                </div>
+                <div class="small text-muted mt-1">
+                    Backups folder: <code>{{ backup_health.backup_dir }}</code>
+                    {% if backup_health.disk_free_bytes %}
+                    &middot; free space {{ "{:,.0f}".format(backup_health.disk_free_bytes / 1048576.0) }} MB
+                    {% endif %}
+                </div>
+                {% for warning in backup_health.warnings %}
+                <div class="alert alert-warning py-1 px-2 mt-2 mb-0 small">
+                    <i class="fas fa-triangle-exclamation me-1"></i>{{ warning }}
+                </div>
+                {% endfor %}
+                <div class="small text-muted mt-2 mb-0">
+                    Backups live on this server. Keep at least one copy somewhere else &mdash;
+                    download one regularly, or run
+                    <code>python3 scripts/hdc_backup.py create</code> from a scheduled task and
+                    push the folder off-site.
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
 <div class="row g-3 mt-1">
     <div class="col-lg-5">
         <div class="card hdc-card">
             <div class="card-header hdc-card-header"><i class="fas fa-database me-2"></i>Backup</div>
             <div class="card-body">
-                <p class="text-muted small mb-3">Create a full backup ZIP of current system data (includes <strong>hdc_erp.db</strong> and <strong>hdc_data_export.xlsx</strong>).</p>
+                <p class="text-muted small mb-3">Create a full backup ZIP of current system data (includes <strong>hdc_erp.db</strong>, <strong>hdc_data_export.xlsx</strong>, tool photos and stage drawings).</p>
                 <form method="POST" data-hdc-dialog>
                     <input type="hidden" name="action" value="create_backup">
                     <button type="submit" class="btn btn-mint w-100">
@@ -28,7 +71,7 @@
                         </button>
                     </div>
                     <div class="col-12">
-                        <div class="small text-muted">Keeps latest N backups and removes older files + temp artifacts.</div>
+                        <div class="small text-muted">Keeps at least the latest N backups, then one per day (7), week (4) and month (6), and removes temp artifacts.</div>
                     </div>
                 </form>
             </div>
@@ -129,6 +172,12 @@
                                 <a href="{{ url_for('hdc_settings_backup_download', filename=b.name) }}" class="btn btn-sm btn-outline-secondary">
                                     Download
                                 </a>
+                                <form method="POST" class="d-inline">
+                                    <input type="hidden" name="action" value="verify_backup">
+                                    <input type="hidden" name="backup_name" value="{{ b.name }}">
+                                    <button type="submit" class="btn btn-sm btn-outline-info ms-1"
+                                            title="Check this archive can actually be restored">Verify</button>
+                                </form>
                                 <form method="POST" class="d-inline" onsubmit="return confirm('Restore this backup and replace current data?');">
                                     <input type="hidden" name="action" value="restore_saved">
                                     <input type="hidden" name="backup_name" value="{{ b.name }}">

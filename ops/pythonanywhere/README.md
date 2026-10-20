@@ -121,3 +121,22 @@ python3 tests/test_pa_setup.py       # installer CLI + the WSGI file it writes
 throwaway `/var/www`, then *executes* the generated WSGI file to prove
 `/deploy` reaches the hook, everything else reaches the app, and a push →
 signed webhook → fast-forward → reload cycle works end to end.
+
+## Backups (do this the day you deploy)
+
+The installer arms `HDC_PRE_DEPLOY_BACKUP=1` in the WSGI file, so every deploy
+snapshots the database before the code underneath it changes. That covers
+deploys only — you still want a daily one:
+
+1. **Tasks → Create a scheduled task** (paid plans; free accounts created
+   on/after 2026-01-15 no longer have scheduled tasks):
+
+   ```
+   python3 /home/<you>/HDC-MAIN/scripts/hdc_backup.py create --prune
+   ```
+
+2. **Get a copy off the server.** Backups land beside the database, so host
+   loss takes both. See [`BACKUPS.md`](../../BACKUPS.md) §5.
+
+3. **Check it answered.** `python3 scripts/hdc_backup.py status` exits 1 and
+   prints `NEEDS ATTENTION` when the newest backup is stale or missing.

@@ -8,7 +8,6 @@ import shutil
 import sqlite3
 import tempfile
 from pathlib import Path
-import zipfile
 
 from sqlalchemy import text
 
@@ -17,6 +16,13 @@ from hdc.core.bootstrap import _bootstrap_hdc, _ensure_bootstrap_once
 from hdc.extensions import db
 from hdc.models.workforce import TimeEntry
 from hdc.services.audit import _audit_paused
+from hdc.services.backups import (
+    BACKUP_DB_ARCNAME,
+    BACKUP_ESTIMATION_ARCNAME,
+    _restore_backup_files,
+    _safe_extract_zip,
+    _verify_extracted_backup,
+)
 from hdc.services.subcontract import _reconcile_subcontract_links
 from hdc.services.timekeeping import _reconcile_worker_time_entries, _repair_worker_work_ledger_links
 
@@ -84,33 +90,32 @@ def _restore_from_paths(db_path, estimation_path=None):
 
 
 def _restore_from_backup_zip(zip_path):
+    """Replace the live database with an archive, then merge its operator files.
+
+    Order matters: the archive is unpacked into a scratch directory, verified
+    there, and only then allowed anywhere near live data.  Photos and drawings
+    are merged afterwards — they are never a reason to roll back a database
+    that has already been swapped successfully.
+    """
     tmpdir = tempfile.mkdtemp(prefix='restore-extract-', dir=get_runtime_settings().instance_dir)
     try:
-        with zipfile.ZipFile(zip_path, 'r') as zf:
-            for member in zf.infolist():
-                mname = (member.filename or '').replace('\\', '/')
-                if not mname or mname.startswith('/') or '..' in mname.split('/'):
-                    raise ValueError(f'Unsafe backup member path: {member.filename}')
-                dest = os.path.abspath(os.path.join(tmpdir, mname))
-                if not (dest == os.path.abspath(tmpdir) or dest.startswith(os.path.abspath(tmpdir) + os.sep)):
-                    raise ValueError(f'Unsafe extraction target: {member.filename}')
-            zf.extractall(tmpdir)
-        db_file = os.path.join(tmpdir, 'hdc_erp.db')
+        _safe_extract_zip(zip_path, tmpdir)
+        db_file = os.path.join(tmpdir, BACKUP_DB_ARCNAME)
         if not os.path.exists(db_file):
             raise ValueError('Backup ZIP must contain hdc_erp.db')
-        try:
-            con = sqlite3.connect(db_file)
-            cur = con.cursor()
-            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='hdc_user'")
-            has_user = cur.fetchone() is not None
-            cur.close()
-            con.close()
-        except Exception as ex:
-            raise ValueError(f'Backup DB verification failed: {ex}')
-        if not has_user:
-            raise ValueError('Invalid backup: hdc_user table not found. This backup appears empty or corrupted.')
-        est_file = os.path.join(tmpdir, 'project_estimations.json')
+        # Manifest checksums (when the archive has one) plus the integrity,
+        # required-table and foreign-key gate — all before the live swap.
+        report = _verify_extracted_backup(tmpdir)
+        if not report['ok']:
+            raise ValueError('Backup verification failed: ' + '; '.join(report['errors']))
+        est_file = os.path.join(tmpdir, BACKUP_ESTIMATION_ARCNAME)
         _restore_from_paths(db_file, est_file if os.path.exists(est_file) else None)
+        try:
+            return _restore_backup_files(tmpdir)
+        except Exception as exc:                # pragma: no cover - defensive
+            # The database is already restored; losing a photo is not worth
+            # undoing it, so report and carry on.
+            return {'copied': 0, 'dirs': [], 'errors': [f'file restore skipped: {exc}']}
     finally:
         try:
             shutil.rmtree(tmpdir, ignore_errors=True)
