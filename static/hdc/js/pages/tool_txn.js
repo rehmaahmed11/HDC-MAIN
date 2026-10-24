@@ -1148,22 +1148,24 @@
 
             var piecesCell = row.querySelector('.return-pieces');
             var rentalId = picker ? picker.value : '';
+            // Always try to fetch and show serial numbers; fall back to quantity input if none.
             fetch('/hdc/api/tool-rental/serials/out-of-store?tool_id=' + encodeURIComponent(item.tool_id) +
                   '&rental_id=' + encodeURIComponent(rentalId),
                   { credentials: 'same-origin' })
                 .then(function (response) { return response.ok ? response.json() : null; })
                 .then(function (data) {
-                    if (!data || !data.tools) return;
                     var serials = [];
-                    (data.tools || []).forEach(function (tool) {
-                        (tool.serials || []).forEach(function (serial) {
-                            if (String(tool.tool_id) === String(item.tool_id) &&
-                                String(serial.rental_item_id) === String(item.rental_item_id)) {
-                                serials.push(serial);
-                            }
+                    if (data && data.tools) {
+                        (data.tools || []).forEach(function (tool) {
+                            (tool.serials || []).forEach(function (serial) {
+                                if (String(tool.tool_id) === String(item.tool_id) &&
+                                    String(serial.rental_item_id) === String(item.rental_item_id)) {
+                                    serials.push(serial);
+                                }
+                            });
                         });
-                    });
-                    if (!serials.length) return;
+                    }
+                    // Always build a piece picker so the UI has checkboxes for serials.
                     var piece = buildPiecePicker(serials.map(function (serial) {
                         return { id: serial.serial_id, serial_number: serial.serial_number,
                                  condition: serial.condition || 'good' };
@@ -1172,7 +1174,9 @@
                         label: 'Pieces of ' + item.tool_name + ' coming back',
                         onChange: function () { syncReturnPieceQty(row); }
                     });
+                    piecesCell.innerHTML = ''; // clear any previous content
                     if (piece) piecesCell.appendChild(piece);
+                    else piecesCell.innerHTML = '<span class="small text-muted">No serial markings for this tool — use quantity.</span>';
                 })
                 .catch(function () { /* the quantity path still works */ });
             tbody.appendChild(row);
