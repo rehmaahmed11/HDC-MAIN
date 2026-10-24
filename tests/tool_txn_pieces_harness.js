@@ -343,14 +343,33 @@ const results = {};
     'a quantity-only transfer posts no piece list at all');
 
   // ── the return sheet ────────────────────────────────────────────────────
+  // The sheet starts from *who is returning*: no issue picker sits between the
+  // holder and the tools, and every issue the holder still holds is listed on
+  // its own row, with that issue named on the row.
   await clearForm();
   selectValue(document.getElementById('txnType'), 'partial_return');
-  const rental = (context.rentals || [])
-    .find((row) => String(row.id) === String(context.returnRentalId)) || context.rentals[0];
-  selectValue(document.getElementById('returnRentalSelect'), String(rental.id));
-  await flush(); await flush(); await flush();
+  const returnHolder = document.getElementById('returnHolderSelect');
+  ok(returnHolder, 'the return form asks who is returning');
+  ok(!document.getElementById('returnRentalSelect'),
+    'no issue picker sits between the holder and their tools');
+  equal(Array.from(returnHolder.options).map((option) => option.value).indexOf(context.returnHolder) > -1,
+    true, 'the holder that still holds tools is offered');
+  selectValue(returnHolder, context.returnHolder);
+  await flush();
 
-  const returnRow = document.querySelector('#returnItemRows .tool-txn-line');
+  const returnRows = Array.from(document.querySelectorAll('#returnItemRows .tool-txn-line'));
+  ok(returnRows.length, 'choosing the holder lists the tools still out with it');
+  equal(returnRows.length, context.returnRowCount,
+    'every tool line the holder still holds is on the sheet');
+  equal(returnRows.map((row) => row.querySelector('.return-rental-id').value)
+    .indexOf(String(context.returnRentalId)) > -1,
+    true, 'each row carries the issue it belongs to');
+  equal(returnRows[0].querySelector('td:nth-child(3)').textContent.indexOf(context.returnRentalCode) > -1,
+    true, 'the issue is named on the row, under the tool');
+  equal(Array.from(document.querySelectorAll('#returnItemRows thead th')).map((th) => th.textContent.trim()).join('|'),
+    'Select|#|Tool|Issued|Already back|Still out|Returning now|Condition|Exact pieces',
+    'the sheet is exactly the columns the operator asked for');
+  const returnRow = returnRows.find((row) => row.querySelector('strong').textContent === context.returnTool) || returnRows[0];
   ok(returnRow, 'the return sheet lists the tools still out');
   const returnCell = returnRow.querySelector('.return-pieces');
   const returnPieces = pieces(returnCell);
@@ -368,6 +387,8 @@ const results = {};
     [tickedPieces(returnCell).join(',')],
     'the ticked pieces post under return_serial_ids_<item>[]');
   equal(results.returns.fields['qty_returned[]'], ['2'], 'the returning quantity posts with them');
+  equal(results.returns.fields['return_rental_id[]'], [String(context.returnRentalId)],
+    'the row posts the issue it belongs to, so one submission can settle several');
 
   // ── nothing left to ctrl-click ──────────────────────────────────────────
   equal(document.querySelectorAll('#toolTxnForm select[multiple]').length, 0,

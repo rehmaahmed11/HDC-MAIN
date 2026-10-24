@@ -179,10 +179,11 @@ PANELS = (PANEL_DESTINATION, PANEL_LINES, PANEL_TERMS, PANEL_RENTOUT_SOURCE,
 
 #: Which rental combo a transaction picks from.  The page finds the picker by
 #: its ``data-rental-picker`` attribute, so the script never names a DOM id.
-PICKER_RETURN = 'return'
+#: Returns are not here: a return starts from *who is returning* and brings
+#: back whatever that holder still has out, across all of its open issues.
 PICKER_PAYMENT = 'payment'
 PICKER_ADJUSTMENT = 'adjustment'
-PICKERS = (PICKER_RETURN, PICKER_PAYMENT, PICKER_ADJUSTMENT)
+PICKERS = (PICKER_PAYMENT, PICKER_ADJUSTMENT)
 
 #: The field checks the page script runs before it lets a transaction post.
 #: Each name is one function in the script's ``CHECKS`` table; a transaction
@@ -191,6 +192,7 @@ PICKERS = (PICKER_RETURN, PICKER_PAYMENT, PICKER_ADJUSTMENT)
 CHECK_CUSTOMER = 'customer'                    # customer name chosen / typed
 CHECK_PROJECT = 'project'                      # own site / project chosen
 CHECK_RENTAL = 'rental'                        # the rental picker is filled
+CHECK_RETURN_HOLDER = 'return_holder'          # the holder whose tools come back
 CHECK_LINES = 'lines'                          # store lines added and valid
 CHECK_TRANSFER = 'transfer'                    # holders ticked, qty to move
 CHECK_RETURN_ITEMS = 'return_items'            # qty coming back on a return
@@ -199,8 +201,8 @@ CHECK_ADJUSTMENT = 'adjustment'                # amount to write off
 CHECK_DAMAGE = 'damage'                        # piece(s) to write off
 CHECK_MAINTENANCE_SEND = 'maintenance_send'    # piece(s) to send to the shop
 CHECK_MAINTENANCE_RETURN = 'maintenance_return'  # piece(s) coming back
-CHECKS = (CHECK_CUSTOMER, CHECK_PROJECT, CHECK_RENTAL, CHECK_LINES,
-          CHECK_TRANSFER, CHECK_RETURN_ITEMS, CHECK_PAYMENT,
+CHECKS = (CHECK_CUSTOMER, CHECK_PROJECT, CHECK_RENTAL, CHECK_RETURN_HOLDER,
+          CHECK_LINES, CHECK_TRANSFER, CHECK_RETURN_ITEMS, CHECK_PAYMENT,
           CHECK_ADJUSTMENT, CHECK_DAMAGE, CHECK_MAINTENANCE_SEND,
           CHECK_MAINTENANCE_RETURN)
 
@@ -340,12 +342,10 @@ TXN_GROUPS = (
                 'label': 'Partial Return',
                 'icon': 'fa-rotate-left',
                 'kind': KIND_RETURN,
-                'endpoint': 'hdc_tool_rental_return',
-                'picker': PICKER_RETURN,
-                'eligible_for': ELIGIBLE_PENDING_TOOLS,
+                'endpoint': 'hdc_tool_txn_return',
                 'return_type': 'partial',
                 'panels': (PANEL_RETURN, PANEL_SETTLEMENT),
-                'checks': (CHECK_RENTAL, CHECK_RETURN_ITEMS),
+                'checks': (CHECK_RETURN_HOLDER, CHECK_RETURN_ITEMS),
                 'submit_label': 'Record Partial Return',
                 'help': 'Bring back only the quantities that actually came back.',
                 'confirm': 'Record this partial return and settle what is being paid?',
@@ -355,12 +355,13 @@ TXN_GROUPS = (
                 'label': 'Full Return',
                 'icon': 'fa-circle-check',
                 'kind': KIND_RETURN,
-                'endpoint': 'hdc_tool_rental_return',
-                'picker': PICKER_RETURN,
-                'eligible_for': ELIGIBLE_PENDING_TOOLS,
+                'endpoint': 'hdc_tool_txn_return',
                 'return_type': 'full',
                 'panels': (PANEL_RETURN, PANEL_SETTLEMENT),
-                'checks': (CHECK_RENTAL,),
+                # A full return still has to post *which* rows are coming back:
+                # the sheet spans every issue the holder has, so "everything"
+                # means every row on the sheet, not every line of one rental.
+                'checks': (CHECK_RETURN_HOLDER, CHECK_RETURN_ITEMS),
                 'submit_label': 'Record Full Return',
                 'submit_class': 'btn-success',
                 'help': 'Close the physical issue: every piece still out comes back.',
@@ -371,12 +372,10 @@ TXN_GROUPS = (
                 'label': 'Return to Store (no payment)',
                 'icon': 'fa-warehouse',
                 'kind': KIND_RETURN,
-                'endpoint': 'hdc_tool_rental_return',
-                'picker': PICKER_RETURN,
-                'eligible_for': ELIGIBLE_PENDING_TOOLS,
+                'endpoint': 'hdc_tool_txn_return',
                 'return_type': 'partial',
                 'panels': (PANEL_RETURN,),
-                'checks': (CHECK_RENTAL, CHECK_RETURN_ITEMS),
+                'checks': (CHECK_RETURN_HOLDER, CHECK_RETURN_ITEMS),
                 'submit_label': 'Return to Store',
                 'submit_class': 'btn-secondary',
                 'help': 'Put chosen pieces back in the warehouse without collecting rent now.',

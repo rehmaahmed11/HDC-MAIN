@@ -131,14 +131,30 @@ class TxnRegistryTests(unittest.TestCase):
             self.assertTrue(entry['icon'])
 
     def test_rental_bound_types_pick_from_rentals_and_nothing_else_does(self):
+        # A return no longer picks an issue first — it opens the holder's
+        # sheet — so only the money entries still carry a rental picker.
+        picks = [entry['key'] for entry in TXN_OPTIONS if entry['needs_rental']]
+        self.assertEqual(sorted(picks), ['credit_adjustment', 'rental_payment'])
         for entry in TXN_OPTIONS:
             if entry['needs_rental']:
-                self.assertIn(entry['kind'], (KIND_RETURN, KIND_PAYMENT, KIND_ADJUSTMENT),
-                              entry['key'])
+                self.assertIn(entry['kind'], (KIND_PAYMENT, KIND_ADJUSTMENT), entry['key'])
                 self.assertTrue(entry['picker'], entry['key'])
+                self.assertTrue(entry['eligible_for'], entry['key'])
             else:
                 self.assertIsNone(entry['eligible_for'], entry['key'])
                 self.assertIsNone(entry['picker'], entry['key'])
+
+    def test_every_return_posts_the_rows_the_sheet_ticked(self):
+        """A return's tools come from the sheet, never from the endpoint.
+
+        The sheet spans every issue the holder still has, so "everything still
+        out" cannot be inferred from one rental: each return option has to run
+        the sheet collector, or a full return would post nothing at all.
+        """
+        for entry in TXN_OPTIONS:
+            if entry['kind'] == KIND_RETURN:
+                self.assertIn('return_holder', entry['checks'], entry['key'])
+                self.assertIn('return_items', entry['checks'], entry['key'])
 
     def test_money_and_physical_kinds_are_disjoint(self):
         for entry in TXN_OPTIONS:
@@ -302,19 +318,42 @@ class TxnFormTestCase(unittest.TestCase):
         return self._post(f'/hdc/tool-rental/{rental.id}/return', data, follow=True)
 
     # ------------------------------------------------------------ the page
-    def test_return_starts_with_holder_before_issue_and_tools(self):
+    def test_return_starts_with_the_holder_and_lists_every_tool_it_holds(self):
+        """No issue picker sits between the holder and their tools.
+
+        The return sheet asks *who is returning* and then lists **everything**
+        that site or customer still holds — across all of its open issues, with
+        the issue on each row — so the tools come first and the operator never
+        has to guess which issue a piece belongs to.
+        """
+        self._rent(self.vibrator, 2, billing='no_charge', project=self.site_a)
+        rental = self._latest_rental()
         response = self.client.get('/hdc/tool-rental/transaction')
         self.assertEqual(response.status_code, 200)
         html = response.get_data(as_text=True)
         self.assertIn('Return from — client or project / site', html)
-        self.assertLess(html.index('id="returnHolderSelect"'), html.index('id="returnRentalSelect"'))
-        self.assertLess(html.index('id="returnRentalSelect"'), html.index('id="returnItemRows"'))
-        self.assertIn('return tools from one issue at a time', html)
-        with open(os.path.join(os.path.dirname(__file__), '..', 'static', 'hdc', 'js', 'pages', 'tool_txn.js')) as source:
-            script = source.read()
-        self.assertIn('option.dataset.holderKey === holder.value', script)
+        self.assertIn('id="returnHolderSelect"', html)
+        self.assertNotIn('returnRentalSelect', html)
+        self.assertNotIn('Original issue / rental reference', html)
+        self.assertLess(html.index('id="returnHolderSelect"'), html.index('id="returnItemRows"'))
+        # The holder list comes from what is actually out, not from a hard-coded
+        # pair of ids: the site this rental belongs to is offered by its key.
+        self.assertIn(f'<option value="project:{self.site_a.id}">{self.site_a.name}</option>', html)
+        config = json.loads(re.search(
+            r'<script id="toolTxnConfig" type="application/json">(.*?)</script>', html, re.S).group(1))
+        rows = [row for row in config['returnRows'] if row['rentalId'] == rental.id]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]['holderKey'], f'project:{self.site_a.id}')
+        self.assertEqual(rows[0]['toolName'], self.vibrator.name)
+        self.assertEqual(rows[0]['issued'], 2.0)
+        self.assertEqual(rows[0]['pending'], 2.0)
+        self.assertEqual(len(rows[0]['serials']), 2)
+        script = _txn_script()
         self.assertIn('return-tool-check', script)
-        self.assertIn("toolCheck.checked ? String(item.qty_pending) : ''", script)
+        self.assertIn('return-rental-id', script)
+        self.assertIn('return_rental_id[]', script)
+        self.assertIn('Tools still at the selected site / customer', script)
+        self.assertIn("toolCheck.checked ? String(pendingQty) : ''", script)
 
     def test_page_offers_three_groups_and_every_transaction(self):
         response = self.client.get('/hdc/tool-rental/transaction')
@@ -715,6 +754,127 @@ class TxnFormTestCase(unittest.TestCase):
         self._return_qty(rental, item, 3, return_type='full')
         self.assertEqual(ToolRentalPayment.query.count(), 0)
         self.assertAlmostEqual(self._ledger_row(self.vibrator)['in_store_qty'], 6.0)
+
+    # ---------------------------------------------- the holder return sheet
+    def _return_sheet_post(self, lines, **extra):
+        """Post the return sheet the way the page posts it: one row per tool.
+
+        ``lines`` are ``(rental_id, item, qty)`` triples — the same three
+        values each sheet row carries (its issue, its tool line, the quantity
+        coming back).
+        """
+        data = {
+            'return_condition': 'partial',
+            'payment_condition': 'no_payment',
+            'return_date': _pkt_today().isoformat(),
+            'return_rental_id[]': [str(rental_id) for rental_id, _item, _qty in lines],
+            'rental_item_id[]': [str(item.id) for _rental_id, item, _qty in lines],
+            'qty_returned[]': [str(qty) for _rental_id, _item, qty in lines],
+            'condition_notes[]': [''] * len(lines),
+        }
+        data.update(extra)
+        return self._txn('partial_return', data)
+
+    def _rent_for_site(self, tool, qty, billing='no_charge'):
+        """One more issue for the same site, created the way the page does."""
+        self._rent(tool, qty, renter_type='internal', billing=billing, project=self.site_a)
+        rental = self._latest_rental()
+        return rental, ToolRentalItem.query.filter_by(rental_id=rental.id).first()
+
+    def test_holder_return_closes_several_issues_in_one_submission(self):
+        """A site holding three issues is one place — and one submission.
+
+        The sheet lists every tool the holder still has out, each row carrying
+        its issue, so the truck is loaded once and each issue still gets its
+        own return record (the audit trail the rental page reads).
+        """
+        first, item_a = self._rent_for_site(self.vibrator, 2)
+        second, item_b = self._rent_for_site(self.drill, 1)
+        third, item_c = self._rent_for_site(self.vibrator, 1)
+        response = self._return_sheet_post([
+            (first.id, item_a, 2), (second.id, item_b, 1), (third.id, item_c, 1),
+        ])
+        self.assertEqual(response.status_code, 200)
+        db.session.expire_all()
+        for item in (item_a, item_b, item_c):
+            self.assertAlmostEqual(float(db.session.get(ToolRentalItem, item.id).qty_pending), 0.0)
+        self.assertEqual(ToolRentalReturn.query.count(), 3)
+        self.assertEqual({ret.rental_id for ret in ToolRentalReturn.query.all()},
+                         {first.id, second.id, third.id})
+        self.assertAlmostEqual(self._ledger_row(self.vibrator)['in_store_qty'], 6.0)
+        self.assertAlmostEqual(self._ledger_row(self.vibrator)['out_qty'], 0.0)
+
+    def test_holder_return_full_takes_everything_still_out(self):
+        # Full Return means the whole load, even when only one row was left
+        # ticked — the sheet posts the rows it lists, the flag decides the rest.
+        first, item_a = self._rent_for_site(self.vibrator, 2)
+        second, item_b = self._rent_for_site(self.vibrator, 1)
+        self._return_sheet_post([(first.id, item_a, 0), (second.id, item_b, 0)],
+                                return_condition='full')
+        db.session.expire_all()
+        self.assertAlmostEqual(float(db.session.get(ToolRentalItem, item_a.id).qty_pending), 0.0)
+        self.assertAlmostEqual(float(db.session.get(ToolRentalItem, item_b.id).qty_pending), 0.0)
+        self.assertAlmostEqual(self._ledger_row(self.vibrator)['in_store_qty'], 6.0)
+        self.assertEqual(ToolRentalReturn.query.count(), 2)
+        self.assertTrue(all(ret.return_type == 'full' for ret in ToolRentalReturn.query.all()))
+
+    def test_holder_return_refuses_more_than_is_still_out_and_writes_nothing(self):
+        first, item_a = self._rent_for_site(self.vibrator, 2)
+        second, item_b = self._rent_for_site(self.drill, 1)
+        response = self._return_sheet_post([(first.id, item_a, 1), (second.id, item_b, 9)])
+        self.assertIn('only 1 is still out', response.get_data(as_text=True))
+        self.assertEqual(ToolRentalReturn.query.count(), 0,
+                         'a refused line writes nothing at all')
+        db.session.expire_all()
+        self.assertAlmostEqual(float(db.session.get(ToolRentalItem, item_a.id).qty_pending), 2.0)
+        self.assertAlmostEqual(float(db.session.get(ToolRentalItem, item_b.id).qty_pending), 1.0)
+
+    def test_holder_return_collects_rent_against_one_issue_only(self):
+        """The sheet has one money answer for one issue.
+
+        Rent is collected against the issue the operator names, while the tools
+        come back from every issue ticked — cash and discount land on that
+        issue's record and nowhere else.
+        """
+        self._rent(self.vibrator, 2, renter_type='external', customer='Mixed Load Co')
+        first = self._latest_rental()
+        item_a = ToolRentalItem.query.filter_by(rental_id=first.id).first()
+        self._rent(self.drill, 1, renter_type='external', customer='Mixed Load Co')
+        second = self._latest_rental()
+        item_b = ToolRentalItem.query.filter_by(rental_id=second.id).first()
+        due_a = float(first.total_pending_amount)
+        due_b = float(second.total_pending_amount)
+        self.assertGreater(due_a, 0)
+        self._return_sheet_post(
+            [(first.id, item_a, 2), (second.id, item_b, 1)],
+            payment_condition='partial', amount_paid='100',
+            settle_rental_id=str(first.id),
+            received_to_account_id=str(self.bank.id),
+            payment_mode='bank', payment_reference='SHEET-1',
+            discount_amount='0')
+        payments = ToolRentalPayment.query.all()
+        self.assertEqual(len(payments), 1)
+        self.assertEqual(payments[0].rental_id, first.id)
+        self.assertAlmostEqual(float(payments[0].amount), 100.0)
+        self.assertEqual(payments[0].received_to_account_id, self.bank.id)
+        self.assertEqual(AccountTransaction.query.count(), 1)
+        db.session.expire_all()
+        self.assertAlmostEqual(float(db.session.get(ToolRental, first.id).total_pending_amount),
+                               due_a - 100.0)
+        self.assertAlmostEqual(float(db.session.get(ToolRental, second.id).total_pending_amount), due_b)
+
+    def test_holder_return_never_charges_a_no_charge_issue(self):
+        first, item_a = self._rent_for_site(self.vibrator, 2, billing='no_charge')
+        second, item_b = self._rent_for_site(self.drill, 1, billing='per_day')
+        self._return_sheet_post(
+            [(first.id, item_a, 2), (second.id, item_b, 1)],
+            payment_condition='full', amount_paid='500',
+            settle_rental_id=str(first.id), received_to_account_id=str(self.bank.id))
+        self.assertEqual(ToolRentalPayment.query.count(), 0)
+        self.assertEqual(AccountTransaction.query.count(), 0)
+        db.session.expire_all()
+        self.assertAlmostEqual(float(db.session.get(ToolRental, second.id).total_pending_amount),
+                               float(second.total_pending_amount))
 
     # ------------------------------------------------------ money transactions
     def test_rental_payment_updates_balance_and_moves_no_tool(self):

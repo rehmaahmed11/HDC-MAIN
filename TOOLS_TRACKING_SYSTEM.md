@@ -16,6 +16,9 @@ live on their own pages, so no page repeats the same numbers twice.
 - New Rental (the one transaction form, opened by the hub's **New Rental** action): `/hdc/tool-rental/new`
   — the transaction dropdown offers **New Rental, Transfer Rental, Return Tools and Rent Payment**
   (see *One transaction form* below)
+- New Transaction (the wider, grouped form — **Rent Out**, **Return**,
+  **Maintenance**): `/hdc/tool-rental/transaction`, see
+  `TOOL_TRANSACTION_FORM_REPORT.md`
 - One tool (position + movement history): `/hdc/tool-rental/tool/<tool_id>`
 - Tracking (chains, where each piece is right now, admin): `/hdc/tool-rental/tracking`
 - **Track by Serial** (every individual serial-numbered piece, its current
@@ -29,7 +32,8 @@ live on their own pages, so no page repeats the same numbers twice.
   `hdc/services/tool_audit.py`
 - Pages: `templates/hdc/tool_rental/tool_dashboard.html`, `tool_position.html`,
   `tool_inventory.html`, `tool_rental.html`, `tool_new_rental.html`,
-  `tool_tracking.html`, `tool_serial_tracking.html`, `tool_reports.html`,
+  `tool_txn.html`, `tool_tracking.html`, `tool_serial_tracking.html`,
+  `tool_reports.html`,
   `_stock_forms.html`, `tool_audit.html`, `tool_audit_sheet.html`,
   `_audit_line.html`
 - Tests: `tests/test_tool_tracking.py` (20 cases),
@@ -79,6 +83,33 @@ returns quantities per tool; for serial-by-serial returns use the rental's page.
 
 Tests: `tests/test_tool_txn_form.py` (registry, rendered form, pickers, and the
 endpoints the form posts to).
+
+### Returns on `/hdc/tool-rental/transaction` start from the holder
+
+The older page's return asks for a rental first. The transaction page does not:
+once **Return from — client or project / site** is chosen, the sheet that opens
+is *Tools still at the selected site / customer* — one row per tool that holder
+still has out, across **every** open issue it has, in the same spreadsheet rows
+as the store and transfer sheets:
+
+```
+Select | # | Tool | Issued | Already back | Still out | Returning now | Condition | Exact pieces
+  ☑    | 1 | Reri / TOOL-000110 (RENT-000110) | 1 | 0 | 1 | 1 | good | 0 of 1 ticked
+```
+
+Nothing sits between *who is returning* and *what is coming back*: there is no
+issue/rental dropdown on the return at all. The issue travels **on the row**
+(small, under the tool's code) so a truck bringing back a mixed load closes several issues in one
+submission — `record_return()` writes one return record per issue inside a
+single database transaction — and the optional rent collection still settles
+exactly one of them (a no-charge holder shows no cash fields). Rows come from
+`ToolRentalItem.qty_pending`, the same number the endpoint re-checks against,
+so the sheet and the server cannot drift apart.
+
+Tests: `tests/test_tool_txn_page.py` (holder sheet, several issues per holder,
+mixed-load return, rent on one issue) and `tests/test_tool_txn_pieces.py`
+(piece pickers and the exact `return_serial_ids_<item>[]` fields the sheet
+posts).
 
 ## 1. What the dashboard shows (and what it deliberately does not)
 

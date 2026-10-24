@@ -11,8 +11,13 @@ bookkeeping: it only
   rent due, pieces under maintenance, accounts, projects and customers);
 * mints and detects the one transaction reference the form carries, so a
   double-click or a retried post cannot post twice;
-* implements the three physical movements that previously had no route:
+* implements the physical movements that previously had no route:
 
+  - **a return from a holder** — the sheet lists everything a site or customer
+    still holds, so one submission can close several of its open issues at
+    once.  Each issue keeps its own return record, written together in ONE
+    database transaction; the optional rent collection settles exactly one of
+    them;
   - **damage / loss reported on a holder** — the piece is returned off the
     rental line and written off through the existing scrap register, in ONE
     database transaction, so ``owned = in_store + out`` still holds;
@@ -22,11 +27,12 @@ bookkeeping: it only
     written off if the workshop could not repair them.
 
 Everything else (rent out, issue to an own site, transfer between sites or
-customers, partial/full/store returns, rent payments and credit adjustments)
-posts to the existing endpoints — ``hdc_tool_rental_create``,
-``hdc_tool_rental_return``, ``hdc_tool_rental_payment`` and
+customers, rent payments and credit adjustments) posts to the existing
+endpoints — ``hdc_tool_rental_create``, ``hdc_tool_rental_payment`` and
 ``hdc_tool_rental_add_discount`` — with the same field names those routes
-already accept, so the money and tool rules live in one place.
+already accept, so the money and tool rules live in one place.  The
+per-rental ``hdc_tool_rental_return`` route still serves the rental page and
+the New Rental form unchanged.
 
 Layer: ``services`` — may import models, utils and other services.
 """
@@ -36,6 +42,7 @@ from __future__ import annotations
 import secrets
 
 from sqlalchemy import func, or_
+from sqlalchemy.orm import joinedload
 
 from hdc.extensions import db
 from hdc.models.tool_rental import (
@@ -48,7 +55,8 @@ from hdc.services.record_permissions import integrity_message
 from hdc.services.tool_rental import (
     EPS, SCRAP_LABEL, STORE_LABEL, create_movement_log, create_serial_movement,
     ensure_all_tools_serials, ensure_tool_serials, get_receiving_accounts,
-    known_tool_customers, recalc_rental_totals, record_tool_scrap,
+    known_tool_customers, recalc_rental_totals, record_tool_rental_discount,
+    record_tool_scrap, post_tool_rental_payment_to_accounts,
     return_serials_from_rental, tool_available_for_integrity, get_out_of_store_serials,
 )
 from hdc.services.tool_tracking import LOC_CUSTOMER, LOC_OWN_PROJECT, tool_ledger
@@ -345,6 +353,129 @@ def location_key_for(loc_type, project_id=None, stage_id=None, customer_name=Non
     ))
 
 
+def _out_of_store_serials_by_item(rental_ids):
+    """Every piece still out on these rentals, keyed by its rental line.
+
+    One query for the whole sheet instead of one per row: the return sheet can
+    list a site's whole holding (several issues) at once.
+    """
+    if not rental_ids:
+        return {}
+    rows = (ToolSerial.query
+            .filter(ToolSerial.current_rental_id.in_([int(rid) for rid in rental_ids]),
+                    ToolSerial.is_in_store == False,  # noqa: E712
+                    or_(ToolSerial.is_scrapped == False,  # noqa: E712
+                        ToolSerial.is_scrapped.is_(None)),
+                    ToolSerial.status != 'scrapped')
+            .all())
+    by_item = {}
+    for serial in sorted(rows, key=lambda s: (int(s.tool_id or 0), s.sort_key)):
+        if serial.current_rental_item_id is None:
+            continue
+        by_item.setdefault(int(serial.current_rental_item_id), []).append(serial)
+    return by_item
+
+
+def return_sheet(limit=RENTAL_PICKER_LIMIT):
+    """Who still holds tools, and exactly which tools each holder holds.
+
+    The return form asks **who is returning** first; this is the list behind
+    that question and the sheet it opens.  A *holder* is a site or a customer
+    (a site with several open issues is still one place), and a *row* is one
+    rental line still out — carrying the issue it belongs to, so a mixed load
+    can come home in one submission without losing which issue each piece
+    settles.
+
+    Rows come from ``ToolRentalItem.qty_pending`` — the same number the return
+    endpoint checks a quantity against — and the piece markings from the
+    serials that are actually out of the store, so ticking a piece here means
+    exactly what ticking it on the per-rental sheet meant.
+
+    Returns ``{'holders': [...], 'rows': [...]}``.
+    """
+    rentals = (ToolRental.query
+               .filter(ToolRental.is_void == False,  # noqa: E712
+                       ToolRental.items.any(
+                           func.coalesce(ToolRentalItem.qty_pending, 0) > EPS))
+               .order_by(ToolRental.rental_date.desc(), ToolRental.id.desc())
+               .limit(limit)
+               .all())
+    if not rentals:
+        return {'holders': [], 'rows': []}
+
+    rental_ids = [int(rental.id) for rental in rentals]
+    by_rental = {int(rental.id): rental for rental in rentals}
+    order = {int(rental.id): index for index, rental in enumerate(rentals)}
+    items = (ToolRentalItem.query
+             .options(joinedload(ToolRentalItem.tool))
+             .filter(ToolRentalItem.rental_id.in_(rental_ids),
+                     func.coalesce(ToolRentalItem.qty_pending, 0) > EPS)
+             .order_by(ToolRentalItem.id.asc())
+             .all())
+    serials_by_item = _out_of_store_serials_by_item(rental_ids)
+
+    rows = []
+    for item in items:
+        rental = by_rental.get(int(item.rental_id))
+        if rental is None:
+            continue
+        tool = item.tool
+        holder_key, holder_label, loc_type = _rental_holder(rental)
+        rows.append({
+            'holderKey': holder_key,
+            'holder': holder_label,
+            'locType': loc_type,
+            'rentalId': int(rental.id),
+            'rentalCode': rental.rental_code or f'Rental #{rental.id}',
+            'itemId': int(item.id),
+            'toolId': int(item.tool_id),
+            'toolName': tool.name if tool else f'Tool #{item.tool_id}',
+            'toolCode': (tool.tool_code if tool else '') or '',
+            'unit': (tool.unit if tool else 'pcs') or 'pcs',
+            'issued': _flt(item.qty_rented),
+            'returned': _flt(item.qty_returned),
+            'pending': _flt(item.qty_pending),
+            'billingType': rental.billing_type or '',
+            'amountDue': (0.0 if (rental.billing_type or '') == 'no_charge'
+                          else _flt(rental.total_pending_amount)),
+            'serials': [{
+                'id': int(serial.id),
+                'serialNumber': serial.serial_number,
+                'condition': serial.condition or 'good',
+            } for serial in serials_by_item.get(int(item.id), [])],
+        })
+    rows.sort(key=lambda row: (order.get(row['rentalId'], 0),
+                               row['toolName'].lower(), row['toolCode']))
+
+    holders = {}
+    for row in rows:
+        holder = holders.setdefault(row['holderKey'], {
+            'key': row['holderKey'], 'label': row['holder'], 'locType': row['locType'],
+            'pending': 0.0, 'tools': 0, '_rentals': set(),
+        })
+        holder['pending'] += row['pending']
+        holder['tools'] += 1
+        holder['_rentals'].add(row['rentalId'])
+    holder_rows = sorted(holders.values(), key=lambda h: (h['label'].lower(), h['key']))
+    for holder in holder_rows:
+        holder['rentals'] = len(holder.pop('_rentals'))
+    return {'holders': holder_rows, 'rows': rows}
+
+
+def _rental_holder(rental):
+    """``(key, label, loc_type)`` — *who* a rental's tools are out with.
+
+    One site / customer, however many issues it holds: a site with three open
+    rentals is still one place to send the truck to, so its key is the project
+    (or the customer name), never the rental.
+    """
+    if rental.renter_type == 'internal' and rental.project_id:
+        label = rental.project.name if rental.project else f'Project #{rental.project_id}'
+        return f'project:{int(rental.project_id)}', label, LOC_OWN_PROJECT
+    label = (rental.customer_name or 'Outside customer').strip()
+    return 'customer:' + label.casefold(), label, LOC_CUSTOMER
+
+
 def rental_picker_rows(eligible_for, limit=RENTAL_PICKER_LIMIT):
     """Rentals a transaction may pick from, as ``(id, label, data)`` options."""
     from hdc.services.tool_txn_types import rental_eligible
@@ -362,8 +493,7 @@ def rental_picker_rows(eligible_for, limit=RENTAL_PICKER_LIMIT):
                                pending_amount=amount_due,
                                billing_type=rental.billing_type or ''):
             continue
-        holder = (rental.project.name if rental.renter_type == 'internal' and rental.project
-                  else (rental.customer_name or 'Outside customer'))
+        holder_key, holder, _loc_type = _rental_holder(rental)
         status = ('No charge · no rent due' if rental.billing_type == 'no_charge'
                   else f'{amount_due:,.0f} PKR due')
         label = f'{rental.rental_code} · {holder} · {tools_out:,.0f} out · {status}'
@@ -371,9 +501,7 @@ def rental_picker_rows(eligible_for, limit=RENTAL_PICKER_LIMIT):
             'amount': f'{amount_due:.2f}',
             'tools': f'{tools_out:.2f}',
             'holder': holder,
-            'holder-key': (f'project:{rental.project_id}'
-                           if rental.renter_type == 'internal' and rental.project_id
-                           else 'customer:' + holder.strip().casefold()),
+            'holder-key': holder_key,
             'renter_type': rental.renter_type or '',
             'billing-type': rental.billing_type or '',
         }))
@@ -420,16 +548,22 @@ def txn_form_context():
     """
     ensure_all_tools_serials(commit=False)
     from hdc.models.projects import Project, Stage
-    from hdc.services.tool_txn_types import TXN_OPTIONS
+    from hdc.services.tool_txn_types import (
+        ELIGIBLE_PENDING_AMOUNT, ELIGIBLE_PENDING_TOOLS, TXN_OPTIONS,
+    )
 
     projects = Project.query.order_by(Project.name.asc()).all()
     from sqlalchemy.orm import joinedload
     stages = (Stage.query.options(joinedload(Stage.project))
               .order_by(Stage.name.asc()).all())
 
-    # One set of rental choices per eligibility rule the registry uses, so a
-    # new transaction inherits the picker list instead of inventing a new one.
+    # One set of rental choices per eligibility rule, so a new transaction
+    # inherits the picker list instead of inventing a new one.  Both rules are
+    # built: the damage / loss panel picks the issue a write-off happened on
+    # (tools still out) even though that is not a rental-bound transaction.
     rental_picker_options = {}
+    for rule in (ELIGIBLE_PENDING_TOOLS, ELIGIBLE_PENDING_AMOUNT):
+        rental_picker_options[rule] = rental_picker_rows(rule)
     for option in TXN_OPTIONS:
         rule = option['eligible_for']
         if rule and rule not in rental_picker_options:
@@ -437,10 +571,14 @@ def txn_form_context():
 
     in_store = in_store_tool_rows()
     transfer_sources = transfer_source_rows()
+    # Who still holds what — the return sheet's holder list and its rows.
+    returns = return_sheet()
     return {
         'today': _pkt_today().isoformat(),
         'txn_reference': new_txn_reference(),
         'in_store_tools': in_store,
+        'return_holders': returns['holders'],
+        'return_rows': returns['rows'],
         'tool_options': [
             (tool['id'], f"{tool['name']} ({tool['code']}) — {tool['available_qty']:g} available"
              if tool['code'] else f"{tool['name']} — {tool['available_qty']:g} available")
@@ -467,6 +605,303 @@ def txn_form_context():
         'rentout_site_loc': LOC_OWN_PROJECT,
         'rentout_customer_loc': LOC_CUSTOMER,
     }
+
+
+# --------------------------------------------------------------------------- #
+# Returns — one load back from a holder, whatever issues it came off
+# --------------------------------------------------------------------------- #
+def _return_line_serials(item, raw_serial_ids, claimed):
+    """The piece markings a return line posts, as real out-of-store serials.
+
+    ``claimed`` carries the ids an earlier line already took, so one piece can
+    never be returned twice inside the same submission.
+    """
+    wanted = _parse_serial_ids(raw_serial_ids)
+    if not wanted:
+        return True, '', []
+    chosen = []
+    for serial_id in wanted:
+        if serial_id in claimed:
+            return False, 'One of the selected pieces is ticked twice on this return.', []
+        serial = db.session.get(ToolSerial, serial_id)
+        if (not serial or int(serial.tool_id) != int(item.tool_id)
+                or getattr(serial, 'is_scrapped', False) or serial.status == 'scrapped'):
+            return False, 'One of the selected piece markings does not belong to this tool.', []
+        if serial.is_in_store:
+            return False, (f'{serial.serial_number} is already in the store — '
+                           f'reload the page and retick the pieces still out.'), []
+        if serial.current_rental_id and int(serial.current_rental_id) != int(item.rental_id):
+            return False, (f'{serial.serial_number} is out on another issue — reload '
+                           f'the page and retick the pieces still out.'), []
+        claimed.add(int(serial_id))
+        chosen.append(serial)
+    return True, '', chosen
+
+
+def record_return(*, actor_id, lines, return_type='partial', return_date=None,
+                  payment_type='no_payment', amount_paid=0.0, discount_amount=0.0,
+                  discount_reason='goodwill', discount_notes='', settle_rental_id=None,
+                  received_to_account_id=None, payment_mode='cash',
+                  payment_reference='', notes='', reference='', responsible='',
+                  commit=True):
+    """Bring tools back from one holder — off every issue they came from.
+
+    The return sheet lists everything a site or customer still holds, so one
+    submission can close several of its issues at once.  Each issue still gets
+    its own return record (``ToolRentalReturn`` with one line per tool), because
+    that is the audit trail the rental page, the tracking chain and the
+    movement log read; the whole submission is written in **one** database
+    transaction, so a refused line writes nothing at all.
+
+    ``lines`` is a list of ``{rental_id, rental_item_id, qty, serial_ids,
+    condition}``.  A line with ``serial_ids`` returns exactly those piece
+    markings; otherwise ``qty`` does, and a *full* return takes whatever is
+    still out on the row.
+
+    Money is optional and always settles **one** issue — ``settle_rental_id``,
+    defaulting to the only issue in the submission.  Cash, discount and the
+    credit flag follow the same rules the per-rental return endpoint applies:
+    never more than the issue still owes, and a no-charge issue collects
+    nothing whatever the form had left on it.
+
+    Returns ``(ok, message, summary)``.
+    """
+    when = _parse_when(return_date)
+    return_type = 'full' if str(return_type or '').strip().lower() == 'full' else 'partial'
+
+    wanted = []
+    for raw in lines or ():
+        try:
+            rental_id = int(raw.get('rental_id') or 0)
+            item_id = int(raw.get('rental_item_id') or 0)
+        except (TypeError, ValueError):
+            return False, 'The return lines could not be read — reload the page.', {}
+        if rental_id and item_id:
+            wanted.append((rental_id, item_id, raw))
+    if not wanted:
+        return False, ('Tick the tools coming back, or choose Full Return to bring '
+                       'everything still out back.'), {}
+
+    rental_ids = sorted({rental_id for rental_id, _item_id, _raw in wanted})
+    rentals = {int(rental.id): rental
+               for rental in ToolRental.query.filter(ToolRental.id.in_(rental_ids)).all()}
+    for rental_id in rental_ids:
+        rental = rentals.get(rental_id)
+        if not rental:
+            return False, f'Issue #{rental_id} no longer exists — reload the page.', {}
+        if rental.is_void:
+            return False, (f'{rental.rental_code} is voided, so its tools cannot come '
+                           f'back through a return.'), {}
+
+    claimed = set()
+    groups = {}
+    total_pieces = 0.0
+    for rental_id, item_id, raw in wanted:
+        rental = rentals[rental_id]
+        item = db.session.get(ToolRentalItem, item_id)
+        if not item or int(item.rental_id or 0) != int(rental.id):
+            return False, (f'That tool line is not on {rental.rental_code} — reload the '
+                           f'page and retick.'), {}
+        tool = item.tool
+        name = tool.name if tool else f'Tool #{item.tool_id}'
+        pending = max(0.0, _flt(item.qty_pending))
+        if pending <= EPS:
+            return False, f'{name} is already back from {rental.rental_code}.', {}
+
+        ok, message, serials = _return_line_serials(item, raw.get('serial_ids'), claimed)
+        if not ok:
+            return False, message, {}
+        if serials:
+            qty = float(len(serials))
+        elif return_type == 'full':
+            qty = pending
+        else:
+            qty = max(0.0, _flt(raw.get('qty')))
+        if qty <= 0:
+            continue
+        if qty > pending + EPS:
+            return False, integrity_message(
+                'A return cannot bring back more than is still out.',
+                f'{qty:g} × {name} coming back, but only {pending:g} is still out on '
+                f'{rental.rental_code}.'), {}
+
+        condition = str(raw.get('condition') or '').strip()
+        if serials:
+            numbers = ', '.join(serial.serial_number for serial in serials)
+            if numbers not in condition:
+                condition = (f'{condition} [Serials: {numbers}]'.strip()
+                             if condition else f'Serials: {numbers}')
+        groups.setdefault(rental_id, []).append((item, qty, condition[:300], serials))
+        total_pieces += qty
+
+    if not groups:
+        return False, 'No tools were marked to come back on this return.', {}
+
+    # ---- the optional settlement, always against ONE issue -----------------
+    payment_type = str(payment_type or 'no_payment').strip().lower()
+    if payment_type not in ('full', 'partial', 'credit', 'no_payment'):
+        payment_type = 'no_payment'
+    amount = max(0.0, _flt(amount_paid))
+    discount = max(0.0, _flt(discount_amount))
+
+    settle_rental = None
+    if payment_type != 'no_payment' or amount > 0 or discount > 0:
+        try:
+            settle_id = int(settle_rental_id or 0)
+        except (TypeError, ValueError):
+            settle_id = 0
+        if not settle_id and len(rental_ids) == 1:
+            settle_id = rental_ids[0]
+        settle_rental = rentals.get(settle_id)
+        if settle_rental is None:
+            return False, ('Choose the issue the rent is being collected against — '
+                           'money can only settle one issue at a time.'), {}
+        if (settle_rental.billing_type or '').strip().lower() == 'no_charge':
+            # A free issue has no settlement, even if the form kept a stale
+            # cash selection from another holder.
+            payment_type, amount, discount = 'no_payment', 0.0, 0.0
+        elif payment_type == 'no_payment':
+            amount = 0.0
+
+    received_to_account_id = int(received_to_account_id or 0) or None
+    receiving_account = None
+    if amount > 0:
+        if payment_type == 'full':
+            amount = max(0.0, _flt(settle_rental.total_pending_amount))
+        owed = max(0.0, _flt(settle_rental.total_pending_amount))
+        if amount > owed + 0.001:
+            return False, (f'Cash {amount:,.2f} PKR is more than the {owed:,.2f} PKR '
+                           f'{settle_rental.rental_code} still owes.'), {}
+        if not received_to_account_id:
+            return False, ('Choose the cash / bank account receiving the money.'), {}
+        from hdc.models.accounts import Account
+        receiving_account = db.session.get(Account, received_to_account_id)
+        if (not receiving_account or receiving_account.is_void
+                or str(receiving_account.status or 'active').lower() != 'active'
+                or str(receiving_account.type or '').lower() not in ('company', 'cash', 'bank')):
+            return False, 'Select a valid Cash/Bank receiving account for the payment.', {}
+    if discount > 0:
+        owed = max(0.0, _flt(settle_rental.total_pending_amount) - amount)
+        if discount > owed + 0.001:
+            return False, (f'The discount {discount:,.2f} PKR is more than the '
+                           f'{owed:,.2f} PKR left on {settle_rental.rental_code} '
+                           f'after this payment.'), {}
+
+    # ---- record one return per issue, all inside this transaction ----------
+    created = []
+    for rental_id in sorted(groups):
+        rental = rentals[rental_id]
+        group = groups[rental_id]
+        pieces = sum(line[1] for line in group)
+        is_settled = settle_rental is not None and int(rental.id) == int(settle_rental.id)
+        record = ToolRentalReturn(
+            rental_id=rental.id,
+            return_date=when,
+            return_type=return_type,
+            payment_type=payment_type if is_settled else 'no_payment',
+            total_tools_returned=pieces,
+            amount_paid=amount if is_settled else 0.0,
+            notes=stamp_reference(
+                (notes or '').strip() or f'Return from {rental.current_location_label or "holder"}',
+                reference, responsible=responsible),
+            created_by=actor_id,
+        )
+        db.session.add(record)
+        db.session.flush()
+
+        for item, qty, condition, serials in group:
+            db.session.add(ToolRentalReturnItem(
+                return_id=record.id,
+                rental_item_id=item.id,
+                tool_id=item.tool_id,
+                qty_returned=qty,
+                condition_notes=condition,
+            ))
+            item.qty_returned = _flt(item.qty_returned) + qty
+            item.qty_pending = max(0.0, _flt(item.qty_rented) - item.qty_returned)
+            if serials:
+                return_serials_from_rental(
+                    rental_id=rental.id, serial_ids=[int(s.id) for s in serials],
+                    return_id=record.id, created_by=actor_id, commit=False)
+            create_movement_log(
+                tool_id=int(item.tool_id), rental_id=rental.id,
+                movement_type='return_in',
+                from_label=rental.current_location_label or 'Site',
+                to_label=STORE_LABEL, qty=qty, return_id=record.id,
+                notes=f'Return {record.id}: {qty:g} pcs', when=when,
+            )
+        created.append((rental, record, pieces))
+
+    # ---- cash, discount and credit, on the settled issue only --------------
+    settle_record = next((record for rental, record, _pieces in created
+                          if settle_rental is not None
+                          and int(rental.id) == int(settle_rental.id)), None)
+    paid_total = 0.0
+    if settle_record is not None and (amount > 0 or discount > 0):
+        payment = ToolRentalPayment(
+            rental_id=settle_rental.id,
+            return_id=settle_record.id,
+            payment_date=when,
+            amount=amount,
+            discount=discount,
+            payment_mode=(payment_mode or 'cash').strip().lower(),
+            received_to_account_id=int(receiving_account.id) if receiving_account else None,
+            reference=(payment_reference or '').strip(),
+            notes=f'Payment on return {settle_record.id}',
+            created_by=actor_id,
+        )
+        db.session.add(payment)
+        db.session.flush()
+        if amount > 0:
+            ok_acc, message, _links = post_tool_rental_payment_to_accounts(
+                payment, rental=settle_rental, commit=False)
+            if not ok_acc:
+                db.session.rollback()
+                return False, message or 'Unable to post the rent receipt in accounts.', {}
+            paid_total = amount
+        if discount > 0:
+            _row, ok_disc, message = record_tool_rental_discount(
+                settle_rental.id, discount, discount_date=when,
+                reason=(discount_reason or 'goodwill').strip().lower(),
+                notes=(discount_notes or '').strip(),
+                payment_id=payment.id, return_id=settle_record.id,
+                created_by=actor_id, commit=False)
+            if not ok_disc:
+                db.session.rollback()
+                return False, message or 'Unable to post the discount.', {}
+
+    for rental_id in sorted(groups):
+        recalc_rental_totals(rental_id)
+    if settle_rental is not None and payment_type == 'credit':
+        if (float(settle_rental.total_pending_amount or 0) > 0
+                and (settle_rental.billing_type or '').strip().lower() != 'no_charge'):
+            settle_rental.payment_status = 'credit'
+
+    summary = {
+        'rental_ids': sorted(groups),
+        'return_ids': [int(record.id) for _rental, record, _pieces in created],
+        'qty': total_pieces,
+        'amount_paid': paid_total,
+        'discount': discount if settle_record is not None else 0.0,
+        'settle_rental_id': int(settle_rental.id) if settle_rental else None,
+    }
+    if commit:
+        db.session.commit()
+    else:
+        db.session.flush()
+
+    codes = ', '.join(rental.rental_code for rental, _record, _pieces in created)
+    message = (f'Return recorded: {total_pieces:g} piece(s) came back from '
+               f'{created[0][0].current_location_label or "the holder"} '
+               f'across {len(created)} issue(s) ({codes}).')
+    if paid_total > 0:
+        message += (f' {paid_total:,.2f} PKR received into '
+                    f'{receiving_account.name if receiving_account else "-"}' + '.')
+    if summary['discount'] > 0:
+        message += f' {summary["discount"]:,.2f} PKR discounted.'
+    if payment_type == 'credit':
+        message += ' The balance stays on credit.'
+    return True, message, summary
 
 
 # --------------------------------------------------------------------------- #

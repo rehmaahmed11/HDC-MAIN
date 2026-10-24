@@ -16,7 +16,9 @@
  *      guess, including per-piece (serial) selection: the Pieces / serial
  *      cell of every sheet (store, transfer, return) is one *tick per piece
  *      marking*, with a search box and a tick-all-shown shortcut, never a
- *      ctrl-click multi-select;
+ *      ctrl-click multi-select.  On a return the sheet starts from *who is
+ *      returning* and lists everything that holder still holds, each row
+ *      carrying the issue it belongs to — one load, several issues;
  *   3. copy the one visible transaction date into the endpoint's own date
  *      field, and stamp the reference / responsible person onto the notes, so
  *      the record that gets created carries the number on the printed form;
@@ -51,6 +53,9 @@
     });
     var TOOLS = CONFIG.tools || [];
     var SOURCES = CONFIG.transferSources || [];
+    /* The return sheet: everything every holder still has out, one row per
+       rental line, each carrying the issue it belongs to. */
+    var RETURN_ROWS = CONFIG.returnRows || [];
     var BILLING = {};
     (CONFIG.billingModes || []).forEach(function (mode) { BILLING[mode.key] = mode; });
 
@@ -261,18 +266,45 @@
         });
     }
 
+    /* Rent is optional and always settles ONE issue: the holder's issues that
+       still owe something are offered here, and the cash fields appear only
+       when one of them is chosen.  A no-charge holder has no rent to collect,
+       whatever the form was left holding. */
     function syncReturnSettlement() {
-        var select = document.getElementById('returnRentalSelect');
-        var option = select && select.options[select.selectedIndex];
+        var select = document.getElementById('returnSettleRental');
         var fields = document.getElementById('returnCashFields');
         var status = document.getElementById('returnSettlementStatus');
-        var free = !!(option && option.value && BILLING[option.dataset.billingType] &&
-                     !BILLING[option.dataset.billingType].charges_rent);
-        if (status) status.textContent = option && option.value
-            ? moneyStatus(option.dataset.billingType, option.dataset.amount) : 'Choose a rental to see its rent status.';
+        var holder = returnHolderSelect();
+        var rows = returnRowsForHolder(holder ? holder.value : '');
+        var entries = returnSettleEntries(rows).filter(function (entry) {
+            return entry.amountDue > 0 && !(BILLING[entry.billingType] && !BILLING[entry.billingType].charges_rent);
+        });
+        if (select) {
+            var previous = select.value;
+            select.innerHTML = '';
+            select.add(new Option(entries.length ? 'Choose an issue' : 'No rent to collect', ''));
+            entries.forEach(function (entry) {
+                select.add(new Option(entry.code + ' · ' + Number(entry.amountDue).toFixed(2) + ' PKR due',
+                                      String(entry.id)));
+            });
+            var keep = entries.some(function (entry) { return String(entry.id) === String(previous); });
+            select.value = keep ? previous : (entries.length === 1 ? String(entries[0].id) : '');
+            select.disabled = !entries.length || !!select.closest('.d-none');
+        }
+        var chosen = entries.filter(function (entry) {
+            return select && String(entry.id) === String(select.value);
+        })[0];
+        if (status) {
+            status.textContent = !rows.length
+                ? 'Choose a client or project / site to see its rent status.'
+                : (entries.length
+                    ? (chosen ? moneyStatus(chosen.billingType, chosen.amountDue)
+                              : 'Choose the issue the rent is being collected against.')
+                    : 'No rent due on this holder’s issues — a return here only moves the tools.');
+        }
         if (fields) {
-            fields.classList.toggle('d-none', free);
-            setEnabled(fields, !free && !fields.closest('.d-none'));
+            fields.classList.toggle('d-none', !chosen);
+            setEnabled(fields, !!chosen && !fields.closest('.d-none'));
         }
     }
 
@@ -304,8 +336,16 @@
         var fromRental = select.value === 'rental';
         var storeFields = document.getElementById('damageStoreFields');
         var rentalField = document.getElementById('damageRentalField');
-        if (storeFields) { storeFields.classList.toggle('d-none', fromRental); setEnabled(storeFields, !fromRental); }
-        if (rentalField) { rentalField.classList.toggle('d-none', !fromRental); setEnabled(rentalField, fromRental); }
+        // A block stays disabled while its own panel is hidden: switching the
+        // source must never re-enable fields on a panel the operator cannot see.
+        if (storeFields) {
+            storeFields.classList.toggle('d-none', fromRental);
+            setEnabled(storeFields, !fromRental && !storeFields.closest('.d-none'));
+        }
+        if (rentalField) {
+            rentalField.classList.toggle('d-none', !fromRental);
+            setEnabled(rentalField, fromRental && !rentalField.closest('.d-none'));
+        }
         var hint = document.getElementById('damageRentalHint');
         if (hint) {
             hint.textContent = fromRental
@@ -1048,145 +1088,127 @@
         return errors;
     }
 
-    /* ── returns ────────────────────────────────────────────────────────── */
-    var returnRequest = 0;
+    /* ── returns ──────────────────────────────────────────────────────────
+       A return starts from *who is returning*, and the sheet then shows every
+       tool that site or customer still holds — across all of its open issues.
+       No issue picker stands between the two: the issue a row settles is
+       printed under the tool's code, so one load can close several issues.  A site with three open issues is
+       one place to send the truck to, so one submission can close all three:
+       each row carries its own issue, and the server writes one return record
+       per issue in a single database transaction. */
+    function returnHolderSelect() {
+        return document.getElementById('returnHolderSelect');
+    }
 
-    // Keep the source list data-driven, but never offer another holder's issues.
-    function initReturnHolders() {
-        var holder = document.getElementById('returnHolderSelect');
-        var rental = document.getElementById('returnRentalSelect');
-        if (!holder || !rental) return;
-        var options = Array.prototype.slice.call(rental.options).filter(function (o) { return o.value; });
-        var seen = {};
-        options.forEach(function (option) {
-            var key = option.dataset.holderKey;
-            if (seen[key]) return;
-            seen[key] = true;
-            holder.add(new Option(option.dataset.holder, key));
+    function returnRowsForHolder(key) {
+        if (!key) return [];
+        return RETURN_ROWS.filter(function (row) { return row.holderKey === key; });
+    }
+
+    /* One entry per issue among these rows, with what that issue still owes. */
+    function returnSettleEntries(rows) {
+        var byRental = {};
+        var entries = [];
+        rows.forEach(function (row) {
+            var key = String(row.rentalId);
+            if (byRental[key]) return;
+            byRental[key] = {
+                id: row.rentalId,
+                code: row.rentalCode,
+                billingType: row.billingType || '',
+                amountDue: Number(row.amountDue || 0)
+            };
+            entries.push(byRental[key]);
         });
-        function chooseHolder() {
-            rental.innerHTML = '<option value="">Choose an issue / rental</option>';
-            var matching = options.filter(function (option) { return option.dataset.holderKey === holder.value; });
-            matching.forEach(function (option) { rental.add(option); });
-            document.getElementById('returnReferenceField').classList.toggle('d-none', matching.length < 2);
-            rental.value = matching.length === 1 ? matching[0].value : '';
-            loadReturnItems(rental.value);
-            syncReturnSettlement();
-        }
-        holder.addEventListener('change', chooseHolder);
-        chooseHolder();
+        return entries;
     }
 
-    function loadReturnItems(rentalId) {
-        var box = document.getElementById('returnItemRows');
-        if (!box) return;
-        if (!rentalId) {
-            ++returnRequest; // invalidate an in-flight fetch when the selection is cleared
-            box.innerHTML = '<div class="small text-muted">Choose a client or project / site, then an issue if needed, to see its tools.</div>';
-            return;
-        }
-        var request = ++returnRequest;
-        box.innerHTML = '<div class="small text-muted">Loading the outstanding tools…</div>';
-        fetch('/hdc/api/tool-rental/rental/' + encodeURIComponent(rentalId) + '/pending-items',
-              { credentials: 'same-origin' })
-            .then(function (response) {
-                if (!response.ok) throw new Error('HTTP ' + response.status);
-                return response.json();
-            })
-            .then(function (items) {
-                if (request !== returnRequest) return;
-                renderReturnItems(items || []);
-            })
-            .catch(function () {
-                if (request !== returnRequest) return;
-                box.innerHTML = '<div class="small text-danger">Could not load this rental’s tools. Try again.</div>';
-            });
+    function returnPiecePicker(row, item) {
+        var cell = row.querySelector('.return-pieces');
+        if (!cell) return;
+        var serials = (item.serials || []).map(function (serial) {
+            return { id: serial.id, serial_number: serial.serialNumber,
+                     condition: serial.condition || 'good' };
+        });
+        var picker = buildPiecePicker(serials, {
+            className: 'return-serials',
+            label: 'Pieces of ' + item.toolName + ' coming back',
+            onChange: function () { syncReturnPieceQty(row); }
+        });
+        if (picker) cell.appendChild(picker);
+        else cell.innerHTML = '<span class="small text-muted">No serial markings for this tool — use the quantity.</span>';
     }
 
-    function renderReturnItems(items) {
+    function renderReturnSheet() {
         var box = document.getElementById('returnItemRows');
         if (!box) return;
-        var picker = pickerSelect();
+        var holder = returnHolderSelect();
+        var rows = returnRowsForHolder(holder ? holder.value : '');
+        var info = document.getElementById('returnRentalInfo');
+        var issues = returnSettleEntries(rows).length;
+        var pending = rows.reduce(function (sum, row) { return sum + Number(row.pending || 0); }, 0);
+        if (info) {
+            info.textContent = rows.length
+                ? (pending + ' piece(s) still out with this holder across ' + issues + ' issue(s).')
+                : '';
+        }
         box.innerHTML = '';
-        if (!items.length) {
-            box.innerHTML = '<div class="small text-muted">Nothing is still out on this rental.</div>';
+        if (!rows.length) {
+            box.innerHTML = '<div class="small text-muted">Choose a client or project / site to see every tool still out with them.</div>';
+            syncReturnSettlement();
             return;
         }
         var wrap = document.createElement('div');
         wrap.className = 'table-responsive';
-        wrap.innerHTML = '<table class="table table-sm table-bordered table-striped align-middle tool-txn-sheet">' +
+        wrap.innerHTML = '<table class="table table-sm table-bordered table-striped align-middle tool-txn-sheet" id="returnSheet">' +
             '<caption class="caption-top">Tools still at the selected site / customer</caption>' +
-            '<thead><tr><th scope="col">Select</th><th scope="col">#</th><th scope="col">Tool</th><th scope="col">Issued</th>' +
-            '<th scope="col">Already back</th><th scope="col">Still out</th><th scope="col">Returning now</th>' +
-            '<th scope="col">Condition</th><th scope="col">Exact pieces</th></tr></thead><tbody></tbody></table>';
+            '<thead><tr><th scope="col" class="col-pick">Select</th><th scope="col" class="col-idx">#</th>' +
+            '<th scope="col">Tool</th>' +
+            '<th scope="col" class="col-qty">Issued</th><th scope="col" class="col-qty">Already back</th>' +
+            '<th scope="col" class="col-qty">Still out</th><th scope="col" class="col-qty">Returning now</th>' +
+            '<th scope="col">Condition</th><th scope="col" class="col-pieces">Exact pieces</th>' +
+            '</tr></thead><tbody></tbody></table>';
         var tbody = wrap.querySelector('tbody');
-        items.forEach(function (item, index) {
+        rows.forEach(function (item, index) {
             var row = document.createElement('tr');
             row.className = 'tool-txn-line';
+            var pendingQty = Number(item.pending);
             row.innerHTML =
-                '<td><input type="checkbox" class="form-check-input return-tool-check" aria-label="Return ' + escapeHtml(item.tool_name) + '"></td><td>' + (index + 1) + '</td><td><strong>' + escapeHtml(item.tool_name) +
-                '</strong><br><small>' + escapeHtml(item.tool_code) + '</small>' +
-                '<input type="hidden" class="return-item-id" value="' + Number(item.rental_item_id) + '"></td>' +
-                '<td>' + Number(item.qty_rented) + '</td><td>' + Number(item.qty_returned) + '</td>' +
-                '<td class="fw-bold return-outstanding">' + Number(item.qty_pending) + '</td>' +
+                '<td><input type="checkbox" class="form-check-input return-tool-check" aria-label="Return ' + escapeHtml(item.toolName) + '"></td>' +
+                '<td>' + (index + 1) + '</td>' +
+                '<td><strong>' + escapeHtml(item.toolName) + '</strong><br><small>' + escapeHtml(item.toolCode) + '</small>' +
+                '<br><small class="text-muted">Issue <span class="tool-txn-mono">' + escapeHtml(item.rentalCode) + '</span></small>' +
+                '<input type="hidden" class="return-item-id" value="' + Number(item.itemId) + '">' +
+                '<input type="hidden" class="return-rental-id" value="' + Number(item.rentalId) + '"></td>' +
+                '<td>' + Number(item.issued) + '</td><td>' + Number(item.returned) + '</td>' +
+                '<td class="fw-bold return-outstanding">' + pendingQty + '</td>' +
                 '<td><input type="number" class="form-control form-control-sm return-qty-input" aria-label="Returning ' +
-                escapeHtml(item.tool_name) + '" min="0" step="0.1" max="' + Number(item.qty_pending) +
-                '" data-pending="' + Number(item.qty_pending) + '" placeholder="0"></td>' +
+                escapeHtml(item.toolName) + '" min="0" step="0.1" max="' + pendingQty +
+                '" data-pending="' + pendingQty + '" placeholder="0"></td>' +
                 '<td><input type="text" class="form-control form-control-sm return-condition" aria-label="Condition" placeholder="Condition / notes"></td>' +
                 '<td class="col-pieces return-pieces"></td>';
-            row.querySelector('.return-item-id').dataset.pending = String(item.qty_pending);
+            row.querySelector('.return-item-id').dataset.pending = String(pendingQty);
             var toolCheck = row.querySelector('.return-tool-check');
             var quantity = row.querySelector('.return-qty-input');
             toolCheck.addEventListener('change', function () {
-                quantity.value = toolCheck.checked ? String(item.qty_pending) : '';
+                quantity.value = toolCheck.checked ? String(pendingQty) : '';
                 if (!toolCheck.checked) {
                     Array.prototype.forEach.call(row.querySelectorAll('.pieces-pick-box'), function (box) { box.checked = false; });
                     quantity.readOnly = false;
                 }
+                syncReturnSettlement();
             });
             quantity.addEventListener('input', function () { toolCheck.checked = Number(quantity.value) > 0; });
-
-            var piecesCell = row.querySelector('.return-pieces');
-            var rentalId = picker ? picker.value : '';
-            // Always try to fetch and show serial numbers; fall back to quantity input if none.
-            fetch('/hdc/api/tool-rental/serials/out-of-store?tool_id=' + encodeURIComponent(item.tool_id) +
-                  '&rental_id=' + encodeURIComponent(rentalId),
-                  { credentials: 'same-origin' })
-                .then(function (response) { return response.ok ? response.json() : null; })
-                .then(function (data) {
-                    var serials = [];
-                    if (data && data.tools) {
-                        (data.tools || []).forEach(function (tool) {
-                            (tool.serials || []).forEach(function (serial) {
-                                if (String(tool.tool_id) === String(item.tool_id) &&
-                                    String(serial.rental_item_id) === String(item.rental_item_id)) {
-                                    serials.push(serial);
-                                }
-                            });
-                        });
-                    }
-                    // Always build a piece picker so the UI has checkboxes for serials.
-                    var piece = buildPiecePicker(serials.map(function (serial) {
-                        return { id: serial.serial_id, serial_number: serial.serial_number,
-                                 condition: serial.condition || 'good' };
-                    }), {
-                        className: 'return-serials',
-                        label: 'Pieces of ' + item.tool_name + ' coming back',
-                        onChange: function () { syncReturnPieceQty(row); }
-                    });
-                    piecesCell.innerHTML = ''; // clear any previous content
-                    if (piece) piecesCell.appendChild(piece);
-                    else piecesCell.innerHTML = '<span class="small text-muted">No serial markings for this tool — use quantity.</span>';
-                })
-                .catch(function () { /* the quantity path still works */ });
+            returnPiecePicker(row, item);
             tbody.appendChild(row);
         });
         box.appendChild(wrap);
         var hint = document.createElement('div');
         hint.className = 'small text-muted';
-        hint.textContent = 'Tick a tool to add it to this return; adjust its quantity or choose exact pieces. Untick to remove it. “Full Return” takes everything still outstanding.';
+        hint.textContent = 'Tick a tool to add it to this return; adjust its quantity or tick the exact pieces. Untick to remove it. “Full Return” takes everything still out, from every issue listed.';
         box.appendChild(hint);
         syncReturnMode();
+        syncReturnSettlement();
     }
 
     /* Ticked pieces are the quantity coming back; untick them all and the
@@ -1220,6 +1242,8 @@
             var picker = row.querySelector('.return-serials');
             var serialIds = picker ? piecePickerIds(picker) : [];
             if (!qty && !serialIds.length) return;
+            var rentalId = row.querySelector('.return-rental-id');
+            if (rentalId) addHidden(row.querySelector('td'), 'return_rental_id[]', rentalId.value, 'return-post');
             addHidden(row.querySelector('td'), 'rental_item_id[]', itemId.value, 'return-post');
             addHidden(row.querySelector('td'), 'qty_returned[]', serialIds.length ? String(serialIds.length) : String(qty), 'return-post');
             addHidden(row.querySelector('td'), 'condition_notes[]', row.querySelector('.return-condition').value, 'return-post');
@@ -1350,6 +1374,20 @@
         return validateLines();
     }
 
+    /* Who is returning comes before what is coming back: without a holder the
+       sheet has nothing to list, and the server would have no rows to post. */
+    function checkReturnHolder() {
+        var holder = document.getElementById('returnHolderSelect');
+        if (!holder || !holder.value) {
+            if (holder) holder.focus();
+            return ['Choose who is returning the tools (client or project / site).'];
+        }
+        if (!document.querySelectorAll('#returnItemRows .tool-txn-line').length) {
+            return ['Nothing is still out with this holder — pick another one.'];
+        }
+        return [];
+    }
+
     function checkReturnItems() {
         var entry = currentEntry();
         if (entry && entry.return_type === 'full') return [];
@@ -1412,6 +1450,7 @@
         customer: checkCustomer,
         project: checkProject,
         rental: checkRental,
+        return_holder: checkReturnHolder,
         lines: checkLines,
         transfer: validateTransfer,
         return_items: checkReturnItems,
@@ -1629,9 +1668,13 @@
         setTimeout(function () {
             showError('');
             // The browser resets native controls; the script-built pickers
-            // (store tick list + rows, transfer holders + rows) reset here.
-            var returnHolder = document.getElementById('returnHolderSelect');
-            if (returnHolder) returnHolder.dispatchEvent(new Event('change'));
+            // (store tick list + rows, transfer holders + rows, the return
+            // sheet) reset here.
+            var clearReturnHolder = document.getElementById('returnHolderSelect');
+            if (clearReturnHolder) {
+                clearReturnHolder.value = '';
+                clearReturnHolder.dispatchEvent(new Event('change'));
+            }
             var storeSearch = document.getElementById('storeToolSearch');
             if (storeSearch) storeSearch.value = '';
             var transferSearch = document.getElementById('transferLinesSearch');
@@ -1711,8 +1754,10 @@
     if (maintenanceTool) maintenanceTool.addEventListener('change', renderMaintenanceSend);
     var dateInput = document.getElementById('transaction_date');
     if (dateInput) dateInput.addEventListener('change', syncDateFields);
-    var returnSelect = document.getElementById('returnRentalSelect');
-    if (returnSelect) returnSelect.addEventListener('change', function () { loadReturnItems(this.value); syncReturnSettlement(); });
+    var returnHolder = document.getElementById('returnHolderSelect');
+    if (returnHolder) returnHolder.addEventListener('change', renderReturnSheet);
+    var returnSettle = document.getElementById('returnSettleRental');
+    if (returnSettle) returnSettle.addEventListener('change', syncReturnSettlement);
     var paymentSelect = document.getElementById('paymentRentalSelect');
     if (paymentSelect) paymentSelect.addEventListener('change', function () {
         var option = paymentSelect.options[paymentSelect.selectedIndex];
@@ -1738,7 +1783,7 @@
         if (amount && option) amount.max = option.getAttribute('data-amount') || '';
     });
 
-    initReturnHolders();
+    renderReturnSheet();
     paintGroupCards();
     filterTypeOptions();
     applyPanels();

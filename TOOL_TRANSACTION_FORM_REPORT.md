@@ -30,9 +30,9 @@ this page posts to the same endpoint that implements it.
 | Rent Out | Transfer to Another Customer | same (`transfer_customer`) | Same transfer engine, destination `customer`; only holders whose tools are actually out are offered. |
 | Rent Out | Receive Rent Payment | `POST /hdc/tool-rental/<id>/payment` | Money in, posted to Accounts through the existing receipt poster. No tool moves. |
 | Rent Out | Credit / Waive-off | `POST /hdc/tool-rental/<id>/discount` | Reduces what is owed, posts `discount_given` with no cash. Same authorization as the rental's own discount action. |
-| Return | Partial Return | `POST /hdc/tool-rental/<id>/return` (`partial`) | Only the posted quantities come back; the rest stays outstanding. Optional collection panel on the same post. |
-| Return | Full Return | `POST /hdc/tool-rental/<id>/return` (`full`) | Every outstanding line comes back; the physical issue closes. |
-| Return | Return to Store (no payment) | `POST /hdc/tool-rental/<id>/return`, no collection panel | Chosen pieces land back at `Warehouse / Store`; nothing is collected. |
+| Return | Partial Return | `POST /hdc/tool-rental/transaction/return` (`partial`) | Only the ticked quantities come back; the rest stays outstanding. Optional collection panel on the same post, against one of the holder's issues. |
+| Return | Full Return | `POST /hdc/tool-rental/transaction/return` (`full`) | Every line ticked on the sheet comes back in full; the physical issue closes. |
+| Return | Return to Store (no payment) | `POST /hdc/tool-rental/transaction/return`, no collection panel | Chosen pieces land back at `Warehouse / Store`; nothing is collected. |
 | Return | Damage or Loss | `POST /hdc/tool-rental/transaction/damage-loss` | From the store: the existing scrap write-off. From a holder: pieces are returned off the rental line and written off in the same database transaction, so owned and out move together. |
 | Maintenance | Send for Maintenance | `POST /hdc/tool-rental/transaction/maintenance` | Pieces leave the available pool (serial status → `maintenance`) but stay owned and store-side, with a workshop location and movement history. |
 | Maintenance | Back from Maintenance | `POST /hdc/tool-rental/transaction/maintenance-return` | Pieces come back to the store — or are written off through the scrap register when the operator marks them unrepairable. |
@@ -44,9 +44,32 @@ fields when returning a no-charge rental. The saved rental and return also say
 No charge / No payment; the payment endpoint still refuses a free rental.
 Transfer now picks one real site/customer location, expands its live holdings
 into one tickable row per rental, and shows each tool as a spreadsheet-style row
-with available quantity, move quantity, new rate and exact serials. Returns
-show the selected rental's tools in the same row format. Both sheets use the
-server's real rental/ledger data; quantity limits are rechecked on posting.
+with available quantity, move quantity, new rate and exact serials. Both sheets
+use the server's real rental/ledger data; quantity limits are rechecked on
+posting.
+
+**A return starts from who is returning — never from an issue.** The operator
+picks **Return from — client or project / site** and the sheet that opens is
+*Tools still at the selected site / customer*: one row per tool the holder
+still has out, across **all** of its open issues, never a list of rental codes
+to choose between first. `return_sheet()` in `tool_txn_entry.py` builds it from
+`ToolRentalItem.qty_pending` (the same number the endpoint checks a quantity
+against) and the serial markings that are actually out of the store, and groups
+rows by holder — `project:<id>` or `customer:<casefolded name>` — so a site
+with three open issues is still one place to send the truck to.
+
+| Select | # | Tool | Issued | Already back | Still out | Returning now | Condition | Exact pieces |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| ☑ | 1 | Reri · TOOL-000110 *RENT-000110* | 1 | 0 | 1 | 1 | good | *0 of 1 ticked* |
+
+Those nine columns are the whole sheet — the issue never became a step of its
+own. Each row still knows the issue it settles: it is printed small under the
+tool's code and posted with the row, so a mixed load can come home in one
+submission without losing which issue each piece belongs to. One submission therefore closes several
+issues at once — `record_return()` writes one `ToolRentalReturn` per issue,
+inside **one** database transaction — while the optional rent collection still
+settles exactly one issue (only the holder's issues that actually owe rent are
+offered; a no-charge holder has no cash fields at all).
 For a transfer, the old holder's outstanding balance and free status are visible
 before settlement. The new page defaults to **leave on credit**, never silently
 collects cash, and requires a chosen receiving account to collect now (older
@@ -79,7 +102,9 @@ transfer from the existing From / To choices. The page script
   exactly the fields those checks imply — there is no per-transaction branch in
   the script;
 * finds its rental picker by the `data-rental-picker` name the registry gave it,
-  never by a hard-coded DOM id.
+  never by a hard-coded DOM id — the money transactions (payment, credit) still
+  ask for one issue; the return does not ask at all, it opens the holder's
+  sheet instead (`check_return_holder` in the registry's `checks`).
 
 Adding a transaction is therefore adding one data entry (plus its panel markup)
 — no new page, no new dropdown, no new `if` in the script. A test asserts the
@@ -124,10 +149,10 @@ sentence, and a test asserts the list is empty.
 | File | Change |
 | --- | --- |
 | `hdc/services/tool_txn_types.py` | The grouped, self-checking registry; `NEW_RENTAL_TXN_TYPES` for the old page. |
-| `hdc/services/tool_txn_entry.py` | Form context builds one picker list per eligibility rule from the registry. |
-| `hdc/routes/tool_rental.py` | `_txn_group_context()` / `_txn_page_config()`; the three thin POST handlers unchanged. |
+| `hdc/services/tool_txn_entry.py` | Form context builds one picker list per eligibility rule from the registry, plus `return_sheet()` / `record_return()` for the holder-first return. |
+| `hdc/routes/tool_rental.py` | `_txn_group_context()` / `_txn_page_config()`; `POST /hdc/tool-rental/transaction/return` for the holder sheet, the other thin POST handlers unchanged. |
 | `templates/hdc/tool_rental/tool_txn.html` | Three group cards + shared modal form; the Return / Maintenance `<optgroup>` selector is data-driven. |
-| `static/hdc/js/pages/tool_txn.js` | Opens each card's group in the modal; rent-out type follows From / To; checks/collectors by name. |
+| `static/hdc/js/pages/tool_txn.js` | Opens each card's group in the modal; rent-out type follows From / To; the return sheet renders the holder's whole holding; checks/collectors by name. |
 | `templates/hdc/tool_rental/tool_new_rental.html` | Its registry const renamed to match `NEW_RENTAL_TXN_TYPES`. |
 | `tests/test_tool_txn_page.py` | Registry, page and per-transaction cases for the grouped page, plus the data-driven guard. |
 | `tests/test_tool_txn_form.py` | Imports the renamed New Rental registry. |
