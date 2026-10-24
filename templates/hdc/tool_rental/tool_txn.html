@@ -27,7 +27,17 @@
    excel-style rows (tool, pieces, qty, rate) — 4) to whom (site / customer,
    then that destination's details), 5) the rent type and terms, and 6) for a
    transfer, settling the previous holder.  A "no rent" answer greys out and
-   disables the rate cells in the rows above. #}
+   disables the rate cells in the rows above.
+
+   Returning is asked the other way round: first *who is returning* (a site or
+   a customer), and then one sheet — "Tools still at the selected site /
+   customer" — listing every tool that holder still has out, across all of its
+   open issues, with the issue named on each row (select, #, issue, tool,
+   issued, already back, still out, returning now, condition, exact pieces).
+   There is no issue picker wedged between the holder and their tools: a mixed
+   load comes back in one submission and each issue still gets its own return
+   record.  Rent, if any, is collected against the one issue chosen in the
+   optional settlement panel below. #}
 {% block content %}
 {% set tools_active = 'transaction' %}
 {% set tools_out = 'pending_tools' %}
@@ -421,8 +431,13 @@
                 </div>
             </div>
 
-            <!-- ── return: what is still outstanding ──────────────────────── -->
-            <div class="tool-txn-panel d-none" id="returnPanel" data-txn-panels="return" data-rental-picker="return">
+            <!-- ── return: who is bringing the tools back ───────────────────
+                 The holder is the first — and only — question: the sheet below
+                 then lists *everything* that site or customer still holds,
+                 across all of its open issues, with the issue each row belongs
+                 to.  Choosing an issue comes from the rows, never from a picker
+                 wedged between the holder and their tools. ─────────────────── -->
+            <div class="tool-txn-panel d-none" id="returnPanel" data-txn-panels="return">
                 <h6><i class="fas fa-rotate-left me-1" aria-hidden="true"></i>Return details</h6>
                 <input type="hidden" name="return_condition" id="returnCondition" value="partial">
                 <input type="hidden" name="return_date" id="returnDateHidden" value="{{ today }}">
@@ -431,17 +446,10 @@
                         <label class="form-label" for="returnHolderSelect">Return from — client or project / site</label>
                         <select id="returnHolderSelect" class="form-select">
                             <option value="">Choose who is returning the tools</option>
+                            {% for holder in return_holders %}
+                            <option value="{{ holder.key }}">{{ holder.label }}</option>
+                            {% endfor %}
                         </select>
-                        <div class="mt-2 d-none" id="returnReferenceField">
-                            <label class="form-label" for="returnRentalSelect">Original issue / rental reference</label>
-                            <select name="rental_id" id="returnRentalSelect" class="form-select">
-                                <option value="">Choose an issue / rental</option>
-                                {% for value, label, attrs in rental_picker_options[tools_out] %}
-                                <option value="{{ value }}" {% for key, val in attrs.items() %}data-{{ key }}="{{ val }}" {% endfor %}>{{ label }}</option>
-                                {% endfor %}
-                            </select>
-                            <small class="text-muted">If this holder has several issues, return tools from one issue at a time.</small>
-                        </div>
                         <small class="text-muted d-block" id="returnRentalInfo"></small>
                     </div>
                     <div class="col-md-4">
@@ -451,14 +459,23 @@
                     </div>
                 </div>
                 <div id="returnItemRows" class="mt-3">
-                    <div class="small text-muted">Choose a client or project / site first, then tick the tools to return.</div>
+                    <div class="small text-muted">Choose a client or project / site to see every tool still out with them.</div>
                 </div>
             </div>
 
             <!-- ── return: optional rent collection ───────────────────────── -->
             <div class="tool-txn-panel d-none" id="settlementPanel" data-txn-panels="settlement">
                 <h6><i class="fas fa-hand-holding-dollar me-1" aria-hidden="true"></i>Collect rent with this return (optional)</h6>
-                <div class="tool-txn-summary mb-2" id="returnSettlementStatus" role="status" aria-live="polite">Choose a rental to see its rent status.</div>
+                <div class="tool-txn-summary mb-2" id="returnSettlementStatus" role="status" aria-live="polite">Choose a client or project / site to see its rent status.</div>
+                <div class="row g-3 mb-3" id="returnSettleField">
+                    <div class="col-md-6">
+                        <label class="form-label" for="returnSettleRental">Collect rent for — issue</label>
+                        <select name="settle_rental_id" id="returnSettleRental" class="form-select">
+                            <option value="">No rent to collect</option>
+                        </select>
+                        <small class="text-muted d-block">Money settles one issue; the tools come back from every issue ticked above.</small>
+                    </div>
+                </div>
                 <div class="row g-3" id="returnCashFields">
                     <div class="col-md-4">
                         <label class="form-label" for="payment_condition">Payment</label>

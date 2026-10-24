@@ -28,8 +28,8 @@ from hdc.services.tool_txn_types import (
     NEW_RENTAL_TXN_TYPES, TXN_GROUPS, BILLING_MODES, rental_eligible,
 )
 from hdc.services.tool_txn_entry import (
-    MAINTENANCE_LABEL, record_damage_loss, return_from_maintenance, send_to_maintenance,
-    stamp_reference, txn_form_context, txn_reference_seen,
+    MAINTENANCE_LABEL, record_damage_loss, record_return, return_from_maintenance,
+    send_to_maintenance, stamp_reference, txn_form_context, txn_reference_seen,
 )
 from hdc.services.tool_rental import (
     _ensure_tool_category, _next_rental_code, _next_tool_code,
@@ -231,6 +231,7 @@ def _txn_page_config(context, groups):
         'maintenanceLabel': context['maintenance_label'],
         'tools': tools,
         'transferSources': sources,
+        'returnRows': context.get('return_rows') or [],
         'maintenancePieces': [{
             'serialId': row['serial_id'],
             'serialNumber': row['serial_number'],
@@ -267,6 +268,50 @@ def _txn_billing_notes(default=''):
     if agreement:
         terms = (terms + ' | ' if terms else '') + f'Agreement: {agreement}'
     return (terms or default).strip()[:300]
+
+
+def _posted_return_lines():
+    """The tool lines a return sheet posted, in the order it rendered them.
+
+    The sheet posts four parallel lists (issue, tool line, quantity, condition)
+    plus the ticked piece markings under ``return_serial_ids_<item>[]`` — the
+    same field names the per-rental return route already reads.  A row that
+    brings nothing back is dropped here, so the service only ever sees real
+    lines.  The rental each row belongs to rides along, because one submission
+    may bring tools home from several of a holder's issues at once.
+    """
+    rental_ids = (request.form.getlist('return_rental_id[]')
+                  or request.form.getlist('return_rental_id'))
+    item_ids = (request.form.getlist('rental_item_id[]')
+                or request.form.getlist('rental_item_id'))
+    quantities = request.form.getlist('qty_returned[]') or request.form.getlist('qty_returned')
+    conditions = request.form.getlist('condition_notes[]') or request.form.getlist('condition_notes')
+
+    lines = []
+    for index, item_raw in enumerate(item_ids):
+        try:
+            item_id = int(item_raw)
+        except (TypeError, ValueError):
+            continue
+        try:
+            rental_id = int(rental_ids[index]) if index < len(rental_ids) else 0
+        except (TypeError, ValueError):
+            rental_id = 0
+        serial_ids = []
+        for chunk in (request.form.getlist(f'return_serial_ids_{item_id}[]')
+                      or request.form.getlist(f'return_serial_ids_{item_id}')):
+            for token in str(chunk or '').split(','):
+                token = token.strip()
+                if token.isdigit() and token not in serial_ids:
+                    serial_ids.append(token)
+        lines.append({
+            'rental_id': rental_id,
+            'rental_item_id': item_id,
+            'qty': _flt(quantities[index]) if index < len(quantities) else 0.0,
+            'condition': conditions[index] if index < len(conditions) else '',
+            'serial_ids': serial_ids,
+        })
+    return lines
 
 
 def _txn_return_url(default_url):
@@ -1712,6 +1757,53 @@ def register(app):
         context['billing_modes'] = BILLING_MODES
         context['txn_config'] = _txn_page_config(context, groups)
         return render_template('tool_rental/tool_txn.html', **context)
+
+    @app.route('/hdc/tool-rental/transaction/return', methods=['POST'])
+    @_answers_txn_post_as_data
+    @login_required
+    @_money_write_required()
+    def hdc_tool_txn_return():
+        """Bring tools back from one holder — across every issue it still has.
+
+        The return sheet starts from *who is returning* (a site or a customer)
+        and lists everything that holder still has out, with the issue each row
+        belongs to, so one submission can close several open issues at once.
+        Each issue keeps its own return record; the optional rent collection
+        settles exactly one of them.  The per-rental route stays as it is for
+        the rental page and the New Rental form.
+        """
+        duplicate = _txn_reference_blocked(url_for('hdc_tool_txn'))
+        if duplicate:
+            return duplicate
+
+        return_date, date_error = _strict_form_date(
+            request.form.get('return_date') or request.form.get('transaction_date'),
+            'Return date')
+        if date_error:
+            flash(date_error, 'danger')
+            return redirect(_txn_return_url(url_for('hdc_tool_txn')))
+
+        ok, message, _summary = record_return(
+            actor_id=current_user.id if hasattr(current_user, 'id') else None,
+            lines=_posted_return_lines(),
+            return_type=(request.form.get('return_condition')
+                         or request.form.get('return_type') or 'partial'),
+            return_date=return_date,
+            payment_type=request.form.get('payment_condition') or 'no_payment',
+            amount_paid=_flt(request.form.get('amount_paid')),
+            discount_amount=_flt(request.form.get('discount_amount')),
+            discount_reason=request.form.get('discount_reason') or 'goodwill',
+            discount_notes=request.form.get('discount_notes') or '',
+            settle_rental_id=request.form.get('settle_rental_id', type=int),
+            received_to_account_id=request.form.get('received_to_account_id', type=int),
+            payment_mode=request.form.get('payment_mode') or 'cash',
+            payment_reference=request.form.get('payment_reference') or '',
+            notes=(request.form.get('notes') or '').strip(),
+            reference=(request.form.get('txn_reference') or '').strip(),
+            responsible=(request.form.get('responsible_person') or '').strip(),
+        )
+        flash(message, 'success' if ok else 'danger')
+        return redirect(_txn_return_url(url_for('hdc_tool_txn')))
 
     @app.route('/hdc/tool-rental/transaction/damage-loss', methods=['POST'])
     @_answers_txn_post_as_data

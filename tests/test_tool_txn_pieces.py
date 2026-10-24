@@ -62,7 +62,7 @@ from hdc.models.tool_rental import (                               # noqa: E402
 from hdc.services.tool_rental import (                             # noqa: E402
     assign_serials_to_rental, ensure_all_tools_serials, get_out_of_store_serials,
 )
-from hdc.services.tool_txn_entry import txn_form_context               # noqa: E402
+from hdc.services.tool_txn_entry import return_sheet, txn_form_context   # noqa: E402
 from hdc.utils.dates import _pkt_today                             # noqa: E402
 
 ADMIN_PASSWORD = os.environ['HDC_BOOTSTRAP_ADMIN_PASSWORD']
@@ -222,6 +222,13 @@ class PiecesPickerTestCase(unittest.TestCase):
         source = [row for row in txn_form_context()['transfer_sources']
                   if int(row['rental_id']) == int(self.transfer_rental.id)]
         self.assertTrue(source, 'the fixture rental must be offered as a transfer source')
+        # The return sheet is driven by *who is returning*: hand the harness the
+        # holder key the server actually rendered, and the rows it lists.
+        sheet = return_sheet()
+        holder_rows = [row for row in sheet['rows']
+                       if int(row['rentalId']) == int(rental.id)]
+        self.assertTrue(holder_rows, 'the fixture rental must appear on the return sheet')
+        holder_key = holder_rows[0]['holderKey']
         return {
             'storeTool': self.shovel.name,
             'transfer': {
@@ -229,6 +236,11 @@ class PiecesPickerTestCase(unittest.TestCase):
                 'toolName': self.vibrator.name,
                 'source': {'key': source[0]['key']},
             },
+            'returnHolder': holder_key,
+            'returnRowCount': len([row for row in sheet['rows']
+                                   if row['holderKey'] == holder_key]),
+            'returnRentalCode': holder_rows[0]['rentalCode'],
+            'returnTool': holder_rows[0]['toolName'],
             'returnRentalId': int(rental.id),
             'rentals': [{
                 'id': int(rental.id),
@@ -348,7 +360,7 @@ class PiecesPickerTestCase(unittest.TestCase):
         results = self._run_harness()
         returns = results['returns']
         ticked = self._ticked_ids(returns['fields'], 'return_serial_ids_')
-        rental_id = int(returns['fields']['rental_id'][0])
+        rental_id = int(returns['fields']['return_rental_id[]'][0])
         self.assertEqual(rental_id, int(self.return_rental.id))
         self.assertEqual(len(ticked), 2)
         self._post_fields(returns['action'], returns['fields'])
