@@ -201,16 +201,6 @@
                                    value="{{ txn_reference }}" readonly tabindex="-1">
                             <small class="text-muted d-block">A repeated submission is ignored.</small>
                         </div>
-                        <div class="col-md-4">
-                            <label class="form-label" for="responsible_person">Responsible person</label>
-                            <input type="text" name="responsible_person" id="responsible_person"
-                                   class="form-control" placeholder="Who is recording / handing over">
-                        </div>
-                        <div class="col-md-8">
-                            <label class="form-label" for="txnNotes">Notes</label>
-                            <input type="text" name="notes" id="txnNotes" class="form-control"
-                                   placeholder="Anything the next person needs to know">
-                        </div>
                     </div>
 
             <!-- ── rent out setup, step 2: where the tools come from ──────── -->
@@ -382,18 +372,7 @@
                         <label class="form-label" for="expected_return_date">Expected return date</label>
                         <input type="date" name="expected_return_date" id="expected_return_date" class="form-control">
                     </div>
-                    <div class="col-md-6">
-                        <label class="form-label" for="rental_reference">Rental agreement / reference (optional)</label>
-                        <input type="text" name="rental_reference" id="rental_reference" class="form-control"
-                               placeholder="Agreement, PO or existing rental reference">
-                    </div>
-                    <div class="col-md-6">
-                        <label class="form-label" for="billing_notes">Agreed billing terms</label>
-                        <input type="text" name="billing_notes" id="billing_notes" class="form-control"
-                               placeholder="e.g. weekly billing, rate includes operator">
-                    </div>
                 </div>
-                <div id="billingStatus" class="tool-txn-summary mt-3" role="status" aria-live="polite"></div>
             </div>
 
             <!-- ── transfer: … and what the old holder is owed ────────────── -->
@@ -678,6 +657,21 @@
                 </div>
                 <div class="border rounded p-2 mt-2" id="maintenanceReturnList" style="max-height:220px; overflow:auto;">
                     <span class="small text-muted">Nothing is with the workshop right now.</span>
+                </div>
+            </div>
+
+            <!-- ── notes: asked last, whatever the transaction is ───────────
+                 No data-txn-panels here on purpose — the panel switcher only
+                 touches blocks that declare one, so this stays open (and
+                 enabled) for every transaction, exactly as it did while it sat
+                 in the common row at the top. ────────────────────────────── -->
+            <div class="tool-txn-panel" id="txnNotesPanel">
+                <div class="row g-3">
+                    <div class="col-12">
+                        <label class="form-label" for="txnNotes">Notes</label>
+                        <input type="text" name="notes" id="txnNotes" class="form-control"
+                               placeholder="Anything the next person needs to know">
+                    </div>
                 </div>
             </div>
                 </div>
