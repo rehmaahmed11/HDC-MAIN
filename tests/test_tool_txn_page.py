@@ -429,7 +429,13 @@ class TxnFormTestCase(unittest.TestCase):
         self.assertEqual(config['billingModes'], list(BILLING_MODES))
         for mode in BILLING_MODES:
             self.assertIn(f'<option value="{mode["key"]}">{mode["label"]}</option>', html)
-        self.assertIn('id="billingStatus"', html)
+        # The rent-charged status line and the two free-text term fields are
+        # gone from the form; the registry still drives the rate controls, and
+        # the notes field now sits at the bottom of the form.
+        for gone in ('id="billingStatus"', 'name="rental_reference"',
+                     'name="billing_notes"', 'name="responsible_person"'):
+            self.assertNotIn(gone, html)
+        self.assertLess(html.index('id="maintenanceReturnPanel"'), html.index('id="txnNotes"'))
         self.assertIn('id="returnSettlementStatus"', html)
         self.assertIn('id="returnCashFields"', html)
         self.assertIn('id="transferSettlementStatus"', html)
