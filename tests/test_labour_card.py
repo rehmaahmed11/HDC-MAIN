@@ -252,8 +252,13 @@ class LabourCardTestCase(IsolatedAppTest):
         self.assertEqual(landing.status_code, 200)
         body = landing.get_data(as_text=True)
         self.assertIn('Labour Card', body)
-        # Searchable combo-box list of worker names (strict select combo).
+        # Searchable list-style combo box of worker names (strict select
+        # combo with the opt-in chevron that opens the full worker list).
         self.assertIn('data-hdc-combo="labourWorker"', body)
+        self.assertIn('data-hdc-combo-toggle="true"', body)
+        self.assertIn('data-hdc-combo-strict="true"', body)
+        # The hidden select keeps the posted name and carries every worker.
+        self.assertIn('name="worker_id"', body)
         self.assertIn('Card Worker (LC-W)', body)
         self.assertIn('Select a worker', body)
 

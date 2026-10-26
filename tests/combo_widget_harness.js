@@ -159,6 +159,10 @@ function makeElement(tag, id) {
       return [];
     },
     closest() { return null; },
+    // Real elements move focus on click; the stub only needs the calls not
+    // to throw (the toggle relies on input.focus() when opening the list).
+    focus() {},
+    blur() {},
   };
   if (el.tagName === 'SELECT') {
     Object.defineProperty(el, 'value', {
@@ -427,6 +431,85 @@ function comboMenus() {
   assert.equal(observers.length, beforeObserverCount, 'destroy disconnects mutation observers');
   assert.equal((f5.input._listeners.focus || []).length, 0, 'destroy removes input listeners');
   assert.equal((f5.select._listeners.change || []).length, 0, 'destroy removes select listeners');
+
+  // 13. opt-in dropdown toggle: a list-style combo box with a chevron.
+  // 13a. Without showToggle no button is ever rendered (existing pages keep
+  // the plain search box).
+  const f6a = buildField('inp6a', 'sel6a', [
+    mkopt('', 'Select'),
+    mkopt('1', 'One (W-1)'),
+  ]);
+  HDCComboList.attach('inp6a', 'sel6a', { strict: true });
+  const wrap6a = f6a.input.parentNode;
+  assert.equal(
+    wrap6a.children.filter(c => c.classList && c.classList.contains('hdc-combo-toggle')).length,
+    0, 'no toggle button without showToggle');
+  assert.ok(!wrap6a.classList.contains('hdc-combo-has-toggle'));
+
+  // 13b. With showToggle the chevron sits inside the wrapper and opens the
+  // FULL list — the maxItems cap must not hide workers behind typing.
+  const many = [mkopt('', 'Select')];
+  for (let i = 1; i <= 75; i++) {
+    many.push(mkopt(String(i), 'Worker ' + String(i).padStart(2, '0') + ' (W-' + i + ')'));
+  }
+  const f6 = buildField('inp6', 'sel6', many);
+  const combo6 = HDCComboList.attach('inp6', 'sel6',
+    { strict: true, maxItems: 50, showToggle: true });
+  const wrap6 = f6.input.parentNode;
+  assert.ok(wrap6.classList.contains('hdc-combo-has-toggle'),
+    'wrapper is marked for toggle styling (input padding etc.)');
+  const toggle6 = wrap6.children.find(
+    c => c.classList && c.classList.contains('hdc-combo-toggle'));
+  assert.ok(toggle6, 'chevron toggle button rendered next to the input');
+  assert.equal(toggle6.tagName, 'BUTTON');
+  assert.equal(toggle6.getAttribute('tabindex'), '-1',
+    'the chevron stays out of the tab order (input owns keyboard use)');
+  assert.equal(toggle6.getAttribute('aria-haspopup'), 'listbox');
+  const menu6 = comboMenus()[comboMenus().length - 1];
+  assert.ok(!menuVisible(menu6), 'list starts closed');
+
+  // First click: open and show every option, not just maxItems.
+  toggle6.dispatchEvent(new FakeEvent('mousedown'));
+  toggle6.dispatchEvent(new FakeEvent('click'));
+  assert.ok(menuVisible(menu6), 'chevron click opens the list');
+  assert.equal((menuHtml(menu6).match(/hdc-combo-item/g) || []).length, 75,
+    'toggle lists all 75 workers, ignoring the 50-item render cap');
+  assert.ok(toggle6.classList.contains('hdc-combo-toggle-open'),
+    'chevron flips to its open state');
+  assert.equal(f6.input.getAttribute('aria-expanded'), 'true');
+
+  // Typing still narrows the open list.
+  documentStub.activeElement = f6.input;
+  f6.input.value = 'worker 7';
+  f6.input.dispatchEvent(new FakeEvent('input'));
+  const shownCount = (menuHtml(menu6).match(/hdc-combo-item/g) || []).length;
+  assert.ok(shownCount > 1 && shownCount < 75,
+    'typing filters the toggle list (got ' + shownCount + ' matches)');
+  assert.ok(menuVisible(menu6), 'list stays open while filtering');
+
+  // Second click: close and reset the chevron / aria state.
+  toggle6.dispatchEvent(new FakeEvent('mousedown'));
+  toggle6.dispatchEvent(new FakeEvent('click'));
+  assert.ok(!menuVisible(menu6), 'second chevron click closes the list');
+  assert.ok(!toggle6.classList.contains('hdc-combo-toggle-open'));
+  assert.equal(f6.input.getAttribute('aria-expanded'), 'false');
+
+  // Picking from the opened list also resets the chevron.
+  documentStub.activeElement = f6.input;
+  f6.input.value = '';
+  toggle6.dispatchEvent(new FakeEvent('mousedown'));
+  toggle6.dispatchEvent(new FakeEvent('click'));
+  f6.input.value = 'worker 03';
+  f6.input.dispatchEvent(new FakeEvent('input'));
+  f6.input.dispatchEvent(new FakeEvent('keydown', { key: 'Enter' }));
+  assert.equal(f6.select.value, '3', 'keyboard pick still works with the toggle');
+  assert.ok(!menuVisible(menu6), 'pick closes the list');
+  assert.ok(!toggle6.classList.contains('hdc-combo-toggle-open'),
+    'pick resets the chevron');
+
+  // destroy removes the button as well as the menu.
+  combo6.destroy();
+  assert.equal(toggle6.parentNode, null, 'destroy removes the toggle button');
 
   console.log('combo widget harness: all assertions passed');
 })().catch(err => {
