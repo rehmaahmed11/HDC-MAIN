@@ -37,6 +37,8 @@ DOMAIN_OF = {
     "workers": ["workers.html", "trades.html", "worker_ledger.html",
                 # Worker statement — the printable month sheet
                 "worker_statement.html",
+                # Labour Card — site-wise days/overtime/amount + payable
+                "labour_card.html",
                 "worker_advance.html", "worker_payment.html",
                 "worker_ledger_entry_edit.html", "worker_rate.html"],
     "timekeeping": ["timekeeping.html", "timekeeping_edit.html",
