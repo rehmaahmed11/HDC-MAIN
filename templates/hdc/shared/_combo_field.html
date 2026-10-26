@@ -22,13 +22,14 @@
 #}
 {% macro combo_field(name, field_id, options, label='', placeholder='', required=false,
                      hint='', input_class='form-control', value='', max_items=50,
-                     empty_text='') %}
+                     empty_text='', toggle=false) %}
 <div class="hdc-combo-field">
     {% if label %}<label class="form-label"{% if field_id %} for="{{ field_id }}Input"{% endif %}>{{ label }}</label>{% endif %}
     <input type="text" id="{{ field_id }}Input" name="{{ name }}" class="{{ input_class }}"
            value="{{ value }}" placeholder="{{ placeholder }}"
            autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list"
            data-hdc-combo="{{ field_id }}"
+           {% if toggle %}data-hdc-combo-toggle="true"{% endif %}
            {% if max_items %}data-hdc-combo-max="{{ max_items }}"{% endif %}
            {% if empty_text %}data-hdc-combo-empty="{{ empty_text }}"{% endif %}>
     <select id="{{ field_id }}" class="form-select d-none"
@@ -57,17 +58,24 @@
    current value — nothing at all until the parent is chosen. ``depends_wait``
    / ``depends_none`` are the hints shown before a parent is picked / when the
    parent has no options.
+
+   Pass ``toggle=true`` for a list-style combo box: core/combo.js adds a
+   chevron button inside the field that opens the whole (uncapped, scrollable)
+   list with one click, while typing still filters it. The button is created
+   by JavaScript only, so the no-JS fallback is unchanged.
 #}
 {% macro combo_select(name, field_id, options, label='', placeholder='', required=false,
                       hint='', selected='', max_items=60,
                       empty_text='', label_id='', depends_on='',
-                      depends_key='parent-id', depends_wait='', depends_none='') %}
+                      depends_key='parent-id', depends_wait='', depends_none='',
+                      toggle=false) %}
 <div class="hdc-combo-field">
     {% if label %}<label class="form-label"{% if field_id %} for="{{ field_id }}Input"{% endif %}{% if label_id %} id="{{ label_id }}"{% endif %}>{{ label }}</label>{% endif %}
     <input type="text" id="{{ field_id }}Input" class="form-control"
            placeholder="{{ placeholder }}"
            autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list"
            data-hdc-combo="{{ field_id }}" data-hdc-combo-strict="true"
+           {% if toggle %}data-hdc-combo-toggle="true"{% endif %}
            {% if max_items %}data-hdc-combo-max="{{ max_items }}"{% endif %}
            {% if empty_text %}data-hdc-combo-empty="{{ empty_text }}"{% endif %}>
     <select id="{{ field_id }}" name="{{ name }}" class="form-select d-none"

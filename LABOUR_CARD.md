@@ -5,8 +5,13 @@ answers *"what does this worker's card look like, and what is payable?"*
 
 ## How to use it
 
-1. Type a few letters of the labour's name and pick him from the
-   searchable list (the card opens below as soon as he is selected).
+1. Pick the labour from the **searchable list-style combo box**: either
+   click the arrow at the right of the *Worker Name* field to browse the
+   full worker list (scrollable), or type a few letters of his name to
+   filter it, then pick him — the card opens below as soon as he is
+   selected. (The arrow is added on top of the same shared searchable
+   combo used across the app; typing, arrow keys, Enter and Escape all
+   work, and without JavaScript the field still posts as a plain select.)
 2. Choose the **From / To** dates, or use the quick buttons:
    This Week · Last Week · This Month · Last 30 Days · All Time.
    The page opens on **This Week (Monday → today)**. Leaving *From*

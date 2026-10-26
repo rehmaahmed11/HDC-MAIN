@@ -32,7 +32,18 @@
                 '.hdc-combo-add:hover,.hdc-combo-add.active{background:var(--accent);color:#fff;}',
                 // Keyboard focus ring for the visible input, so a combo is as
                 // reachable as the select it replaced.
-                'input[data-hdc-combo]:focus-visible{outline:2px solid var(--accent);outline-offset:1px;}'
+                'input[data-hdc-combo]:focus-visible{outline:2px solid var(--accent);outline-offset:1px;}',
+                // Optional dropdown toggle (opt-in via showToggle /
+                // data-hdc-combo-toggle): turns the search box into a classic
+                // list-style combo box whose chevron opens the whole
+                // scrollable list instead of only the first page of matches.
+                '.hdc-combo-wrap.hdc-combo-has-toggle input[data-hdc-combo]{padding-right:2.35rem;}',
+                '.hdc-combo-toggle{position:absolute;top:0;right:0;bottom:0;width:2.2rem;padding:0;border:0;background:transparent;',
+                'color:var(--text-muted);display:flex;align-items:center;justify-content:center;cursor:pointer;',
+                'border-radius:0 var(--bs-border-radius,0.375rem) var(--bs-border-radius,0.375rem) 0;}',
+                '.hdc-combo-toggle:hover{color:var(--accent-strong);}',
+                '.hdc-combo-toggle i{font-size:.8rem;transition:transform .15s ease;}',
+                '.hdc-combo-toggle.hdc-combo-toggle-open i{transform:rotate(180deg);}'
             ].join('');
             document.head.appendChild(style);
         }
@@ -58,6 +69,21 @@
                 if (!menu.id) menu.id = select.id ? select.id + '_menu' : '';
                 if (menu.id) input.setAttribute('aria-controls', menu.id);
                 document.body.appendChild(menu);
+
+                // Opt-in chevron that makes the field look — and behave —
+                // like a list-style combo box: one click opens the full list.
+                var toggle = null;
+                if (opts.showToggle) {
+                    wrap.classList.add('hdc-combo-has-toggle');
+                    toggle = document.createElement('button');
+                    toggle.type = 'button';
+                    toggle.className = 'hdc-combo-toggle';
+                    toggle.setAttribute('tabindex', '-1');
+                    toggle.setAttribute('aria-label', 'Toggle list');
+                    toggle.setAttribute('aria-haspopup', 'listbox');
+                    toggle.innerHTML = '<i class="fas fa-chevron-down" aria-hidden="true"></i>';
+                    wrap.appendChild(toggle);
+                }
 
                 if (opts.hideSelect !== false) select.classList.add('d-none');
                 if (opts.syncInputWithSelected !== false) {
@@ -127,7 +153,25 @@
                             return (o.text || '').toLowerCase().indexOf(q) !== -1;
                         });
                     }
-                    return all.slice(0, opts.maxItems || 25);
+                    // A list-style combo (showToggle) promises the whole list:
+                    // the menu itself scrolls, so no option is ever unreachable
+                    // without typing. Plain search boxes keep the render cap.
+                    var cap = opts.showToggle ? all.length : (opts.maxItems || 25);
+                    return all.slice(0, cap);
+                }
+                function openMenu() {
+                    menu.classList.remove('d-none');
+                    if (toggle) {
+                        toggle.classList.add('hdc-combo-toggle-open');
+                        input.setAttribute('aria-expanded', 'true');
+                    }
+                }
+                function closeMenu() {
+                    menu.classList.add('d-none');
+                    if (toggle) {
+                        toggle.classList.remove('hdc-combo-toggle-open');
+                        input.setAttribute('aria-expanded', 'false');
+                    }
                 }
                 // The "+ Add New …" affordance is opt-in: a combo only shows it
                 // when the caller passes onAdd, so every existing caller keeps
@@ -163,12 +207,12 @@
                                 : '';
                             menu.innerHTML = empty + addOnly;
                             state.idx = -1;
-                            menu.classList.remove('d-none');
+                            openMenu();
                             placeMenu();
                             return;
                         }
                         menu.innerHTML = '';
-                        menu.classList.add('d-none');
+                        closeMenu();
                         return;
                     }
                     if (hasAddRow()) {
@@ -177,7 +221,7 @@
                             escapeHtml(opts.addLabel || '+ Add new') + '</div>');
                     }
                     menu.innerHTML = rows.join('');
-                    menu.classList.remove('d-none');
+                    openMenu();
                     placeMenu();
                 }
                 function highlight() {
@@ -192,7 +236,7 @@
                     if (hasAddRow() && i === state.items.length) {
                         // The action row is not a value: it never touches the
                         // select, so a cancelled modal leaves the field as-is.
-                        menu.classList.add('d-none');
+                        closeMenu();
                         opts.onAdd(input, select);
                         return;
                     }
@@ -201,7 +245,7 @@
                     select.value = opt.value;
                     input.value = (opt.value || !opts.strict) ? opt.text : '';
                     select.dispatchEvent(new Event('change', { bubbles: true }));
-                    menu.classList.add('d-none');
+                    closeMenu();
                 }
                 function syncByExact() {
                     var q = (input.value || '').trim().toLowerCase();
@@ -256,15 +300,29 @@
                         e.preventDefault();
                         if (state.idx >= 0) pick(state.idx);
                     } else if (e.key === 'Escape') {
-                        menu.classList.add('d-none');
+                        closeMenu();
                     }
                 };
                 var onBlur = function () {
                     setTimeout(function () {
                         if (destroyed) return;
                         syncByExact();
-                        menu.classList.add('d-none');
+                        closeMenu();
                     }, 120);
+                };
+                // The chevron is a pure mouse/touch affordance: it never
+                // steals focus (mousedown is prevented) so the input keeps
+                // owning the keyboard contract, and one click opens the full
+                // list while a second click closes it again.
+                var onToggleMousedown = function (e) { e.preventDefault(); };
+                var onToggleClick = function (e) {
+                    e.preventDefault();
+                    if (!menu.classList.contains('d-none')) {
+                        closeMenu();
+                        return;
+                    }
+                    input.focus();
+                    render();
                 };
                 var onMenuMousemove = function (e) {
                     var row = e.target.closest('.hdc-combo-item');
@@ -288,6 +346,10 @@
                 input.addEventListener('blur', onBlur);
                 menu.addEventListener('mousemove', onMenuMousemove);
                 menu.addEventListener('mousedown', onMenuMousedown);
+                if (toggle) {
+                    toggle.addEventListener('mousedown', onToggleMousedown);
+                    toggle.addEventListener('click', onToggleClick);
+                }
 
                 // Page code rebuilds these selects as direction / type /
                 // project change and rewrites option labels when balances
@@ -321,11 +383,16 @@
                         select.removeEventListener('change', onSelectChange);
                         menu.removeEventListener('mousemove', onMenuMousemove);
                         menu.removeEventListener('mousedown', onMenuMousedown);
+                        if (toggle) {
+                            toggle.removeEventListener('mousedown', onToggleMousedown);
+                            toggle.removeEventListener('click', onToggleClick);
+                            if (toggle.parentNode) toggle.parentNode.removeChild(toggle);
+                        }
                         window.removeEventListener('resize', placeMenu);
                         window.removeEventListener('scroll', placeMenu, true);
                         if (optionsObserver) optionsObserver.disconnect();
                         if (requiredObserver) requiredObserver.disconnect();
-                        menu.classList.add('d-none');
+                        closeMenu();
                         if (menu.parentNode) menu.parentNode.removeChild(menu);
                         if (input.getAttribute('aria-controls') === menu.id) {
                             input.removeAttribute('aria-controls');
@@ -359,6 +426,9 @@
                 // inputs set data-hdc-combo-strict so only a real listed
                 // option can supply the selected value.
                 strict: input.getAttribute('data-hdc-combo-strict') === 'true',
+                // Opt-in list-style combo box: a chevron button opens the
+                // whole (uncapped, scrollable) list instead of a text box.
+                showToggle: input.getAttribute('data-hdc-combo-toggle') === 'true',
                 maxItems: parseInt(input.getAttribute('data-hdc-combo-max') || '50', 10),
                 // Read at render time: a dependent picker rewrites the
                 // attribute as its parent changes (see bindDependent).
