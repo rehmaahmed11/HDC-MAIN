@@ -193,6 +193,9 @@
             <a href="{{ url_for('hdc_worker_statement', wid=w.id) }}" class="small text-primary ms-2">
                 <i class="fas fa-file-invoice-dollar me-1"></i>Statement
             </a>
+            <a href="{{ url_for('hdc_labour_card', worker_id=w.id) }}" class="small text-success ms-2">
+                <i class="fas fa-id-card me-1"></i>Labour Card
+            </a>
         </td>
         <td class="text-muted">{{ w.role_type or '—' }}</td>
         <td>{{ "{:,.0f}".format(w.base_daily_wage) }} PKR</td>

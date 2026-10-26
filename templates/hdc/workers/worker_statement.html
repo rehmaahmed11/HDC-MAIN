@@ -109,6 +109,9 @@ tr.no-notes-row > td { background: transparent !important; }
     <a href="{{ url_for('hdc_worker_ledger', wid=w.id) }}" class="btn btn-outline-secondary btn-sm">
         <i class="fas fa-book me-1"></i>Classic ledger
     </a>
+    <a href="{{ url_for('hdc_labour_card', worker_id=w.id) }}" class="btn btn-outline-success btn-sm">
+        <i class="fas fa-id-card me-1"></i>Labour Card
+    </a>
     <button type="button" class="btn btn-outline-dark btn-sm no-print" onclick="window.print()">
         <i class="fas fa-print me-1"></i>Print / Save PDF
     </button>

@@ -1,0 +1,544 @@
+{% extends "shared/base.html" %}
+{% block title %}Labour Card{% if w %} — {{ w.name }}{% endif %}{% endblock %}
+{% block page_heading %}
+    <i class="fas fa-id-card me-2"></i>Labour Card
+    {% if w %}<span class="badge bg-secondary ms-2 fs-6">{{ w.worker_code }}</span>{% endif %}
+{% endblock %}
+
+{% block content %}
+{% from "shared/_combo_field.html" import combo_select %}
+{% macro num(v) %}{{ '%g'|format((v or 0)|round(2)) }}{% endmacro %}
+{% macro money(v) %}{{ "{:,.0f}".format(v or 0) }}{% endmacro %}
+
+<style>
+.lc-payable { border:2px solid var(--accent, #16a34a); }
+.lc-payable .lc-payable-amount { font-size:1.6rem; font-weight:800; line-height:1.1; }
+.lc-info-col { background: rgba(245,158,11,.08) !important; }
+.lc-print-head { display:none; }
+@media print {
+    #sidebar, .topbar, .sidebar-backdrop, #flashMessages, .no-print { display:none !important; }
+    .lc-print-head { display:block; text-align:center; margin-bottom:10px; }
+}
+</style>
+
+{% if w and card %}
+<div class="lc-print-head">
+    <strong>HDC — Labour Card</strong> · {{ w.name }} ({{ w.worker_code }})<br>
+    <small>
+        {% if card.date_from or card.date_to %}
+            {{ card.date_from.strftime('%d %b %Y') if card.date_from else 'Start' }}
+            to {{ card.date_to.strftime('%d %b %Y') if card.date_to else 'Today' }}
+        {% else %}All time{% endif %}
+    </small>
+</div>
+{% endif %}
+
+{# ── Worker + date range picker ─────────────────────────────────────────── #}
+<div class="card hdc-card mt-2 no-print">
+    <div class="card-header hdc-card-header">
+        <i class="fas fa-magnifying-glass me-2"></i>Select Worker &amp; Dates
+    </div>
+    <div class="card-body">
+        <form method="GET" action="{{ url_for('hdc_labour_card') }}" id="labourCardForm" class="row g-3 align-items-end">
+            <div class="col-12 col-md-5">
+                {{ combo_select('worker_id', 'labourWorker', worker_options,
+                                label='Worker Name', placeholder='Type worker name to search…',
+                                selected=selected_worker_id,
+                                empty_text='No worker matches — check the spelling.',
+                                hint='Type a few letters, then pick the worker from the list. The card opens below.') }}
+            </div>
+            <div class="col-6 col-md-2">
+                <label class="form-label" for="lcDateFrom">From Date</label>
+                <input type="date" id="lcDateFrom" name="date_from" value="{{ date_from }}" class="form-control">
+            </div>
+            <div class="col-6 col-md-2">
+                <label class="form-label" for="lcDateTo">To Date</label>
+                <input type="date" id="lcDateTo" name="date_to" value="{{ date_to }}" class="form-control">
+            </div>
+            <div class="col-12 col-md-3 d-grid">
+                <button type="submit" class="btn btn-mint">
+                    <i class="fas fa-id-card me-1"></i>Show Card
+                </button>
+            </div>
+            <div class="col-12">
+                <div class="btn-group flex-wrap" role="group" aria-label="Quick date ranges">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-lc-preset="this-week">This Week</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-lc-preset="last-week">Last Week</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-lc-preset="this-month">This Month</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-lc-preset="last-30">Last 30 Days</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-lc-preset="all-time">All Time</button>
+                </div>
+                <small class="text-muted d-block mt-1">Leave <strong>From</strong> blank for all time. Weeks run Monday to Sunday.</small>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% if not w or not card %}
+<div class="card hdc-card mt-3">
+    <div class="card-body text-center text-muted py-5">
+        <i class="fas fa-id-card fa-3x mb-3"></i>
+        <h5 class="text-body">Select a worker — his card will appear here</h5>
+        <p class="mb-0 mx-auto" style="max-width:640px;">
+            The card shows, site by site: days worked, overtime and the amount earned,
+            then the grand total minus advances and payments, ending in the
+            <strong>Payable</strong> still owed to the worker. Fuel &amp; Food site
+            expenses for the same dates are mentioned for information only — they are
+            never added to the worker's totals. The last 4 weeks are summarised at
+            the bottom, week by week.
+        </p>
+    </div>
+</div>
+{% else %}
+
+{# ── Worker strip + actions ─────────────────────────────────────────────── #}
+<div class="card hdc-card mt-3">
+    <div class="card-body d-flex flex-wrap gap-3 align-items-center">
+        <div>
+            <div class="fs-5 fw-bold">{{ w.name }}
+                <span class="badge bg-secondary">{{ w.worker_code }}</span>
+                {% if w.role_type %}<span class="badge bg-primary">{{ w.role_type }}</span>{% endif %}
+                {% if not w.active_status %}<span class="badge bg-warning text-dark">Inactive</span>{% endif %}
+            </div>
+            <div class="text-muted small">
+                {% if (w.wage_type or 'daily') == 'hourly' %}
+                    Hourly rate: {{ money(w.hourly_rate or w.hourly_wage) }} PKR/hr
+                {% elif w.wage_type == 'per_sqft' %}
+                    Rate: {{ money(w.rate_per_sqft) }} PKR / sq ft
+                {% else %}
+                    Daily wage: {{ money(w.base_daily_wage) }} PKR/day
+                {% endif %}
+                · Period:
+                {% if card.date_from or card.date_to %}
+                    {{ card.date_from.strftime('%d %b %Y') if card.date_from else 'Start' }}
+                    → {{ card.date_to.strftime('%d %b %Y') if card.date_to else 'Today' }}
+                {% else %}All time{% endif %}
+            </div>
+        </div>
+        <div class="ms-auto d-flex gap-2 flex-wrap no-print">
+            <a href="{{ url_for('hdc_worker_advance', wid=w.id) }}" class="btn btn-warning btn-sm">
+                <i class="fas fa-hand-holding-usd me-1"></i>Give Advance
+            </a>
+            <a href="{{ url_for('hdc_worker_payment', wid=w.id) }}" class="btn btn-success btn-sm">
+                <i class="fas fa-money-bill-wave me-1"></i>Record Payment
+            </a>
+            <a href="{{ url_for('hdc_worker_ledger', wid=w.id) }}" class="btn btn-outline-secondary btn-sm">
+                <i class="fas fa-book me-1"></i>Ledger
+            </a>
+            <a href="{{ url_for('hdc_worker_statement', wid=w.id) }}" class="btn btn-outline-primary btn-sm">
+                <i class="fas fa-file-invoice-dollar me-1"></i>Statement
+            </a>
+            <button type="button" class="btn btn-outline-dark btn-sm" onclick="window.print()">
+                <i class="fas fa-print me-1"></i>Print / Save PDF
+            </button>
+        </div>
+    </div>
+</div>
+
+{# ── KPI strip ──────────────────────────────────────────────────────────── #}
+<div class="row g-3 mt-1">
+    <div class="col-6 col-md-2">
+        <div class="kpi-card kpi-teal">
+            <div class="kpi-label">Days Worked</div>
+            <div class="kpi-value small">{{ num(card.total_days) }}</div>
+            <div class="kpi-sub">in this period</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-2">
+        <div class="kpi-card kpi-purple">
+            <div class="kpi-label">Overtime</div>
+            <div class="kpi-value small">{{ num(card.total_overtime) }} hrs</div>
+            <div class="kpi-sub">in this period</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-2">
+        <div class="kpi-card kpi-green">
+            <div class="kpi-label">Grand Total Earned</div>
+            <div class="kpi-value small">{{ money(card.grand_total) }}</div>
+            <div class="kpi-sub">all sites, this period</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-2">
+        <div class="kpi-card kpi-orange">
+            <div class="kpi-label">Advances Taken</div>
+            <div class="kpi-value small">{{ money(card.period.advance) }}</div>
+            <div class="kpi-sub">in this period</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-2">
+        <div class="kpi-card kpi-red">
+            <div class="kpi-label">Amount Paid</div>
+            <div class="kpi-value small">{{ money(card.period.paid) }}</div>
+            <div class="kpi-sub">in this period</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-2">
+        <div class="kpi-card {% if card.payable_now > 0 %}kpi-profit{% else %}kpi-green{% endif %}">
+            <div class="kpi-label">Payable Now</div>
+            <div class="kpi-value small">{{ money(card.payable_now) }}</div>
+            <div class="kpi-sub">still owed (whole ledger)</div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mt-1">
+    {# ── Site-wise work box ─────────────────────────────────────────────── #}
+    <div class="col-12 col-lg-8">
+        <div class="card hdc-card h-100">
+            <div class="card-header hdc-card-header">
+                <i class="fas fa-location-dot me-2"></i>Site-wise Work
+                <span class="text-muted small ms-2">days · overtime · amount per site</span>
+            </div>
+            <div class="table-responsive">
+                <table class="table hdc-table table-sm mb-0" id="labourCardSites">
+                    <thead>
+                        <tr>
+                            <th style="width:3rem;">#</th>
+                            <th>Site</th>
+                            <th class="text-end" title="8 regular hours = 1 day. A day split over two sites shows as fractions (0.5 + 0.5).">Days Worked</th>
+                            <th class="text-end">Overtime (hrs)</th>
+                            <th class="text-end">Amount (PKR)</th>
+                            <th class="text-end lc-info-col" title="Whole-site Fuel expense in these dates — information only, NOT added to this worker's total.">Fuel (site)*</th>
+                            <th class="text-end lc-info-col" title="Whole-site Food expense in these dates — information only, NOT added to this worker's total.">Food (site)*</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    {% for s in card.sites %}
+                        <tr>
+                            <td>{{ loop.index }}</td>
+                            <td><strong>{{ s.name }}</strong>
+                                <div class="text-muted small">{{ s.dates_worked }} date{{ 's' if s.dates_worked != 1 }} present</div>
+                            </td>
+                            <td class="text-end">{{ num(s.days) }}</td>
+                            <td class="text-end">{{ num(s.overtime) }}</td>
+                            <td class="text-end fw-bold">{{ money(s.amount) }}</td>
+                            <td class="text-end lc-info-col text-muted">{% if s.fuel %}{{ money(s.fuel) }}{% else %}—{% endif %}</td>
+                            <td class="text-end lc-info-col text-muted">{% if s.food %}{{ money(s.food) }}{% else %}—{% endif %}</td>
+                        </tr>
+                    {% else %}
+                        <tr><td colspan="7" class="text-center text-muted py-4 hdc-empty-row">
+                            No work recorded for this worker in these dates.
+                            {% if card.first_activity %}First recorded activity: {{ card.first_activity.strftime('%d %b %Y') }} — try <strong>All Time</strong>.{% endif %}
+                        </td></tr>
+                    {% endfor %}
+                    </tbody>
+                    {% if card.sites %}
+                    <tfoot class="table-secondary fw-bold">
+                        <tr>
+                            <td colspan="2" class="text-end">Grand Total</td>
+                            <td class="text-end">{{ num(card.total_days) }}</td>
+                            <td class="text-end">{{ num(card.total_overtime) }}</td>
+                            <td class="text-end">{{ money(card.grand_total) }}</td>
+                            <td class="text-end lc-info-col text-muted">{{ money(card.total_fuel) }}*</td>
+                            <td class="text-end lc-info-col text-muted">{{ money(card.total_food) }}*</td>
+                        </tr>
+                    </tfoot>
+                    {% endif %}
+                </table>
+            </div>
+            <div class="card-body py-2 small text-muted">
+                <div><strong>Days</strong> = regular hours ÷ 8 (overtime is over and above the day's first 8 hours).
+                     A day split between two sites shows as fractions, e.g. 0.5 + 0.5.</div>
+                <div class="mt-1"><strong>* Fuel / Food (site)</strong> = that site's own Fuel &amp; Food
+                     <em>Expenses</em> in the selected dates (whole site, all workers — the same figure
+                     appears on every worker's card for this site, so never add these columns across workers).
+                     <strong>These amounts are NOT added to this worker's Grand Total, Balance or Payable.</strong>
+                     {% if card.site_expenses.counted_categories %}
+                     Counted from expense categories: {{ card.site_expenses.counted_categories|join(', ') }}.
+                     {% else %}
+                     Counted from expense categories whose name contains Fuel / Petrol / Diesel or Food — none found in these dates.
+                     {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {# ── Summary → Payable box ──────────────────────────────────────────── #}
+    <div class="col-12 col-lg-4">
+        <div class="card hdc-card lc-payable h-100">
+            <div class="card-header hdc-card-header">
+                <i class="fas fa-scale-balanced me-2"></i>Summary &amp; Payable
+            </div>
+            <div class="table-responsive">
+                <table class="table hdc-table table-sm mb-0" id="labourCardSummary">
+                    <tbody>
+                        <tr>
+                            <td>Opening balance b/f <span class="text-muted small">(owed before From date)</span></td>
+                            <td class="text-end">{{ money(card.period.opening_balance) }}</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Grand Total Earned</strong> <span class="text-muted small">(this period)</span></td>
+                            <td class="text-end fw-bold text-success">+ {{ money(card.grand_total) }}</td>
+                        </tr>
+                        <tr>
+                            <td>Less: Advances taken <span class="text-muted small">(this period)</span></td>
+                            <td class="text-end text-warning">− {{ money(card.period.advance) }}</td>
+                        </tr>
+                        <tr>
+                            <td>Less: Amount paid <span class="text-muted small">(amount he took, this period)</span></td>
+                            <td class="text-end text-danger">− {{ money(card.period.paid) }}</td>
+                        </tr>
+                        <tr>
+                            <td>Less: Settlements <span class="text-muted small">(shortfall written off)</span></td>
+                            <td class="text-end">− {{ money(card.period.settled) }}</td>
+                        </tr>
+                        <tr class="table-secondary fw-bold">
+                            <td>Balance{% if card.date_to %} at {{ card.date_to.strftime('%d %b %Y') }}{% endif %}</td>
+                            <td class="text-end">{{ money(card.period.closing_balance) }}</td>
+                        </tr>
+                        {% if card.period.tip %}
+                        <tr>
+                            <td class="text-muted small">Tips given in this period <span>(extra — never deducted)</span></td>
+                            <td class="text-end text-muted small">{{ money(card.period.tip) }}</td>
+                        </tr>
+                        {% endif %}
+                        {% if card.balance_after_to|round(2) != 0 %}
+                        <tr>
+                            <td class="text-muted small">Net entries after To date</td>
+                            <td class="text-end text-muted small">{{ "{:+,.0f}".format(card.balance_after_to) }}</td>
+                        </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+            <div class="card-body text-center">
+                <div class="text-muted small text-uppercase fw-bold">Payable Now — still owed to worker</div>
+                <div class="lc-payable-amount {% if card.payable_now > 0 %}text-success{% else %}text-muted{% endif %}">
+                    {{ money(card.payable_now) }} <small class="fs-6">PKR</small>
+                </div>
+                {% if card.excess_advance_now > 0 %}
+                <div class="alert alert-warning py-2 small mt-2 mb-0">
+                    <i class="fas fa-triangle-exclamation me-1"></i>
+                    Advances/payments exceed earnings by <strong>{{ money(card.excess_advance_now) }} PKR</strong> —
+                    this will adjust against future work. Nothing is payable right now.
+                </div>
+                {% elif card.payable_now == 0 %}
+                <div class="text-muted small mt-1">Fully settled — nothing pending.</div>
+                {% endif %}
+                <div class="text-muted small mt-2">
+                    Whole-ledger check: Earned {{ money(card.snapshot.earned) }}
+                    − Advances {{ money(card.snapshot.advanced) }}
+                    − Paid {{ money(card.snapshot.salary_paid) }}
+                    − Settled {{ money(card.snapshot.settled) }}
+                    = {{ money(card.balance_now) }}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# ── Advances & payments detail (period) ────────────────────────────────── #}
+<div class="card hdc-card mt-3">
+    <div class="card-header hdc-card-header">
+        <i class="fas fa-money-bill-transfer me-2"></i>Advances &amp; Payments in This Period
+        <span class="text-muted small ms-2">every advance he took and every amount paid to him, in the selected dates</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table hdc-table table-sm mb-0">
+            <thead>
+                <tr><th>Date</th><th>Type</th><th>Site</th><th>Notes</th><th class="text-end">Amount (PKR)</th></tr>
+            </thead>
+            <tbody>
+            {% set type_labels = {'advance': 'Advance', 'payment': 'Payment', 'settlement': 'Settlement', 'tip': 'Tip (extra)'} %}
+            {% set type_badges = {'advance': 'bg-warning text-dark', 'payment': 'bg-danger', 'settlement': 'bg-primary', 'tip': 'bg-info text-dark'} %}
+            {% for r in card.money_rows %}
+                <tr {{ r|hdc_row_attrs }}>
+                    <td class="text-nowrap">{{ r.date.strftime('%d %b %Y') if r.date else '-' }}</td>
+                    <td><span class="badge {{ type_badges.get(r.entry_type, 'bg-secondary') }}">{{ type_labels.get(r.entry_type, r.entry_type|title) }}</span></td>
+                    <td class="small">{{ r.site_name or '—' }}</td>
+                    <td class="small text-muted">{{ r.notes or '—' }}</td>
+                    <td class="text-end fw-bold">{{ money(r.amount) }}</td>
+                </tr>
+            {% else %}
+                <tr><td colspan="5" class="text-center text-muted py-4 hdc-empty-row">No advance or payment in these dates.</td></tr>
+            {% endfor %}
+            </tbody>
+            {% if card.money_rows %}
+            <tfoot class="table-secondary small">
+                <tr>
+                    <td colspan="4" class="text-end">
+                        Advances {{ money(card.period.advance) }} · Paid {{ money(card.period.paid) }}
+                        · Settled {{ money(card.period.settled) }}{% if card.period.tip %} · Tips {{ money(card.period.tip) }} (not deducted){% endif %}
+                    </td>
+                    <td class="text-end fw-bold">{{ money(card.period.advance + card.period.paid + card.period.settled) }}</td>
+                </tr>
+            </tfoot>
+            {% endif %}
+        </table>
+    </div>
+</div>
+
+{# ── Fuel & Food detail (site expenses, info only) ──────────────────────── #}
+{% if card.site_expenses.detail %}
+<div class="card hdc-card mt-3">
+    <div class="card-header hdc-card-header">
+        <i class="fas fa-gas-pump me-2"></i>Fuel &amp; Food Detail — Site Expenses in These Dates
+        <span class="badge bg-warning text-dark ms-2">Not added in worker's total</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table hdc-table table-sm mb-0">
+            <thead>
+                <tr><th>Date</th><th>Site</th><th>Category</th><th>Type</th><th>Remarks</th><th class="text-end">Amount (PKR)</th></tr>
+            </thead>
+            <tbody>
+            {% for e in card.site_expenses.detail %}
+                <tr {{ e|hdc_row_attrs }}>
+                    <td class="text-nowrap">{{ e.date.strftime('%d %b %Y') if e.date else '-' }}</td>
+                    <td class="small">{{ e.site_name }}</td>
+                    <td class="small">{{ e.category or '—' }}</td>
+                    <td>
+                        {% if e.kind == 'fuel' %}<span class="badge bg-dark"><i class="fas fa-gas-pump me-1"></i>Fuel</span>
+                        {% else %}<span class="badge bg-success"><i class="fas fa-utensils me-1"></i>Food</span>{% endif %}
+                    </td>
+                    <td class="small text-muted">{{ e.remarks or '—' }}</td>
+                    <td class="text-end">{{ money(e.amount) }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+            <tfoot class="table-secondary small">
+                <tr>
+                    <td colspan="5" class="text-end">
+                        Fuel {{ money(card.total_fuel) }} · Food {{ money(card.total_food) }}
+                        {% if card.site_expenses.detail_truncated %}
+                        · showing first {{ card.site_expenses.detail|length }} of {{ card.site_expenses.detail_total_count }} lines (totals include all)
+                        {% endif %}
+                    </td>
+                    <td class="text-end fw-bold">{{ money(card.total_fuel + card.total_food) }}*</td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+{# ── Last 4 weeks ───────────────────────────────────────────────────────── #}
+<div class="card hdc-card mt-3">
+    <div class="card-header hdc-card-header">
+        <i class="fas fa-calendar-week me-2"></i>Last 4 Weeks — Weekly Summary
+        <span class="text-muted small ms-2">Monday–Sunday, ending with the week of the To date</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table hdc-table table-sm mb-0" id="labourCardWeeks">
+            <thead>
+                <tr>
+                    <th>Week</th>
+                    <th class="text-end">Days Worked</th>
+                    <th class="text-end">Overtime (hrs)</th>
+                    <th class="text-end">Earned / Payable Amount</th>
+                    <th class="text-end">Advance Took</th>
+                    <th class="text-end">Got Paid</th>
+                    <th class="text-end">Settled</th>
+                    <th class="text-end">Week Balance</th>
+                    <th class="text-end">Pending (owed at week end)</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for wk in card.last_4_weeks.weeks %}
+                <tr{% if wk.is_current %} class="table-info"{% endif %}>
+                    <td class="text-nowrap"><strong>{{ wk.label }}</strong>
+                        {% if wk.is_current %}<span class="badge bg-info text-dark ms-1">This week</span>{% endif %}
+                    </td>
+                    <td class="text-end">{{ num(wk.days) }}</td>
+                    <td class="text-end">{{ num(wk.overtime) }}</td>
+                    <td class="text-end text-success">{{ money(wk.earned) }}</td>
+                    <td class="text-end text-warning">{{ money(wk.advance) }}</td>
+                    <td class="text-end text-danger">{{ money(wk.paid) }}</td>
+                    <td class="text-end">{{ money(wk.settled) }}</td>
+                    <td class="text-end">{{ money(wk.week_balance) }}</td>
+                    <td class="text-end fw-bold {% if wk.pending > 0 %}text-info{% elif wk.pending < 0 %}text-danger{% else %}text-muted{% endif %}">
+                        {{ money(wk.pending) }}
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+            <tfoot class="table-secondary fw-bold">
+                <tr>
+                    <td>Last 4 weeks total</td>
+                    <td class="text-end">{{ num(card.last_4_weeks.totals.days) }}</td>
+                    <td class="text-end">{{ num(card.last_4_weeks.totals.overtime) }}</td>
+                    <td class="text-end">{{ money(card.last_4_weeks.totals.earned) }}</td>
+                    <td class="text-end">{{ money(card.last_4_weeks.totals.advance) }}</td>
+                    <td class="text-end">{{ money(card.last_4_weeks.totals.paid) }}</td>
+                    <td class="text-end">{{ money(card.last_4_weeks.totals.settled) }}</td>
+                    <td class="text-end">{{ money(card.last_4_weeks.totals.week_balance) }}</td>
+                    <td class="text-end">{{ money(card.last_4_weeks.totals.pending) }}</td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+    <div class="card-body py-2 small text-muted">
+        <strong>Pending</strong> = everything still owed to the worker at that Sunday
+        (opening pending before these 4 weeks: {{ money(card.last_4_weeks.opening_before) }} PKR,
+        plus each week's balance). A payment is counted in the week it was <em>paid</em>, even when it
+        settles an earlier week's wage — that is why Pending is cumulative, not just the week's remainder.
+        A negative Pending means advances/payments are ahead of earnings.
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    var form = document.getElementById('labourCardForm');
+    if (!form) return;
+    var workerSelect = document.getElementById('labourWorker');
+    var fromInput = document.getElementById('lcDateFrom');
+    var toInput = document.getElementById('lcDateTo');
+
+    // Picking a worker from the searchable combo opens his card at once
+    // (the combo widget dispatches a real `change` on the hidden select).
+    // The initial value is remembered so widget initialisation can never
+    // cause a submit loop on page load.
+    if (workerSelect) {
+        var initialWorker = workerSelect.value;
+        workerSelect.addEventListener('change', function () {
+            if (workerSelect.value && workerSelect.value !== initialWorker) {
+                form.submit();
+            }
+        });
+    }
+
+    function iso(d) {
+        var m = String(d.getMonth() + 1).padStart(2, '0');
+        var day = String(d.getDate()).padStart(2, '0');
+        return d.getFullYear() + '-' + m + '-' + day;
+    }
+    function mondayOf(d) {
+        var copy = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+        copy.setDate(copy.getDate() - ((copy.getDay() + 6) % 7));
+        return copy;
+    }
+    function addDays(d, n) {
+        var copy = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+        copy.setDate(copy.getDate() + n);
+        return copy;
+    }
+
+    form.querySelectorAll('[data-lc-preset]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            var today = new Date();
+            var preset = btn.getAttribute('data-lc-preset');
+            if (preset === 'this-week') {
+                fromInput.value = iso(mondayOf(today));
+                toInput.value = iso(today);
+            } else if (preset === 'last-week') {
+                var lastMonday = addDays(mondayOf(today), -7);
+                fromInput.value = iso(lastMonday);
+                toInput.value = iso(addDays(lastMonday, 6));
+            } else if (preset === 'this-month') {
+                fromInput.value = iso(new Date(today.getFullYear(), today.getMonth(), 1));
+                toInput.value = iso(today);
+            } else if (preset === 'last-30') {
+                fromInput.value = iso(addDays(today, -29));
+                toInput.value = iso(today);
+            } else if (preset === 'all-time') {
+                fromInput.value = '';
+                toInput.value = iso(today);
+            }
+            if (workerSelect && workerSelect.value) form.submit();
+        });
+    });
+})();
+</script>
+{% endblock %}

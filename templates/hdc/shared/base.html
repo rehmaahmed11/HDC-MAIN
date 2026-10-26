@@ -118,6 +118,8 @@ body[data-hdc-custom-access="true"][data-hdc-page-write="false"] form[method="PO
                  'match': ['/hdc/subcontractor']},
                 {'label': 'Workers', 'icon': 'fa-users-cog', 'href': url_for('hdc_workers'), 'permission': 'workers',
                  'match': ['/hdc/workers']},
+                {'label': 'Labour Card', 'icon': 'fa-id-card', 'href': url_for('hdc_labour_card'), 'permission': 'labour_card',
+                 'note': 'worker card & payable', 'match': ['/hdc/labour-card']},
                 {'label': 'Trades', 'icon': 'fa-people-carry-box', 'href': url_for('hdc_trades'),
                  'match': ['/hdc/trades']},
                 {'label': 'Timekeeping', 'icon': 'fa-calendar-check', 'href': url_for('hdc_attendance'),

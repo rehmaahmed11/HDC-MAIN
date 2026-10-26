@@ -41,6 +41,7 @@ PAGE_TREE = [
         {'id': 'subcontractor_payments', 'label': 'Subcontractor payments & ledger', 'paths': [r'^/hdc/subcontractor/\d+/(?:pay|payments|ledger|events)(?:/|$)', r'^/hdc/subcontractor/\d+/payment/']},
         {'id': 'workers', 'label': 'Workers', 'paths': [r'^/hdc/workers$', r'^/hdc/workers/\d+/(?:toggle|edit)$', r'^/hdc/api/next_worker_code$']},
         {'id': 'worker_ledgers', 'label': 'Worker ledgers, rates & payments', 'paths': [r'^/hdc/workers/\d+/(?:ledger|advance|payment|rate)(?:/|$)']},
+        {'id': 'labour_card', 'label': 'Labour Card', 'paths': [r'^/hdc/labour-card(?:/|$)']},
         {'id': 'trades', 'label': 'Trades', 'paths': [r'^/hdc/trades$']},
         {'id': 'timekeeping', 'label': 'Timekeeping & attendance', 'paths': [r'^/hdc/(?:timekeeping|attendance)$']},
         {'id': 'timekeeping_records', 'label': 'Timekeeping status & corrections', 'paths': [r'^/hdc/timekeeping/(?:status|\d+/(?:edit|delete|reactivate))(?:/|$)']},
