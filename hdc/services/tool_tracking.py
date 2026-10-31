@@ -377,11 +377,74 @@ def rental_return_sources(rental, items):
             slot = next((s for s in sources if s['key'] == key), None)
             if slot is None:
                 sources.append({'key': key, 'label': bucket['label'],
+                                'loc_type': bucket['loc_type'],
+                                'project_id': bucket.get('project_id') or 0,
+                                'stage_id': bucket.get('stage_id') or 0,
+                                'customer_name': bucket.get('customer_name'),
                                 'qty': _round_qty(bucket['qty'])})
             else:
                 slot['qty'] = _round_qty(slot['qty'] + bucket['qty'])
         out[int(item.id)] = sources
     return out
+
+
+def holdings_by_item(ledger=None):
+    """The authoritative location split, indexed by rental line.
+
+    A rental's original project and its latest transfer are NOT the current
+    location of every piece on that rental.  Both return forms and serial
+    synchronization use these buckets instead of guessing from the header.
+    """
+    ledger = ledger if ledger is not None else tool_ledger()
+    result = {}
+    for row in ledger['tools']:
+        for holding in row['holdings']:
+            item = holding.get('rental_item')
+            if item is not None:
+                result.setdefault(int(item.id), []).append(holding)
+    return result
+
+
+def serials_at_holding(item, location_key=None, location_label=None,
+                       ledger=None, exclude_ids=()):
+    """Read the exact pieces at one rental-line holding, without writing.
+
+    An explicitly assigned piece is authoritative.  Legacy pieces with a
+    missing line link are offered only when their rental, tool and location
+    all match; a piece belonging to another line is never borrowed as a
+    fallback.  Write paths repair the missing link through serial sync.
+    """
+    buckets = holdings_by_item(ledger).get(int(item.id), [])
+    keys = {holding_key(h['loc_type'], h.get('project_id'), h.get('stage_id'),
+                        h.get('customer_name')).casefold() for h in buckets}
+    labels = {(h['label'] or '').strip().casefold() for h in buckets}
+    if location_key is not None:
+        keys = {str(location_key).strip().casefold()}
+        labels = {(h['label'] or '').strip().casefold() for h in buckets
+                  if holding_key(h['loc_type'], h.get('project_id'), h.get('stage_id'),
+                                 h.get('customer_name')).casefold() in keys}
+    if location_label is not None:
+        labels = {str(location_label).strip().casefold()}
+    excluded = {int(sid) for sid in exclude_ids}
+    rows = ToolSerial.query.filter(
+        ToolSerial.tool_id == int(item.tool_id),
+        ToolSerial.current_rental_id == int(item.rental_id),
+        ToolSerial.is_in_store == False,  # noqa: E712
+        or_(ToolSerial.is_scrapped == False, ToolSerial.is_scrapped.is_(None)),  # noqa: E712
+        ToolSerial.status != 'scrapped',
+    ).all()
+    chosen = []
+    for serial in rows:
+        label = (serial.current_location_label or '').strip().casefold()
+        if int(serial.id) in excluded or label not in labels:
+            continue
+        if serial.current_rental_item_id is not None:
+            if int(serial.current_rental_item_id) != int(item.id):
+                continue
+        elif not keys:
+            continue
+        chosen.append(serial)
+    return sorted(chosen, key=lambda s: s.sort_key)
 
 
 class _NameLookup:
