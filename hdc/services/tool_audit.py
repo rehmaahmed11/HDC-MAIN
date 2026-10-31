@@ -37,17 +37,19 @@ from hdc.models.tool_rental import (
     MOVEMENT_AUDIT_ADJUST, MOVEMENT_SCRAP_OUT, TOOL_AUDIT_LOSS_REASONS,
     TOOL_SCRAP_REASONS, Tool, ToolAudit, ToolAuditLine, ToolMovementLog,
     ToolPurchase, ToolRental, ToolRentalItem, ToolRentalReturn,
-    ToolRentalReturnItem, ToolScrap, ToolSerial, ToolSerialMovement,
+    ToolRentalReturnItem, ToolRentalTransfer, ToolRentalTransferItem,
+    ToolScrap, ToolSerial, ToolSerialMovement,
 )
 from hdc.services.record_permissions import record_code_query
 from hdc.services.tool_rental import (
     STORE_LABEL, SUPPLIER_LABEL, assign_serials_to_rental, create_movement_log,
-    record_tool_purchase, record_tool_scrap, recalc_rental_totals,
-    tool_available_for_integrity,
+    ensure_all_tools_serials, ensure_tool_serials, record_tool_purchase,
+    record_tool_scrap, recalc_rental_totals, return_serials_from_rental,
+    tool_available_for_integrity, transfer_serials,
 )
 from hdc.services.tool_tracking import (
     EPS, LOC_CUSTOMER, LOC_OWN_PROJECT, LOC_STORE, WAREHOUSE_LABEL, holding_key,
-    tool_ledger,
+    serials_at_holding, tool_ledger,
 )
 from hdc.utils.dates import _pkt_now_naive, _pkt_today
 from hdc.utils.format import _flt
@@ -61,6 +63,7 @@ _CLOSED_PROJECT_STATUSES = ('completed', 'closed', 'cancelled', 'canceled', 'ina
 #: "an audit did this" instead of looking like a normal move.
 AUDIT_LOSS_LABEL = 'Written off — audit shortage'
 AUDIT_GAIN_LABEL = 'Found at audit — stock corrected'
+AUDIT_GAIN_TRANSFER_PREFIX = 'Audit found-stock location correction'
 
 #: Meta fields the count form is allowed to write.
 _AUDIT_META_FIELDS = ('counter_name', 'reference', 'notes', 'audit_date')
@@ -992,8 +995,13 @@ def _pending_at_location(ledger, spec, tool_id):
     return holders
 
 
-def _rental_line_for_gain(spec, tool_id):
+def _rental_line_for_gain(spec, tool_id, ledger=None):
     """Where an unexpectedly found tool can be parked so it keeps showing here."""
+    # Prefer a line actually holding this tool at the counted location.  The
+    # rental header may still name Site A after some pieces transferred to B.
+    for holder in _pending_at_location(ledger or tool_ledger(), spec, tool_id):
+        if holder.get('item') is not None and _q2(holder['qty']) > EPS:
+            return holder['item']
     pending_lines = (ToolRentalItem.query
                      .join(ToolRental, ToolRental.id == ToolRentalItem.rental_id)
                      .filter(ToolRentalItem.tool_id == int(tool_id),
@@ -1083,7 +1091,7 @@ def plan_adjustments(audit, ledger=None):
             continue
         gain = _q2(variance)
         target = None if spec['loc_type'] == LOC_STORE else _rental_line_for_gain(
-            spec, int(tool.id))
+            spec, int(tool.id), ledger=ledger)
         unit_cost = _q2(_flt(tool.purchase_cost))
         plan.append({
             'kind': 'gain', 'line': line, 'tool': tool, 'name': tool.name,
@@ -1099,7 +1107,7 @@ def plan_adjustments(audit, ledger=None):
     return plan
 
 
-def _lift_pending(audit, entry, user_id):
+def _lift_pending(audit, entry, user_id, ledger=None):
     """Take lost pieces off the rental line still holding them.
 
     ``qty_rented`` shrinks rather than only the ``qty_pending`` cache:
@@ -1109,9 +1117,11 @@ def _lift_pending(audit, entry, user_id):
     """
     remaining = _q2(min(entry['qty'], entry['liftable_qty']))
     if remaining <= EPS:
-        return 0.0
+        return 0.0, []
     lifted = 0.0
     touched = []
+    serial_ids = []
+    positions = ledger or tool_ledger()
     for holder in entry['holders']:
         if remaining <= EPS:
             break
@@ -1119,6 +1129,10 @@ def _lift_pending(audit, entry, user_id):
         take = _q2(min(remaining, _q2(item.qty_pending)))
         if take <= EPS:
             continue
+        # Choose identities while the pre-adjustment holding is still intact.
+        serial_ids.extend(int(s.id) for s in serials_at_holding(
+            item, location_key=holder.get('key'), ledger=positions,
+            exclude_ids=serial_ids)[:int(round(take))])
         item.qty_rented = max(0.0, _q2(_q2(item.qty_rented) - take))
         item.qty_returned = min(_q2(item.qty_returned), item.qty_rented)
         item.qty_pending = max(0.0, _q2(item.qty_rented - item.qty_returned))
@@ -1136,7 +1150,7 @@ def _lift_pending(audit, entry, user_id):
                   f'{item.tool.unit if item.tool else ""} written off — not coming back'[:500])
     for rental_id in dict.fromkeys(touched):
         recalc_rental_totals(rental_id)
-    return lifted
+    return lifted, serial_ids
 
 
 def _grant_gain(audit, entry, user_id, note_tail, when=None):
@@ -1169,11 +1183,43 @@ def _grant_gain(audit, entry, user_id, note_tail, when=None):
         entry['blocked'] = True
         return
 
+    gain_transfer = None
     if parked is not None:
         parked.qty_rented = _q2(_q2(parked.qty_rented) + qty)
         parked.qty_pending = _q2(_q2(parked.qty_pending) + qty)
         parked.notes = (f'{parked.notes or ""} | {audit.audit_code}: +{qty:g} found '
                         f'(audit)').strip(' |')[:300]
+        # Increasing qty_rented alone puts the new pieces at the rental's
+        # ORIGINAL destination when the ledger replays it.  If the count found
+        # them at a transferred site/customer, record the location correction
+        # explicitly so every section keeps the gain where it was counted.
+        rental = parked.rental
+        origin_type = LOC_OWN_PROJECT if rental.project_id else LOC_CUSTOMER
+        origin_key = holding_key(origin_type, rental.project_id, rental.stage_id,
+                                 rental.customer_name)
+        found_key = holding_key(audit.loc_type, audit.project_id, audit.stage_id,
+                                audit.customer_name)
+        if origin_key.casefold() != found_key.casefold():
+            from_label = (rental.project.name if rental.project else rental.customer_name) or 'Original holder'
+            if rental.stage:
+                from_label += f' > {rental.stage.name}'
+            gain_transfer = ToolRentalTransfer(
+                rental_id=int(rental.id),
+                from_type='site' if rental.project_id else 'customer',
+                from_project_id=rental.project_id, from_stage_id=rental.stage_id,
+                from_customer_name=rental.customer_name, from_location_label=from_label,
+                to_type='site' if audit.loc_type == LOC_OWN_PROJECT else 'customer',
+                to_project_id=audit.project_id, to_stage_id=audit.stage_id,
+                to_customer_name=audit.customer_name, to_location_label=audit.location_label,
+                qty_transferred=qty, transfer_date=audit.audit_date,
+                notes=f'{AUDIT_GAIN_TRANSFER_PREFIX} {audit.audit_code}: +{qty:g} found at count',
+                created_by=user_id)
+            db.session.add(gain_transfer)
+            db.session.flush()
+            db.session.add(ToolRentalTransferItem(
+                transfer_id=int(gain_transfer.id), rental_item_id=int(parked.id),
+                tool_id=int(tool.id), qty_transferred=qty))
+            db.session.flush()
         recalc_rental_totals(int(parked.rental_id))
         # The pieces were counted *at that place*, so their markings go out to
         # the holder too -- otherwise serials say "in store" while the rental
@@ -1192,15 +1238,16 @@ def _grant_gain(audit, entry, user_id, note_tail, when=None):
                 rental_item_id=int(parked.id),
                 location_label=(audit.location_label or None),
                 notes=f'{audit.audit_code}: found at count, parked on this rental',
-                created_by=user_id, commit=False)
+                created_by=user_id, when=when, commit=False)
 
     create_movement_log(
         tool_id=int(tool.id),
         rental_id=int(parked.rental_id) if parked is not None else None,
         movement_type=MOVEMENT_AUDIT_ADJUST,
+        transfer_id=int(gain_transfer.id) if gain_transfer is not None else None,
         from_label=AUDIT_GAIN_LABEL,
         to_label=(audit.location_label if parked is not None else STORE_LABEL),
-        qty=qty,
+        qty=qty, when=when,
         notes=f'{audit.audit_code} audit at {audit.location_label}: {qty:g} '
               f'{tool.unit or "pcs"} of {tool.name} found, added to stock'
               f'{f" under {parked.rental.rental_code}" if parked is not None and parked.rental else ""}'
@@ -1208,7 +1255,7 @@ def _grant_gain(audit, entry, user_id, note_tail, when=None):
               f'{note_tail}'[:500])
 
 
-def _return_loss_to_store(audit, entry, user_id, when):
+def _return_loss_to_store(audit, entry, user_id, when, ledger=None):
     """A shortage at a site / customer that is really back in the store.
 
     Posted like a return, not a write-off: each rental line that held the pieces
@@ -1240,8 +1287,13 @@ def _return_loss_to_store(audit, entry, user_id, when):
                        f'post the rest as a loss.'), 0.0
 
     touched = set()
+    positions = ledger or tool_ledger()
+    claimed_serials = set()
     for holder, take in takes:
         item = holder['item']
+        chosen = serials_at_holding(item, location_key=holder.get('key'),
+                                    ledger=positions, exclude_ids=claimed_serials)[:int(round(take))]
+        claimed_serials.update(int(s.id) for s in chosen)
         item.qty_returned = _q2(_q2(item.qty_returned) + take)
         item.qty_pending = max(0.0, _q2(_q2(item.qty_rented) - _q2(item.qty_returned)))
         item.notes = (f'{item.notes or ""} | {audit.audit_code}: -{take:g} back in store '
@@ -1258,11 +1310,16 @@ def _return_loss_to_store(audit, entry, user_id, when):
             return_id=int(record.id), rental_item_id=int(item.id), tool_id=int(item.tool_id),
             qty_returned=take, condition_notes=(audit.audit_code or '')[:300],
             from_location_key=holder.get('key') or None))
+        if chosen:
+            return_serials_from_rental(
+                int(item.rental_id), [int(s.id) for s in chosen], return_id=int(record.id),
+                notes=f'{audit.audit_code}: returned from {holder.get("label")}',
+                created_by=user_id, when=when, commit=False)
         create_movement_log(
             tool_id=int(item.tool_id), rental_id=int(item.rental_id),
-            movement_type=MOVEMENT_AUDIT_ADJUST,
+            movement_type=MOVEMENT_AUDIT_ADJUST, return_id=int(record.id),
             from_label=audit.location_label or holder.get('label') or '',
-            to_label=STORE_LABEL, qty=take,
+            to_label=STORE_LABEL, qty=take, when=when,
             notes=f'{audit.audit_code} audit: {take:g} piece(s) of {name} came back to store'[:500])
         touched.add(int(item.rental_id))
     for rental_id in sorted(touched):
@@ -1270,7 +1327,7 @@ def _return_loss_to_store(audit, entry, user_id, when):
     return True, '', need
 
 
-def _unreturn_line(audit, line, touched_rentals):
+def _unreturn_line(audit, line, touched_rentals, user_id=None):
     """Undo a came-back posting: the pieces go out again on the rental lines."""
     rows = (ToolRentalReturnItem.query
             .filter(ToolRentalReturnItem.tool_id == int(line.tool_id),
@@ -1284,6 +1341,26 @@ def _unreturn_line(audit, line, touched_rentals):
             item.qty_returned = max(0.0, _q2(_q2(item.qty_returned) - qty))
             item.qty_pending = max(0.0, _q2(_q2(item.qty_rented) - _q2(item.qty_returned)))
             touched_rentals.add(int(item.rental_id))
+            # Restore the exact pieces the audit returned, not whichever store
+            # pieces happen to sort first.  Refuse to steal a piece that has
+            # since been issued or scrapped; the line's savepoint keeps the
+            # reversal all-or-nothing.
+            movements = ToolSerialMovement.query.filter_by(
+                return_id=int(row.return_id), movement_type='return_in').all()
+            restore_ids = []
+            for movement in movements:
+                serial = db.session.get(ToolSerial, int(movement.serial_id))
+                if (serial is None or serial.tool_id != item.tool_id or serial.is_scrapped
+                        or not serial.is_in_store or serial.current_rental_id):
+                    raise ValueError('a returned piece has since moved; reverse that move first')
+                restore_ids.append(int(serial.id))
+            if restore_ids:
+                transfer_serials(
+                    serial_ids=restore_ids, from_label=STORE_LABEL,
+                    to_label=audit.location_label or '', rental_id=int(item.rental_id),
+                    rental_item_id=int(item.id), movement_type=MOVEMENT_AUDIT_ADJUST,
+                    notes=f'Reversal of {audit.audit_code}: exact returned pieces out again',
+                    created_by=user_id, commit=False)
             create_movement_log(
                 tool_id=int(item.tool_id), rental_id=int(item.rental_id),
                 movement_type=MOVEMENT_AUDIT_ADJUST, from_label=STORE_LABEL,
@@ -1294,7 +1371,11 @@ def _unreturn_line(audit, line, touched_rentals):
         db.session.flush()
         if record is not None and ToolRentalReturnItem.query.filter_by(
                 return_id=int(record.id)).count() == 0:
-            db.session.delete(record)
+            # Keep the receipt and its serial/movement links as history, but
+            # make it a zero-qty reversed document.  Deleting it would break
+            # the FK trail that proves which exact pieces were restored.
+            record.total_tools_returned = 0.0
+            record.notes = f'Reversed {audit.audit_code}: {record.notes or ""}'[:500]
             db.session.flush()
 
 
@@ -1324,6 +1405,9 @@ def post_adjustments(audit, mode='losses', reason='lost', audit_date=None,
         reason_key = 'lost'
     mode = 'both' if str(mode or '').strip().lower() == 'both' else 'losses'
     when = _parse_day(audit_date)
+    # Repair stale piece links before choosing what the count is adjusting.
+    # This is the Adjust write, not the count-sheet GET.
+    ensure_all_tools_serials(created_by=user_id, commit=False)
     ledger = ledger or tool_ledger()
     note_tail = (notes or '').strip()
 
@@ -1354,7 +1438,7 @@ def post_adjustments(audit, mode='losses', reason='lost', audit_date=None,
                            f'{entry.get("name", "Tool")}: nothing available to write off.')
             continue
         if entry['kind'] == 'loss' and reason_key == AUDIT_RETURNED_REASON:
-            ok_ret, msg_ret, returned = _return_loss_to_store(audit, entry, user_id, when)
+            ok_ret, msg_ret, returned = _return_loss_to_store(audit, entry, user_id, when, ledger=ledger)
             if not ok_ret:
                 remarks.append(msg_ret)
                 continue
@@ -1363,17 +1447,22 @@ def post_adjustments(audit, mode='losses', reason='lost', audit_date=None,
             returned_qty += returned
             done_loss += 1
         elif entry['kind'] == 'loss':
-            _lift_pending(audit, entry, user_id)
+            loss_savepoint = db.session.begin_nested()
+            _lifted, lost_serial_ids = _lift_pending(audit, entry, user_id, ledger=ledger)
             ok, message, scrap = record_tool_scrap(
                 tool_id=int(entry['tool'].id), qty=entry['writable_qty'],
                 reason=reason_key, scrap_date=when, reference=audit.audit_code or '',
                 notes=(f'{audit.audit_code} count at {audit.location_label}: '
                        f'{entry["name"]} short by {_q2(entry["qty"]):g}. '
                        f'{note_tail}'.strip())[:300],
-                created_by=user_id, commit=False)
+                created_by=user_id, commit=False,
+                serial_ids=lost_serial_ids or None, from_holder=bool(lost_serial_ids),
+                from_label=audit.location_label if lost_serial_ids else None)
             if not ok:
+                loss_savepoint.rollback()
                 remarks.append(f'{entry["name"]}: {message}')
                 continue
+            loss_savepoint.commit()
             line.adjusted_qty = _q2(-entry['writable_qty'])
             line.scrap_id = int(scrap.id) if scrap else None
             line.adjust_reason = reason_key
@@ -1383,7 +1472,13 @@ def post_adjustments(audit, mode='losses', reason='lost', audit_date=None,
             if entry.get('partial'):
                 remarks.append(entry.get('message') or '')
         else:
+            gain_savepoint = db.session.begin_nested()
             _grant_gain(audit, entry, user_id, note_tail, when=when)
+            if entry.get('blocked'):
+                gain_savepoint.rollback()
+                remarks.append(entry.get('message') or f'{entry["name"]}: overage was not posted.')
+                continue
+            gain_savepoint.commit()
             line.adjusted_qty = _q2(entry['qty'])
             line.adjust_reason = 'found_extra'
             found_qty += entry['qty']
@@ -1493,11 +1588,30 @@ def reverse_audit_adjustments(audit, user_id=None, commit=False):
         savepoint = db.session.begin_nested()
         try:
             if adj < 0 and (line.adjust_reason or '') == AUDIT_RETURNED_REASON:
-                _unreturn_line(audit, line, touched_rentals)
+                _unreturn_line(audit, line, touched_rentals, user_id=user_id)
             elif adj < 0:
                 qty = abs(adj)
                 scrap = db.session.get(ToolScrap, int(line.scrap_id)) if line.scrap_id else None
                 scrap_code = scrap.scrap_code if scrap is not None else None
+                restored_serials = []
+                if scrap_code:
+                    scrap_moves = ToolSerialMovement.query.filter(
+                        ToolSerialMovement.movement_type == MOVEMENT_SCRAP_OUT,
+                        ToolSerialMovement.notes.like(f'%{scrap_code}%')).all()
+                    for movement in scrap_moves:
+                        serial = db.session.get(ToolSerial, int(movement.serial_id))
+                        if serial is None or serial.tool_id != tool.id or not serial.is_scrapped:
+                            continue
+                        serial.is_scrapped = False
+                        serial.is_in_store = True
+                        serial.current_rental_id = None
+                        serial.current_rental_item_id = None
+                        serial.status = 'in_store'
+                        serial.condition = 'good'
+                        serial.current_location_label = STORE_LABEL
+                        serial.updated_at = _pkt_now_naive()
+                        serial.updated_by = user_id
+                        restored_serials.append(serial)
                 if scrap is not None:
                     # The line points at this scrap row. Clearing the reference
                     # first is not cosmetic: the movement log below flushes, and
@@ -1525,6 +1639,7 @@ def reverse_audit_adjustments(audit, user_id=None, commit=False):
                                 ToolMovementLog.to_location_label == AUDIT_LOSS_LABEL,
                                 ToolMovementLog.notes.like(f'%{audit.audit_code}%'))
                         .all())
+                restore_left = qty
                 for log in logs:
                     item = (ToolRentalItem.query
                             .filter(ToolRentalItem.rental_id == int(log.rental_id),
@@ -1532,12 +1647,23 @@ def reverse_audit_adjustments(audit, user_id=None, commit=False):
                             .order_by(ToolRentalItem.id.asc()).first())
                     if item is None:
                         continue
-                    back = _q2(min(abs(_q2(log.qty)), qty))
+                    back = _q2(min(abs(_q2(log.qty)), restore_left))
                     if back <= EPS:
                         continue
                     item.qty_rented = _q2(_q2(item.qty_rented) + back)
                     item.qty_pending = _q2(_q2(item.qty_pending) + back)
+                    restore_left = _q2(restore_left - back)
                     touched_rentals.add(int(item.rental_id))
+                    taking = restored_serials[:int(round(back))]
+                    restored_serials = restored_serials[int(round(back)):]
+                    if taking:
+                        transfer_serials(
+                            serial_ids=[int(s.id) for s in taking], from_label=STORE_LABEL,
+                            to_label=audit.location_label or log.from_location_label,
+                            rental_id=int(item.rental_id), rental_item_id=int(item.id),
+                            movement_type=MOVEMENT_AUDIT_ADJUST,
+                            notes=f'Reversal of {audit.audit_code}: exact written-off pieces out again',
+                            created_by=user_id, commit=False)
                 if not logs:
                     remarks.append(f'{tool.name}: {qty:g} piece(s) returned to stock; the '
                                    f'rental line they were lifted from could not be '
@@ -1548,26 +1674,26 @@ def reverse_audit_adjustments(audit, user_id=None, commit=False):
                             .filter(ToolPurchase.tool_id == tool.id,
                                     ToolPurchase.reference == (audit.audit_code or ''))
                             .order_by(ToolPurchase.id.desc()).first())
+                purchase_code = purchase.purchase_code if purchase is not None else None
                 marked = []
                 if purchase is not None:
                     marked = [int(m.serial_id) for m in ToolSerialMovement.query.filter(
-                        ToolSerialMovement.notes.like(f'%{purchase.purchase_code}%')).all()]
-                    db.session.delete(purchase)
-                tool.total_quantity = _q2(max(0.0, _q2(_q2(tool.total_quantity) - qty)))
-                for sid in marked:
-                    serial = db.session.get(ToolSerial, int(sid))
-                    if serial is None or serial.tool_id != tool.id:
-                        continue
-                    if not serial.is_in_store or serial.current_rental_id:
-                        remarks.append(f'{tool.name}: marking {serial.serial_number} is in use '
-                                       f'and was left alone.')
-                        continue
-                    ToolSerialMovement.query.filter_by(serial_id=serial.id).delete()
-                    db.session.delete(serial)
+                        ToolSerialMovement.notes.like(f'%{purchase_code}%')).all()]
                 parked = (ToolRentalItem.query
                           .filter(ToolRentalItem.tool_id == tool.id,
                                   ToolRentalItem.notes.like(f'%{audit.audit_code}%'))
                           .all())
+                parked_ids = {int(item.id) for item in parked}
+                # The found pieces may have been parked on a rental.  Remove
+                # that quantity and its location correction BEFORE deleting
+                # their markings; otherwise they look "in use" and survive as
+                # orphan serials after the stock-in row is reversed.
+                for serial_id in marked:
+                    serial = db.session.get(ToolSerial, int(serial_id))
+                    if serial is None or serial.tool_id != tool.id:
+                        continue
+                    if (not serial.is_in_store and serial.current_rental_item_id not in parked_ids):
+                        raise ValueError(f'{serial.serial_number} has since moved; reverse that move first')
                 left = qty
                 for item in parked:
                     if left <= EPS:
@@ -1580,6 +1706,24 @@ def reverse_audit_adjustments(audit, user_id=None, commit=False):
                     item.qty_pending = _q2(max(0.0, _q2(_q2(item.qty_rented) - _q2(item.qty_returned))))
                     left = _q2(left - take)
                     touched_rentals.add(int(item.rental_id))
+                corrections = (ToolRentalTransfer.query.filter(
+                    ToolRentalTransfer.notes.like(f'{AUDIT_GAIN_TRANSFER_PREFIX} {audit.audit_code}%')).all())
+                for correction in corrections:
+                    if any(int(split.tool_id) == int(tool.id) for split in correction.items):
+                        correction.qty_transferred = 0.0
+                        for split in correction.items:
+                            split.qty_transferred = 0.0
+                        correction.notes = f'Reversed {AUDIT_GAIN_TRANSFER_PREFIX} {audit.audit_code}'
+                for serial_id in marked:
+                    serial = db.session.get(ToolSerial, int(serial_id))
+                    if serial is None or serial.tool_id != tool.id:
+                        continue
+                    ToolSerialMovement.query.filter_by(serial_id=serial.id).delete()
+                    db.session.delete(serial)
+                tool.total_quantity = _q2(max(0.0, _q2(_q2(tool.total_quantity) - qty)))
+                if purchase is not None:
+                    db.session.delete(purchase)
+                db.session.flush()
                 create_movement_log(
                     tool_id=int(tool.id), rental_id=None,
                     movement_type=MOVEMENT_AUDIT_ADJUST,

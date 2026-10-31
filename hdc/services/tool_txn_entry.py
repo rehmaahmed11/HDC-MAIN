@@ -47,7 +47,7 @@ from sqlalchemy.orm import joinedload
 from hdc.extensions import db
 from hdc.models.tool_rental import (
     TOOL_DISCOUNT_REASONS, TOOL_SCRAP_REASONS, Tool, ToolCategory, ToolMovementLog,
-    ToolMovementLog, ToolPurchase, ToolRental, ToolRentalDiscount, ToolRentalItem,
+    ToolPurchase, ToolRental, ToolRentalDiscount, ToolRentalItem,
     ToolRentalPayment, ToolRentalReturn, ToolRentalReturnItem, ToolRentalTransfer,
     ToolScrap, ToolSerial,
 )
@@ -59,7 +59,10 @@ from hdc.services.tool_rental import (
     record_tool_scrap, post_tool_rental_payment_to_accounts,
     return_serials_from_rental, tool_available_for_integrity, get_out_of_store_serials,
 )
-from hdc.services.tool_tracking import LOC_CUSTOMER, LOC_OWN_PROJECT, tool_ledger
+from hdc.services.tool_tracking import (
+    LOC_CUSTOMER, LOC_OWN_PROJECT, holding_key, holdings_by_item,
+    serials_at_holding, tool_ledger,
+)
 from hdc.utils.dates import _pkt_now_naive, _pkt_today
 from hdc.utils.format import _flt
 
@@ -185,7 +188,7 @@ def in_store_tool_rows():
     rows = []
     for tool in tools:
         available = tool_available_for_integrity(tool)
-        serials = [s for s in tool.in_store_serials
+        serials = [s for s in tool.issuable_serials
                    if (s.status or '') != 'maintenance']
         if available <= 0.001 and not serials:
             continue
@@ -259,7 +262,8 @@ def transfer_source_rows(limit=TRANSFER_SOURCE_LIMIT):
     active_ids = set(order)
 
     sources = {}
-    for tool_row in tool_ledger()['tools']:
+    positions = tool_ledger()
+    for tool_row in positions['tools']:
         for holding in tool_row['holdings']:
             rental = holding['rental']
             rental_id = int(rental.id)
@@ -314,13 +318,11 @@ def transfer_source_rows(limit=TRANSFER_SOURCE_LIMIT):
                 }
                 source['lines'].append(line)
             line['qty'] += qty
-            for serial in get_out_of_store_serials(tool_id=int(item.tool_id),
-                                                   rental_id=rental_id,
-                                                   rental_item_id=int(item.id)):
+            for serial in serials_at_holding(
+                    item, location_key=holding_key(loc_type, project_id, stage_id, customer_name),
+                    ledger=positions):
                 if any(s['id'] == int(serial.id) for s in line['serials']):
                     continue
-                if len(line['serials']) >= int(round(line['qty'] or 0)):
-                    break
                 line['serials'].append({
                     'id': int(serial.id),
                     'serial_number': serial.serial_number,
@@ -377,76 +379,62 @@ def _out_of_store_serials_by_item(rental_ids):
 
 
 def return_sheet(limit=RENTAL_PICKER_LIMIT):
-    """Who still holds tools, and exactly which tools each holder holds.
+    """One return row per tool line at its ACTUAL current holder.
 
-    The return form asks **who is returning** first; this is the list behind
-    that question and the sheet it opens.  A *holder* is a site or a customer
-    (a site with several open issues is still one place), and a *row* is one
-    rental line still out — carrying the issue it belongs to, so a mixed load
-    can come home in one submission without losing which issue each piece
-    settles.
-
-    Rows come from ``ToolRentalItem.qty_pending`` — the same number the return
-    endpoint checks a quantity against — and the piece markings from the
-    serials that are actually out of the store, so ticking a piece here means
-    exactly what ticking it on the per-rental sheet meant.
-
-    Returns ``{'holders': [...], 'rows': [...]}``.
+    A split issue can have pieces at A, B and a customer.  The original rental
+    header cannot answer where they are.  Use the same location buckets as
+    Tracking, and offer only the serial identities in each bucket.
     """
     rentals = (ToolRental.query
                .filter(ToolRental.is_void == False,  # noqa: E712
-                       ToolRental.items.any(
-                           func.coalesce(ToolRentalItem.qty_pending, 0) > EPS))
+                       ToolRental.items.any(func.coalesce(ToolRentalItem.qty_pending, 0) > EPS))
                .order_by(ToolRental.rental_date.desc(), ToolRental.id.desc())
-               .limit(limit)
-               .all())
+               .limit(limit).all())
     if not rentals:
         return {'holders': [], 'rows': []}
-
-    rental_ids = [int(rental.id) for rental in rentals]
-    by_rental = {int(rental.id): rental for rental in rentals}
-    order = {int(rental.id): index for index, rental in enumerate(rentals)}
-    items = (ToolRentalItem.query
-             .options(joinedload(ToolRentalItem.tool))
-             .filter(ToolRentalItem.rental_id.in_(rental_ids),
-                     func.coalesce(ToolRentalItem.qty_pending, 0) > EPS)
-             .order_by(ToolRentalItem.id.asc())
-             .all())
-    serials_by_item = _out_of_store_serials_by_item(rental_ids)
+    by_rental = {int(r.id): r for r in rentals}
+    order = {int(r.id): index for index, r in enumerate(rentals)}
+    positions = tool_ledger()
+    buckets = {}
+    for row in positions['tools']:
+        for holding in row['holdings']:
+            item = holding['rental_item']
+            if int(item.rental_id) not in by_rental:
+                continue
+            key = holding_key(holding['loc_type'], holding.get('project_id'),
+                              holding.get('stage_id'), holding.get('customer_name'))
+            slot_key = (int(item.id), key.casefold())
+            if slot_key not in buckets:
+                buckets[slot_key] = dict(holding, qty=0.0, location_key=key)
+            buckets[slot_key]['qty'] += _flt(holding['qty'])
 
     rows = []
-    for item in items:
-        rental = by_rental.get(int(item.rental_id))
-        if rental is None:
-            continue
+    for holding in buckets.values():
+        item = holding['rental_item']
+        rental = by_rental[int(item.rental_id)]
         tool = item.tool
-        holder_key, holder_label, loc_type = _rental_holder(rental)
+        if holding['loc_type'] == LOC_OWN_PROJECT:
+            holder_key = f"project:{int(holding.get('project_id') or 0)}"
+        else:
+            holder_key = 'customer:' + (holding.get('customer_name') or '').strip().casefold()
         rows.append({
-            'holderKey': holder_key,
-            'holder': holder_label,
-            'locType': loc_type,
-            'rentalId': int(rental.id),
-            'rentalCode': rental.rental_code or f'Rental #{rental.id}',
-            'itemId': int(item.id),
-            'toolId': int(item.tool_id),
+            'holderKey': holder_key, 'holder': holding['label'],
+            'locType': holding['loc_type'], 'locationKey': holding['location_key'],
+            'rentalId': int(rental.id), 'rentalCode': rental.rental_code or f'Rental #{rental.id}',
+            'itemId': int(item.id), 'toolId': int(item.tool_id),
             'toolName': tool.name if tool else f'Tool #{item.tool_id}',
             'toolCode': (tool.tool_code if tool else '') or '',
             'unit': (tool.unit if tool else 'pcs') or 'pcs',
-            'issued': _flt(item.qty_rented),
-            'returned': _flt(item.qty_returned),
-            'pending': _flt(item.qty_pending),
-            'billingType': rental.billing_type or '',
-            'amountDue': (0.0 if (rental.billing_type or '') == 'no_charge'
-                          else _flt(rental.total_pending_amount)),
-            'serials': [{
-                'id': int(serial.id),
-                'serialNumber': serial.serial_number,
-                'condition': serial.condition or 'good',
-            } for serial in serials_by_item.get(int(item.id), [])],
+            'issued': _flt(item.qty_rented), 'returned': _flt(item.qty_returned),
+            'pending': _flt(holding['qty']), 'billingType': rental.billing_type or '',
+            'amountDue': 0.0 if rental.billing_type == 'no_charge' else _flt(rental.total_pending_amount),
+            'serials': [{'id': int(s.id), 'serialNumber': s.serial_number,
+                         'condition': s.condition or 'good'}
+                        for s in serials_at_holding(item, location_key=holding['location_key'],
+                                                    ledger=positions)],
         })
-    rows.sort(key=lambda row: (order.get(row['rentalId'], 0),
-                               row['toolName'].lower(), row['toolCode']))
-
+    rows.sort(key=lambda r: (order.get(r['rentalId'], 0), r['toolName'].lower(),
+                             r['toolCode'], r['locationKey']))
     holders = {}
     for row in rows:
         holder = holders.setdefault(row['holderKey'], {
@@ -546,7 +534,8 @@ def txn_form_context():
     eligibility rule gets its own option list, so a new transaction inherits a
     picker instead of adding a context key.
     """
-    ensure_all_tools_serials(commit=False)
+    # GET renders the last committed write; it never repairs stock silently.
+    # The explicit Rebuild action and each transaction own synchronization.
     from hdc.models.projects import Project, Stage
     from hdc.services.tool_txn_types import (
         ELIGIBLE_PENDING_AMOUNT, ELIGIBLE_PENDING_TOOLS, TXN_OPTIONS,
@@ -610,7 +599,7 @@ def txn_form_context():
 # --------------------------------------------------------------------------- #
 # Returns — one load back from a holder, whatever issues it came off
 # --------------------------------------------------------------------------- #
-def _return_line_serials(item, raw_serial_ids, claimed):
+def _return_line_serials(item, raw_serial_ids, claimed, allowed_ids=None):
     """The piece markings a return line posts, as real out-of-store serials.
 
     ``claimed`` carries the ids an earlier line already took, so one piece can
@@ -630,9 +619,13 @@ def _return_line_serials(item, raw_serial_ids, claimed):
         if serial.is_in_store:
             return False, (f'{serial.serial_number} is already in the store — '
                            f'reload the page and retick the pieces still out.'), []
-        if serial.current_rental_id and int(serial.current_rental_id) != int(item.rental_id):
+        if serial.current_rental_id != int(item.rental_id):
             return False, (f'{serial.serial_number} is out on another issue — reload '
                            f'the page and retick the pieces still out.'), []
+        if serial.current_rental_item_id is not None and int(serial.current_rental_item_id) != int(item.id):
+            return False, f'{serial.serial_number} belongs to another tool line on this issue.', []
+        if allowed_ids is not None and int(serial.id) not in allowed_ids:
+            return False, f'{serial.serial_number} is not at the selected return location.', []
         claimed.add(int(serial_id))
         chosen.append(serial)
     return True, '', chosen
@@ -693,8 +686,12 @@ def record_return(*, actor_id, lines, return_type='partial', return_date=None,
             return False, (f'{rental.rental_code} is voided, so its tools cannot come '
                            f'back through a return.'), {}
 
+    ensure_all_tools_serials(created_by=actor_id, commit=False)
+    positions = tool_ledger()
+    location_rows = holdings_by_item(positions)
     claimed = set()
     groups = {}
+    claimed_at_location = {}
     total_pieces = 0.0
     for rental_id, item_id, raw in wanted:
         rental = rentals[rental_id]
@@ -708,22 +705,44 @@ def record_return(*, actor_id, lines, return_type='partial', return_date=None,
         if pending <= EPS:
             return False, f'{name} is already back from {rental.rental_code}.', {}
 
-        ok, message, serials = _return_line_serials(item, raw.get('serial_ids'), claimed)
+        sources = location_rows.get(int(item.id), [])
+        places = {holding_key(h['loc_type'], h.get('project_id'), h.get('stage_id'),
+                              h.get('customer_name')).casefold(): h for h in sources}
+        requested_key = str(raw.get('from_location_key') or raw.get('location_key') or '').strip()
+        if requested_key:
+            source = places.get(requested_key.casefold())
+            if source is None:
+                return False, f'{name} is no longer at that return location — reload the sheet.', {}
+        elif len(places) == 1:
+            source = next(iter(places.values()))
+        else:
+            return False, f'Choose the site/customer the {name} pieces are coming from.', {}
+        from_key = holding_key(source['loc_type'], source.get('project_id'),
+                               source.get('stage_id'), source.get('customer_name'))
+        here = sum(_flt(h['qty']) for h in sources
+                   if holding_key(h['loc_type'], h.get('project_id'), h.get('stage_id'),
+                                  h.get('customer_name')).casefold() == from_key.casefold())
+        allowed_ids = {int(s.id) for s in serials_at_holding(
+            item, location_key=from_key, ledger=positions)}
+        ok, message, serials = _return_line_serials(item, raw.get('serial_ids'), claimed, allowed_ids)
         if not ok:
             return False, message, {}
         if serials:
             qty = float(len(serials))
         elif return_type == 'full':
-            qty = pending
+            qty = here
         else:
             qty = max(0.0, _flt(raw.get('qty')))
         if qty <= 0:
             continue
-        if qty > pending + EPS:
+        slot = (int(item.id), from_key.casefold())
+        already = claimed_at_location.get(slot, 0.0)
+        if qty > pending + EPS or already + qty > here + EPS:
             return False, integrity_message(
                 'A return cannot bring back more than is still out.',
-                f'{qty:g} × {name} coming back, but only {pending:g} is still out on '
-                f'{rental.rental_code}.'), {}
+                f'{qty:g} × {name} coming back, but only {here - already:g} is still out '
+                f'at {source["label"]} on {rental.rental_code}.'), {}
+        claimed_at_location[slot] = already + qty
 
         condition = str(raw.get('condition') or '').strip()
         if serials:
@@ -731,7 +750,8 @@ def record_return(*, actor_id, lines, return_type='partial', return_date=None,
             if numbers not in condition:
                 condition = (f'{condition} [Serials: {numbers}]'.strip()
                              if condition else f'Serials: {numbers}')
-        groups.setdefault(rental_id, []).append((item, qty, condition[:300], serials))
+        groups.setdefault(rental_id, []).append((item, qty, condition[:300], serials,
+                                                  from_key, source['label']))
         total_pieces += qty
 
     if not groups:
@@ -809,26 +829,27 @@ def record_return(*, actor_id, lines, return_type='partial', return_date=None,
         db.session.add(record)
         db.session.flush()
 
-        for item, qty, condition, serials in group:
+        for item, qty, condition, serials, from_key, from_label in group:
             db.session.add(ToolRentalReturnItem(
                 return_id=record.id,
                 rental_item_id=item.id,
                 tool_id=item.tool_id,
                 qty_returned=qty,
                 condition_notes=condition,
+                from_location_key=from_key,
             ))
             item.qty_returned = _flt(item.qty_returned) + qty
             item.qty_pending = max(0.0, _flt(item.qty_rented) - item.qty_returned)
             if serials:
                 return_serials_from_rental(
                     rental_id=rental.id, serial_ids=[int(s.id) for s in serials],
-                    return_id=record.id, created_by=actor_id, commit=False)
+                    return_id=record.id, created_by=actor_id,
+                    notes=f'Return {record.id} from {from_label}', when=when, commit=False)
             create_movement_log(
                 tool_id=int(item.tool_id), rental_id=rental.id,
-                movement_type='return_in',
-                from_label=rental.current_location_label or 'Site',
+                movement_type='return_in', from_label=from_label,
                 to_label=STORE_LABEL, qty=qty, return_id=record.id,
-                notes=f'Return {record.id}: {qty:g} pcs', when=when,
+                notes=f'Return {record.id} from {from_label}: {qty:g} pcs', when=when,
             )
         created.append((rental, record, pieces))
 
@@ -966,8 +987,12 @@ def _record_rental_damage_loss(*, actor_id, rental_id, rental_item_id, qty,
     pending = max(0.0, _flt(item.qty_pending))
     if pending <= EPS:
         return False, f'{tool.name} has nothing still out on {rental.rental_code}.', {}
+    positions = tool_ledger()
+    sources = [h for h in holdings_by_item(positions).get(int(item.id), [])
+               if _flt(h.get('qty')) > EPS]
+    if not sources:
+        return False, f'{tool.name} is not recorded as still out on {rental.rental_code}.', {}
 
-    # Which exact pieces were lost / broken?
     chosen = []
     if serial_ids:
         parsed = _parse_serial_ids(serial_ids)
@@ -984,64 +1009,73 @@ def _record_rental_damage_loss(*, actor_id, rental_id, rental_item_id, qty,
             if serial.current_rental_id and int(serial.current_rental_id) != int(rental.id):
                 return False, (f'{serial.serial_number} belongs to another rental '
                                f'({serial.current_rental_id}).'), {}
+            if serial.current_rental_item_id not in (None, int(item.id)):
+                return False, f'{serial.serial_number} belongs to another line of this rental.', {}
             if sid not in [s.id for s in chosen]:
                 chosen.append(serial)
+        labels = {(s.current_location_label or '').strip() for s in chosen}
+        if len(labels) != 1 or not next(iter(labels)):
+            return False, 'Choose the damaged/lost pieces from one recorded holder.', {}
+        from_label = next(iter(labels))
         qty = float(len(chosen))
     else:
         qty = _flt(qty)
         if qty <= EPS:
             return False, 'Quantity must be greater than 0.', {}
-        if qty > pending + EPS:
-            return False, integrity_message(
-                'Damaged / lost quantity is more than this rental has out.',
-                f'Only {pending:g} {tool.unit} of {tool.name} is out on '
-                f'{rental.rental_code}.'), {}
-        chosen = get_out_of_store_serials(tool_id=int(tool.id), rental_id=int(rental.id),
-                                          rental_item_id=int(item.id))[:int(round(qty))]
-        qty = float(len(chosen)) if chosen else _flt(qty)
+        labels = {(h.get('label') or '').strip() for h in sources}
+        preferred = (rental.current_location_label or '').strip()
+        if preferred in labels:
+            from_label = preferred
+        elif len(labels) == 1:
+            from_label = next(iter(labels))
+        else:
+            return False, ('This line is split between holders. Select the exact damaged/lost '
+                           'pieces so the write-off comes from the correct site.'), {}
+        chosen = get_out_of_store_serials(
+            tool_id=int(tool.id), rental_id=int(rental.id), rental_item_id=int(item.id),
+            location_label=from_label)[:int(round(qty))]
+        if len(chosen) + EPS < qty:
+            return False, f'Only {len(chosen)} marked piece(s) of {tool.name} are at {from_label}.', {}
+    here = sum(_flt(h.get('qty')) for h in sources
+               if (h.get('label') or '').strip() == from_label)
+    if qty > pending + EPS or qty > here + EPS:
+        return False, integrity_message(
+            'Damaged / lost quantity is more than this holder has out.',
+            f'Only {here:g} {tool.unit} of {tool.name} is still out at {from_label} on '
+            f'{rental.rental_code}.'), {}
+    source = next((h for h in sources if (h.get('label') or '').strip() == from_label), sources[0])
+    from_key = holding_key(source['loc_type'], source.get('project_id'),
+                           source.get('stage_id'), source.get('customer_name'))
 
     reason_key = (reason or 'damaged').strip().lower()
     if reason_key not in SCRAP_REASON_LABELS:
         reason_key = 'damaged'
     reason_label = SCRAP_REASON_LABELS.get(reason_key, reason_key)
-    from_label = rental.current_location_label or 'Site'
 
-    # 1. Off the rental line — the piece is no longer "out".
+    # Lift the quantity off the rental, but do NOT send the exact pieces through
+    # a store return first: they were broken/lost at the holder.  The scrap write
+    # below moves those same identities straight from that holder to write-off.
     ret = ToolRentalReturn(
-        rental_id=rental.id,
-        return_date=when,
-        return_type='partial',
-        payment_type='no_payment',
-        total_tools_returned=qty,
-        amount_paid=0.0,
+        rental_id=rental.id, return_date=when, return_type='partial',
+        payment_type='no_payment', total_tools_returned=qty, amount_paid=0.0,
         notes=stamp_reference(
             f'{reason_label} reported at {from_label}; written off, not returned to store. '
             f'{notes}'.strip(), reference),
-        created_by=actor_id,
-    )
+        created_by=actor_id)
     db.session.add(ret)
     db.session.flush()
     db.session.add(ToolRentalReturnItem(
-        return_id=ret.id,
-        rental_item_id=item.id,
-        tool_id=int(tool.id),
-        qty_returned=qty,
-        condition_notes=f'{reason_label} — write-off via transaction {reference or ret.id}',
-    ))
+        return_id=ret.id, rental_item_id=item.id, tool_id=int(tool.id), qty_returned=qty,
+        from_location_key=from_key,
+        condition_notes=f'{reason_label} — write-off via transaction {reference or ret.id}'))
     item.qty_returned = _flt(item.qty_returned) + qty
     item.qty_pending = max(0.0, _flt(item.qty_rented) - item.qty_returned)
-    if chosen:
-        return_serials_from_rental(
-            rental_id=rental.id, serial_ids=[s.id for s in chosen], return_id=ret.id,
-            created_by=actor_id, commit=False)
     create_movement_log(
-        tool_id=int(tool.id), rental_id=rental.id, movement_type='return_in',
-        from_label=from_label, to_label=STORE_LABEL, qty=qty, return_id=ret.id,
+        tool_id=int(tool.id), rental_id=rental.id, movement_type='scrap_out',
+        from_label=from_label, to_label=SCRAP_LABEL, qty=qty, return_id=ret.id,
         notes=stamp_reference(f'{reason_label} at {from_label} — written off', reference),
-        when=when,
-    )
+        when=when)
 
-    # 2. Write the pieces off the stock register (store side, unchanged by step 1).
     ok, msg, scrap = record_tool_scrap(
         tool_id=int(tool.id), qty=qty, reason=reason_key, scrap_date=when,
         reference=reference,
@@ -1049,7 +1083,8 @@ def _record_rental_damage_loss(*, actor_id, rental_id, rental_item_id, qty,
             f'{reason_label} at {from_label} (rental {rental.rental_code}); '
             f'reported via {reference or "tool transaction"}. {notes}'.strip(), ''),
         created_by=actor_id, commit=False,
-        serial_ids=[s.id for s in chosen] or None)
+        serial_ids=[s.id for s in chosen] or None, from_holder=bool(chosen),
+        from_label=from_label if chosen else None)
     if not ok:
         db.session.rollback()
         return False, msg, {}
@@ -1082,7 +1117,7 @@ def send_to_maintenance(*, actor_id, serial_ids, txn_date=None, reference='',
         if tool:
             ensure_tool_serials(tool=tool, created_by=actor_id, commit=False)
             wanted = int(round(_flt(qty)))
-            pool = [s for s in tool.in_store_serials
+            pool = [s for s in tool.issuable_serials
                     if (s.status or '') != 'maintenance'
                     and (s.condition or 'good') != 'maintenance']
             parsed = [int(s.id) for s in pool[:max(0, wanted)]]

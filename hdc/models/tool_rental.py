@@ -91,7 +91,11 @@ class Tool(db.Model):
 
     @property
     def available_qty(self):
-        return max(0.0, float(self.total_quantity or 0.0) - self.rented_out_qty)
+        """Owned, not issued, and not waiting at the workshop."""
+        workshop = sum(1 for s in self.active_serials
+                       if s.is_in_store and (s.status == 'maintenance'
+                                             or s.condition == 'maintenance'))
+        return max(0.0, float(self.total_quantity or 0.0) - self.rented_out_qty - workshop)
 
     @property
     def utilization_pct(self):
@@ -150,6 +154,12 @@ class Tool(db.Model):
     def in_store_serials(self):
         """Serial-marked units currently in the warehouse/store."""
         return [s for s in self.active_serials if s.is_in_store]
+
+    @property
+    def issuable_serials(self):
+        """Store pieces that can leave; workshop stock is owned but not available."""
+        return [s for s in self.in_store_serials
+                if s.status != 'maintenance' and s.condition != 'maintenance']
 
     @property
     def out_serials(self):

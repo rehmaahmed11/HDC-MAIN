@@ -1179,7 +1179,8 @@
                 '<td><strong>' + escapeHtml(item.toolName) + '</strong><br><small>' + escapeHtml(item.toolCode) + '</small>' +
                 '<br><small class="text-muted">Issue <span class="tool-txn-mono">' + escapeHtml(item.rentalCode) + '</span></small>' +
                 '<input type="hidden" class="return-item-id" value="' + Number(item.itemId) + '">' +
-                '<input type="hidden" class="return-rental-id" value="' + Number(item.rentalId) + '"></td>' +
+                '<input type="hidden" class="return-rental-id" value="' + Number(item.rentalId) + '">' +
+                '<input type="hidden" class="return-location-key" value="' + escapeHtml(item.locationKey || '') + '"></td>' +
                 '<td>' + Number(item.issued) + '</td><td>' + Number(item.returned) + '</td>' +
                 '<td class="fw-bold return-outstanding">' + pendingQty + '</td>' +
                 '<td><input type="number" class="form-control form-control-sm return-qty-input" aria-label="Returning ' +
@@ -1247,9 +1248,9 @@
             addHidden(row.querySelector('td'), 'rental_item_id[]', itemId.value, 'return-post');
             addHidden(row.querySelector('td'), 'qty_returned[]', serialIds.length ? String(serialIds.length) : String(qty), 'return-post');
             addHidden(row.querySelector('td'), 'condition_notes[]', row.querySelector('.return-condition').value, 'return-post');
-            if (serialIds.length) {
-                addHidden(row.querySelector('td'), 'return_serial_ids_' + itemId.value + '[]', serialIds.join(','), 'return-post');
-            }
+            addHidden(row.querySelector('td'), 'from_location_key[]', row.querySelector('.return-location-key').value, 'return-post');
+            // Parallel lists keep split lines distinct even within one holder.
+            addHidden(row.querySelector('td'), 'return_serial_ids[]', serialIds.join(','), 'return-post');
         });
     }
 

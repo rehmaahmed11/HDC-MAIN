@@ -544,9 +544,17 @@
                     <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
                     <div class="row g-2">
                         <div class="col-12">
-                            <label class="form-label">Current Location</label>
+                            <label class="form-label">Move pieces from</label>
+                            {% if transfer_from_locations %}
+                            <select name="from_location_key" class="form-select" required>
+                                {% for source in transfer_from_locations %}
+                                <option value="{{ source.key }}" {% if source.key == default_transfer_from_key %}selected{% endif %}>{{ source.label }} — {{ "%.4g"|format(source.qty) }} out</option>
+                                {% endfor %}
+                            </select>
+                            {% else %}
                             <input type="text" class="form-control" value="{{ rental.current_location_label }}" readonly>
-                            <small class="text-muted">Chain: {{ " > ".join(rental.tracking_chain) }}</small>
+                            {% endif %}
+                            <small class="text-muted">After a partial move, choose the holder the selected pieces are actually with. Chain: {{ " > ".join(rental.tracking_chain) }}</small>
                         </div>
                         <div class="col-6">
                             <label class="form-label">To Type</label>
