@@ -2192,6 +2192,12 @@ def _ensure_tool_rental_schema():
     # a > b > c across rentals (see hdc.services.tool_rental.rental_transfer_chain).
     _ensure_table_columns_sqlite('hdc_tool_rental_transfer', {
         'to_rental_id': "to_rental_id INTEGER REFERENCES hdc_tool_rental(id)",
+        'closes_rental': "closes_rental BOOLEAN DEFAULT 0",
+    })
+    # Return lines remember which site / customer the pieces left (see
+    # hdc.services.tool_tracking.holding_key).
+    _ensure_table_columns_sqlite('hdc_tool_rental_return_item', {
+        'from_location_key': "from_location_key VARCHAR(120)",
     })
     _ensure_table_columns_sqlite('hdc_tool_serial', {
         'is_scrapped': "is_scrapped BOOLEAN DEFAULT 0",

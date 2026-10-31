@@ -57,7 +57,8 @@ from hdc.services.tool_rental import (
     tool_glance_rows,
 )
 from hdc.services.tool_audit import (
-    AUDIT_LOSS_REASONS, audit_history, audit_locations, audit_matrix, audit_movement,
+    AUDIT_LOSS_REASONS, AUDIT_REASON_CHOICES, audit_history, audit_locations, audit_matrix,
+    audit_movement,
     audit_rows_for_json, audit_sheet, audit_summary, close_audit, open_audit_count,
     parse_location_key, pending_audit_for, plan_adjustments, post_adjustments,
     posted_adjustment_lines, reopen_audit, save_counts, start_audit, void_audit,
@@ -69,8 +70,8 @@ from hdc.services.tool_photos import (
 from hdc.services.tool_tracking import (
     LOC_CUSTOMER, LOC_OWN_PROJECT, LOC_STORE, WAREHOUSE_LABEL,
     allocate_transfer_qty, dashboard_summary, inventory_rows, location_summary,
-    record_transfer_items, tool_item_summary, tool_ledger, tool_position,
-    tracking_location_groups, viewer_scope_limited,
+    record_transfer_items, rental_return_sources, tool_item_summary, tool_ledger,
+    tool_position, tracking_location_groups, viewer_scope_limited,
 )
 from hdc.utils.dates import _pkt_now_naive, _pkt_today
 from hdc.utils.format import _flt, _amount_to_words
@@ -3024,9 +3025,11 @@ def register(app):
                 slot.append(pool.pop(0))
                 need -= 1
 
+        return_sources = rental_return_sources(rental, items)
         return render_template('tool_rental/tool_rental_detail.html',
             rental=rental,
             items=items,
+            return_sources=return_sources,
             rental_serials=rental_serials,
             serials_by_item=serials_by_item,
             returns=returns,
@@ -3093,11 +3096,32 @@ def register(app):
         rental_item_ids = request.form.getlist('rental_item_id[]') or request.form.getlist('rental_item_id')
         qty_returned_list = request.form.getlist('qty_returned[]') or request.form.getlist('qty_returned')
         condition_notes_list = request.form.getlist('condition_notes[]') or request.form.getlist('condition_notes')
+        # Where each returned line physically sits (site / stage / customer).
+        from_key_list = request.form.getlist('from_location_key[]') or request.form.getlist('from_location_key')
+        all_rental_items = ToolRentalItem.query.filter_by(rental_id=rental.id).all()
+        sources_by_item = rental_return_sources(rental, all_rental_items)
 
         if return_type == 'full':
-            rental_items = ToolRentalItem.query.filter_by(rental_id=rental.id).all()
-            rental_item_ids = [str(i.id) for i in rental_items if float(i.qty_pending or 0) > 0.001]
-            qty_returned_list = [str(float(ToolRentalItem.query.get(int(ri)).qty_pending or 0)) for ri in rental_item_ids]
+            # One line per place the pieces are at, so a full return takes each
+            # site's pieces from that site instead of from whichever came last.
+            rental_item_ids, qty_returned_list = [], []
+            condition_notes_list, from_key_list = [], []
+            for it in all_rental_items:
+                pending_qty = float(it.qty_pending or 0)
+                if pending_qty <= 0.001:
+                    continue
+                srcs = sources_by_item.get(int(it.id)) or []
+                if len(srcs) > 1:
+                    for src in srcs:
+                        rental_item_ids.append(str(it.id))
+                        qty_returned_list.append(str(src['qty']))
+                        condition_notes_list.append('')
+                        from_key_list.append(src['key'])
+                else:
+                    rental_item_ids.append(str(it.id))
+                    qty_returned_list.append(str(pending_qty))
+                    condition_notes_list.append('')
+                    from_key_list.append(srcs[0]['key'] if srcs else '')
         else:
             if not rental_item_ids or len(rental_item_ids)!=len(qty_returned_list):
                 flash('For partial return, specify qty for each tool.', 'danger')
@@ -3157,11 +3181,30 @@ def register(app):
                 flash(f'Return qty {qty_ret} exceeds pending {r_item.qty_pending} for {r_item.tool.name}.', 'danger')
                 return redirect(_txn_return_url(url_for('hdc_tool_rental_detail', rental_id=rental.id)))
             cond_note = (condition_notes_list[idx] if idx < len(condition_notes_list) else '').strip()
+            from_key = (from_key_list[idx] if idx < len(from_key_list) else '').strip()
+            srcs = sources_by_item.get(int(r_item.id)) or []
+            chosen_src = None
+            if from_key:
+                chosen_src = next((x for x in srcs if x['key'].casefold() == from_key.casefold()), None)
+                if chosen_src is None:
+                    flash(f'{r_item.tool.name}: that site/customer no longer holds this tool. '
+                          f'Reload the rental and choose again.', 'danger')
+                    return redirect(_txn_return_url(url_for('hdc_tool_rental_detail', rental_id=rental.id)))
+            elif len(srcs) == 1:
+                chosen_src = srcs[0]
+            elif len(srcs) > 1:
+                flash(f'Choose where the returned {r_item.tool.name} came from (site or customer).', 'danger')
+                return redirect(_txn_return_url(url_for('hdc_tool_rental_detail', rental_id=rental.id)))
+            if chosen_src is not None and qty_ret > float(chosen_src['qty']) + 0.001:
+                flash(f"Only {chosen_src['qty']:g} {r_item.tool.name} are at {chosen_src['label']}; "
+                      f"cannot return {qty_ret:g} from there.", 'danger')
+                return redirect(_txn_return_url(url_for('hdc_tool_rental_detail', rental_id=rental.id)))
+            from_key_value = chosen_src['key'] if chosen_src is not None else None
             if item_return_serials:
                 sn_str = ', '.join(s.serial_number for s in item_return_serials)
                 if sn_str not in cond_note:
                     cond_note = f"{cond_note} [Serials: {sn_str}]".strip() if cond_note else f"Serials: {sn_str}"
-            parsed_returns.append((r_item, qty_ret, cond_note[:300], item_return_serials))
+            parsed_returns.append((r_item, qty_ret, cond_note[:300], item_return_serials, from_key_value))
             total_tools_returned += qty_ret
 
         if total_tools_returned <= 0:
@@ -3218,13 +3261,14 @@ def register(app):
         db.session.add(ret_rec)
         db.session.flush()
 
-        for r_item, qty_ret, cond_note, item_return_serials in parsed_returns:
+        for r_item, qty_ret, cond_note, item_return_serials, from_key_value in parsed_returns:
             ret_item = ToolRentalReturnItem(
                 return_id=ret_rec.id,
                 rental_item_id=r_item.id,
                 tool_id=r_item.tool_id,
                 qty_returned=qty_ret,
-                condition_notes=cond_note
+                condition_notes=cond_note,
+                from_location_key=from_key_value,
             )
             db.session.add(ret_item)
             r_item.qty_returned = float(r_item.qty_returned or 0) + qty_ret
@@ -3690,6 +3734,9 @@ def register(app):
             qty_transferred=qty_transferred,
             transfer_date=transfer_date,
             notes=(request.form.get('notes') or '').strip(),
+            # Moving pieces back to the warehouse is a return: the rental line
+            # stops holding them (see the post-transfer block below).
+            closes_rental=(to_type == 'warehouse'),
             created_by=current_user.id if hasattr(current_user,'id') else None
         )
         db.session.add(transfer)
@@ -3775,7 +3822,16 @@ def register(app):
                     if s_obj.id not in claimed_site_serials and len(chosen_s) < int(round(float(take))):
                         claimed_site_serials.add(s_obj.id)
                         chosen_s.append(s_obj)
-            if chosen_s:
+            if chosen_s and to_type == 'warehouse':
+                # back in the store: the markings come home, not "transferred"
+                return_serials_from_rental(
+                    rental_id=rental.id,
+                    serial_ids=[s.id for s in chosen_s[:int(round(float(take)))]],
+                    created_by=current_user.id if hasattr(current_user, 'id') else None,
+                    notes=f'Transfer {from_label} > {to_label}',
+                    commit=False,
+                )
+            elif chosen_s:
                 transfer_serials(
                     serial_ids=[s.id for s in chosen_s[:int(round(float(take)))]],
                     from_label=from_label,
@@ -3803,6 +3859,13 @@ def register(app):
                 notes=f'Transfer {from_label} > {to_label}'
             )
         record_transfer_items(transfer, allocations)
+        if to_type == 'warehouse':
+            # the pieces are home: the rental line gives them up, exactly as a
+            # return would, so the customer / site stops showing them as out
+            for ri, take in allocations:
+                ri.qty_returned = float(ri.qty_returned or 0) + float(take)
+                ri.qty_pending = max(0.0, float(ri.qty_rented or 0) - float(ri.qty_returned or 0))
+            recalc_rental_totals(rental.id)
         transfer.qty_transferred = moved_qty or float(qty_transferred or 0)
         db.session.commit()
         chain_str = " > ".join(rental.tracking_chain)
@@ -3986,7 +4049,7 @@ def register(app):
             only=(request.args.get('only') or '').strip(),
             can_adjust=_audit_write_allowed(),
             audit_open_count=open_audit_count(),
-            scrap_reasons=AUDIT_LOSS_REASONS,
+            scrap_reasons=AUDIT_REASON_CHOICES,
             today=_pkt_today().isoformat(),
         )
 
@@ -4011,7 +4074,7 @@ def register(app):
             movements=[], history=audit_history(limit=10, location_key_filter=spec['key']),
             can_adjust=_audit_write_allowed(),
             audit_open_count=open_audit_count(),
-            scrap_reasons=AUDIT_LOSS_REASONS,
+            scrap_reasons=AUDIT_REASON_CHOICES,
             today=_pkt_today().isoformat(),
         )
 
@@ -4036,7 +4099,7 @@ def register(app):
             posted_adjustments=len(posted_adjustment_lines(audit)),
             can_adjust=(_audit_write_allowed() and not audit.is_void),
             audit_open_count=open_audit_count(),
-            scrap_reasons=AUDIT_LOSS_REASONS,
+            scrap_reasons=AUDIT_REASON_CHOICES,
             today=_pkt_today().isoformat(),
         )
 
@@ -4089,6 +4152,9 @@ def register(app):
         if summary.get('losses'):
             parts.append(f"{summary.get('lost_qty', 0):g} piece(s) written off "
                          f"({summary.get('write_off_value', 0):,.0f} PKR)")
+        if summary.get('returned_qty'):
+            parts.append(f"{summary.get('returned_qty', 0):g} piece(s) back in store "
+                         f"(not written off)")
         if summary.get('gains'):
             parts.append(f"+{summary.get('found_qty', 0):g} pcs added to stock")
         tail = (f"The sheet stays open — {summary.get('remaining')} finding(s) left unposted."

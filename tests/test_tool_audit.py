@@ -366,10 +366,14 @@ class ToolAuditTestCase(unittest.TestCase):
         audit.save_counts(record, {self.grinder.id: {'counted': 6},
                                    self.prop.id: {'counted': 12}}, ledger=tool_ledger())
         db.session.expire_all()
-        ok, message = audit.close_audit(record)
-        self.assertTrue(ok, message)
-        db.session.expire_all()
+        # every line counted and equal to the book: the sheet files itself as
+        # verified, so it no longer sits "waiting" on the place card
         self.assertEqual(record.status, 'adjusted')
+        self.assertIn('Verified', record.notes or '')
+        ok, message = audit.close_audit(record)
+        self.assertFalse(ok)
+        self.assertIn('already closed', message)
+        db.session.expire_all()
         self.assertEqual(record.write_off_value, 0.0)
         self.assertEqual(ToolScrap.query.count(), 0)
 

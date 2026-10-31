@@ -581,12 +581,15 @@ class ToolCrudGapTestCase(unittest.TestCase):
         # stock was not touched by closing
         self.assertEqual(float(db.session.get(Tool, tool.id).total_quantity), 10.0)
 
-    def test_close_audit_still_says_the_count_matched_when_it_did(self):
+    def test_exact_match_count_files_itself_as_verified(self):
         tool = self._bought_tool('T-EVEN', 'Even tool', 5, cost=100.0)
         audit = self._count(tool, 5)
+        db.session.expire_all()
+        # nothing left to do: no longer open, so it is not "waiting" anywhere
+        self.assertEqual(db.session.get(ToolAudit, audit.id).status, 'adjusted')
         ok, message = close_audit(audit)
-        self.assertTrue(ok)
-        self.assertIn('matched the book', message)
+        self.assertFalse(ok)
+        self.assertIn('already closed', message)
 
     def test_void_audit_with_reverse_puts_stock_back(self):
         tool = self._bought_tool('T-VOID', 'Void tool', 10, cost=1000.0)
