@@ -371,6 +371,10 @@ class ToolRentalReturnItem(db.Model):
 
     qty_returned = db.Column(db.Float, default=0.0)
     condition_notes = db.Column(db.String(300))
+    # Where the returned pieces physically came from (``site:<id>[#<stage>]``,
+    # ``cust:<name>`` or ``store``).  NULL = not recorded (older rows and
+    # callers that never asked): the ledger then falls back to latest-first.
+    from_location_key = db.Column(db.String(120), nullable=True)
 
     tool = db.relationship('Tool', foreign_keys=[tool_id])
     rental_item = db.relationship('ToolRentalItem', foreign_keys=[rental_item_id])
@@ -477,6 +481,10 @@ class ToolRentalTransfer(db.Model):
     # a hand-over chain can be walked a > b > c across rentals (NULL for a
     # plain site-to-site move that stays inside one rental).
     to_rental_id = db.Column(db.Integer, db.ForeignKey('hdc_tool_rental.id'), nullable=True, index=True)
+    # A move back to the warehouse is a *return*: the rental line stops holding
+    # those pieces.  Rows written before this flag existed stay False and keep
+    # their old meaning (a store bucket), so existing books do not shift.
+    closes_rental = db.Column(db.Boolean, default=False)
 
     qty_transferred = db.Column(db.Float, default=0.0)
     transfer_date = db.Column(db.Date, default=_pkt_today)

@@ -286,6 +286,17 @@
                                             </div>
                                             <div class="col-3">
                                                 <input type="number" name="qty_returned[]" class="form-control form-control-sm return-qty-input" min="0" max="{{ it.qty_pending }}" step="0.1" placeholder="Qty">
+                                                {% set src_list = (return_sources or {}).get(it.id, []) %}
+                                                {% if src_list|length > 1 %}
+                                                <select name="from_location_key[]" class="form-select form-select-sm mt-1" aria-label="Returned from which site or customer">
+                                                    <option value="">Returned from…</option>
+                                                    {% for src in src_list %}
+                                                    <option value="{{ src.key }}">{{ src.label }} ({{ "%g"|format(src.qty) }})</option>
+                                                    {% endfor %}
+                                                </select>
+                                                {% else %}
+                                                <input type="hidden" name="from_location_key[]" value="{{ src_list[0].key if src_list else '' }}">
+                                                {% endif %}
                                             </div>
                                             <div class="col-4">
                                                 <input type="text" name="condition_notes[]" class="form-control form-control-sm" placeholder="Condition">

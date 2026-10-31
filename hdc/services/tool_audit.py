@@ -36,8 +36,8 @@ from hdc.models.projects import Project, Stage
 from hdc.models.tool_rental import (
     MOVEMENT_AUDIT_ADJUST, MOVEMENT_SCRAP_OUT, TOOL_AUDIT_LOSS_REASONS,
     TOOL_SCRAP_REASONS, Tool, ToolAudit, ToolAuditLine, ToolMovementLog,
-    ToolPurchase, ToolRental, ToolRentalItem, ToolScrap, ToolSerial,
-    ToolSerialMovement,
+    ToolPurchase, ToolRental, ToolRentalItem, ToolRentalReturn,
+    ToolRentalReturnItem, ToolScrap, ToolSerial, ToolSerialMovement,
 )
 from hdc.services.record_permissions import record_code_query
 from hdc.services.tool_rental import (
@@ -46,7 +46,8 @@ from hdc.services.tool_rental import (
     tool_available_for_integrity,
 )
 from hdc.services.tool_tracking import (
-    EPS, LOC_CUSTOMER, LOC_OWN_PROJECT, LOC_STORE, WAREHOUSE_LABEL, tool_ledger,
+    EPS, LOC_CUSTOMER, LOC_OWN_PROJECT, LOC_STORE, WAREHOUSE_LABEL, holding_key,
+    tool_ledger,
 )
 from hdc.utils.dates import _pkt_now_naive, _pkt_today
 from hdc.utils.format import _flt
@@ -69,6 +70,11 @@ _AUDIT_META_FIELDS = ('counter_name', 'reference', 'notes', 'audit_date')
 #: typed in by hand — one place explains every piece that is gone.
 AUDIT_LOSS_REASONS = tuple((key, label) for key, label in TOOL_SCRAP_REASONS
                            if key in TOOL_AUDIT_LOSS_REASONS)
+#: A shortage that is not lost: the pieces came back to the store and the rental
+#: line that was holding them gives them up, exactly like a return would.
+AUDIT_RETURNED_REASON = 'returned'
+AUDIT_REASON_CHOICES = AUDIT_LOSS_REASONS + ((AUDIT_RETURNED_REASON,
+                                              'Came back to store — not lost'),)
 AUDIT_MODE_LABELS = {
     'losses': 'Write off the losses only',
     'both': 'Write off losses and add the overages',
@@ -871,10 +877,32 @@ def save_counts(audit, counts, meta=None, user_id=None, ledger=None, commit=True
         if name in _AUDIT_META_FIELDS:
             setattr(audit, name, value)
     recompute_audit_totals(audit)
+    # A sheet where every line was counted and nothing differs has nothing left
+    # to do: file it as verified now, instead of leaving it "waiting" on the
+    # place card and in the navigation count until someone presses Close.
+    if audit.status == 'counted' and _sheet_fully_matches(audit):
+        audit.status = 'adjusted'
+        audit.adjusted_at = _pkt_now_naive()
+        audit.notes = f'{audit.notes or ""} | Verified: every line matches the book'.strip(' |')[:500]
     audit.updated_at = _pkt_now_naive()
     if commit:
         db.session.commit()
     return True, '', audit
+
+
+def _sheet_fully_matches(audit):
+    """Every book line counted, and every counted line equal to the book."""
+    lines = lines_of(audit)
+    if not lines:
+        return False
+    for line in lines:
+        if _q2(line.book_qty) <= EPS and line.counted_qty is None:
+            continue
+        if line.counted_qty is None:
+            return False
+        if abs(_q2(line.variance)) > EPS or (line.status or '') in ('short', 'extra'):
+            return False
+    return True
 
 
 def pending_audit_for(spec):
@@ -955,6 +983,10 @@ def _pending_at_location(ledger, spec, tool_id):
                 continue
             holders.append({'item': item, 'qty': _q2(holding.get('qty')),
                             'label': holding.get('label') or '',
+                            'key': holding_key(holding.get('loc_type'),
+                                               holding.get('project_id'),
+                                               holding.get('stage_id'),
+                                               holding.get('customer_name')),
                             'rental': holding.get('rental')})
     holders.sort(key=lambda entry: -entry['qty'])
     return holders
@@ -1176,6 +1208,96 @@ def _grant_gain(audit, entry, user_id, note_tail, when=None):
               f'{note_tail}'[:500])
 
 
+def _return_loss_to_store(audit, entry, user_id, when):
+    """A shortage at a site / customer that is really back in the store.
+
+    Posted like a return, not a write-off: each rental line that held the pieces
+    at that place gives them up (with a return record that names the place), so
+    owned stock is untouched and the piece shows in the store.  All or nothing:
+    if the book cannot account for the whole shortage at this place, nothing is
+    changed and the line stays open.  Returns ``(ok, message, qty)``.
+    """
+    name = entry.get('name') or 'Tool'
+    if audit.loc_type == LOC_STORE:
+        return False, (f'{name}: a store shortage cannot be "came back to store" — '
+                       f'choose a loss reason for it.'), 0.0
+    need = _q2(entry['qty'])
+    takes = []
+    left = need
+    for holder in entry.get('holders') or []:
+        item = holder.get('item')
+        if item is None or left <= EPS:
+            continue
+        take = _q2(min(left, _q2(holder['qty']), _q2(item.qty_pending)))
+        if take <= EPS:
+            continue
+        takes.append((holder, take))
+        left = _q2(left - take)
+    if left > EPS:
+        held = _q2(need - left)
+        return False, (f'{name}: the book has only {held:g} at {audit.location_label}, so '
+                       f'{need:g} cannot be posted as returned. Fix the rental first, or '
+                       f'post the rest as a loss.'), 0.0
+
+    touched = set()
+    for holder, take in takes:
+        item = holder['item']
+        item.qty_returned = _q2(_q2(item.qty_returned) + take)
+        item.qty_pending = max(0.0, _q2(_q2(item.qty_rented) - _q2(item.qty_returned)))
+        item.notes = (f'{item.notes or ""} | {audit.audit_code}: -{take:g} back in store '
+                      f'(audit)').strip(' |')[:300]
+        record = ToolRentalReturn(
+            rental_id=int(item.rental_id), return_date=when, return_type='partial',
+            payment_type='no_payment', total_tools_returned=take, amount_paid=0.0,
+            notes=(f'{audit.audit_code} count: {take:g} piece(s) of {name} came back to '
+                   f'store from {audit.location_label}')[:500],
+            created_by=user_id)
+        db.session.add(record)
+        db.session.flush()
+        db.session.add(ToolRentalReturnItem(
+            return_id=int(record.id), rental_item_id=int(item.id), tool_id=int(item.tool_id),
+            qty_returned=take, condition_notes=(audit.audit_code or '')[:300],
+            from_location_key=holder.get('key') or None))
+        create_movement_log(
+            tool_id=int(item.tool_id), rental_id=int(item.rental_id),
+            movement_type=MOVEMENT_AUDIT_ADJUST,
+            from_label=audit.location_label or holder.get('label') or '',
+            to_label=STORE_LABEL, qty=take,
+            notes=f'{audit.audit_code} audit: {take:g} piece(s) of {name} came back to store'[:500])
+        touched.add(int(item.rental_id))
+    for rental_id in sorted(touched):
+        recalc_rental_totals(rental_id)
+    return True, '', need
+
+
+def _unreturn_line(audit, line, touched_rentals):
+    """Undo a came-back posting: the pieces go out again on the rental lines."""
+    rows = (ToolRentalReturnItem.query
+            .filter(ToolRentalReturnItem.tool_id == int(line.tool_id),
+                    ToolRentalReturnItem.condition_notes == (audit.audit_code or ''))
+            .all())
+    for row in rows:
+        item = db.session.get(ToolRentalItem, int(row.rental_item_id))
+        qty = _q2(row.qty_returned)
+        record = row.return_record
+        if item is not None:
+            item.qty_returned = max(0.0, _q2(_q2(item.qty_returned) - qty))
+            item.qty_pending = max(0.0, _q2(_q2(item.qty_rented) - _q2(item.qty_returned)))
+            touched_rentals.add(int(item.rental_id))
+            create_movement_log(
+                tool_id=int(item.tool_id), rental_id=int(item.rental_id),
+                movement_type=MOVEMENT_AUDIT_ADJUST, from_label=STORE_LABEL,
+                to_label=audit.location_label or '', qty=qty,
+                notes=(f'Reversal of {audit.audit_code} came-back-to-store: {qty:g} '
+                       f'piece(s) out again on the rental')[:500])
+        db.session.delete(row)
+        db.session.flush()
+        if record is not None and ToolRentalReturnItem.query.filter_by(
+                return_id=int(record.id)).count() == 0:
+            db.session.delete(record)
+            db.session.flush()
+
+
 def post_adjustments(audit, mode='losses', reason='lost', audit_date=None,
                      notes='', user_id=None, ledger=None, commit=True):
     """Write the count back into the books — the *Adjust* button.
@@ -1198,7 +1320,7 @@ def post_adjustments(audit, mode='losses', reason='lost', audit_date=None,
     if not audit.is_open:
         return False, 'This count is already closed.', {'done': 0}
     reason_key = (reason or 'lost').strip().lower()
-    if reason_key not in {key for key, _ in TOOL_SCRAP_REASONS}:
+    if reason_key not in {key for key, _ in TOOL_SCRAP_REASONS} | {AUDIT_RETURNED_REASON}:
         reason_key = 'lost'
     mode = 'both' if str(mode or '').strip().lower() == 'both' else 'losses'
     when = _parse_day(audit_date)
@@ -1223,7 +1345,7 @@ def post_adjustments(audit, mode='losses', reason='lost', audit_date=None,
                                      'closed as verified.'}
 
     done_loss = done_gain = 0
-    lost_qty = found_qty = write_off = 0.0
+    lost_qty = found_qty = write_off = returned_qty = 0.0
     remarks = []
     for entry in plan:
         line = entry['line']
@@ -1231,7 +1353,16 @@ def post_adjustments(audit, mode='losses', reason='lost', audit_date=None,
             remarks.append(entry.get('message') or
                            f'{entry.get("name", "Tool")}: nothing available to write off.')
             continue
-        if entry['kind'] == 'loss':
+        if entry['kind'] == 'loss' and reason_key == AUDIT_RETURNED_REASON:
+            ok_ret, msg_ret, returned = _return_loss_to_store(audit, entry, user_id, when)
+            if not ok_ret:
+                remarks.append(msg_ret)
+                continue
+            line.adjusted_qty = _q2(-returned)
+            line.adjust_reason = AUDIT_RETURNED_REASON
+            returned_qty += returned
+            done_loss += 1
+        elif entry['kind'] == 'loss':
             _lift_pending(audit, entry, user_id)
             ok, message, scrap = record_tool_scrap(
                 tool_id=int(entry['tool'].id), qty=entry['writable_qty'],
@@ -1277,6 +1408,7 @@ def post_adjustments(audit, mode='losses', reason='lost', audit_date=None,
 
     summary = {'done': done_loss + done_gain, 'losses': done_loss, 'gains': done_gain,
                'lost_qty': _q2(lost_qty), 'found_qty': _q2(found_qty),
+               'returned_qty': _q2(returned_qty),
                'write_off_value': _q2(write_off), 'remaining': len(remaining),
                'status': audit.status,
                'remarks': [text for text in remarks if text]}
@@ -1360,7 +1492,9 @@ def reverse_audit_adjustments(audit, user_id=None, commit=False):
         # only itself instead of discarding the lines already undone.
         savepoint = db.session.begin_nested()
         try:
-            if adj < 0:
+            if adj < 0 and (line.adjust_reason or '') == AUDIT_RETURNED_REASON:
+                _unreturn_line(audit, line, touched_rentals)
+            elif adj < 0:
                 qty = abs(adj)
                 scrap = db.session.get(ToolScrap, int(line.scrap_id)) if line.scrap_id else None
                 scrap_code = scrap.scrap_code if scrap is not None else None

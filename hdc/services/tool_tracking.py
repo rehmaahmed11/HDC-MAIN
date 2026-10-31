@@ -86,6 +86,27 @@ def _location_key(loc_type, project_id=None, stage_id=None, customer_name=None):
     )
 
 
+def holding_key(loc_type, project_id=None, stage_id=None, customer_name=None):
+    """Stable text key for one holding place, as stored on a return line.
+
+    ``site:<project>`` or ``site:<project>#<stage>``, ``cust:<name>`` or
+    ``store``.  Compared case-insensitively, because customer names are typed.
+    """
+    if loc_type == LOC_OWN_PROJECT:
+        key = f'site:{int(project_id or 0)}'
+        if stage_id:
+            key += f'#{int(stage_id)}'
+        return key
+    if loc_type == LOC_CUSTOMER:
+        return f'cust:{(customer_name or "").strip()}'
+    return 'store'
+
+
+def _bucket_key(bucket):
+    return holding_key(bucket.get('loc_type'), bucket.get('project_id'),
+                       bucket.get('stage_id'), bucket.get('customer_name'))
+
+
 def _load_position_events(rental_ids, item_ids, names=None):
     """Chronological movement events per rental line.
 
@@ -124,13 +145,20 @@ def _load_position_events(rental_ids, item_ids, names=None):
 
         for transfer in transfers:
             dest = _transfer_destination(transfer, names)
+            # A move back to the warehouse that closed the rental line is a
+            # *return*: the pieces leave the rental.  Older warehouse moves keep
+            # the historical meaning (a store bucket) so existing books hold.
+            as_return = bool(transfer.closes_rental) and dest['loc_type'] == LOC_STORE
             # A hand-over (the Transfer Rental flow) opened a NEW rental for the
             # destination, so the pieces have left this rental.  Only an
             # in-place move keeps the pieces on this rental (no to_rental_id).
-            base = {'kind': 'transfer', 'date': transfer.transfer_date,
-                    'dest': dest, 'transfer': transfer,
+            base = {'kind': 'return' if as_return else 'transfer',
+                    'date': transfer.transfer_date,
+                    'dest': None if as_return else dest, 'transfer': transfer,
                     'handover': transfer.to_rental_id is not None,
-                    'seq': (kind_rank['transfer'], int(transfer.id or 0))}
+                    'from_key': None,
+                    'seq': (kind_rank['return' if as_return else 'transfer'],
+                            int(transfer.id or 0))}
             splits = splits_by_transfer.get(int(transfer.id))
             if splits:
                 for split in splits:
@@ -165,6 +193,7 @@ def _load_position_events(rental_ids, item_ids, names=None):
             events_by_item.setdefault(int(ret_item.rental_item_id), []).append({
                 'kind': 'return', 'date': ret.return_date, 'transfer': None,
                 'qty': _round_qty(ret_item.qty_returned), 'dest': None,
+                'from_key': (ret_item.from_location_key or None),
                 'seq': (kind_rank['return'], int(ret.id or 0)),
             })
 
@@ -206,6 +235,28 @@ def _transfer_source_matches_bucket(bucket, transfer):
     if from_type in ('warehouse', 'store'):
         return bucket.get('loc_type') == LOC_STORE
     return False
+
+
+def _return_candidates(buckets, event):
+    """Holdings a return should take from, most likely first.
+
+    A return line that recorded where the pieces left (``from_key``) takes them
+    from that holding.  A warehouse move takes them from its recorded source.
+    Anything else keeps the historical latest-first order, so old rows replay
+    exactly as before.  Returns ``(preferred, rest)``.
+    """
+    open_buckets = [b for b in reversed(buckets) if b['qty'] > EPS]
+    key = (event.get('from_key') or '').strip().casefold()
+    transfer = event.get('transfer')
+    if key:
+        preferred = [b for b in open_buckets if _bucket_key(b).casefold() == key]
+    elif transfer is not None:
+        preferred = [b for b in open_buckets if _transfer_source_matches_bucket(b, transfer)]
+    else:
+        preferred = []
+    chosen = {id(b) for b in preferred}
+    rest = [b for b in open_buckets if id(b) not in chosen]
+    return preferred, rest
 
 
 def _resolve_position_buckets(rental, item, events, names=None):
@@ -267,8 +318,14 @@ def _resolve_position_buckets(rental, item, events, names=None):
                     {'label': dest['label'], 'date': event['date'] or rental.rental_date}]
                 open_bucket(dest, moved, chain, event['date'] or rental.rental_date)
         else:  # return
+            preferred, rest = _return_candidates(buckets, event)
+            if event['qty'] is None:
+                # legacy "everything went back": only the holding it came from
+                for bucket in (preferred or rest[:1]):
+                    bucket['qty'] = 0.0
+                continue
             remaining = _round_qty(event['qty'])
-            for bucket in reversed(buckets):
+            for bucket in preferred + rest:
                 if remaining <= EPS:
                     break
                 if bucket['qty'] <= EPS:
@@ -278,6 +335,53 @@ def _resolve_position_buckets(rental, item, events, names=None):
                 remaining = _round_qty(remaining - take)
 
     return [b for b in buckets if b['qty'] > EPS]
+
+
+def rental_return_sources(rental, items):
+    """Where each open rental line physically sits, for the return form.
+
+    ``{rental_item_id: [{'key', 'label', 'qty'}, ..]}`` -- only own-site and
+    customer holdings (the store is never a place a return comes *from*).  The
+    same legacy drift rule as :func:`tool_ledger` applies, so the quantities
+    here add up to what the ledger says is out.
+    """
+    open_items = [it for it in (items or ())
+                  if float(it.qty_pending or 0) > EPS]
+    if not open_items:
+        return {}
+    names = _NameLookup()
+    events = _load_position_events(
+        [int(it.rental_id) for it in open_items],
+        {int(it.id) for it in open_items}, names)
+    out = {}
+    for item in open_items:
+        pending_qty = _round_qty(item.qty_pending)
+        buckets = _resolve_position_buckets(
+            rental, item, events.get(int(item.id), []), names)
+        drift = _round_qty(pending_qty - sum(b['qty'] for b in buckets))
+        if abs(drift) > EPS:
+            if buckets:
+                buckets[-1]['qty'] = _round_qty(buckets[-1]['qty'] + drift)
+            else:
+                origin = _rental_origin(rental, names)
+                buckets = [{'loc_type': origin['loc_type'], 'label': origin['label'],
+                            'project_id': origin['project_id'],
+                            'stage_id': origin['stage_id'],
+                            'customer_name': origin['customer_name'],
+                            'qty': pending_qty}]
+        sources = []
+        for bucket in buckets:
+            if bucket['loc_type'] == LOC_STORE or bucket['qty'] <= EPS:
+                continue
+            key = _bucket_key(bucket)
+            slot = next((s for s in sources if s['key'] == key), None)
+            if slot is None:
+                sources.append({'key': key, 'label': bucket['label'],
+                                'qty': _round_qty(bucket['qty'])})
+            else:
+                slot['qty'] = _round_qty(slot['qty'] + bucket['qty'])
+        out[int(item.id)] = sources
+    return out
 
 
 class _NameLookup:
@@ -517,6 +621,10 @@ def tool_ledger():
             for bucket in buckets:
                 qty = _round_qty(bucket['qty'])
                 if qty <= EPS:
+                    continue
+                # Pieces sitting at the warehouse are in stock: they must not be
+                # counted as out, or the store figure (owned - out) loses them.
+                if bucket['loc_type'] == LOC_STORE:
                     continue
                 chain = [dict(step, is_current=False) for step in bucket['chain']]
                 if chain:
