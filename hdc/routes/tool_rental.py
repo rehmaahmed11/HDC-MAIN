@@ -37,7 +37,7 @@ from hdc.services.tool_rental import (
     get_receiving_accounts, global_tool_locations,
     known_tool_customers, known_tool_suppliers,
     post_tool_rental_payment_to_accounts, recalc_rental_totals,
-    record_tool_purchase, record_tool_scrap,
+    record_tool_purchase, record_tool_purchase_batch, record_tool_scrap,
     record_tool_rental_discount, rental_discount_rows, rental_transfer_chain,
     rental_outcome_filter, rental_outcomes, search_rentals, tool_available_for_integrity, tool_kpis, tool_purchases,
     tool_scraps, tool_stock_aggregates, void_discounts_for_payment,
@@ -987,7 +987,7 @@ def register(app):
                     flash(f'Tool {tool.name} ({code}) added with 0 qty — '
                           f'use "Add Stock" when it arrives.', 'success')
                 return redirect(url_for('hdc_tool_rental_inventory',
-                                        q=tool.tool_code, focus='tool'))
+                                        focus='tool'))
 
             flash('Unknown inventory action.', 'warning')
             return redirect(url_for('hdc_tool_rental_inventory'))
@@ -1002,7 +1002,37 @@ def register(app):
 
         # One ledger, one set of numbers: the inventory page can never disagree
         # with the Tools dashboard about what is in store / out / on a site.
-        tools = inventory_rows(term=q, category_id=category_id, view=view)
+        # Keep the full live tool list alongside any filtered view so the
+        # searchable list-style combo box and the Purchase / Scrap modals never
+        # collapse to a single item when a search or filter is active.
+        all_tools = inventory_rows()
+        if q or category_id or view != 'all':
+            tools = inventory_rows(term=q, category_id=category_id, view=view)
+        else:
+            tools = all_tools
+        all_tool_models = [r['tool'] for r in all_tools]
+
+        seen_search_opts = set()
+        inventory_search_options = []
+        for r in all_tools:
+            label = f"{r['name']} ({r['code']})" if r.get('code') else str(r['name'])
+            key = label.lower()
+            if label and key not in seen_search_opts:
+                seen_search_opts.add(key)
+                inventory_search_options.append(label)
+        holder_labels = sorted(
+            {str(h['label']).strip()
+             for r in all_tools
+             for h in (r.get('holdings') or [])
+             if str(h.get('label') or '').strip()},
+            key=lambda s: s.lower(),
+        )
+        for h_label in holder_labels:
+            key = h_label.lower()
+            if key not in seen_search_opts:
+                seen_search_opts.add(key)
+                inventory_search_options.append(h_label)
+
         stock_stats = tool_stock_aggregates([int(r['tool_id']) for r in tools])
         categories = (ToolCategory.query
                       .order_by(ToolCategory.name.asc()).all())
@@ -1037,6 +1067,9 @@ def register(app):
 
         return render_template('tool_rental/tool_inventory.html',
             tools=tools,
+            all_tool_models=all_tool_models,
+            all_tools_count=len(all_tools),
+            inventory_search_options=inventory_search_options,
             stock_stats=stock_stats,
             categories=categories,
             category_tool_counts=category_tool_counts,
@@ -1239,12 +1272,12 @@ def register(app):
             qty = float(len(parse_custom_serial_list(custom_serials)))
         if qty <= 0:
             flash('Purchase quantity must be greater than 0.', 'danger')
-            return redirect(url_for('hdc_tool_rental_inventory', q=tool.tool_code))
+            return redirect(url_for('hdc_tool_rental_inventory'))
         purchase_date = _parse_date(request.form.get('purchase_date'))
         if _has_recent_duplicate(ToolPurchase, tool_id=tool.id, qty=qty,
                                  purchase_date=purchase_date):
             flash('Duplicate purchase prevented (same tool + qty + date submitted twice).', 'warning')
-            return redirect(url_for('hdc_tool_rental_inventory', q=tool.tool_code))
+            return redirect(url_for('hdc_tool_rental_inventory'))
 
         ok, msg, purchase = record_tool_purchase(
             tool_id=tool.id,
@@ -1261,20 +1294,100 @@ def register(app):
         )
         if not ok:
             flash(msg or 'Could not record purchase.', 'danger')
-            return redirect(url_for('hdc_tool_rental_inventory', q=tool.tool_code))
+            return redirect(url_for('hdc_tool_rental_inventory'))
         flash(f'Stock in: {qty:g} {tool.unit} of {tool.name} ({purchase.purchase_code}) — '
               f'now owning {tool.total_quantity:g} {tool.unit}.', 'success')
-        return redirect(url_for('hdc_tool_rental_inventory', q=tool.tool_code))
+        return redirect(url_for('hdc_tool_rental_inventory'))
 
     @app.route('/hdc/tool-rental/inventory/purchase', methods=['POST'])
     @login_required
     @_money_write_required()
     def hdc_tool_rental_purchase_create():
-        tool_id = request.form.get('tool_id', type=int)
-        if not tool_id:
-            flash('Select the tool you purchased.', 'danger')
+        row_modes = request.form.getlist('row_mode')
+        tool_ids = request.form.getlist('tool_id')
+        new_names = request.form.getlist('new_tool_name')
+        new_codes = request.form.getlist('new_tool_code')
+        new_cats = request.form.getlist('new_tool_category_id')
+        new_units = request.form.getlist('new_tool_unit')
+        new_rates = request.form.getlist('new_tool_rate')
+        qtys = request.form.getlist('qty')
+        unit_costs = request.form.getlist('unit_cost')
+        serial_starts = request.form.getlist('serial_start_no')
+        custom_serials_list = request.form.getlist('custom_serials')
+
+        def _at(values, idx, default=''):
+            return values[idx] if idx < len(values) else default
+
+        n_rows = max(len(row_modes), len(tool_ids), len(new_names), len(qtys), 1)
+        items = []
+        for i in range(n_rows):
+            mode = (_at(row_modes, i, '') or '').strip().lower()
+            raw_tid = (_at(tool_ids, i, '') or '').strip()
+            raw_new_name = (_at(new_names, i, '') or '').strip()
+            raw_qty = (_at(qtys, i, '') or '').strip()
+            raw_cost = (_at(unit_costs, i, '') or '').strip()
+            raw_serials = (_at(custom_serials_list, i, '') or '').strip()
+            raw_start = (_at(serial_starts, i, '') or '').strip()
+
+            if not mode:
+                mode = 'on_fly' if (raw_new_name and not raw_tid) else 'existing'
+
+            # Ignore an untouched blank row when purchasing multiple items.
+            if mode == 'on_fly':
+                if not raw_new_name and not raw_qty and not raw_cost and not raw_serials:
+                    continue
+            else:
+                if not raw_tid and not raw_qty and not raw_cost and not raw_serials:
+                    continue
+
+            items.append({
+                'mode': mode,
+                'tool_id': raw_tid or None,
+                'new_tool_name': raw_new_name,
+                'new_tool_code': (_at(new_codes, i, '') or '').strip(),
+                'category_id': (_at(new_cats, i, '') or '').strip() or None,
+                'unit': (_at(new_units, i, 'pcs') or 'pcs').strip(),
+                'rental_rate_per_day': (_at(new_rates, i, '') or '').strip() or 0.0,
+                'qty': raw_qty,
+                'unit_cost': raw_cost if raw_cost != '' else None,
+                'serial_numbers': raw_serials or None,
+                'start_no': raw_start or None,
+            })
+
+        if not items:
+            flash('Select the tool you purchased (or add a new tool on the fly) with a quantity.', 'danger')
             return redirect(url_for('hdc_tool_rental_inventory'))
-        return _do_tool_purchase(tool_id)
+
+        purchase_date_raw = (request.form.get('purchase_date') or '').strip() or None
+        parsed_pdate = _parse_date(purchase_date_raw)
+        if all(it['mode'] == 'existing' and str(it.get('tool_id') or '').isdigit() for it in items):
+            all_dup = True
+            for it in items:
+                q_val = max(0.0, _flt(it.get('qty')))
+                if q_val <= 0 and it.get('serial_numbers'):
+                    q_val = float(len(parse_custom_serial_list(it['serial_numbers'])))
+                if not (q_val > 0 and _has_recent_duplicate(
+                        ToolPurchase, tool_id=int(it['tool_id']), qty=q_val,
+                        purchase_date=parsed_pdate)):
+                    all_dup = False
+                    break
+            if all_dup:
+                flash('Duplicate purchase prevented (same tool + qty + date submitted twice).', 'warning')
+                return redirect(url_for('hdc_tool_rental_inventory'))
+
+        ok, msg, _purchases = record_tool_purchase_batch(
+            items=items,
+            supplier=(request.form.get('supplier') or '').strip(),
+            purchase_date=purchase_date_raw,
+            reference=(request.form.get('reference') or '').strip(),
+            notes=(request.form.get('notes') or '').strip(),
+            update_cost=(request.form.get('update_cost') == '1'),
+            created_by=current_user.id if hasattr(current_user, 'id') else None,
+            commit=True,
+        )
+        flash(msg or ('Purchase recorded.' if ok else 'Could not record purchase.'),
+              'success' if ok else 'danger')
+        return redirect(url_for('hdc_tool_rental_inventory'))
 
     @app.route('/hdc/tool-rental/inventory/<int:tool_id>/purchase', methods=['POST'])
     @login_required

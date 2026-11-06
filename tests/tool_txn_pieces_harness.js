@@ -382,10 +382,9 @@ const results = {};
   equal(returnQty.value, '2', 'the returning quantity follows the ticked pieces');
   ok(returnQty.readOnly, 'ticked pieces decide the returning quantity');
   results.returns = await submit();
-  const returnItemId = returnRow.querySelector('.return-item-id').value;
-  equal(results.returns.fields['return_serial_ids_' + returnItemId + '[]'],
+  equal(results.returns.fields['return_serial_ids[]'],
     [tickedPieces(returnCell).join(',')],
-    'the ticked pieces post under return_serial_ids_<item>[]');
+    'the ticked pieces post under return_serial_ids[]');
   equal(results.returns.fields['qty_returned[]'], ['2'], 'the returning quantity posts with them');
   equal(results.returns.fields['return_rental_id[]'], [String(context.returnRentalId)],
     'the row posts the issue it belongs to, so one submission can settle several');

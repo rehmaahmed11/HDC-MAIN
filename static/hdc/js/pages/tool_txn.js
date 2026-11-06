@@ -643,29 +643,6 @@
         return ids;
     }
 
-
-    function addStoreRowOnTheFly(name, code, qty, rate) {
-        var tbody = document.getElementById('storeSelectedRows');
-        if (!tbody) return;
-        lineIndex++;
-        var row = document.createElement('tr');
-        row.className = 'store-line-row';
-        row.setAttribute('data-tool-id', 'on-the-fly-' + lineIndex);
-        row.innerHTML =
-            '<td class="store-line-idx"></td>' +            '<td><strong>' + escapeHtml(name) + '</strong>' +            (code ? '<br><small class="text-muted">' + escapeHtml(code) + '</small>' : '') +            '<br><small class="text-muted">On the fly entry</small></td>' +            '<td class="store-line-pieces"><span class="small text-muted">Qty only</span></td>' +            '<td><input type="number" class="form-control form-control-sm store-line-qty" min="0.1" step="0.1" value="' +            escapeHtml(String(qty)) + '" placeholder="Qty" aria-label="Quantity of ' +            escapeHtml(name) + '"></td>' +            '<td><input type="number" class="form-control form-control-sm txn-line-rate" min="0" step="0.01" value="' +            escapeHtml(String(rate)) + '" aria-label="Rate for ' +            escapeHtml(name) + '"></td>' +            '<td class="col-action"><button type="button" class="btn btn-sm btn-outline-danger store-line-remove" ' +            'title="Remove" aria-label="Remove ' + escapeHtml(name) + '"><i class="fas fa-times" aria-hidden="true"></i></button></td>';
-        row.querySelector('.store-line-remove').addEventListener('click', function () {
-            row.remove();
-            renumberStoreRows();
-            updateStoreCount();
-            toggleStoreEmpty();
-            syncBilling();
-        });
-        tbody.appendChild(row);
-        renumberStoreRows();
-        updateStoreCount();
-        toggleStoreEmpty();
-        syncBilling();
-    }
     function renderStoreToolList() {
         var list = document.getElementById('storeToolList');
         var search = document.getElementById('storeToolSearch');
@@ -1550,23 +1527,8 @@
 
     function clearForNextEntry() {
         // A recorded entry changes the stock and the holders on the page, and
-        // its reference is spent. Instead of reloading (which clears the search
-        // and state), we reset the form and refresh the store list.
-        var form = document.getElementById('toolTxnForm');
-        if (form) form.reset();
-        var storeSearch = document.getElementById('storeToolSearch');
-        if (storeSearch) storeSearch.value = '';
-        var tbody = document.getElementById('storeSelectedRows');
-        if (tbody) tbody.innerHTML = '';
-        renderStoreToolList();
-        toggleStoreEmpty();
-        // Re-apply panels and group cards to match the reset state
-        var typeSelect = document.getElementById('txnType');
-        var entry = currentEntry();
-        if (entry) activeGroup = entry.group;
-        paintGroupCards();
-        filterTypeOptions();
-        applyPanels();
+        // its reference is spent, so the page is loaded again for the next one.
+        window.location.reload();
     }
 
     function finishPost(status, answer) {
@@ -1765,16 +1727,6 @@
                     addStoreRow(box.value);
                 }
             });
-    });
-    var storeAddOnFly = document.getElementById('storeAddOnFlyBtn');
-    if (storeAddOnFly) storeAddOnFly.addEventListener('click', function () {
-        // Prompt for name, code, qty, rate
-        var name = prompt('Enter tool/item name (On the Fly)', '');
-        if (!name) return;
-        var code = prompt('Enter code (optional)', '');
-        var qty = prompt('Enter quantity', '1');
-        var rate = prompt('Enter rate (PKR)', '0');
-        addStoreRowOnTheFly(name, code || '', parseFloat(qty) || 1, parseFloat(rate) || 0);
     });
     var transferSearch = document.getElementById('transferLinesSearch');
     if (transferSearch) transferSearch.addEventListener('input', applyTransferSearch);

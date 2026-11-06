@@ -58,7 +58,7 @@ NAME_FIELDS = {
     '/hdc/tool-rental': {'q': 'rentalSearch'},
     '/hdc/tool-rental/new': {'customer_name': 'rentalCustomerName'},
     '/hdc/tool-rental/<id>': {'to_customer_name': 'transferCustomerName'},
-    '/hdc/tool-rental/inventory': {'supplier': 'toolSupplier'},
+    '/hdc/tool-rental/inventory': {'q': 'inventorySearch', 'supplier': 'toolSupplier'},
     '/hdc/tool-rental/tool/<id>': {'supplier': 'purchaseModalSupplier'},
     '/hdc/tool-rental/reports': {'q': 'toolReportSearch'},
 }

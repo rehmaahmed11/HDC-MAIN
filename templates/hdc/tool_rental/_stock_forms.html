@@ -1,41 +1,156 @@
 {# Reusable "Add Stock" (purchase) and "Scrap" modals for the HDC Tools area.
 
-   Both accept an optional `tool`: when given, the tool is fixed and the picker
-   is hidden; otherwise the caller passes every tool and the user chooses.
-   Row buttons pre-fill the modal through data-tool-id / data-tool-name (see
-   tool_inventory.html's bootstrap `show.bs.modal` listener). #}
+   `purchase_modal` supports two contexts:
+     * `tool` given (the per-tool Position page): fixed single-tool purchase.
+     * `tool` omitted (Tool Inventory): multi-item purchase supporting both
+       existing inventory tools (searchable list-style combo box) and brand-new
+       tools added "on the fly" with quantity and unit price in the same bill. #}
 {% from "shared/_combo_field.html" import combo_field, combo_select %}
 
-{% macro purchase_modal(modal_id, tools, tool=None, today='', known_suppliers=[]) %}
+{% macro _purchase_line_markup(modal_id, tools, categories, is_template=false) %}
+<div class="js-purchase-line border rounded-3 p-2 bg-light-subtle">
+  <input type="hidden" name="row_mode" class="js-row-mode" value="existing">
+  <div class="row g-2 align-items-start">
+    <div class="col-12 col-lg-5">
+      <div class="js-existing-block">
+        <div class="d-flex justify-content-between align-items-center mb-1">
+          <label class="form-label small fw-semibold mb-0"{% if not is_template %} for="{{ modal_id }}ToolInput"{% endif %}>Tool *</label>
+          <button type="button" class="btn btn-link btn-sm p-0 small text-decoration-none js-switch-on-fly">
+            <i class="fas fa-bolt me-1" aria-hidden="true"></i>On the fly (new tool)
+          </button>
+        </div>
+        <input type="text"
+               {% if not is_template %}id="{{ modal_id }}ToolInput" data-hdc-combo="{{ modal_id }}Tool"{% endif %}
+               class="form-control js-purchase-tool-input"
+               placeholder="Search or click arrow to pick tool…"
+               autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list"
+               data-hdc-combo-strict="true" data-hdc-combo-toggle="true" data-hdc-combo-manual="true"
+               data-hdc-dialog-skip="true">
+        <select name="tool_id"
+                {% if not is_template %}id="{{ modal_id }}Tool"{% endif %}
+                class="form-select d-none js-purchase-tool-select"
+                data-hdc-combo-source data-hdc-dialog-skip="true">
+          <option value=""></option>
+          {% for t in tools %}
+          <option value="{{ t.id }}"
+                  data-cost="{{ t.purchase_cost or 0 }}"
+                  data-unit="{{ t.unit or 'pcs' }}">{{ t.name }} ({{ t.tool_code }}) — owns {{ "%g"|format(t.total_quantity or 0) }} {{ t.unit }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="js-onfly-block d-none">
+        <div class="d-flex justify-content-between align-items-center mb-1">
+          <span class="badge bg-primary-subtle text-primary-emphasis border border-primary-subtle">
+            <i class="fas fa-bolt me-1" aria-hidden="true"></i>New Tool — On the Fly
+          </span>
+          <button type="button" class="btn btn-link btn-sm p-0 small text-decoration-none js-switch-existing">
+            Pick existing tool
+          </button>
+        </div>
+        <input type="text" name="new_tool_name" class="form-control js-new-tool-name"
+               placeholder="New tool name * (e.g. Tile Cutter, Bosch Drill)"
+               autocomplete="off" data-hdc-dialog-skip="true">
+        <div class="row g-1 mt-1">
+          <div class="col-5">
+            <select name="new_tool_category_id" class="form-select form-select-sm js-new-tool-cat"
+                    aria-label="New tool category" data-hdc-dialog-skip="true">
+              <option value="">No Category</option>
+              {% for c in categories %}
+              <option value="{{ c.id }}">{{ c.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-3">
+            <select name="new_tool_unit" class="form-select form-select-sm js-new-tool-unit"
+                    aria-label="New tool unit" data-hdc-dialog-skip="true">
+              <option value="pcs">pcs</option>
+              <option value="set">set</option>
+              <option value="nos">nos</option>
+              <option value="meter">meter</option>
+              <option value="kg">kg</option>
+            </select>
+          </div>
+          <div class="col-4">
+            <input type="number" name="new_tool_rate" class="form-control form-control-sm js-new-tool-rate"
+                   min="0" step="0.01" placeholder="Rent/day (opt)"
+                   aria-label="Rental rate per day (optional)" data-hdc-dialog-skip="true">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-6 col-md-3 col-lg-2">
+      <label class="form-label small fw-semibold mb-1">Qty *</label>
+      <input type="number" name="qty" class="form-control js-purchase-qty"
+             min="0.1" step="0.1" placeholder="e.g. 10" data-hdc-dialog-skip="true">
+    </div>
+
+    <div class="col-6 col-md-3 col-lg-2">
+      <label class="form-label small fw-semibold mb-1">Unit Price</label>
+      <input type="number" name="unit_cost" class="form-control js-purchase-cost"
+             min="0" step="0.01" placeholder="0.00" data-hdc-dialog-skip="true">
+    </div>
+
+    <div class="col-9 col-md-4 col-lg-2">
+      <label class="form-label small fw-semibold mb-1">Line Total</label>
+      <input type="text" class="form-control js-purchase-line-total bg-body-tertiary"
+             readonly tabindex="-1" value="0">
+    </div>
+
+    <div class="col-3 col-md-2 col-lg-1 d-flex align-items-end">
+      <div class="w-100">
+        <span class="form-label small mb-1 d-block invisible" aria-hidden="true">×</span>
+        <button type="button" class="btn btn-outline-danger w-100 js-purchase-remove"
+                title="Remove item" aria-label="Remove item">
+          <i class="fas fa-trash-can" aria-hidden="true"></i>
+        </button>
+      </div>
+    </div>
+
+    <div class="col-12">
+      <details class="small">
+        <summary class="text-muted" style="cursor:pointer">
+          <i class="fas fa-hashtag me-1" aria-hidden="true"></i>Serial markings for this item (optional — auto-numbered if blank)
+        </summary>
+        <div class="row g-2 pt-1">
+          <div class="col-4">
+            <input type="number" name="serial_start_no" class="form-control form-control-sm js-serial-start"
+                   min="1" step="1" placeholder="Start No (auto next)" data-hdc-dialog-skip="true">
+          </div>
+          <div class="col-8">
+            <input type="text" name="custom_serials" class="form-control form-control-sm js-custom-serials"
+                   placeholder="Or custom markings comma-separated (e.g. Shovel No 5, Shovel No 6)"
+                   data-hdc-dialog-skip="true">
+          </div>
+        </div>
+      </details>
+    </div>
+  </div>
+</div>
+{% endmacro %}
+
+{% macro purchase_modal(modal_id, tools, tool=None, today='', known_suppliers=[], categories=[]) %}
 <div class="modal fade" id="{{ modal_id }}" tabindex="-1">
-  <div class="modal-dialog modal-lg">
+  <div class="modal-dialog {% if tool %}modal-lg{% else %}modal-xl modal-dialog-scrollable{% endif %}">
     <div class="modal-content hdc-modal">
       <form method="POST" action="{% if tool %}{{ url_for('hdc_tool_rental_tool_purchase', tool_id=tool.id) }}{% else %}{{ url_for('hdc_tool_rental_purchase_create') }}{% endif %}"
             id="{{ modal_id }}Form" data-hdc-dialog>
         <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
         <div class="modal-header">
-          <h6 class="modal-title"><i class="fas fa-cart-plus me-2"></i>Add Stock — New Purchase</h6>
+          <h6 class="modal-title">
+            <i class="fas fa-cart-plus me-2"></i>{% if tool %}Add Stock — New Purchase{% else %}Purchase Stock — One or Multiple Tools{% endif %}
+          </h6>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
+        {% if tool %}
         <div class="modal-body row g-2">
-          {% if tool %}
-            <input type="hidden" name="tool_id" value="{{ tool.id }}">
-            <div class="col-12">
-              <label class="form-label">Tool</label>
-              <input type="text" class="form-control" value="{{ tool.name }} ({{ tool.tool_code }})" readonly>
-              <small class="text-muted">Currently owning {{ "%g"|format(tool.total_quantity or 0) }} {{ tool.unit }}</small>
-            </div>
-          {% else %}
-            <div class="col-12">
-              {% set tool_options = [] %}
-              {% for t in tools %}
-                {% set _ = tool_options.append((t.id, t.name ~ ' (' ~ t.tool_code ~ ') — owns ' ~ ("%g"|format(t.total_quantity or 0)) ~ ' ' ~ t.unit)) %}
-              {% endfor %}
-              {{ combo_select('tool_id', modal_id ~ 'Tool', tool_options,
-                 label='Tool *', placeholder='Search tool name or code…',
-                 required=true, max_items=80) }}
-            </div>
-          {% endif %}
+          <input type="hidden" name="tool_id" value="{{ tool.id }}">
+          <div class="col-12">
+            <label class="form-label">Tool</label>
+            <input type="text" class="form-control" value="{{ tool.name }} ({{ tool.tool_code }})" readonly>
+            <small class="text-muted">Currently owning {{ "%g"|format(tool.total_quantity or 0) }} {{ tool.unit }}</small>
+          </div>
           <div class="col-6">
             <label class="form-label">Qty Purchased *</label>
             <input type="number" name="qty" class="form-control" min="0.1" step="0.1" required placeholder="e.g. 10">
@@ -43,7 +158,7 @@
           <div class="col-6">
             <label class="form-label">Unit Cost</label>
             <input type="number" name="unit_cost" class="form-control" min="0" step="0.01"
-                   placeholder="{% if tool %}{{ tool.purchase_cost or 0 }}{% endif %}">
+                   placeholder="{{ tool.purchase_cost or 0 }}">
             <small class="text-muted">Blank = keep current cost</small>
           </div>
           <div class="col-6">
@@ -55,10 +170,10 @@
             <input type="text" name="reference" class="form-control" placeholder="Invoice no">
           </div>
           <div class="col-12">
-            {# Supplier is a name → searchable combo (see shared/_combo_field.html). #}
             {{ combo_field('supplier', modal_id ~ 'Supplier', known_suppliers,
-               label='Supplier', placeholder='Type to search supplier…',
-               hint='Not in the list? Just type the new name.', max_items=60) }}
+               label='Supplier', placeholder='Search or click arrow for supplier…',
+               hint='Not in the list? Just type the new name.', max_items=60,
+               toggle=true) }}
           </div>
           <div class="col-12">
             <div class="border rounded-3 p-2 bg-light-subtle">
@@ -92,6 +207,73 @@
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
           <button type="submit" class="btn btn-mint"><i class="fas fa-check me-1"></i>Add Stock</button>
         </div>
+        {% else %}
+        <div class="modal-body">
+          <div class="row g-2 mb-3">
+            <div class="col-md-5">
+              {{ combo_field('supplier', modal_id ~ 'Supplier', known_suppliers,
+                 label='Supplier', placeholder='Search or click arrow for supplier…',
+                 hint='Not in the list? Just type the new name.', max_items=80,
+                 toggle=true) }}
+            </div>
+            <div class="col-6 col-md-3">
+              <label class="form-label">Purchase Date</label>
+              <input type="date" name="purchase_date" class="form-control" value="{{ today }}">
+            </div>
+            <div class="col-6 col-md-4">
+              <label class="form-label">Bill / Ref No</label>
+              <input type="text" name="reference" class="form-control" placeholder="Invoice / bill no (optional)">
+            </div>
+          </div>
+
+          <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+            <div>
+              <span class="fw-bold"><i class="fas fa-list-ul me-1 text-success"></i>Items in This Purchase</span>
+              <small class="text-muted ms-1">Pick existing tools or add new tools on the fly with qty &amp; price</small>
+            </div>
+            <div class="d-flex flex-wrap gap-2">
+              <button type="button" class="btn btn-sm btn-outline-success" id="{{ modal_id }}AddExistingBtn">
+                <i class="fas fa-plus me-1"></i>Add Existing Tool
+              </button>
+              <button type="button" class="btn btn-sm btn-outline-primary" id="{{ modal_id }}AddOnFlyBtn">
+                <i class="fas fa-bolt me-1"></i>Add New Tool On the Fly
+              </button>
+            </div>
+          </div>
+
+          <div id="{{ modal_id }}Lines" class="vstack gap-2">
+            {{ _purchase_line_markup(modal_id, tools, categories, is_template=false) }}
+          </div>
+          <template id="{{ modal_id }}LineTemplate">
+            {{ _purchase_line_markup(modal_id, tools, categories, is_template=true) }}
+          </template>
+
+          <div class="row g-2 mt-2">
+            <div class="col-md-8">
+              <label class="form-label small mb-1">Notes</label>
+              <input type="text" name="notes" class="form-control form-control-sm" placeholder="Optional bill notes">
+            </div>
+            <div class="col-md-4 d-flex align-items-end">
+              <div class="form-check mb-1">
+                <input class="form-check-input" type="checkbox" name="update_cost" value="1" id="{{ modal_id }}UpdateCost" checked>
+                <label class="form-check-label small" for="{{ modal_id }}UpdateCost">
+                  Update unit cost from purchase price
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer d-flex flex-wrap justify-content-between align-items-center gap-2">
+          <div class="d-flex align-items-center gap-3">
+            <span class="badge bg-secondary" id="{{ modal_id }}ItemCount">0 items</span>
+            <span class="fw-bold">Grand Total: PKR <span id="{{ modal_id }}GrandTotal">0</span></span>
+          </div>
+          <div class="d-flex gap-2">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="submit" class="btn btn-mint"><i class="fas fa-check me-1"></i>Save Purchase</button>
+          </div>
+        </div>
+        {% endif %}
       </form>
     </div>
   </div>
@@ -127,8 +309,8 @@
                 {% set _ = tool_options.append((t.id, t.name ~ ' (' ~ t.tool_code ~ ') — in store ' ~ ("%g"|format(t.available_qty)) ~ ' ' ~ t.unit)) %}
               {% endfor %}
               {{ combo_select('tool_id', modal_id ~ 'Tool', tool_options,
-                 label='Tool *', placeholder='Search tool name or code…',
-                 required=true, max_items=80) }}
+                 label='Tool *', placeholder='Search or click arrow for tool…',
+                 required=true, max_items=80, toggle=true) }}
             </div>
           {% endif %}
           <div class="col-6">

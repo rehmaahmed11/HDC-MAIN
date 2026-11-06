@@ -71,8 +71,10 @@
                         </div>
                         <div class="col-12">
                             <label class="form-label" for="toolCategoryInput">Category</label>
-                            <input type="text" id="toolCategoryInput" class="form-control" placeholder="Search categories or choose No Category"
-                                   autocomplete="off" data-hdc-combo="toolCategorySelect" data-hdc-combo-strict="true" data-hdc-combo-manual="true">
+                            <input type="text" id="toolCategoryInput" class="form-control" placeholder="No Category (click arrow or search)"
+                                   autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list"
+                                   data-hdc-combo="toolCategorySelect" data-hdc-combo-strict="true"
+                                   data-hdc-combo-toggle="true" data-hdc-combo-manual="true">
                             <select name="category_id" id="toolCategorySelect" class="form-select d-none" data-hdc-combo-source>
                                 <option value="">No Category</option>
                                 {% for c in categories %}
@@ -139,10 +141,11 @@
                                     <div class="col-6">
                                         {{ combo_field('supplier', 'toolSupplier',
                                            known_suppliers, label='Supplier',
+                                           label_class='form-label small mb-1',
                                            input_class='form-control form-control-sm',
-                                           placeholder='Type to search supplier…',
+                                           placeholder='Search or click arrow…',
                                            hint='Not in the list? Just type the new name.',
-                                           max_items=60) }}
+                                           max_items=60, toggle=true) }}
                                     </div>
                                     <div class="col-3">
                                         <label class="form-label small mb-1">Date</label>
@@ -199,24 +202,31 @@
     <div class="col-xl-8">
         <div class="card hdc-card">
             <div class="card-header hdc-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-                <span><i class="fas fa-warehouse me-2"></i>Inventory — {{ tools|length }} tools</span>
+                <span><i class="fas fa-warehouse me-2"></i>Inventory — {% if all_tools_count is defined and tools|length != all_tools_count %}{{ tools|length }} of {{ all_tools_count }} tools{% else %}{{ tools|length }} tools{% endif %}</span>
                 <div class="d-flex gap-2 flex-wrap">
-                    <button class="btn btn-sm btn-mint" data-bs-toggle="modal" data-bs-target="#purchaseModal"><i class="fas fa-cart-plus me-1"></i>Purchase Stock</button>
+                    <button class="btn btn-sm btn-mint" id="openPurchaseModalBtn" data-bs-toggle="modal" data-bs-target="#purchaseModal"><i class="fas fa-cart-plus me-1"></i>Purchase Stock</button>
                     <button class="btn btn-sm btn-outline-danger" data-bs-toggle="modal" data-bs-target="#scrapModal"><i class="fas fa-trash-can me-1"></i>Scrap</button>
                     <a href="{{ url_for('hdc_tool_rental_tracking') }}" class="btn btn-sm btn-outline-secondary">Tracking</a>
                     <a href="{{ url_for('hdc_tool_rental') }}" class="btn btn-sm btn-outline-secondary">Rentals</a>
                 </div>
             </div>
             <div class="card-body">
-                <form method="GET" class="row g-2">
+                <form method="GET" class="row g-2" id="inventoryFilterForm">
                     <div class="col-md-5">
-                        <label class="form-label small mb-1">Search — tool, code, or the site it sits on</label>
-                        <input type="text" name="q" value="{{ q or '' }}" class="form-control" placeholder="e.g. Vibrator, TOOL-0003, DHA Phase 6, Ali Traders">
+                        {{ combo_field('q', 'inventorySearch', inventory_search_options|default([]),
+                           label='Search — tool, code, or the site it sits on',
+                           label_class='form-label small mb-1',
+                           value=q or '',
+                           placeholder='Search or click arrow for all tools, codes, or sites…',
+                           empty_text='No matching tool or site — press Search for text match.',
+                           toggle=true) }}
                     </div>
                     <div class="col-md-3">
                         <label class="form-label small mb-1" for="inventoryCategoryInput">Category</label>
-                        <input type="text" id="inventoryCategoryInput" class="form-control" placeholder="Search categories"
-                               autocomplete="off" data-hdc-combo="inventoryCategorySelect" data-hdc-combo-strict="true" data-hdc-combo-manual="true">
+                        <input type="text" id="inventoryCategoryInput" class="form-control" placeholder="All Categories"
+                               autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list"
+                               data-hdc-combo="inventoryCategorySelect" data-hdc-combo-strict="true"
+                               data-hdc-combo-toggle="true" data-hdc-combo-manual="true">
                         <select name="category_id" id="inventoryCategorySelect" class="form-select d-none" data-hdc-combo-source>
                             <option value="">All Categories</option>
                             {% for c in categories %}
@@ -225,8 +235,8 @@
                         </select>
                     </div>
                     <div class="col-md-2">
-                        <label class="form-label small mb-1">Show</label>
-                        <select name="view" class="form-select">
+                        <label class="form-label small mb-1" for="inventoryViewSelect">Show</label>
+                        <select name="view" id="inventoryViewSelect" class="form-select">
                             <option value="all" {% if selected_view=='all' %}selected{% endif %}>All</option>
                             <option value="out" {% if selected_view=='out' %}selected{% endif %}>Rented out</option>
                             <option value="store" {% if selected_view=='store' %}selected{% endif %}>In store</option>
@@ -434,8 +444,9 @@
                                     <div class="col-6">
                                         <label class="form-label" for="editToolCategoryInput{{ r.tool_id }}">Category</label>
                                         <input type="text" id="editToolCategoryInput{{ r.tool_id }}" class="form-control js-edit-tool-category-input"
-                                               placeholder="Search categories" autocomplete="off"
-                                               data-hdc-combo="editToolCategorySelect{{ r.tool_id }}" data-hdc-combo-strict="true" data-hdc-combo-manual="true">
+                                               placeholder="No Category" autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list"
+                                               data-hdc-combo="editToolCategorySelect{{ r.tool_id }}" data-hdc-combo-strict="true"
+                                               data-hdc-combo-toggle="true" data-hdc-combo-manual="true">
                                         <select name="category_id" id="editToolCategorySelect{{ r.tool_id }}" class="form-select d-none" data-hdc-combo-source>
                                             <option value="">No Category</option>
                                             {% for c in categories %}<option value="{{ c.id }}" {% if r.tool.category_id==c.id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}
@@ -502,8 +513,8 @@
 </div>
 
 {# ------------------------------------------------ shared stock modals -- #}
-{{ purchase_modal('purchaseModal', tools|map(attribute='tool')|list, None, today, known_suppliers) }}
-{{ scrap_modal('scrapModal', tools|map(attribute='tool')|list, None, today, scrap_reasons) }}
+{{ purchase_modal('purchaseModal', all_tool_models|default(tools|map(attribute='tool')|list), None, today, known_suppliers, categories) }}
+{{ scrap_modal('scrapModal', all_tool_models|default(tools|map(attribute='tool')|list), None, today, scrap_reasons) }}
 
 {# ---------------------------------------------- tool photo viewer + saver -- #}
 {% set tool_photo_can_edit = can_write_tools %}
@@ -517,16 +528,48 @@ document.addEventListener('DOMContentLoaded', function () {
     // Keep the named selects as the submitted values; the visible inputs search their options.
     if (window.HDCComboList) {
         window.HDCComboList.attach('toolCategoryInput', 'toolCategorySelect', {
-            includeEmpty: true, strict: true, emptyText: 'No matching categories'
+            includeEmpty: true, strict: true, showToggle: true, emptyText: 'No matching categories'
         });
         window.HDCComboList.attach('inventoryCategoryInput', 'inventoryCategorySelect', {
-            includeEmpty: true, strict: true, emptyText: 'No matching categories'
+            includeEmpty: true, strict: true, showToggle: true, emptyText: 'No matching categories'
         });
         document.querySelectorAll('.js-edit-tool-category-input').forEach(function (input) {
             window.HDCComboList.attach(input, document.getElementById(input.id.replace('Input', 'Select')), {
-                includeEmpty: true, strict: true, emptyText: 'No matching categories'
+                includeEmpty: true, strict: true, showToggle: true, emptyText: 'No matching categories'
             });
         });
+    }
+
+    // Filter form: picking from the searchable list-style combos or changing
+    // Show submits immediately so the operator does not need a second click.
+    var filterForm = document.getElementById('inventoryFilterForm');
+    if (filterForm) {
+        var invSearchSelect = document.getElementById('inventorySearch');
+        var invSearchInput = document.getElementById('inventorySearchInput');
+        var invCatSelect = document.getElementById('inventoryCategorySelect');
+        var invCatInput = document.getElementById('inventoryCategoryInput');
+        var invViewSelect = document.getElementById('inventoryViewSelect');
+        var initialCat = invCatSelect ? invCatSelect.value : '';
+        if (invSearchSelect && invSearchInput) {
+            invSearchSelect.addEventListener('change', function () {
+                if (invSearchSelect.value && document.activeElement === invSearchInput) {
+                    filterForm.submit();
+                }
+            });
+        }
+        if (invCatSelect) {
+            invCatSelect.addEventListener('change', function () {
+                if (invCatSelect.value !== initialCat &&
+                    (!invCatInput || document.activeElement === invCatInput)) {
+                    filterForm.submit();
+                }
+            });
+        }
+        if (invViewSelect) {
+            invViewSelect.addEventListener('change', function () {
+                filterForm.submit();
+            });
+        }
     }
 
     // "+ Create new category…" inside the tool form keeps the user in one flow.
@@ -554,10 +597,331 @@ document.addEventListener('DOMContentLoaded', function () {
     if (card) { card.scrollIntoView({behavior: 'smooth', block: 'start'}); }
     {% endif %}
 
+    // ── Multi-item + On-the-Fly Purchase Stock modal ─────────────────────
+    var purchaseModalEl = document.getElementById('purchaseModal');
+    var purchaseLinesWrap = document.getElementById('purchaseModalLines');
+    var purchaseLineTpl = document.getElementById('purchaseModalLineTemplate');
+    var purchaseAddExistingBtn = document.getElementById('purchaseModalAddExistingBtn');
+    var purchaseAddOnFlyBtn = document.getElementById('purchaseModalAddOnFlyBtn');
+    var purchaseGrandEl = document.getElementById('purchaseModalGrandTotal');
+    var purchaseCountEl = document.getElementById('purchaseModalItemCount');
+    var purchaseRowSeq = 0;
+    var openedFromRowBtn = false;
+
+    function purchaseLines() {
+        return purchaseLinesWrap
+            ? Array.prototype.slice.call(purchaseLinesWrap.querySelectorAll('.js-purchase-line'))
+            : [];
+    }
+
+    function updatePurchaseTotals() {
+        var grand = 0;
+        var activeCount = 0;
+        purchaseLines().forEach(function (row) {
+            var mode = (row.querySelector('.js-row-mode') || {}).value || 'existing';
+            var sel = row.querySelector('.js-purchase-tool-select');
+            var newName = row.querySelector('.js-new-tool-name');
+            var qtyEl = row.querySelector('.js-purchase-qty');
+            var costEl = row.querySelector('.js-purchase-cost');
+            var lineEl = row.querySelector('.js-purchase-line-total');
+            var qty = parseFloat(qtyEl ? qtyEl.value : '') || 0;
+            var costRaw = costEl ? costEl.value.trim() : '';
+            var cost = costRaw !== '' ? (parseFloat(costRaw) || 0) : 0;
+            if (costRaw === '' && mode === 'existing' && sel && sel.value) {
+                var opt = sel.options[sel.selectedIndex];
+                cost = opt ? (parseFloat(opt.getAttribute('data-cost') || '0') || 0) : 0;
+            }
+            var lineTotal = (qty > 0 && cost > 0) ? (qty * cost) : 0;
+            if (lineEl) {
+                lineEl.value = lineTotal.toLocaleString('en-PK', { maximumFractionDigits: 2 });
+            }
+            var hasItem = mode === 'on_fly'
+                ? !!(newName && newName.value.trim())
+                : !!(sel && sel.value);
+            if (hasItem || qty > 0) activeCount += 1;
+            grand += lineTotal;
+        });
+        if (purchaseGrandEl) {
+            purchaseGrandEl.textContent = grand.toLocaleString('en-PK', { maximumFractionDigits: 2 });
+        }
+        if (purchaseCountEl) {
+            purchaseCountEl.textContent = activeCount + (activeCount === 1 ? ' item' : ' items');
+        }
+    }
+
+    function switchPurchaseRowMode(row, mode, prefillName) {
+        var modeInput = row.querySelector('.js-row-mode');
+        var existingBlock = row.querySelector('.js-existing-block');
+        var onFlyBlock = row.querySelector('.js-onfly-block');
+        var toolSelect = row.querySelector('.js-purchase-tool-select');
+        var toolInput = row.querySelector('.js-purchase-tool-input');
+        var newName = row.querySelector('.js-new-tool-name');
+        var costEl = row.querySelector('.js-purchase-cost');
+        var isOnFly = mode === 'on_fly';
+
+        if (modeInput) modeInput.value = isOnFly ? 'on_fly' : 'existing';
+        if (existingBlock) existingBlock.classList.toggle('d-none', isOnFly);
+        if (onFlyBlock) onFlyBlock.classList.toggle('d-none', !isOnFly);
+
+        if (isOnFly) {
+            var carried = (prefillName !== undefined ? String(prefillName) : (toolInput ? toolInput.value : '')).trim();
+            if (toolSelect) {
+                toolSelect.value = '';
+                toolSelect.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            if (toolInput) toolInput.value = '';
+            if (costEl && costEl.dataset.autoFilled === '1') {
+                costEl.value = '';
+                costEl.placeholder = '0.00';
+                costEl.dataset.autoFilled = '0';
+            }
+            if (newName) {
+                if (carried && !newName.value.trim()) newName.value = carried;
+                newName.focus();
+            }
+        } else {
+            if (newName) newName.value = '';
+            var rateEl = row.querySelector('.js-new-tool-rate');
+            if (rateEl) rateEl.value = '';
+            if (toolInput) toolInput.focus();
+        }
+        updatePurchaseTotals();
+    }
+
+    function clearPurchaseRow(row) {
+        var sel = row.querySelector('.js-purchase-tool-select');
+        var inp = row.querySelector('.js-purchase-tool-input');
+        if (sel) {
+            sel.value = '';
+            sel.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        if (inp) inp.value = '';
+        row.querySelectorAll('.js-new-tool-name, .js-new-tool-rate, .js-purchase-qty, .js-purchase-cost, .js-serial-start, .js-custom-serials')
+            .forEach(function (el) { el.value = ''; });
+        var costEl = row.querySelector('.js-purchase-cost');
+        if (costEl) {
+            costEl.placeholder = '0.00';
+            costEl.dataset.autoFilled = '0';
+        }
+        var catSel = row.querySelector('.js-new-tool-cat');
+        if (catSel) catSel.selectedIndex = 0;
+        var unitSel = row.querySelector('.js-new-tool-unit');
+        if (unitSel) unitSel.value = 'pcs';
+        switchPurchaseRowMode(row, 'existing', '');
+    }
+
+    function bindPurchaseRow(row, isInitialRow) {
+        var input = row.querySelector('.js-purchase-tool-input');
+        var select = row.querySelector('.js-purchase-tool-select');
+        var qtyEl = row.querySelector('.js-purchase-qty');
+        var costEl = row.querySelector('.js-purchase-cost');
+
+        if (!isInitialRow && input && select) {
+            purchaseRowSeq += 1;
+            var selectId = 'purchaseModalTool_' + purchaseRowSeq;
+            var inputId = selectId + 'Input';
+            select.id = selectId;
+            input.id = inputId;
+            input.setAttribute('data-hdc-combo', selectId);
+            var lbl = row.querySelector('.js-existing-block label');
+            if (lbl) lbl.setAttribute('for', inputId);
+        }
+
+        if (window.HDCComboList && input && select && !input.__hdcCombo) {
+            var handle = window.HDCComboList.attach(input, select, {
+                strict: true,
+                showToggle: true,
+                emptyText: 'No matching tool — click below to add on the fly.',
+                addLabel: '＋ Add new tool on the fly…',
+                onAdd: function (inp) {
+                    switchPurchaseRowMode(row, 'on_fly', inp ? inp.value : '');
+                }
+            });
+            input.__hdcCombo = handle;
+            row._comboHandle = handle;
+        }
+
+        if (select) {
+            select.addEventListener('change', function () {
+                var opt = select.options[select.selectedIndex];
+                var defaultCost = opt && select.value ? (parseFloat(opt.getAttribute('data-cost') || '0') || 0) : 0;
+                if (costEl) {
+                    costEl.placeholder = defaultCost > 0 ? String(defaultCost) : '0.00';
+                    if (costEl.value.trim() === '' || costEl.dataset.autoFilled === '1') {
+                        costEl.value = defaultCost > 0 ? String(defaultCost) : '';
+                        costEl.dataset.autoFilled = defaultCost > 0 ? '1' : '0';
+                    }
+                }
+                updatePurchaseTotals();
+            });
+        }
+        if (costEl) {
+            costEl.addEventListener('input', function () {
+                costEl.dataset.autoFilled = '0';
+                updatePurchaseTotals();
+            });
+        }
+        if (qtyEl) qtyEl.addEventListener('input', updatePurchaseTotals);
+        var newNameEl = row.querySelector('.js-new-tool-name');
+        if (newNameEl) newNameEl.addEventListener('input', updatePurchaseTotals);
+
+        var onFlyBtn = row.querySelector('.js-switch-on-fly');
+        if (onFlyBtn) {
+            onFlyBtn.addEventListener('click', function () {
+                switchPurchaseRowMode(row, 'on_fly', input ? input.value : '');
+            });
+        }
+        var existingBtn = row.querySelector('.js-switch-existing');
+        if (existingBtn) {
+            existingBtn.addEventListener('click', function () {
+                switchPurchaseRowMode(row, 'existing', '');
+            });
+        }
+        var removeBtn = row.querySelector('.js-purchase-remove');
+        if (removeBtn) {
+            removeBtn.addEventListener('click', function () {
+                var all = purchaseLines();
+                if (all.length <= 1) {
+                    clearPurchaseRow(row);
+                    return;
+                }
+                if (row._comboHandle) row._comboHandle.destroy();
+                row.remove();
+                updatePurchaseTotals();
+            });
+        }
+    }
+
+    function addPurchaseRow(mode) {
+        if (!purchaseLinesWrap || !purchaseLineTpl) return null;
+        var frag = purchaseLineTpl.content.cloneNode(true);
+        var row = frag.querySelector('.js-purchase-line');
+        purchaseLinesWrap.appendChild(frag);
+        bindPurchaseRow(row, false);
+        if (mode === 'on_fly') {
+            switchPurchaseRowMode(row, 'on_fly', '');
+        } else {
+            var inp = row.querySelector('.js-purchase-tool-input');
+            if (inp) inp.focus();
+        }
+        updatePurchaseTotals();
+        return row;
+    }
+
+    function resetPurchaseRowsToSingle() {
+        var rows = purchaseLines();
+        rows.slice(1).forEach(function (r) {
+            if (r._comboHandle) r._comboHandle.destroy();
+            r.remove();
+        });
+        if (rows[0]) clearPurchaseRow(rows[0]);
+        updatePurchaseTotals();
+    }
+
+    purchaseLines().forEach(function (row, idx) { bindPurchaseRow(row, idx === 0); });
+    updatePurchaseTotals();
+
+    if (purchaseAddExistingBtn) {
+        purchaseAddExistingBtn.addEventListener('click', function () { addPurchaseRow('existing'); });
+    }
+    if (purchaseAddOnFlyBtn) {
+        purchaseAddOnFlyBtn.addEventListener('click', function () { addPurchaseRow('on_fly'); });
+    }
+
+    if (window.hdcDialog && document.getElementById('purchaseModalForm')) {
+        window.hdcDialog.beforeSave('purchaseModalForm', function () {
+            var problems = [];
+            var complete = 0;
+            var seenTools = {};
+            var seenNames = {};
+            purchaseLines().forEach(function (row, index) {
+                var lineNo = index + 1;
+                var mode = (row.querySelector('.js-row-mode') || {}).value || 'existing';
+                var sel = row.querySelector('.js-purchase-tool-select');
+                var inp = row.querySelector('.js-purchase-tool-input');
+                var newName = row.querySelector('.js-new-tool-name');
+                var qtyEl = row.querySelector('.js-purchase-qty');
+                var costEl = row.querySelector('.js-purchase-cost');
+                var serialsEl = row.querySelector('.js-custom-serials');
+
+                var hasTool = !!(sel && sel.value);
+                var nameVal = newName ? newName.value.trim() : '';
+                var qtyRaw = qtyEl ? qtyEl.value.trim() : '';
+                var costRaw = costEl ? costEl.value.trim() : '';
+                var serialsRaw = serialsEl ? serialsEl.value.trim() : '';
+                var qtyVal = parseFloat(qtyRaw) || 0;
+
+                if (mode === 'on_fly') {
+                    if (!nameVal && !qtyRaw && !costRaw && !serialsRaw) return;
+                    if (!nameVal) {
+                        problems.push({ message: 'Item ' + lineNo + ': enter the new tool name.', focus: newName });
+                        return;
+                    }
+                    if (qtyVal <= 0 && !serialsRaw) {
+                        problems.push({ message: 'Item ' + lineNo + ': enter a quantity greater than 0.', focus: qtyEl });
+                        return;
+                    }
+                    if (costRaw !== '' && parseFloat(costRaw) < 0) {
+                        problems.push({ message: 'Item ' + lineNo + ': unit price cannot be negative.', focus: costEl });
+                        return;
+                    }
+                    var nameKey = nameVal.toLowerCase();
+                    if (seenNames[nameKey]) {
+                        problems.push({
+                            message: 'Item ' + lineNo + ' repeats "' + nameVal + '" from item ' + seenNames[nameKey] + ' — combine quantities on one line.',
+                            focus: newName
+                        });
+                        return;
+                    }
+                    seenNames[nameKey] = lineNo;
+                    complete += 1;
+                } else {
+                    if (!hasTool && !qtyRaw && !costRaw && !serialsRaw) return;
+                    if (!hasTool) {
+                        problems.push({
+                            message: 'Item ' + lineNo + ': pick an existing tool from the list, or click "On the fly (new tool)".',
+                            focus: inp || sel
+                        });
+                        return;
+                    }
+                    if (qtyVal <= 0 && !serialsRaw) {
+                        problems.push({ message: 'Item ' + lineNo + ': enter a quantity greater than 0.', focus: qtyEl });
+                        return;
+                    }
+                    if (costRaw !== '' && parseFloat(costRaw) < 0) {
+                        problems.push({ message: 'Item ' + lineNo + ': unit price cannot be negative.', focus: costEl });
+                        return;
+                    }
+                    if (seenTools[sel.value]) {
+                        problems.push({
+                            message: 'Item ' + lineNo + ' repeats the same tool chosen on item ' + seenTools[sel.value] + ' — combine quantities on one line.',
+                            focus: inp || sel
+                        });
+                        return;
+                    }
+                    seenTools[sel.value] = lineNo;
+                    complete += 1;
+                }
+            });
+            if (!complete && !problems.length) {
+                var firstRow = purchaseLines()[0];
+                problems.push({
+                    message: 'Add at least one tool (existing or on the fly) with a quantity greater than 0.',
+                    focus: firstRow ? (firstRow.querySelector('.js-purchase-tool-input') || firstRow.querySelector('.js-new-tool-name')) : null
+                });
+            }
+            return problems;
+        });
+    }
+
     // Row buttons pre-fill the shared Purchase / Scrap modals.
     function preselect(modalId, button) {
         var modal = document.getElementById(modalId);
         if (!modal) return;
+        if (modalId === 'purchaseModal') {
+            openedFromRowBtn = true;
+            resetPurchaseRowsToSingle();
+        }
         var select = modal.querySelector('select[name="tool_id"]');
         if (select && button.dataset.toolId) {
             select.value = button.dataset.toolId;
@@ -565,6 +929,16 @@ document.addEventListener('DOMContentLoaded', function () {
         }
         var qty = modal.querySelector('input[name="qty"]');
         if (qty) { qty.value = ''; }
+        if (modalId === 'purchaseModal') updatePurchaseTotals();
+    }
+    var openPurchaseHeaderBtn = document.getElementById('openPurchaseModalBtn');
+    if (openPurchaseHeaderBtn) {
+        openPurchaseHeaderBtn.addEventListener('click', function () {
+            if (openedFromRowBtn) {
+                openedFromRowBtn = false;
+                resetPurchaseRowsToSingle();
+            }
+        });
     }
     document.querySelectorAll('.js-stock-btn').forEach(function (btn) {
         btn.addEventListener('click', function () { preselect('purchaseModal', btn); });
