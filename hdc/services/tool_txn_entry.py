@@ -190,33 +190,7 @@ def in_store_tool_rows():
         available = tool_available_for_integrity(tool)
         serials = [s for s in tool.issuable_serials
                    if (s.status or '') != 'maintenance']
-        if available <= 0.001 and not serials and not tool.is_void:\n            # Keep the tool in the searchable list if it was recently used or
-            # if the user is adding items "on the fly" after a transaction
-            # (the reload used to clear the list, now we preserve it).
-            # We also keep it if it's in the CONFIG from the previous session
-            # but currently has 0 stock (to allow manual entry or price lookup).
-            # However, to fix the "Searchlist shows only 1 item" bug, we ensure
-            # that tools with serials (even if available is low) or tools that
-            # were part of the transaction are still included.
-            # For now, relax the filter to allow tools with serials even if available is low,
-            # and keep tools that have a rate (to allow manual entry).
-            # Actually, the bug is that the reload cleared the search state.
-            # But let's also allow tools with rate > 0 even if available is 0
-            # to support "On the Fly" and manual price lookup if needed.
-            # BUT: the original logic was `available <= 0.001 and not serials: continue`.
-            # Let's change it to only skip if BOTH are true AND the tool is not needed.
-            # Actually, let's keep the logic but ensure we don't skip tools that have serials
-            # even if available is 0 (e.g. pieces are in maintenance or out).
-            # The original code already had `and not serials`.
-            # The bug "Searchlist shows only 1 item" was likely because `clearForNextEntry`
-            # reloaded the page and the server-side `in_store_tool_rows` was called again.
-            # If the transaction depleted the stock, `available` became 0.
-            # If `serials` is also empty (all pieces out or maintenance), the tool is skipped.
-            # To fix this, we should keep the tool in the list if it was recently used
-            # or simply remove the `available <= 0.001 and not serials` filter entirely
-            # or relax it to include tools that have a rate (so they can be searched).
-            # Let's relax it: keep the tool if it has a rate > 0, even if available is 0.
-            # This allows searching for the tool to add "On the Fly" or see its price.
+        if available <= 0.001 and not serials:
             continue
         category_name = tool.category.name if tool.category else tool.name
         rows.append({
