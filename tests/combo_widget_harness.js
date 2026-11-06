@@ -507,9 +507,61 @@ function comboMenus() {
   assert.ok(!toggle6.classList.contains('hdc-combo-toggle-open'),
     'pick resets the chevron');
 
+  // Re-opening via the chevron while an option is already selected must show
+  // all 75 items again — never trap the operator on a 1-item match.
+  assert.equal(f6.input.value, 'Worker 03 (W-3)');
+  toggle6.dispatchEvent(new FakeEvent('mousedown'));
+  toggle6.dispatchEvent(new FakeEvent('click'));
+  assert.ok(menuVisible(menu6), 'chevron re-opens even with a current selection');
+  assert.equal((menuHtml(menu6).match(/hdc-combo-item/g) || []).length, 75,
+    'chevron re-open lists all 75 items instead of filtering to the 1 selected item');
+  toggle6.dispatchEvent(new FakeEvent('click'));
+
+  // Focusing a toggle combo that displays its selected option also opens all 75.
+  documentStub.activeElement = f6.input;
+  f6.input.dispatchEvent(new FakeEvent('focus'));
+  assert.equal((menuHtml(menu6).match(/hdc-combo-item/g) || []).length, 75,
+    'focusing a toggle combo with a selected label shows all 75 items');
+
   // destroy removes the button as well as the menu.
   combo6.destroy();
   assert.equal(toggle6.parentNode, null, 'destroy removes the toggle button');
+
+  // 14. mouse click on "+ Add new" (.hdc-combo-add) invokes onAdd.
+  let addCalledWith = null;
+  const f7 = buildField('inp7', 'sel7', [
+    mkopt('', 'Select'),
+    mkopt('1', 'Hammer (TOOL-0001)'),
+  ]);
+  const combo7 = HDCComboList.attach('inp7', 'sel7', {
+    strict: true,
+    showToggle: true,
+    addLabel: '+ Add new tool on the fly',
+    onAdd: (inp) => { addCalledWith = inp.value; },
+  });
+  const menu7 = comboMenus()[comboMenus().length - 1];
+  documentStub.activeElement = f7.input;
+  f7.input.value = 'Tile Cutter';
+  f7.input.dispatchEvent(new FakeEvent('input'));
+  assert.ok(/hdc-combo-add/.test(menuHtml(menu7)), 'onAdd row rendered when no match');
+  const addRowStub = {
+    getAttribute(attr) { return attr === 'data-idx' ? '0' : null; },
+  };
+  const mousedownEv = new FakeEvent('mousedown');
+  const origDispatch = menu7.dispatchEvent;
+  // Simulate mousedown originating on the .hdc-combo-add child row.
+  for (const fn of (menu7._listeners.mousedown || []).slice()) {
+    mousedownEv.target = {
+      closest(sel) {
+        return sel.indexOf('.hdc-combo-add') !== -1 ? addRowStub : null;
+      },
+    };
+    fn(mousedownEv);
+  }
+  void origDispatch;
+  assert.equal(addCalledWith, 'Tile Cutter',
+    'mouse click on .hdc-combo-add invokes onAdd with typed text');
+  combo7.destroy();
 
   console.log('combo widget harness: all assertions passed');
 })().catch(err => {

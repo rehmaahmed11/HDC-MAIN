@@ -30,7 +30,11 @@ SCRAP_LABEL = 'Scrap / Discard'
 def _next_tool_code():
     last_id = record_code_query(db.session.query(func.max(Tool.id)), Tool.__tablename__).scalar()
     nxt = int(last_id or 0) + 1
-    return f"TOOL-{nxt:04d}"
+    code = f"TOOL-{nxt:04d}"
+    while record_code_query(db.session.query(Tool.id).filter_by(tool_code=code), Tool.__tablename__).first() is not None:
+        nxt += 1
+        code = f"TOOL-{nxt:04d}"
+    return code
 
 def _next_rental_code():
     last_id = record_code_query(db.session.query(func.max(ToolRental.id)), ToolRental.__tablename__).scalar()
@@ -40,7 +44,11 @@ def _next_rental_code():
 def _next_purchase_code():
     last_id = record_code_query(db.session.query(func.max(ToolPurchase.id)), ToolPurchase.__tablename__).scalar()
     nxt = int(last_id or 0) + 1
-    return f"PUR-TOOL-{nxt:05d}"
+    code = f"PUR-TOOL-{nxt:05d}"
+    while record_code_query(db.session.query(ToolPurchase.id).filter_by(purchase_code=code), ToolPurchase.__tablename__).first() is not None:
+        nxt += 1
+        code = f"PUR-TOOL-{nxt:05d}"
+    return code
 
 def _next_scrap_code():
     last_id = record_code_query(db.session.query(func.max(ToolScrap.id)), ToolScrap.__tablename__).scalar()
@@ -212,6 +220,223 @@ def record_tool_purchase(tool_id, qty, unit_cost=None, supplier='', purchase_dat
     if commit:
         db.session.commit()
     return True, '', purchase
+
+
+def record_tool_purchase_batch(items, supplier='', purchase_date=None, reference='',
+                               notes='', update_cost=True, created_by=None, commit=True):
+    """Record one or many tool purchases atomically, creating new tools on the fly.
+
+    Each entry in ``items`` is a dict supporting either:
+      * Existing tool: ``{'tool_id': int, 'qty': float, 'unit_cost': float|None, ...}``
+      * On-the-fly new tool: ``{'mode': 'on_fly', 'new_tool_name': str, 'qty': float,
+        'unit_cost': float|None, 'category_id': int|None, 'new_category': str,
+        'unit': str, 'rental_rate_per_day': float, 'new_tool_code': str, ...}``
+    """
+    if not items:
+        return False, 'Add at least one tool with a quantity greater than 0.', []
+
+    seen_tool_ids = set()
+    seen_new_names = set()
+    normalized = []
+
+    for idx, raw in enumerate(items, start=1):
+        mode = str(raw.get('mode') or '').strip().lower()
+        raw_tid = raw.get('tool_id')
+        tool_id = None
+        if raw_tid not in (None, ''):
+            try:
+                tool_id = int(raw_tid)
+            except (TypeError, ValueError):
+                tool_id = None
+        new_name = str(raw.get('new_tool_name') or '').strip()
+        if not mode:
+            mode = 'on_fly' if (new_name and not tool_id) else 'existing'
+
+        custom_serials = raw.get('serial_numbers')
+        if isinstance(custom_serials, str):
+            custom_serials = custom_serials.strip() or None
+        start_no = raw.get('start_no')
+        if start_no in ('', None):
+            start_no = None
+        else:
+            try:
+                start_no = int(start_no)
+            except (TypeError, ValueError):
+                start_no = None
+
+        try:
+            qty = _round2(float(raw.get('qty') or 0.0))
+        except (TypeError, ValueError):
+            qty = 0.0
+        if qty <= EPS and custom_serials:
+            qty = float(len(parse_custom_serial_list(custom_serials)))
+        if qty <= EPS:
+            return False, f'Line {idx}: purchase quantity must be greater than 0.', []
+
+        raw_cost = raw.get('unit_cost')
+        unit_cost = None
+        if raw_cost not in (None, ''):
+            try:
+                unit_cost = float(raw_cost)
+            except (TypeError, ValueError):
+                return False, f'Line {idx}: enter a valid unit price.', []
+            if unit_cost < 0:
+                return False, f'Line {idx}: unit price cannot be negative.', []
+
+        if mode == 'on_fly':
+            if not new_name:
+                return False, f'Line {idx}: enter the new tool name (or switch to an existing tool).', []
+            name_key = new_name.lower()
+            if name_key in seen_new_names:
+                return False, (f'Line {idx}: "{new_name}" is listed twice — '
+                               f'put both quantities on one line.'), []
+            seen_new_names.add(name_key)
+            cat_id = raw.get('category_id')
+            if cat_id in ('', None):
+                cat_id = None
+            else:
+                try:
+                    cat_id = int(cat_id)
+                except (TypeError, ValueError):
+                    cat_id = None
+                if cat_id and db.session.get(ToolCategory, cat_id) is None:
+                    cat_id = None
+            try:
+                rate = max(0.0, _round2(float(raw.get('rental_rate_per_day') or 0.0)))
+            except (TypeError, ValueError):
+                rate = 0.0
+            unit = (str(raw.get('unit') or 'pcs').strip() or 'pcs')[:20]
+            typed_code = str(raw.get('new_tool_code') or '').strip().upper()
+            normalized.append({
+                'mode': 'on_fly',
+                'new_tool_name': new_name,
+                'new_tool_code': typed_code,
+                'category_id': cat_id,
+                'new_category': str(raw.get('new_category') or '').strip(),
+                'unit': unit,
+                'rental_rate_per_day': rate,
+                'qty': qty,
+                'unit_cost': 0.0 if unit_cost is None else unit_cost,
+                'serial_numbers': custom_serials,
+                'start_no': start_no,
+            })
+        else:
+            if not tool_id:
+                return False, f'Line {idx}: select the tool you purchased (or add it on the fly).', []
+            tool = db.session.get(Tool, tool_id)
+            if not tool:
+                return False, f'Line {idx}: selected tool was not found.', []
+            if tool.is_void:
+                return False, f'{tool.name} is archived. Un-archive it before purchasing stock.', []
+            if tool_id in seen_tool_ids:
+                return False, (f'Line {idx}: {tool.name} is listed more than once — '
+                               f'combine quantities on one line.'), []
+            seen_tool_ids.add(tool_id)
+            normalized.append({
+                'mode': 'existing',
+                'tool': tool,
+                'tool_id': tool_id,
+                'qty': qty,
+                'unit_cost': unit_cost,
+                'serial_numbers': custom_serials,
+                'start_no': start_no,
+            })
+
+    purchases = []
+    summaries = []
+    for item in normalized:
+        if item['mode'] == 'on_fly':
+            cat_id = item['category_id']
+            if not cat_id and item['new_category']:
+                cat = _ensure_tool_category(item['new_category'])
+                cat_id = cat.id if cat else None
+            code = item['new_tool_code'] or _next_tool_code()
+            if record_code_query(db.session.query(Tool.id).filter_by(tool_code=code),
+                                 Tool.__tablename__).first() is not None:
+                code = _next_tool_code()
+            tool = Tool(
+                tool_code=code,
+                name=item['new_tool_name'],
+                category_id=cat_id,
+                description='',
+                unit=item['unit'],
+                total_quantity=0.0,
+                purchase_cost=_round2(item['unit_cost']),
+                rental_rate_per_day=item['rental_rate_per_day'],
+                condition='good',
+                status='active',
+                is_void=False,
+            )
+            db.session.add(tool)
+            db.session.flush()
+            ok, msg, purchase = record_tool_purchase(
+                tool_id=tool.id,
+                qty=item['qty'],
+                unit_cost=item['unit_cost'],
+                supplier=supplier,
+                purchase_date=purchase_date,
+                reference=reference,
+                notes=notes,
+                update_cost=True,
+                is_opening_stock=False,
+                created_by=created_by,
+                commit=False,
+                serial_numbers=item['serial_numbers'],
+                start_no=item['start_no'],
+            )
+            if not ok:
+                db.session.rollback()
+                return False, msg or 'Could not record purchase.', []
+            purchases.append(purchase)
+            summaries.append(
+                f"New tool {tool.name} ({tool.tool_code}): +{item['qty']:g} {tool.unit} "
+                f"@ {purchase.unit_cost:,.0f} ({purchase.purchase_code})"
+            )
+        else:
+            tool = item['tool']
+            ok, msg, purchase = record_tool_purchase(
+                tool_id=tool.id,
+                qty=item['qty'],
+                unit_cost=item['unit_cost'],
+                supplier=supplier,
+                purchase_date=purchase_date,
+                reference=reference,
+                notes=notes,
+                update_cost=update_cost,
+                is_opening_stock=False,
+                created_by=created_by,
+                commit=False,
+                serial_numbers=item['serial_numbers'],
+                start_no=item['start_no'],
+            )
+            if not ok:
+                db.session.rollback()
+                return False, msg or 'Could not record purchase.', []
+            purchases.append(purchase)
+            summaries.append(
+                f"{tool.name}: +{item['qty']:g} {tool.unit} "
+                f"@ {purchase.unit_cost:,.0f} ({purchase.purchase_code}, "
+                f"now owning {tool.total_quantity:g} {tool.unit})"
+            )
+
+    if commit:
+        db.session.commit()
+
+    if len(purchases) == 1 and normalized[0]['mode'] == 'existing':
+        t0 = normalized[0]['tool']
+        p0 = purchases[0]
+        msg = (f"Stock in: {p0.qty:g} {t0.unit} of {t0.name} ({p0.purchase_code}) — "
+               f"now owning {t0.total_quantity:g} {t0.unit}.")
+    elif len(purchases) == 1:
+        p0 = purchases[0]
+        t0 = db.session.get(Tool, p0.tool_id)
+        msg = (f"Added new tool {t0.name} ({t0.tool_code}) and purchased "
+               f"{p0.qty:g} {t0.unit} ({p0.purchase_code}) — total {p0.total_cost:,.0f} PKR.")
+    else:
+        grand = sum(float(p.total_cost or 0) for p in purchases)
+        msg = (f"Purchased {len(purchases)} items (total {grand:,.0f} PKR): "
+               + "; ".join(summaries) + ".")
+    return True, msg, purchases
 
 
 def tool_available_for_integrity(tool):

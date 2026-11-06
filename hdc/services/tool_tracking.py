@@ -1420,8 +1420,14 @@ def inventory_rows(term=None, category_id=None, view='all', condition=None, limi
     if term:
         matched = []
         for r in rows:
+            name_txt = str(r['name'] or '')
+            code_txt = str(r['code'] or '')
             haystack = ' '.join([
-                str(r['name'] or ''), str(r['code'] or ''), str(r['category'] or ''),
+                name_txt, code_txt,
+                f"{name_txt} ({code_txt})",
+                f"{name_txt} — {code_txt}",
+                f"{name_txt} - {code_txt}",
+                str(r['category'] or ''),
                 str(r['tool'].description or ''), str(r['unit'] or ''),
                 str(r['current_label'] or ''),
                 ' '.join(str(h['label'] or '') for h in r['holdings']),

@@ -123,7 +123,7 @@ def main():
             _accounts_reconciliation_findings,
             _create_accounts_transaction_with_sync)
         from hdc.services.cashflow_register import (
-            category_options, save_manual_cash_flow_entry,
+            category_field_rules, category_options, save_manual_cash_flow_entry,
             void_manual_cash_flow_entry, restore_manual_cash_flow_entry)
 
         cash = Account.query.filter(Account.name == 'Company Cash').first()
@@ -151,9 +151,15 @@ def main():
         cats = category_options('out')
         cf_out, direction = None, None
         if cats:
+            chosen_cat = next(
+                (c for c in cats
+                 if category_field_rules(c)['project_mode'] != 'required'
+                 and category_field_rules(c)['party_mode'] != 'required'),
+                cats[0],
+            )
             cf_out, _warn = save_manual_cash_flow_entry(
                 direction='out', amount=1000.0, account_id=cash.id,
-                destination_account_id=party.id, category_id=int(cats[0].id),
+                destination_account_id=party.id, category_id=int(chosen_cat.id),
                 description='acceptance run')
             db.session.commit()
 

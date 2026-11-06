@@ -315,7 +315,7 @@ class PiecesPickerTestCase(unittest.TestCase):
         self.assertEqual(self._ticked_ids(results['transferQtyOnly']['fields'],
                                           'transfer_serial_ids_'), [])
         self.assertEqual(len(self._ticked_ids(results['returns']['fields'],
-                                             'return_serial_ids_')), 2)
+                                             'return_serial_ids[]')), 2)
 
     # ------------------------------------------------- what actually moves
     def test_the_ticked_pieces_are_the_ones_that_leave_the_store(self):
@@ -359,7 +359,7 @@ class PiecesPickerTestCase(unittest.TestCase):
     def test_the_ticked_return_pieces_come_back_to_the_store(self):
         results = self._run_harness()
         returns = results['returns']
-        ticked = self._ticked_ids(returns['fields'], 'return_serial_ids_')
+        ticked = self._ticked_ids(returns['fields'], 'return_serial_ids')
         rental_id = int(returns['fields']['return_rental_id[]'][0])
         self.assertEqual(rental_id, int(self.return_rental.id))
         self.assertEqual(len(ticked), 2)

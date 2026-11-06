@@ -172,6 +172,7 @@ class ToolIssueSyncTestCase(IsolatedAppTest):
         a_row = next(r for r in rows if r['holder'] == 'Site A')
         self.assertEqual(a_row['pending'], 2)
         self.form('/hdc/tool-rental/transaction/return', **{
+            'return_date': '2026-10-31',
             'return_rental_id[]': [str(rental.id)],
             'rental_item_id[]': [str(item.id)], 'qty_returned[]': ['2'],
             'condition_notes[]': [''], 'from_location_key[]': [a_row['locationKey']],

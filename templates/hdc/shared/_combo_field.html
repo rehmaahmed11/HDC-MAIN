@@ -22,9 +22,9 @@
 #}
 {% macro combo_field(name, field_id, options, label='', placeholder='', required=false,
                      hint='', input_class='form-control', value='', max_items=50,
-                     empty_text='', toggle=false) %}
+                     empty_text='', toggle=false, label_class='form-label') %}
 <div class="hdc-combo-field">
-    {% if label %}<label class="form-label"{% if field_id %} for="{{ field_id }}Input"{% endif %}>{{ label }}</label>{% endif %}
+    {% if label %}<label class="{{ label_class }}"{% if field_id %} for="{{ field_id }}Input"{% endif %}>{{ label }}</label>{% endif %}
     <input type="text" id="{{ field_id }}Input" name="{{ name }}" class="{{ input_class }}"
            value="{{ value }}" placeholder="{{ placeholder }}"
            autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list"
@@ -68,9 +68,9 @@
                       hint='', selected='', max_items=60,
                       empty_text='', label_id='', depends_on='',
                       depends_key='parent-id', depends_wait='', depends_none='',
-                      toggle=false) %}
+                      toggle=false, label_class='form-label') %}
 <div class="hdc-combo-field">
-    {% if label %}<label class="form-label"{% if field_id %} for="{{ field_id }}Input"{% endif %}{% if label_id %} id="{{ label_id }}"{% endif %}>{{ label }}</label>{% endif %}
+    {% if label %}<label class="{{ label_class }}"{% if field_id %} for="{{ field_id }}Input"{% endif %}{% if label_id %} id="{{ label_id }}"{% endif %}>{{ label }}</label>{% endif %}
     <input type="text" id="{{ field_id }}Input" class="form-control"
            placeholder="{{ placeholder }}"
            autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list"

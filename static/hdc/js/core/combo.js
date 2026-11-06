@@ -141,13 +141,13 @@
                     }
                     menu.style.maxHeight = safeHeight + 'px';
                 }
-                function getOptions() {
+                function getOptions(ignoreFilter) {
                     var all = Array.from(select.options).filter(function (o) {
                         if (!opts.includeEmpty && !o.value) return false;
                         if (o.hidden || (o.style && o.style.display === 'none')) return false;
                         return true;
                     });
-                    var q = (input.value || '').toLowerCase().trim();
+                    var q = ignoreFilter ? '' : (input.value || '').toLowerCase().trim();
                     if (q) {
                         all = all.filter(function (o) {
                             return (o.text || '').toLowerCase().indexOf(q) !== -1;
@@ -184,11 +184,17 @@
                         .replace(/&/g, '&amp;').replace(/</g, '&lt;')
                         .replace(/>/g, '&gt;').replace(/\"/g, '&quot;');
                 }
-                function render() {
-                    state.items = getOptions();
+                function render(ignoreFilter) {
+                    state.items = getOptions(ignoreFilter);
                     state.idx = state.items.length ? 0 : -1;
+                    if (ignoreFilter && state.items.length && select.value) {
+                        var selIdx = state.items.findIndex(function (o) {
+                            return String(o.value) === String(select.value);
+                        });
+                        if (selIdx >= 0) state.idx = selIdx;
+                    }
                     var rows = state.items.map(function (o, i) {
-                        return '<div class=\"hdc-combo-item' + (i === 0 ? ' active' : '') +
+                        return '<div class=\"hdc-combo-item' + (i === state.idx ? ' active' : '') +
                             '\" role=\"option\" data-idx=\"' + i + '\">' + escapeHtml(o.text) + '</div>';
                     });
                     if (!state.items.length) {
@@ -277,10 +283,19 @@
                 }
 
                 var destroyed = false;
-                var onFocus = function () { render(); };
+                var openingViaToggle = false;
+                var onFocus = function () {
+                    if (openingViaToggle) return;
+                    // When a list-style combo already displays a chosen option,
+                    // focusing it should browse the full list rather than trap
+                    // the operator on a single-row match of the current label.
+                    var cur = opts.showToggle ? selectedOption() : null;
+                    var showingSelected = !!(cur && cur.value && (input.value || '') === (cur.text || ''));
+                    render(showingSelected);
+                };
                 var onInput = function () {
                     if (opts.clearOnInput !== false) select.value = '';
-                    render();
+                    render(false);
                 };
                 // Keep the visible label in sync when another page control
                 // changes the hidden select (dependent pickers, modal
@@ -321,17 +336,19 @@
                         closeMenu();
                         return;
                     }
+                    openingViaToggle = true;
                     input.focus();
-                    render();
+                    openingViaToggle = false;
+                    render(true);
                 };
                 var onMenuMousemove = function (e) {
-                    var row = e.target.closest('.hdc-combo-item');
+                    var row = e.target.closest('.hdc-combo-item, .hdc-combo-add');
                     if (!row) return;
                     state.idx = parseInt(row.getAttribute('data-idx') || '-1', 10);
                     highlight();
                 };
                 var onMenuMousedown = function (e) {
-                    var row = e.target.closest('.hdc-combo-item');
+                    var row = e.target.closest('.hdc-combo-item, .hdc-combo-add');
                     if (!row) return;
                     e.preventDefault();
                     pick(parseInt(row.getAttribute('data-idx') || '-1', 10));

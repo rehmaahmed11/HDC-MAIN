@@ -538,6 +538,288 @@ class ToolStockLifecycleTestCase(unittest.TestCase):
                     '/hdc/tool-rental/tracking'):
             self.assertEqual(self.client.get(url).status_code, 200, url)
 
+    def test_inventory_searchable_list_combo_keeps_all_tools_even_when_filtered(self):
+        scaffolding = ToolCategory(name='Scaffolding', active_status=True)
+        tools_cat = ToolCategory(name='Tools', active_status=True)
+        db.session.add_all([scaffolding, tools_cat])
+        db.session.commit()
+
+        created = []
+        for idx in range(1, 56):
+            cat = scaffolding if idx % 2 == 0 else tools_cat
+            created.append(self._make_tool(
+                f'TOOL-{idx:04d}', f'Inventory Tool {idx:02d}', 5,
+                cost=1000.0 + idx, category=cat))
+        self._rent([(created[2], 2)], project=self.site)
+
+        r = self.client.get('/hdc/tool-rental/inventory')
+        self.assertEqual(r.status_code, 200)
+        html = r.get_data(as_text=True)
+        self.assertIn('Inventory — 55 tools', html)
+        self.assertIn('id="inventorySearchInput"', html)
+        self.assertIn('data-hdc-combo="inventorySearch"', html)
+        self.assertIn('data-hdc-combo-toggle="true"', html)
+        self.assertIn('Inventory Tool 55 (TOOL-0055)', html)
+        self.assertIn('Site A', html)
+
+        # Filtering by a combo-picked option label matches the tool while
+        # keeping all 55 tools available in the search combo & stock modals.
+        filtered = self.client.get(
+            '/hdc/tool-rental/inventory',
+            query_string={'q': 'Inventory Tool 03 (TOOL-0003)'}
+        ).get_data(as_text=True)
+        self.assertIn('Inventory — 1 of 55 tools', filtered)
+        for idx in (1, 3, 55):
+            self.assertIn(f'Inventory Tool {idx:02d} (TOOL-{idx:04d})', filtered)
+
+        # Saving a purchase returns to the full inventory rather than trapping on ?q=.
+        post_resp = self.client.post('/hdc/tool-rental/inventory/purchase', data={
+            '_csrf_token': self._token(),
+            'tool_id': str(created[0].id),
+            'qty': '2',
+            'unit_cost': '1200',
+        })
+        self.assertEqual(post_resp.status_code, 302)
+        self.assertNotIn('q=', post_resp.headers['Location'])
+
+    def test_multi_item_and_on_the_fly_purchase_in_one_submission(self):
+        cat = ToolCategory(name='Power Tools', active_status=True)
+        db.session.add(cat)
+        db.session.commit()
+        grinder = self._make_tool('TOOL-0001', 'Angle Grinder', 4, cost=9000)
+        hammer = self._make_tool('TOOL-0002', 'Jack Hammer', 2, cost=30000)
+
+        resp = self.client.post('/hdc/tool-rental/inventory/purchase', data={
+            '_csrf_token': self._token(),
+            'supplier': 'Bilal Hardware',
+            'purchase_date': _pkt_today().isoformat(),
+            'reference': 'BILL-900',
+            'notes': 'Combined supplier invoice',
+            'update_cost': '1',
+            'row_mode': ['existing', 'existing', 'on_fly', 'on_fly', 'existing'],
+            'tool_id': [str(grinder.id), str(hammer.id), '', '', ''],
+            'new_tool_name': ['', '', 'Tile Cutter', 'Laser Level', ''],
+            'new_tool_category_id': ['', '', str(cat.id), '', ''],
+            'new_tool_unit': ['pcs', 'pcs', 'pcs', 'set', 'pcs'],
+            'new_tool_rate': ['', '', '600', '800', ''],
+            'qty': ['3', '2', '4', '2', ''],
+            'unit_cost': ['9500', '31000', '8500', '15000', ''],
+            'serial_start_no': ['', '', '', '', ''],
+            'custom_serials': ['', '', '', '', ''],
+        }, follow_redirects=True)
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_data(as_text=True)
+        self.assertIn('Purchased 4 items', body)
+
+        db.session.refresh(grinder)
+        db.session.refresh(hammer)
+        self.assertEqual(float(grinder.total_quantity), 7.0)
+        self.assertEqual(float(grinder.purchase_cost), 9500.0)
+        self.assertEqual(float(hammer.total_quantity), 4.0)
+        self.assertEqual(float(hammer.purchase_cost), 31000.0)
+
+        tile_cutter = Tool.query.filter_by(name='Tile Cutter').first()
+        laser_level = Tool.query.filter_by(name='Laser Level').first()
+        self.assertIsNotNone(tile_cutter)
+        self.assertIsNotNone(laser_level)
+        self.assertEqual(int(tile_cutter.category_id), int(cat.id))
+        self.assertEqual(float(tile_cutter.total_quantity), 4.0)
+        self.assertEqual(float(tile_cutter.purchase_cost), 8500.0)
+        self.assertEqual(float(tile_cutter.rental_rate_per_day), 600.0)
+        self.assertEqual(len(tile_cutter.active_serials), 4)
+        self.assertEqual(laser_level.unit, 'set')
+        self.assertEqual(float(laser_level.total_quantity), 2.0)
+        self.assertEqual(float(laser_level.purchase_cost), 15000.0)
+
+        self.assertEqual(ToolPurchase.query.filter_by(reference='BILL-900').count(), 4)
+        self.assertTrue(tools_reconciliation()['balanced'])
+
+    def test_multi_item_purchase_rolls_back_atomically_on_bad_or_duplicate_line(self):
+        grinder = self._make_tool('TOOL-0001', 'Angle Grinder', 4, cost=9000)
+
+        # Duplicate existing tool across two rows is rejected without saving row 1.
+        self.client.post('/hdc/tool-rental/inventory/purchase', data={
+            '_csrf_token': self._token(),
+            'row_mode': ['existing', 'existing'],
+            'tool_id': [str(grinder.id), str(grinder.id)],
+            'new_tool_name': ['', ''],
+            'qty': ['2', '3'],
+            'unit_cost': ['9000', '9000'],
+        }, follow_redirects=True)
+        db.session.refresh(grinder)
+        self.assertEqual(float(grinder.total_quantity), 4.0)
+        self.assertEqual(ToolPurchase.query.count(), 0)
+
+        # Invalid second on-the-fly line (missing qty) rolls back the whole batch.
+        self.client.post('/hdc/tool-rental/inventory/purchase', data={
+            '_csrf_token': self._token(),
+            'row_mode': ['existing', 'on_fly'],
+            'tool_id': [str(grinder.id), ''],
+            'new_tool_name': ['', 'Broken Line Tool'],
+            'qty': ['2', '0'],
+            'unit_cost': ['9000', '5000'],
+        }, follow_redirects=True)
+        db.session.refresh(grinder)
+        self.assertEqual(float(grinder.total_quantity), 4.0)
+        self.assertIsNone(Tool.query.filter_by(name='Broken Line Tool').first())
+        self.assertEqual(ToolPurchase.query.count(), 0)
+
+    def test_inventory_dom_combo_and_multi_purchase_jsdom(self):
+        import json
+        import subprocess
+
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        tests_dir = os.path.join(repo_root, 'tests')
+        probe = subprocess.run(
+            ['node', '-e', "require(require.resolve('jsdom', {paths:['./tests']}))"],
+            cwd=repo_root, capture_output=True, text=True,
+        )
+        if probe.returncode != 0:
+            self.skipTest('jsdom not installed in tests/node_modules')
+
+        scaffolding = ToolCategory(name='Scaffolding', active_status=True)
+        tools_cat = ToolCategory(name='Tools', active_status=True)
+        db.session.add_all([scaffolding, tools_cat])
+        db.session.commit()
+        seeded = []
+        for idx in range(1, 52):
+            seeded.append(self._make_tool(
+                f'TOOL-{idx:04d}', f'Site Tool {idx:02d}', 3,
+                cost=500.0 * idx, category=scaffolding if idx % 2 == 0 else tools_cat))
+
+        html = self.client.get('/hdc/tool-rental/inventory').get_data(as_text=True)
+        html_file = os.path.join(self.tmp, 'inventory.html')
+        with open(html_file, 'w', encoding='utf-8') as fh:
+            fh.write(html)
+
+        driver = """
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+const { JSDOM } = require('jsdom');
+const [repoRoot, htmlPath, tool1Id, tool2Id, catId] = process.argv.slice(1);
+const html = fs.readFileSync(htmlPath, 'utf-8');
+const comboJs = fs.readFileSync(path.join(repoRoot, 'static/hdc/js/core/combo.js'), 'utf-8');
+
+const dom = new JSDOM(html, { url: 'http://localhost/hdc/tool-rental/inventory', runScripts: 'outside-only' });
+const { window } = dom;
+const { document } = window;
+window.eval(comboJs);
+
+// Execute the inline DOMContentLoaded script from tool_inventory.html
+const scripts = Array.from(document.querySelectorAll('script')).filter(s => !s.src && s.textContent.indexOf('purchaseModalLines') !== -1);
+assert.equal(scripts.length, 1, 'inventory inline script present');
+window.eval(scripts[0].textContent);
+document.dispatchEvent(new window.Event('DOMContentLoaded', { bubbles: true }));
+
+// 1. Searchable list-style combo on Inventory — 51 tools
+const searchInput = document.getElementById('inventorySearchInput');
+const searchToggle = searchInput.parentElement.querySelector('.hdc-combo-toggle');
+assert.ok(searchToggle, 'chevron toggle rendered on inventorySearchInput');
+searchToggle.dispatchEvent(new window.MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+searchToggle.dispatchEvent(new window.MouseEvent('click', { bubbles: true, cancelable: true }));
+const searchMenu = document.getElementById('inventorySearch_menu');
+assert.ok(!searchMenu.classList.contains('d-none'), 'chevron opens inventory search menu');
+assert.equal(searchMenu.querySelectorAll('.hdc-combo-item').length, 51, 'all 51 tools rendered past the 50-item cap');
+
+// 2. Category filter combo also has chevron toggle and lists All Categories + Scaffolding + Tools
+const catInput = document.getElementById('inventoryCategoryInput');
+const catToggle = catInput.parentElement.querySelector('.hdc-combo-toggle');
+assert.ok(catToggle, 'chevron toggle rendered on inventoryCategoryInput');
+catToggle.dispatchEvent(new window.MouseEvent('click', { bubbles: true, cancelable: true }));
+const catMenu = document.getElementById('inventoryCategorySelect_menu');
+assert.equal(catMenu.querySelectorAll('.hdc-combo-item').length, 3, 'All Categories + Scaffolding + Tools');
+
+// 3. Multi-item + On-the-Fly purchase inside #purchaseModal
+const linesWrap = document.getElementById('purchaseModalLines');
+let rows = linesWrap.querySelectorAll('.js-purchase-line');
+assert.equal(rows.length, 1);
+
+// Row 0: pick existing tool 1
+const row0Sel = rows[0].querySelector('.js-purchase-tool-select');
+row0Sel.value = String(tool1Id);
+row0Sel.dispatchEvent(new window.Event('change', { bubbles: true }));
+assert.equal(rows[0].querySelector('.js-purchase-cost').value, '500', 'unit price auto-filled from tool cost');
+rows[0].querySelector('.js-purchase-qty').value = '3';
+rows[0].querySelector('.js-purchase-qty').dispatchEvent(new window.Event('input', { bubbles: true }));
+
+// Row 1: click Add Existing Tool and pick tool 2
+document.getElementById('purchaseModalAddExistingBtn').click();
+rows = linesWrap.querySelectorAll('.js-purchase-line');
+assert.equal(rows.length, 2);
+const row1Sel = rows[1].querySelector('.js-purchase-tool-select');
+row1Sel.value = String(tool2Id);
+row1Sel.dispatchEvent(new window.Event('change', { bubbles: true }));
+rows[1].querySelector('.js-purchase-qty').value = '2';
+rows[1].querySelector('.js-purchase-cost').value = '1200';
+rows[1].querySelector('.js-purchase-cost').dispatchEvent(new window.Event('input', { bubbles: true }));
+
+// Row 2: type an unknown tool in an Existing row and click "+ Add new tool on the fly…" in the combo menu!
+document.getElementById('purchaseModalAddExistingBtn').click();
+rows = linesWrap.querySelectorAll('.js-purchase-line');
+assert.equal(rows.length, 3);
+assert.equal(rows[2].querySelector('.js-row-mode').value, 'existing');
+const row2Input = rows[2].querySelector('.js-purchase-tool-input');
+row2Input.focus();
+row2Input.value = 'On Fly Cutter';
+row2Input.dispatchEvent(new window.Event('input', { bubbles: true }));
+const row2Menu = document.getElementById(rows[2].querySelector('.js-purchase-tool-select').id + '_menu');
+const addRowEl = row2Menu.querySelector('.hdc-combo-add');
+assert.ok(addRowEl, 'combo menu renders "+ Add new tool on the fly…" when typing a new tool');
+addRowEl.dispatchEvent(new window.MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+assert.equal(rows[2].querySelector('.js-row-mode').value, 'on_fly', 'clicking "+ Add new tool on the fly…" switches row to on_fly');
+assert.equal(rows[2].querySelector('.js-new-tool-name').value, 'On Fly Cutter', 'typed tool name copied into new_tool_name');
+rows[2].querySelector('.js-new-tool-cat').value = String(catId);
+rows[2].querySelector('.js-purchase-qty').value = '4';
+rows[2].querySelector('.js-purchase-cost').value = '8500';
+rows[2].querySelector('.js-purchase-cost').dispatchEvent(new window.Event('input', { bubbles: true }));
+
+// Also verify "+ Add New Tool On the Fly" button directly adds an on_fly row and can be removed cleanly
+document.getElementById('purchaseModalAddOnFlyBtn').click();
+rows = linesWrap.querySelectorAll('.js-purchase-line');
+assert.equal(rows.length, 4);
+assert.equal(rows[3].querySelector('.js-row-mode').value, 'on_fly');
+rows[3].querySelector('.js-purchase-remove').click();
+rows = linesWrap.querySelectorAll('.js-purchase-line');
+assert.equal(rows.length, 3);
+
+assert.equal(document.getElementById('purchaseModalItemCount').textContent, '3 items');
+assert.equal(document.getElementById('purchaseModalGrandTotal').textContent, '37,900');
+
+// Collect form payload as browser submits it
+const form = document.getElementById('purchaseModalForm');
+const fields = {};
+Array.from(form.elements).forEach(el => {
+  if (!el.name || el.disabled) return;
+  if ((el.type === 'checkbox' || el.type === 'radio') && !el.checked) return;
+  if (el.type === 'submit' || el.type === 'button') return;
+  (fields[el.name] = fields[el.name] || []).push(el.value);
+});
+console.log('JSDOM_PAYLOAD ' + JSON.stringify(fields));
+"""
+        run = subprocess.run(
+            ['node', '-e', driver, repo_root, html_file,
+             str(seeded[0].id), str(seeded[1].id), str(scaffolding.id)],
+            cwd=tests_dir, capture_output=True, text=True, timeout=60,
+        )
+        self.assertEqual(run.returncode, 0, f'jsdom failed:\n{run.stdout}\n{run.stderr}')
+        payload_line = next(line for line in run.stdout.splitlines() if line.startswith('JSDOM_PAYLOAD '))
+        fields = json.loads(payload_line[len('JSDOM_PAYLOAD '):])
+
+        resp = self.client.post('/hdc/tool-rental/inventory/purchase',
+                                data=fields, follow_redirects=True)
+        self.assertEqual(resp.status_code, 200)
+        db.session.refresh(seeded[0])
+        db.session.refresh(seeded[1])
+        self.assertEqual(float(seeded[0].total_quantity), 6.0)
+        self.assertEqual(float(seeded[1].total_quantity), 5.0)
+        self.assertEqual(float(seeded[1].purchase_cost), 1200.0)
+        on_fly_tool = Tool.query.filter_by(name='On Fly Cutter').first()
+        self.assertIsNotNone(on_fly_tool)
+        self.assertEqual(float(on_fly_tool.total_quantity), 4.0)
+        self.assertEqual(float(on_fly_tool.purchase_cost), 8500.0)
+        self.assertEqual(int(on_fly_tool.category_id), int(scaffolding.id))
+
     def test_wiping_tools_voids_the_linked_ledger_income(self):
         """Rent already posted to Accounts must not survive as orphan income."""
         from hdc.models.accounts import Account, AccountTransaction
