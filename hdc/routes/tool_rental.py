@@ -75,6 +75,7 @@ from hdc.services.tool_tracking import (
     tool_position, tracking_location_groups, viewer_scope_limited,
 )
 from hdc.utils.dates import _pkt_now_naive, _pkt_today
+from hdc.utils.sqlite import begin_sqlite_write
 from hdc.utils.format import _flt, _amount_to_words
 from hdc.services.receipts import _receipt_company_profile
 from hdc.services.record_permissions import integrity_message
@@ -2598,6 +2599,8 @@ def register(app):
     @login_required
     @_money_write_required()
     def hdc_tool_rental_create():
+        # Serialize availability checks with cancellation/restoration and other issues.
+        begin_sqlite_write(db.session.connection())
         # One form, two jobs: a brand-new rental, or a transfer that settles the
         # previous holder and starts a fresh cycle for the destination.
         duplicate = _txn_reference_blocked(url_for('hdc_tool_rental_new'))
@@ -2876,6 +2879,7 @@ def register(app):
         return or transfer exists, only the header details may change — the
         physical history belongs to the Return / Transfer forms by then.
         """
+        begin_sqlite_write(db.session.connection())
         rental = ToolRental.query.get_or_404(rental_id)
         edit_url = url_for('hdc_tool_rental_edit', rental_id=rental.id)
         detail_url = url_for('hdc_tool_rental_detail', rental_id=rental.id)
@@ -3752,6 +3756,8 @@ def register(app):
         rental = ToolRental.query.get_or_404(rental_id)
         ok, message, _row = restore_tool_rental(
             rental.id, actor_id=getattr(current_user, 'id', None), commit=True)
+        if not ok:
+            db.session.rollback()
         flash(message, 'success' if ok else 'danger')
         return redirect(_txn_return_url(
             url_for('hdc_tool_rental_detail', rental_id=rental.id)))

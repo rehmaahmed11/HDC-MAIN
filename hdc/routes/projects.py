@@ -35,6 +35,7 @@ from hdc.services.reporting import _build_stage_event_ledger
 from hdc.services.subcontract import _log_subcontract_event, assign_subcontractors_from_form, selected_subcontractor_ids
 from hdc.services.timekeeping import _has_recent_duplicate
 from hdc.utils.dates import _pkt_now_naive, _pkt_today
+from hdc.utils.sqlite import begin_sqlite_write, incoming_foreign_key_reference
 from hdc.utils.format import _activity_at_for, _amount_to_words, _flt, _is_pdf_upload, _parse_date
 
 def _link_client_party(project, client_name, *, party_id=None, phone=None):
@@ -701,8 +702,14 @@ def register(app):
     @app.route('/hdc/stage/<int:sid>/delete', methods=['POST'])
     @login_required
     def hdc_delete_stage(sid):
+        begin_sqlite_write(db.session.connection())
         s = Stage.query.get_or_404(sid)
         pid = s.project_id
+        dependency = incoming_foreign_key_reference(db.session.connection(), 'hdc_stage', sid)
+        if dependency:
+            db.session.rollback()
+            flash('Stage has linked history and cannot be deleted. Keep the stage to preserve its records.', 'warning')
+            return redirect(url_for('hdc_project_detail', pid=pid))
         db.session.delete(s); db.session.commit()
         flash('Stage deleted.', 'success')
         return redirect(url_for('hdc_project_detail', pid=pid))

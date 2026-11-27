@@ -57,6 +57,7 @@ from hdc.services.accounts import (
 )
 from hdc.utils.format import _flt
 from hdc.utils.money import sync_money_fields
+from hdc.utils.sqlite import begin_sqlite_write, incoming_foreign_key_reference
 from hdc.utils.normalize import _normalize_account_mode, _normalize_name_ci
 
 __all__ = [
@@ -656,19 +657,17 @@ def delete_account(account_id):
     posted transactions is never removed, because that would orphan ledger rows
     and break every report that reads them.  Returns ``(row, message, archived)``.
     """
+    begin_sqlite_write(db.session.connection())
     row = db.session.get(Account, int(account_id)) if account_id else None
     if not row:
         return None, 'Account not found.', False
     if row.is_void:
         return None, 'This account is already archived.', True
 
-    has_txn = db.session.query(AccountTransaction.id).filter(
-        AccountTransaction.is_void == False,  # noqa: E712
-        or_(AccountTransaction.from_account_id == row.id,
-            AccountTransaction.to_account_id == row.id)
-    ).first() is not None
-
-    if has_txn:
+    # All references matter, including voided transactions, the executing
+    # account and other domains' FKs. Inspect actual schema without user scopes.
+    has_history = incoming_foreign_key_reference(db.session.connection(), 'hdc_account', row.id)
+    if has_history:
         row.status = 'archived'
         row.is_void = True
         db.session.commit()

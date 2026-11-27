@@ -16,6 +16,7 @@ from hdc.models.tool_rental import (
 from hdc.services.record_permissions import integrity_message, integrity_query, record_code_query
 from hdc.utils.dates import _pkt_now_naive, _pkt_today
 from hdc.utils.normalize import _normalize_name_ci
+from hdc.utils.sqlite import begin_sqlite_write
 
 _ACCOUNT_COMPANY_TYPES = ('company', 'cash', 'bank')
 EPS = 0.001
@@ -2933,11 +2934,39 @@ def void_tool_rental(rental_id, reason='', actor_id=None, commit=True):
 
 def restore_tool_rental(rental_id, actor_id=None, commit=True):
     """Undo a cancellation: the rental comes back and its pieces go out again."""
-    rental = db.session.get(ToolRental, int(rental_id or 0))
+    begin_sqlite_write(db.session.connection())
+    rental = db.session.get(ToolRental, int(rental_id or 0), populate_existing=True)
     if not rental:
         return False, 'Rental not found.', None
     if not rental.is_void:
         return False, f'{rental.rental_code} is not cancelled.', None
+
+    # Reserve the SQLite writer before checking stock. Aggregate duplicate
+    # lines first, and use unscoped SQL so hidden rentals also consume stock.
+    needed = {}
+    for item in rental.items:
+        qty = _round2(max(0.0, _round2(item.qty_rented) - _round2(item.qty_returned)))
+        needed[item.tool_id] = _round2(needed.get(item.tool_id, 0) + qty)
+    conn = db.session.connection()
+    for tool_id, qty in needed.items():
+        if qty <= EPS:
+            continue
+        tool = db.session.get(Tool, tool_id, populate_existing=True)
+        if not tool or tool.is_void or (tool.status or '').lower() != 'active':
+            return False, 'Cannot reinstate: a tool is archived or unavailable.', None
+        out = conn.exec_driver_sql(
+            'SELECT COALESCE(SUM(qty_pending), 0) FROM hdc_tool_rental_item WHERE tool_id = ?',
+            (tool_id,)).scalar() or 0
+        serials = conn.exec_driver_sql(
+            "SELECT COUNT(*), COALESCE(SUM(CASE WHEN is_in_store = 1 AND current_rental_id IS NULL "
+            "AND COALESCE(status, '') != 'maintenance' AND COALESCE(condition, '') != 'maintenance' "
+            "THEN 1 ELSE 0 END), 0), COALESCE(SUM(CASE WHEN is_in_store = 1 AND "
+            "(status = 'maintenance' OR condition = 'maintenance') THEN 1 ELSE 0 END), 0) "
+            "FROM hdc_tool_serial WHERE tool_id = ? AND COALESCE(is_scrapped, 0) = 0 "
+            "AND COALESCE(status, '') != 'scrapped'", (tool_id,)).one()
+        available = max(0.0, float(tool.total_quantity or 0) - float(out) - int(serials[2]))
+        if qty > available + EPS or (serials[0] and int(round(qty)) > serials[1]):
+            return False, f'Cannot reinstate {rental.rental_code}: insufficient available stock for {tool.name}.', None
 
     rental.is_void = False
     rental.void_reason = None
@@ -2954,7 +2983,9 @@ def restore_tool_rental(rental_id, actor_id=None, commit=True):
                       .filter(ToolSerial.tool_id == item.tool_id,
                               ToolSerial.is_in_store == True,  # noqa: E712
                               ToolSerial.is_scrapped == False,  # noqa: E712
-                              ToolSerial.current_rental_id.is_(None))
+                              ToolSerial.current_rental_id.is_(None),
+                              func.coalesce(ToolSerial.status, '') != 'maintenance',
+                              func.coalesce(ToolSerial.condition, '') != 'maintenance')
                       .order_by(ToolSerial.id.asc())
                       .limit(int(round(item.qty_pending)))
                       .all())
