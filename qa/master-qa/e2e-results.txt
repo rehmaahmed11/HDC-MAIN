@@ -1,0 +1,242 @@
+[HDC ERP] Tool Rental schema migrated: received_to_account_id + is_void + account_txn link ready
+[HDC ERP] Initial admin created: admin
+
+== Login & accounts setup
+  [PASS] admin login
+  [PASS] Company Cash auto-created
+  [PASS] fund Company Cash opening 1,000,000
+  [PASS] create bank account
+  [PASS] bank account exists
+  [PASS] cash balance = 1,000,000
+
+== Projects & stages
+  [PASS] create project A (per sqft)
+  [PASS] create project B (lump sum)
+  [PASS] both projects saved
+  [PASS] project A contract = 6,000,000
+  [PASS] stage A1 Grey Structure (per sqft)
+  [PASS] stage A2 Finishing (lump)
+  [PASS] stage B1 Renovation (lump)
+  [PASS] stages saved
+  [PASS] stage A1 contract = 3,000,000
+  [PASS] edit project A location
+  [PASS] project edit persisted
+  [PASS] stage status update
+
+== Client payments (receiving)
+  [PASS] receive 500,000 from client A into Cash
+  [PASS] receive 300,000 from client A into Bank
+  [PASS] receive 100,000 from client B into Cash
+  [PASS] 3 owner payments recorded
+  [PASS] bank balance = 300,000
+  [PASS] void client B receipt
+  [PASS] cash excludes voided receipt
+  [PASS] restore client B receipt
+  [PASS] cash = 1,600,000 after restore
+  [PASS] reject zero-amount receipt (rejected as expected)
+
+== Workers, rates, timekeeping
+  [PASS] add trade
+  [PASS] worker Mason daily 1500
+  [PASS] worker Labour daily 1000
+  [PASS] worker Electrician hourly 250
+  [PASS] 3 workers saved
+  [PASS] duplicate worker code rejected (rejected as expected)
+  [PASS] rate change W1 -> 1600 from D2
+  [PASS] attendance day1 (2026-11-25)
+  [PASS] attendance day2 (2026-11-26) with overtime + absent
+  [PASS] attendance day3 (2026-11-27)
+  [PASS] W1 wages = 5,100 (rate history + overtime)
+  [PASS] W2 wages = 2,000 (absent not paid)
+  [PASS] W3 wages = 3,500 (6h+8h @250)
+  [PASS] re-posting same day does not duplicate
+  [PASS] W1 still 3 entries
+  [PASS] void a time entry
+  [PASS] W3 wages drop to 2,000
+  [PASS] reactivate time entry
+  [PASS] W3 wages back to 3,500
+
+== Advances, wage payments, tips
+  [PASS] advance 1,000 to W1
+  [PASS] W1 payable = 4,100 after advance
+  [PASS] pay W1 2,000 wages
+  [PASS] W1 payable = 2,100
+  [PASS] pay W2 2,500 (500 over) as TIP
+  [PASS] W2 payable = 0 after tip
+  [PASS] W2 tip ledger row = 500
+  [PASS] pay W3 4,000 (500 over) as ADVANCE
+  [PASS] W3 payable = -500 (advance carried)
+  [PASS] overpay with no option is refused (rejected as expected)
+  [PASS] void W1 payment
+  [PASS] W1 payable back to 4,100
+  [PASS] restore W1 payment
+  [PASS] W1 payable = 2,100 again
+  [PASS] cash = 1,590,500 after labour payments
+
+== Payroll
+  [PASS] generate payroll D1..D
+  [PASS] payroll run created
+  [PASS] pay all from payroll
+  [PASS] W1 fully settled by payroll
+  [PASS] W3 advance not over-deducted/paid
+  [PASS] pay_worker twice is idempotent
+  [PASS] no duplicate payroll payment
+  [PASS] cash = 1,588,400 after payroll
+
+== Subcontractors
+  [PASS] add subcontractor to stage A1
+  [PASS] subcontractor saved
+  [PASS] shift stage A1 to subcontractor (per sqft 400 x 2000)
+  [PASS] contract value 800,000
+  [PASS] team attendance 3 masons x 2 days @1200
+  [PASS] team attendance total 7,200
+  [PASS] add sub labour worker
+  [PASS] sub labour worker saved
+  [PASS] sub labour attendance (bulk)
+  [PASS] sub labour attendance row
+  [PASS] pay sub labour worker 900
+  [PASS] progress 25%
+  [PASS] stage sub-progress 25%
+  [PASS] pay subcontractor 150,000 from Bank?
+  [PASS] sub payment recorded
+  [PASS] cash = 1,437,500 after subcontract
+  [PASS] second subcontractor on stage B1
+  [PASS] shift B1 to sub2 lump sum 200,000
+  [PASS] pay sub2 50,000
+
+== Suppliers, materials, purchases, delivery, usage
+  [PASS] supplier Cement Co (opening 10,000)
+  [PASS] supplier Steel Traders
+  [PASS] material Cement (bag)
+  [PASS] material Steel (KG)
+  [PASS] suppliers & materials saved
+  [PASS] purchase 200 bags @1,300 (unpaid, multi-item form)
+  [PASS] purchase 1000kg steel @280 (unpaid)
+  [PASS] supplier1 balance = 270,000 (10k opening + 260k)
+  [PASS] deliver 150 bags to A1
+  [PASS] deliver 50 bags to B1
+  [PASS] over-delivery refused (rejected as expected)
+  [PASS] deliver 1000kg steel to A1
+  [PASS] transfer 20 bags A1 -> A2
+  [PASS] use 100 bags on A1
+  [PASS] use 500kg steel on A1
+  [PASS] over-usage refused (A1 has 30 bags left) (rejected as expected)
+  [PASS] usage cost cement = 130,000
+  [PASS] void steel usage
+  [PASS] re-use 400kg steel
+  [PASS] pay Cement Co 100,000
+  [PASS] supplier1 balance = 170,000
+  [PASS] pay Steel Traders 280,000 (full)
+  [PASS] supplier2 balance = 0
+  [PASS] cash = 1,007,500 after supplier payments
+  [PASS] GET /hdc/purchase-v2/stock
+  [PASS] GET /hdc/purchase-v2/suppliers/1
+  [PASS] GET /api/v2/purchase/kpis
+  [PASS] GET /api/v2/purchase/material-stock
+  [PASS] GET /api/v2/purchase/supplier-ledger
+
+== Expenses
+  [PASS] expense category add
+  [PASS] category saved
+  [PASS] expense 5,000 on A1
+  [PASS] expense 2,000 on B1
+  [PASS] edit expense 2,000 -> 2,500
+  [PASS] expense edit persisted
+  [PASS] void expense
+  [PASS] expense voided
+  [PASS] cash = 1,002,500 after expenses
+  [PASS] expense without amount refused (rejected as expected)
+
+== Office management
+  [PASS] office staff add
+  [PASS] staff saved
+  [PASS] staff salary payment 20,000
+  [PASS] staff ledger row
+  [PASS] staff ledger page
+  [PASS] office expense 3,000
+  [PASS] office expense saved
+  [PASS] allowance category
+  [PASS] cash = 979,500 after office
+
+== Tool rental
+  [PASS] tool category
+  [PASS] tool inventory: 50 steel props
+  [PASS] tool saved
+  [PASS] rent 10 props to external customer
+  [PASS] rental saved
+  [PASS] rental detail
+  [PASS] return all props + receive payment
+  [PASS] tool payment recorded
+
+== Accounts: transfer, CF register, money center
+  [PASS] CF register: money IN 25,000 (other income)
+  [FAIL] CF register: money OUT 4,000  -> status=302 flashes=[('danger', '"Material & Purchase" needs a project — pick one.')]
+  [PASS] CF register: TRANSFER 50,000 cash -> bank
+  [FAIL] cash moved +25k -4k -50k  -> 954700.0 vs 950700.0
+  [PASS] bank = 350,000
+  [FAIL] db-query  -> AttributeError("'NoneType' object has no attribute 'id'") e 542, in <lambda>
+    eid = q(lambda: CashFlowEntry.query.filter_by(direction='out').order_by(CashFlowEntry.id.desc()).first().id)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  [PASS] overdraft refused (transfer 99,999,999) (rejected as expected)
+  [PASS] GET /hdc/accounts/hub
+  [PASS] GET /hdc/accounts/money-center
+  [PASS] GET /hdc/accounts
+  [PASS] GET /hdc/accounts/entries
+  [PASS] GET /hdc/accounts/manage
+  [PASS] GET /hdc/accounts/cashflow
+  [PASS] GET /hdc/accounts/cashflow/register
+  [PASS] GET /hdc/accounts/cashflow/reconciliation
+  [PASS] GET /hdc/accounts/1/ledger
+  [PASS] GET /hdc/accounts/3/ledger
+  [PASS] GET /api/accounts/dashboard_summary
+  [PASS] GET /api/accounts/pending_context
+  [PASS] GET /api/accounts/list_accounts_with_balances
+  [PASS] GET /api/accounts/transaction_history
+
+== Reconciliation & day close
+  [PASS] reconciliation: no "orphan_txns" findings
+  [PASS] reconciliation: no "void_mismatch" findings
+  [PASS] reconciliation: no "duplicate_active" findings
+  [PASS] reconciliation: no "group_inconsistent" findings
+  [PASS] reconciliation: no "orphan_sources" findings
+  [PASS] day close with matching counts locks the day
+  [PASS] back-dated entry refused on locked day (rejected as expected)
+  [PASS] unlock day
+
+== Project costing & reports
+   project A metrics: {'labour': 8100.0, 'material': 242000.0, 'expense': 5000.0, 'subcontract': 150000.0}
+   project B metrics: {'labour': 2500.0, 'material': 0.0, 'expense': 500.0, 'subcontract': 50000.0}
+  [PASS] A material cost = 130,000 cement + 112,000 steel
+  [PASS] A expense = 5,000
+  [PASS] B expense = 500 (W2 tip only; voided fuel excluded)
+  [PASS] A subcontract >= 150,000
+  [PASS] B subcontract = 50,000
+  [PASS] profitability CSV
+  [PASS] profitability has both projects
+  [PASS] GET /hdc/projects/1
+  [PASS] GET /hdc/projects/2
+  [PASS] GET /hdc/stage/1/ledger
+  [PASS] GET /hdc/reports?project_id=1
+  [PASS] GET /hdc/reports/project/1/csv
+  [PASS] GET /hdc/reports/export/salary
+  [PASS] GET /hdc/reports/export/materials
+  [PASS] GET /hdc/reports/glance
+  [PASS] GET /hdc/workers/1/ledger
+  [PASS] GET /hdc/workers/2/ledger
+  [PASS] GET /hdc/subcontractors
+
+== Crawl every GET route (no 5xx allowed)
+  [PASS] crawled 202 GET routes without server error
+
+== Database integrity
+  [PASS] PRAGMA integrity_check ok
+  [PASS] no FK violations
+
+==== 192/195 checks passed, 3 failed
+FAIL [Accounts: transfer, CF register, money center] CF register: money OUT 4,000: status=302 flashes=[('danger', '"Material & Purchase" needs a project — pick one.')]
+FAIL [Accounts: transfer, CF register, money center] cash moved +25k -4k -50k: 954700.0 vs 950700.0
+FAIL [Accounts: transfer, CF register, money center] db-query: AttributeError("'NoneType' object has no attribute 'id'") e 542, in <lambda>
+    eid = q(lambda: CashFlowEntry.query.filter_by(direction='out').order_by(CashFlowEntry.id.desc()).first().id)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'NoneType' object has no attribute 'id'
+

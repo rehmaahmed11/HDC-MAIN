@@ -25,6 +25,7 @@ from hdc.services.backups import (
 )
 from hdc.services.subcontract import _reconcile_subcontract_links
 from hdc.services.timekeeping import _reconcile_worker_time_entries, _repair_worker_work_ledger_links
+from hdc.utils.sqlite import begin_sqlite_write, incoming_foreign_key_reference
 
 def _validate_restore_database(path):
     """Read-only checks must finish before any target file/session is touched."""
@@ -313,22 +314,55 @@ def _wipe_selected_targets(target_keys):
 
     wipe_tools = 'tools' in keys
     wipe_accounts = 'accounts' in keys
+    protected_wipe = bool({'projects', 'expenses'} & set(keys))
+    if protected_wipe:
+        # Lock before checking, and keep the lock through the delete. Foreign
+        # keys stay enabled; defer them to commit for cross-target ordering.
+        conn = db.session.connection()
+        begin_sqlite_write(conn)
+        try:
+            for target in tables:
+                dependency = incoming_foreign_key_reference(conn, target, excluded_tables=tables)
+                if dependency:
+                    raise ValueError(f'Cannot wipe: {dependency[0]} still references {target}. '
+                                     'Select the related data groups or retain the history.')
+            if not wipe_accounts:
+                for target, prefix in (('hdc_expense', 'expense'), ('hdc_owner_payment', 'owner_payment'),
+                                       ('hdc_tool_rental_payment', 'tool_rental_payment'),
+                                       ('hdc_tool_rental_discount', 'tool_rental_discount')):
+                    if target not in tables:
+                        continue
+                    found = conn.exec_driver_sql(
+                        f'SELECT 1 FROM hdc_account_txn AS txn JOIN "{target}" AS source '
+                        'ON txn.source_id = source.id WHERE lower(txn.source_type) = ? '
+                        'OR lower(txn.source_type) LIKE ? LIMIT 1',
+                        (prefix, prefix + ':%')).first()
+                    if found:
+                        raise ValueError(f'Cannot wipe {target}: Accounts still contains linked history. '
+                                         'Retain the history or select Accounts as well.')
+            conn.exec_driver_sql('PRAGMA defer_foreign_keys=ON')
+            for table in tables:
+                conn.exec_driver_sql('DELETE FROM "' + table.replace('"', '""') + '"')
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            raise
     # Before the deletes: tool rent that was posted to Accounts must not
     # survive as orphan income.
-    if wipe_tools and not wipe_accounts:
-        _void_tool_rental_ledger_income()
-
-    db.session.execute(text('PRAGMA foreign_keys=OFF'))
-    try:
-        for tbl in tables:
-            db.session.execute(text(f'DELETE FROM {tbl}'))
-        db.session.commit()
-    except Exception:
-        db.session.rollback()
-        raise
-    finally:
-        db.session.execute(text('PRAGMA foreign_keys=ON'))
-        db.session.commit()
+    if not protected_wipe:
+        if wipe_tools and not wipe_accounts:
+            _void_tool_rental_ledger_income()
+        db.session.execute(text('PRAGMA foreign_keys=OFF'))
+        try:
+            for tbl in tables:
+                db.session.execute(text(f'DELETE FROM {tbl}'))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            raise
+        finally:
+            db.session.execute(text('PRAGMA foreign_keys=ON'))
+            db.session.commit()
 
     # After the deletes: links into wiped Accounts tables are now dead.
     if wipe_accounts and not wipe_tools:

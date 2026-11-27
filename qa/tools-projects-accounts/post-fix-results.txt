@@ -1,0 +1,66 @@
+[HDC ERP] Tool Rental schema migrated: received_to_account_id + is_void + account_txn link ready
+[HDC ERP] Initial admin created: admin
+{
+  "stage_delete_with_expense": {
+    "status": 302,
+    "stage_exists": true,
+    "expense_exists": true,
+    "expense_stage_id": 1,
+    "expense_create": {
+      "status": 302
+    },
+    "ledger_exists": true,
+    "ledger_stage_id": 1,
+    "foreign_key_check": []
+  },
+  "delete_account_only_voided_history": {
+    "status": 302,
+    "account_exists": true,
+    "transaction_exists": true,
+    "transaction_to_account_id": 3,
+    "foreign_key_check": [],
+    "cash_before_restore": 900.0,
+    "restore": {
+      "status": 302
+    },
+    "transaction_void_after_restore": true,
+    "cash_after_restore": 900.0
+  },
+  "restore_after_reissue": {
+    "status": 302,
+    "create_first": {
+      "status": 302
+    },
+    "cancel": {
+      "status": 302
+    },
+    "create_second": {
+      "status": 302
+    },
+    "owned": 5.0,
+    "pending_sum": 5.0,
+    "rental_restored": false,
+    "ledger": {
+      "owned_qty": 5.0,
+      "out_qty": 5.0,
+      "in_store_qty": 0.0
+    },
+    "reconciled": true
+  },
+  "wipe_expenses_without_accounts": {
+    "status": 302,
+    "expense_exists": true,
+    "ledger_exists": true,
+    "ledger_is_void": false,
+    "cash_balance": 900.0,
+    "reported_orphan": false,
+    "foreign_key_check": []
+  },
+  "wipe_projects_without_dependencies": {
+    "status": 302,
+    "project_exists": true,
+    "expense_project_id": 1,
+    "expense_stage_id": 2,
+    "foreign_key_check": []
+  }
+}

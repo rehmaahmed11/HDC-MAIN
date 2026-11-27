@@ -18,6 +18,7 @@ from hdc.models.projects import Project, Stage
 from hdc.models.subcontract import Subcontractor
 from hdc.models.workforce import Worker
 from hdc.services.accounts import _ACCOUNT_LOAN_INTENTS, _ACCOUNT_TXN_CATEGORIES, _ACCOUNT_TXN_FORM_OPTIONS, _ACCOUNT_TXN_TYPES, _ACCOUNT_TYPES, _account_dashboard_kpis, _account_dashboard_subgroups, _account_entity_label, _account_group_mode_for_row, _account_intent_field_matrix, _account_kpi_detail_context, _account_ledger_rows, _account_reverse_transaction_group, _account_running_balance_rows, _account_transaction_history, _account_tx_direction_for_type, _account_txn_group_rows, _accounts_reconciliation_findings, _accounts_set_void_by_source, _accounts_toggle_transaction_void_state, _accounts_update_manual_transaction, _create_account, _create_accounts_transaction_with_sync, _list_accounts_with_balances, _resolve_account_type
+from hdc.services.accounts_manage import delete_account
 from hdc.services.aggregation import _running_projects_receivable_rows
 from hdc.services.ledger import _office_staff_ledger_snapshot, _personal_expense_month, _personal_expense_total
 from hdc.services.receipts import _account_receipt_recent_entries, _receipt_company_profile, cash_flow_receipt_details
@@ -118,19 +119,8 @@ def register(app):
                 if not row or row.is_void:
                     flash('Account not found.', 'danger')
                     return redirect(url_for('hdc_accounts'))
-                has_txn = db.session.query(AccountTransaction.id).filter(
-                    AccountTransaction.is_void == False,
-                    or_(AccountTransaction.from_account_id == row.id, AccountTransaction.to_account_id == row.id)
-                ).first() is not None
-                if has_txn:
-                    row.status = 'inactive'
-                    row.is_void = True
-                    db.session.commit()
-                    flash('Account has transactions, so it was archived instead of deleted.', 'warning')
-                    return redirect(url_for('hdc_accounts'))
-                db.session.delete(row)
-                db.session.commit()
-                flash('Account deleted.', 'success')
+                _row, message, archived = delete_account(account_id)
+                flash(message, 'warning' if archived else 'success')
                 return redirect(url_for('hdc_accounts'))
 
             if action == 'suspend_account':

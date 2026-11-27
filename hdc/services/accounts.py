@@ -1424,6 +1424,22 @@ def _accounts_toggle_transaction_void_state(txn_id, make_void=True, reason='', a
     if not row:
         return False, 'Transaction not found.', 0
     rows = _account_txn_group_rows(row)
+    if not make_void:
+        for item in rows:
+            for account_id in (item.from_account_id, item.executed_by_account_id, item.to_account_id):
+                if account_id:
+                    account = db.session.get(Account, account_id)
+                    if not account or account.is_void:
+                        return False, 'Restore the archived account before restoring this transaction.', 0
+            if not item.from_account_id or not item.executed_by_account_id:
+                return False, 'Cannot restore a transaction with a missing account.', 0
+            kind = (item.type or '').strip().lower()
+            if kind in ('transfer', 'advance_to_person', 'project_income', 'client_payment', 'party_receipt') and not item.to_account_id:
+                return False, 'Cannot restore a transaction with a missing receiving account.', 0
+            if kind in ('expense_material', 'expense_wage', 'expense_subcontractor', 'expense_general',
+                        'purchase', 'payroll', 'party_payment', 'personal_management_payment',
+                        'office_management_payment') and not item.to_account_id and not (item.party_name or '').strip():
+                return False, 'Cannot restore a transaction with no receiving account or party.', 0
     source_pairs = set()
     for r in rows:
         st_base = _account_source_type_base(r.source_type)
