@@ -1,0 +1,476 @@
+{
+ "meta": {
+  "started": "2026-11-27 09:34:32",
+  "count": 100,
+  "db_path": "/tmp/hdc-bulk-e2e/bulk.db",
+  "python": "3.11.2",
+  "sections": [
+   "parties",
+   "projects",
+   "stages",
+   "workers",
+   "timekeeping",
+   "expenses",
+   "office_staff",
+   "office_expenses",
+   "suppliers",
+   "materials",
+   "purchases",
+   "tools",
+   "accounts",
+   "cashflow",
+   "shared"
+  ],
+  "baseline": {
+   "account_txns": 0,
+   "cash_flow_entries": 0,
+   "labour_ledger": 0,
+   "expenses": 0,
+   "office_expenses": 0,
+   "balances": {
+    "Company Cash": 10000000.0,
+    "Credit/Debit Control": 0.0
+   }
+  },
+  "ledger": {
+   "account_txns": 400,
+   "cash_flow_entries": 200,
+   "labour_ledger": 100,
+   "expenses": 100,
+   "office_expenses": 100,
+   "balances": {
+    "Company Cash": 10000000.0,
+    "Credit/Debit Control": 0.0
+   }
+  }
+ },
+ "sections": [
+  {
+   "key": "parties",
+   "title": "Parties directory",
+   "phase": "delete",
+   "attempted": 100,
+   "succeeded": 100,
+   "failed": [],
+   "verify": {
+    "expected": 0,
+    "db_active": 0,
+    "extra": {
+     "deactivated": 100
+    },
+    "ok": true
+   },
+   "reports": [
+    {
+     "label": "Parties directory",
+     "url": "/hdc/parties?status=all",
+     "ok": true,
+     "detail": "status=200"
+    },
+    {
+     "label": "Parties search",
+     "url": "/hdc/parties?q=BLKPARTY&status=all",
+     "ok": true,
+     "detail": "status=200"
+    }
+   ],
+   "seconds": 0.77
+  },
+  {
+   "key": "projects",
+   "title": "Projects",
+   "phase": "delete",
+   "attempted": 100,
+   "succeeded": 100,
+   "failed": [],
+   "verify": {
+    "expected": 0,
+    "db_active": 0,
+    "extra": {},
+    "ok": true
+   },
+   "reports": [
+    {
+     "label": "Projects list",
+     "url": "/hdc/projects",
+     "ok": true,
+     "detail": "status=200"
+    },
+    {
+     "label": "Profitability export",
+     "url": "/hdc/reports/export/profitability",
+     "ok": true,
+     "detail": "status=200 slug_hits=0 expected=absent"
+    }
+   ],
+   "seconds": 0.51
+  },
+  {
+   "key": "stages",
+   "title": "Stages",
+   "phase": "delete",
+   "attempted": 100,
+   "succeeded": 100,
+   "failed": [],
+   "verify": {
+    "expected": 0,
+    "db_active": 0,
+    "extra": {},
+    "ok": true
+   },
+   "reports": [
+    {
+     "label": "Stage overview",
+     "url": "/hdc/stages",
+     "ok": true,
+     "detail": "status=200"
+    }
+   ],
+   "seconds": 1.36
+  },
+  {
+   "key": "workers",
+   "title": "Workers",
+   "phase": "delete",
+   "attempted": 100,
+   "succeeded": 100,
+   "failed": [],
+   "verify": {
+    "expected": 0,
+    "db_active": 0,
+    "extra": {
+     "deactivated": 100
+    },
+    "ok": true
+   },
+   "reports": [
+    {
+     "label": "Workers list",
+     "url": "/hdc/workers",
+     "ok": true,
+     "detail": "status=200"
+    },
+    {
+     "label": "Workers API",
+     "url": "/hdc/api/workers",
+     "ok": true,
+     "detail": "status=200 slug_hits=0 expected=absent"
+    }
+   ],
+   "seconds": 0.5
+  },
+  {
+   "key": "timekeeping",
+   "title": "Timekeeping (attendance)",
+   "phase": "delete",
+   "attempted": 100,
+   "succeeded": 100,
+   "failed": [],
+   "verify": {
+    "expected": 0,
+    "db_active": 0,
+    "extra": {
+     "voided": 100
+    },
+    "ok": true
+   },
+   "reports": [
+    {
+     "label": "Timekeeping status",
+     "url": "/hdc/timekeeping/status",
+     "ok": true,
+     "detail": "status=200"
+    }
+   ],
+   "seconds": 0.76
+  },
+  {
+   "key": "expenses",
+   "title": "Project expenses",
+   "phase": "delete",
+   "attempted": 100,
+   "succeeded": 100,
+   "failed": [],
+   "verify": {
+    "expected": 0,
+    "db_active": 0,
+    "extra": {
+     "voided": 100
+    },
+    "ok": true
+   },
+   "reports": [
+    {
+     "label": "Expenses list",
+     "url": "/hdc/expenses",
+     "ok": true,
+     "detail": "status=200"
+    },
+    {
+     "label": "Project report",
+     "url": "/hdc/reports?project_id=1",
+     "ok": true,
+     "detail": "status=200"
+    }
+   ],
+   "seconds": 0.59
+  },
+  {
+   "key": "office_staff",
+   "title": "Office staff",
+   "phase": "delete",
+   "attempted": 100,
+   "succeeded": 100,
+   "failed": [],
+   "verify": {
+    "expected": 0,
+    "db_active": 0,
+    "extra": {
+     "deactivated": 100
+    },
+    "ok": true
+   },
+   "reports": [
+    {
+     "label": "Office staff list",
+     "url": "/hdc/office-management/staff",
+     "ok": true,
+     "detail": "status=200"
+    }
+   ],
+   "seconds": 0.39
+  },
+  {
+   "key": "office_expenses",
+   "title": "Office expenses",
+   "phase": "delete",
+   "attempted": 100,
+   "succeeded": 100,
+   "failed": [],
+   "verify": {
+    "expected": 0,
+    "db_active": 0,
+    "extra": {
+     "voided": 100
+    },
+    "ok": true
+   },
+   "reports": [
+    {
+     "label": "Office expenses list",
+     "url": "/hdc/office-management/expenses",
+     "ok": true,
+     "detail": "status=200"
+    }
+   ],
+   "seconds": 0.47
+  },
+  {
+   "key": "suppliers",
+   "title": "Suppliers",
+   "phase": "delete",
+   "attempted": 100,
+   "succeeded": 100,
+   "failed": [],
+   "verify": {
+    "expected": 0,
+    "db_active": 0,
+    "extra": {},
+    "ok": true
+   },
+   "reports": [
+    {
+     "label": "Suppliers page",
+     "url": "/hdc/purchase-v2/suppliers",
+     "ok": true,
+     "detail": "status=200"
+    },
+    {
+     "label": "Suppliers API",
+     "url": "/api/v2/purchase/suppliers",
+     "ok": true,
+     "detail": "status=200 slug_hits=0 expected=absent"
+    }
+   ],
+   "seconds": 0.53
+  },
+  {
+   "key": "materials",
+   "title": "Materials",
+   "phase": "delete",
+   "attempted": 100,
+   "succeeded": 100,
+   "failed": [],
+   "verify": {
+    "expected": 0,
+    "db_active": 0,
+    "extra": {},
+    "ok": true
+   },
+   "reports": [
+    {
+     "label": "Materials page",
+     "url": "/hdc/purchase-v2/materials",
+     "ok": true,
+     "detail": "status=200"
+    },
+    {
+     "label": "Materials API",
+     "url": "/api/v2/purchase/materials",
+     "ok": true,
+     "detail": "status=200 slug_hits=0 expected=absent"
+    }
+   ],
+   "seconds": 0.54
+  },
+  {
+   "key": "purchases",
+   "title": "Purchases (V2)",
+   "phase": "delete",
+   "attempted": 100,
+   "succeeded": 100,
+   "failed": [],
+   "verify": {
+    "expected": 0,
+    "db_active": 0,
+    "extra": {},
+    "ok": true
+   },
+   "reports": [
+    {
+     "label": "Purchases page",
+     "url": "/hdc/purchase-v2/purchases",
+     "ok": true,
+     "detail": "status=200"
+    },
+    {
+     "label": "Purchases API",
+     "url": "/api/v2/purchase/purchases",
+     "ok": true,
+     "detail": "status=200 slug_hits=0 expected=absent"
+    }
+   ],
+   "seconds": 0.72
+  },
+  {
+   "key": "tools",
+   "title": "Tools inventory",
+   "phase": "delete",
+   "attempted": 100,
+   "succeeded": 100,
+   "failed": [],
+   "verify": {
+    "expected": 0,
+    "db_active": 0,
+    "extra": {},
+    "ok": true
+   },
+   "reports": [
+    {
+     "label": "Tool inventory",
+     "url": "/hdc/tool-rental/inventory",
+     "ok": true,
+     "detail": "status=200"
+    },
+    {
+     "label": "Tool reports",
+     "url": "/hdc/tool-rental/reports",
+     "ok": true,
+     "detail": "status=200"
+    }
+   ],
+   "seconds": 0.52
+  },
+  {
+   "key": "accounts",
+   "title": "Accounts (money pots)",
+   "phase": "delete",
+   "attempted": 100,
+   "succeeded": 100,
+   "failed": [],
+   "verify": {
+    "expected": 0,
+    "db_active": 0,
+    "extra": {},
+    "ok": true
+   },
+   "reports": [
+    {
+     "label": "Accounts page",
+     "url": "/hdc/accounts",
+     "ok": true,
+     "detail": "status=200"
+    },
+    {
+     "label": "Accounts balances API",
+     "url": "/api/accounts/list_accounts_with_balances",
+     "ok": true,
+     "detail": "status=200 slug_hits=0 expected=absent"
+    }
+   ],
+   "seconds": 0.78
+  },
+  {
+   "key": "cashflow",
+   "title": "Cash-flow register",
+   "phase": "delete",
+   "attempted": 100,
+   "succeeded": 100,
+   "failed": [],
+   "verify": {
+    "expected": 0,
+    "db_active": 0,
+    "extra": {
+     "voided": 200
+    },
+    "ok": true
+   },
+   "reports": [
+    {
+     "label": "Register page",
+     "url": "/hdc/accounts/cashflow/register",
+     "ok": true,
+     "detail": "status=200"
+    },
+    {
+     "label": "Register export",
+     "url": "/hdc/accounts/cashflow/register/export",
+     "ok": true,
+     "detail": "status=200 slug_hits=400 expected=present"
+    }
+   ],
+   "seconds": 0.71
+  },
+  {
+   "key": "shared",
+   "title": "Shared expenses",
+   "phase": "delete",
+   "attempted": 100,
+   "succeeded": 100,
+   "failed": [],
+   "verify": {
+    "expected": 0,
+    "db_active": 0,
+    "extra": {
+     "voided": 0
+    },
+    "ok": true
+   },
+   "reports": [
+    {
+     "label": "Shared expense list",
+     "url": "/hdc/accounts/shared/expenses",
+     "ok": true,
+     "detail": "status=200"
+    },
+    {
+     "label": "Shared report CSV",
+     "url": "/hdc/accounts/shared/report.csv",
+     "ok": true,
+     "detail": "status=200 slug_hits=0 expected=absent"
+    }
+   ],
+   "seconds": 0.84
+  }
+ ]
+}

@@ -1,0 +1,560 @@
+{
+ "meta": {
+  "started": "2026-11-27 09:34:32",
+  "count": 100,
+  "db_path": "/tmp/hdc-bulk-e2e/bulk.db",
+  "python": "3.11.2",
+  "sections": [
+   "parties",
+   "projects",
+   "stages",
+   "workers",
+   "timekeeping",
+   "expenses",
+   "office_staff",
+   "office_expenses",
+   "suppliers",
+   "materials",
+   "purchases",
+   "tools",
+   "accounts",
+   "cashflow",
+   "shared"
+  ],
+  "baseline": {
+   "account_txns": 0,
+   "cash_flow_entries": 0,
+   "labour_ledger": 0,
+   "expenses": 0,
+   "office_expenses": 0,
+   "balances": {
+    "Company Cash": 10000000.0,
+    "Credit/Debit Control": 0.0
+   }
+  },
+  "ledger": {
+   "account_txns": 400,
+   "cash_flow_entries": 200,
+   "labour_ledger": 100,
+   "expenses": 100,
+   "office_expenses": 100,
+   "balances": {
+    "Company Cash": 9854950.0,
+    "Credit/Debit Control": 145050.0,
+    "BLKACC-0001-ED": 0.0,
+    "BLKACC-0002-ED": 0.0,
+    "BLKACC-0003-ED": 0.0,
+    "BLKACC-0004-ED": 0.0,
+    "BLKACC-0005-ED": 0.0,
+    "BLKACC-0006-ED": 0.0,
+    "BLKACC-0007-ED": 0.0,
+    "BLKACC-0008-ED": 0.0,
+    "BLKACC-0009-ED": 0.0,
+    "BLKACC-0010-ED": 0.0,
+    "BLKACC-0011-ED": 0.0,
+    "BLKACC-0012-ED": 0.0,
+    "BLKACC-0013-ED": 0.0,
+    "BLKACC-0014-ED": 0.0,
+    "BLKACC-0015-ED": 0.0,
+    "BLKACC-0016-ED": 0.0,
+    "BLKACC-0017-ED": 0.0,
+    "BLKACC-0018-ED": 0.0,
+    "BLKACC-0019-ED": 0.0,
+    "BLKACC-0020-ED": 0.0,
+    "BLKACC-0021-ED": 0.0,
+    "BLKACC-0022-ED": 0.0,
+    "BLKACC-0023-ED": 0.0,
+    "BLKACC-0024-ED": 0.0,
+    "BLKACC-0025-ED": 0.0,
+    "BLKACC-0026-ED": 0.0,
+    "BLKACC-0027-ED": 0.0,
+    "BLKACC-0028-ED": 0.0,
+    "BLKACC-0029-ED": 0.0,
+    "BLKACC-0030-ED": 0.0,
+    "BLKACC-0031-ED": 0.0,
+    "BLKACC-0032-ED": 0.0,
+    "BLKACC-0033-ED": 0.0,
+    "BLKACC-0034-ED": 0.0,
+    "BLKACC-0035-ED": 0.0,
+    "BLKACC-0036-ED": 0.0,
+    "BLKACC-0037-ED": 0.0,
+    "BLKACC-0038-ED": 0.0,
+    "BLKACC-0039-ED": 0.0,
+    "BLKACC-0040-ED": 0.0,
+    "BLKACC-0041-ED": 0.0,
+    "BLKACC-0042-ED": 0.0,
+    "BLKACC-0043-ED": 0.0,
+    "BLKACC-0044-ED": 0.0,
+    "BLKACC-0045-ED": 0.0,
+    "BLKACC-0046-ED": 0.0,
+    "BLKACC-0047-ED": 0.0,
+    "BLKACC-0048-ED": 0.0,
+    "BLKACC-0049-ED": 0.0,
+    "BLKACC-0050-ED": 0.0,
+    "BLKACC-0051-ED": 0.0,
+    "BLKACC-0052-ED": 0.0,
+    "BLKACC-0053-ED": 0.0,
+    "BLKACC-0054-ED": 0.0,
+    "BLKACC-0055-ED": 0.0,
+    "BLKACC-0056-ED": 0.0,
+    "BLKACC-0057-ED": 0.0,
+    "BLKACC-0058-ED": 0.0,
+    "BLKACC-0059-ED": 0.0,
+    "BLKACC-0060-ED": 0.0,
+    "BLKACC-0061-ED": 0.0,
+    "BLKACC-0062-ED": 0.0,
+    "BLKACC-0063-ED": 0.0,
+    "BLKACC-0064-ED": 0.0,
+    "BLKACC-0065-ED": 0.0,
+    "BLKACC-0066-ED": 0.0,
+    "BLKACC-0067-ED": 0.0,
+    "BLKACC-0068-ED": 0.0,
+    "BLKACC-0069-ED": 0.0,
+    "BLKACC-0070-ED": 0.0,
+    "BLKACC-0071-ED": 0.0,
+    "BLKACC-0072-ED": 0.0,
+    "BLKACC-0073-ED": 0.0,
+    "BLKACC-0074-ED": 0.0,
+    "BLKACC-0075-ED": 0.0,
+    "BLKACC-0076-ED": 0.0,
+    "BLKACC-0077-ED": 0.0,
+    "BLKACC-0078-ED": 0.0,
+    "BLKACC-0079-ED": 0.0,
+    "BLKACC-0080-ED": 0.0,
+    "BLKACC-0081-ED": 0.0,
+    "BLKACC-0082-ED": 0.0,
+    "BLKACC-0083-ED": 0.0,
+    "BLKACC-0084-ED": 0.0,
+    "BLKACC-0085-ED": 0.0,
+    "BLKACC-0086-ED": 0.0,
+    "BLKACC-0087-ED": 0.0,
+    "BLKACC-0088-ED": 0.0,
+    "BLKACC-0089-ED": 0.0,
+    "BLKACC-0090-ED": 0.0,
+    "BLKACC-0091-ED": 0.0,
+    "BLKACC-0092-ED": 0.0,
+    "BLKACC-0093-ED": 0.0,
+    "BLKACC-0094-ED": 0.0,
+    "BLKACC-0095-ED": 0.0,
+    "BLKACC-0096-ED": 0.0,
+    "BLKACC-0097-ED": 0.0,
+    "BLKACC-0098-ED": 0.0,
+    "BLKACC-0099-ED": 0.0,
+    "BLKACC-0100-ED": 0.0
+   }
+  }
+ },
+ "sections": [
+  {
+   "key": "parties",
+   "title": "Parties directory",
+   "phase": "edit",
+   "attempted": 100,
+   "succeeded": 100,
+   "failed": [],
+   "verify": {
+    "expected": 100,
+    "db_edited_markers": 100,
+    "db_active": 100,
+    "ok": true
+   },
+   "reports": [
+    {
+     "label": "Parties directory",
+     "url": "/hdc/parties?status=all",
+     "ok": true,
+     "detail": "status=200"
+    },
+    {
+     "label": "Parties search",
+     "url": "/hdc/parties?q=BLKPARTY&status=all",
+     "ok": true,
+     "detail": "status=200"
+    }
+   ],
+   "seconds": 0.79
+  },
+  {
+   "key": "projects",
+   "title": "Projects",
+   "phase": "edit",
+   "attempted": 100,
+   "succeeded": 100,
+   "failed": [],
+   "verify": {
+    "expected": 100,
+    "db_edited_markers": 100,
+    "db_active": 100,
+    "ok": true
+   },
+   "reports": [
+    {
+     "label": "Projects list",
+     "url": "/hdc/projects",
+     "ok": true,
+     "detail": "status=200"
+    },
+    {
+     "label": "Profitability export",
+     "url": "/hdc/reports/export/profitability",
+     "ok": true,
+     "detail": "status=200 slug_hits=100 expected=present"
+    }
+   ],
+   "seconds": 0.42
+  },
+  {
+   "key": "stages",
+   "title": "Stages",
+   "phase": "edit",
+   "attempted": 100,
+   "succeeded": 100,
+   "failed": [],
+   "verify": {
+    "expected": 100,
+    "db_edited_markers": 100,
+    "db_active": 100,
+    "ok": true
+   },
+   "reports": [
+    {
+     "label": "Stage overview",
+     "url": "/hdc/stages",
+     "ok": true,
+     "detail": "status=200"
+    }
+   ],
+   "seconds": 0.53
+  },
+  {
+   "key": "workers",
+   "title": "Workers",
+   "phase": "edit",
+   "attempted": 100,
+   "succeeded": 100,
+   "failed": [],
+   "verify": {
+    "expected": 100,
+    "db_edited_markers": 100,
+    "db_active": 100,
+    "ok": true
+   },
+   "reports": [
+    {
+     "label": "Workers list",
+     "url": "/hdc/workers",
+     "ok": true,
+     "detail": "status=200"
+    },
+    {
+     "label": "Workers API",
+     "url": "/hdc/api/workers",
+     "ok": true,
+     "detail": "status=200 slug_hits=400 expected=present"
+    }
+   ],
+   "seconds": 0.82
+  },
+  {
+   "key": "timekeeping",
+   "title": "Timekeeping (attendance)",
+   "phase": "edit",
+   "attempted": 100,
+   "succeeded": 100,
+   "failed": [],
+   "verify": {
+    "expected": 100,
+    "db_edited_markers": 100,
+    "db_active": 100,
+    "ok": true
+   },
+   "reports": [
+    {
+     "label": "Timekeeping status",
+     "url": "/hdc/timekeeping/status",
+     "ok": true,
+     "detail": "status=200"
+    }
+   ],
+   "seconds": 1.26
+  },
+  {
+   "key": "expenses",
+   "title": "Project expenses",
+   "phase": "edit",
+   "attempted": 100,
+   "succeeded": 100,
+   "failed": [],
+   "verify": {
+    "expected": 100,
+    "db_edited_markers": 100,
+    "db_active": 100,
+    "ok": true
+   },
+   "reports": [
+    {
+     "label": "Expenses list",
+     "url": "/hdc/expenses",
+     "ok": true,
+     "detail": "status=200"
+    },
+    {
+     "label": "Project report",
+     "url": "/hdc/reports?project_id=1",
+     "ok": true,
+     "detail": "status=200"
+    }
+   ],
+   "seconds": 0.87
+  },
+  {
+   "key": "office_staff",
+   "title": "Office staff",
+   "phase": "edit",
+   "attempted": 100,
+   "succeeded": 100,
+   "failed": [],
+   "verify": {
+    "expected": 100,
+    "db_edited_markers": 100,
+    "db_active": 100,
+    "ok": true
+   },
+   "reports": [
+    {
+     "label": "Office staff list",
+     "url": "/hdc/office-management/staff",
+     "ok": true,
+     "detail": "status=200"
+    }
+   ],
+   "seconds": 0.46
+  },
+  {
+   "key": "office_expenses",
+   "title": "Office expenses",
+   "phase": "edit",
+   "attempted": 100,
+   "succeeded": 100,
+   "failed": [],
+   "verify": {
+    "expected": 100,
+    "db_edited_markers": 100,
+    "db_active": 100,
+    "ok": true
+   },
+   "reports": [
+    {
+     "label": "Office expenses list",
+     "url": "/hdc/office-management/expenses",
+     "ok": true,
+     "detail": "status=200"
+    }
+   ],
+   "seconds": 0.62
+  },
+  {
+   "key": "suppliers",
+   "title": "Suppliers",
+   "phase": "edit",
+   "attempted": 100,
+   "succeeded": 100,
+   "failed": [],
+   "verify": {
+    "expected": 100,
+    "db_edited_markers": 100,
+    "db_active": 100,
+    "ok": true
+   },
+   "reports": [
+    {
+     "label": "Suppliers page",
+     "url": "/hdc/purchase-v2/suppliers",
+     "ok": true,
+     "detail": "status=200"
+    },
+    {
+     "label": "Suppliers API",
+     "url": "/api/v2/purchase/suppliers",
+     "ok": true,
+     "detail": "status=200 slug_hits=100 expected=present"
+    }
+   ],
+   "seconds": 0.6
+  },
+  {
+   "key": "materials",
+   "title": "Materials",
+   "phase": "edit",
+   "attempted": 100,
+   "succeeded": 100,
+   "failed": [],
+   "verify": {
+    "expected": 100,
+    "db_edited_markers": 100,
+    "db_active": 100,
+    "ok": true
+   },
+   "reports": [
+    {
+     "label": "Materials page",
+     "url": "/hdc/purchase-v2/materials",
+     "ok": true,
+     "detail": "status=200"
+    },
+    {
+     "label": "Materials API",
+     "url": "/api/v2/purchase/materials",
+     "ok": true,
+     "detail": "status=200 slug_hits=100 expected=present"
+    }
+   ],
+   "seconds": 0.56
+  },
+  {
+   "key": "purchases",
+   "title": "Purchases (V2)",
+   "phase": "edit",
+   "attempted": 100,
+   "succeeded": 100,
+   "failed": [],
+   "verify": {
+    "expected": 100,
+    "db_edited_markers": 100,
+    "db_active": 100,
+    "ok": true
+   },
+   "reports": [
+    {
+     "label": "Purchases page",
+     "url": "/hdc/purchase-v2/purchases",
+     "ok": true,
+     "detail": "status=200"
+    },
+    {
+     "label": "Purchases API",
+     "url": "/api/v2/purchase/purchases",
+     "ok": true,
+     "detail": "status=200 slug_hits=200 expected=present"
+    }
+   ],
+   "seconds": 0.68
+  },
+  {
+   "key": "tools",
+   "title": "Tools inventory",
+   "phase": "edit",
+   "attempted": 100,
+   "succeeded": 100,
+   "failed": [],
+   "verify": {
+    "expected": 100,
+    "db_edited_markers": 100,
+    "db_active": 100,
+    "ok": true
+   },
+   "reports": [
+    {
+     "label": "Tool inventory",
+     "url": "/hdc/tool-rental/inventory",
+     "ok": true,
+     "detail": "status=200"
+    },
+    {
+     "label": "Tool reports",
+     "url": "/hdc/tool-rental/reports",
+     "ok": true,
+     "detail": "status=200"
+    }
+   ],
+   "seconds": 11.34
+  },
+  {
+   "key": "accounts",
+   "title": "Accounts (money pots)",
+   "phase": "edit",
+   "attempted": 100,
+   "succeeded": 100,
+   "failed": [],
+   "verify": {
+    "expected": 100,
+    "db_edited_markers": 100,
+    "db_active": 100,
+    "ok": true
+   },
+   "reports": [
+    {
+     "label": "Accounts page",
+     "url": "/hdc/accounts",
+     "ok": true,
+     "detail": "status=200"
+    },
+    {
+     "label": "Accounts balances API",
+     "url": "/api/accounts/list_accounts_with_balances",
+     "ok": true,
+     "detail": "status=200 slug_hits=100 expected=present"
+    }
+   ],
+   "seconds": 0.77
+  },
+  {
+   "key": "cashflow",
+   "title": "Cash-flow register",
+   "phase": "edit",
+   "attempted": 100,
+   "succeeded": 100,
+   "failed": [],
+   "verify": {
+    "expected": 100,
+    "db_edited_markers": 100,
+    "db_active": 100,
+    "ok": true
+   },
+   "reports": [
+    {
+     "label": "Register page",
+     "url": "/hdc/accounts/cashflow/register",
+     "ok": true,
+     "detail": "status=200"
+    },
+    {
+     "label": "Register export",
+     "url": "/hdc/accounts/cashflow/register/export",
+     "ok": true,
+     "detail": "status=200 slug_hits=400 expected=present"
+    }
+   ],
+   "seconds": 1.93
+  },
+  {
+   "key": "shared",
+   "title": "Shared expenses",
+   "phase": "edit",
+   "attempted": 100,
+   "succeeded": 100,
+   "failed": [],
+   "verify": {
+    "expected": 100,
+    "db_edited_markers": 100,
+    "db_active": 100,
+    "ok": true
+   },
+   "reports": [
+    {
+     "label": "Shared expense list",
+     "url": "/hdc/accounts/shared/expenses",
+     "ok": true,
+     "detail": "status=200"
+    },
+    {
+     "label": "Shared report CSV",
+     "url": "/hdc/accounts/shared/report.csv",
+     "ok": true,
+     "detail": "status=200 slug_hits=100 expected=present"
+    }
+   ],
+   "seconds": 0.73
+  }
+ ]
+}

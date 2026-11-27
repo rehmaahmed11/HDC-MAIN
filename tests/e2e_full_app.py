@@ -529,9 +529,13 @@ def run():
          action='create_entry', direction='in', amount=25000, account_id=cash, date=D,
          party_name='Scrap buyer', description='scrap sale',
          category_id=q(lambda: CashFlowCategory.query.filter_by(direction='in', name='Other Income').first().id))
+    # Pick "Miscellaneous" explicitly: the first 'out' category is
+    # "Material & Purchase", which the engine rightly refuses without a project.
     form('CF register: money OUT 4,000', '/hdc/accounts/cashflow/register', action='create_entry',
          direction='out', amount=4000, account_id=cash, date=D, description='misc',
-         category_id=q(lambda: CashFlowCategory.query.filter_by(direction='out').first().id))
+         category_id=q(lambda: (CashFlowCategory.query.filter_by(
+             direction='out', name='Miscellaneous').first()
+             or CashFlowCategory.query.filter_by(direction='out').first()).id))
     form('CF register: TRANSFER 50,000 cash -> bank', '/hdc/accounts/cashflow/register',
          action='create_entry', direction='transfer', amount=50000, account_id=cash,
          destination_account_id=bank, date=D, description='deposit')
