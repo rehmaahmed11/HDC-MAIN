@@ -292,7 +292,7 @@
                         <a href="{{ return_to }}" class="btn btn-outline-secondary">Cancel</a>
                         {% if not is_new and txn_count == 0 %}
                         <button type="submit" form="accDeleteForm" class="btn btn-outline-danger ms-auto"
-                                onclick="return confirm('Delete “{{ account.name }}” permanently? It has no posted transactions.');">
+                                data-hdc-confirm="Delete “{{ account.name }}” permanently? It has no posted transactions.">
                             <i class="fas fa-trash me-1"></i>Delete
                         </button>
                         {% endif %}

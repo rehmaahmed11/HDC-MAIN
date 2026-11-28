@@ -115,7 +115,7 @@
                     <td class="text-end text-nowrap">
                         {% if not entry.is_void and entry.entry_type in ('advance', 'payment') %}
                         <a href="{{ url_for('hdc_office_staff_ledger_edit', sid=staff.id, lid=entry.id) }}" class="btn btn-outline-primary btn-sm">Edit</a>
-                        <form method="POST" action="{{ url_for('hdc_office_staff_ledger_void', sid=staff.id, lid=entry.id) }}" class="d-inline" onsubmit="return confirm('Void this ledger entry?');">
+                        <form method="POST" action="{{ url_for('hdc_office_staff_ledger_void', sid=staff.id, lid=entry.id) }}" class="d-inline" data-hdc-confirm="Void this ledger entry?">
                             <button type="submit" class="btn btn-outline-danger btn-sm">Void</button>
                         </form>
                         {% else %}

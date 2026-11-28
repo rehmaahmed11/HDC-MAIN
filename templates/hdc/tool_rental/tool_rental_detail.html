@@ -200,9 +200,9 @@
                                     <td>
                                         {{ p.reference or '' }}<br><small>{{ p.notes or '' }}</small><br>
                                         <div class="d-flex gap-1 mt-1">
-                                            <a href="{{ url_for('hdc_tool_rental_payment_receipt', payment_id=p.id) }}" class="btn btn-sm btn-outline-secondary" title="Receipt"><i class="fas fa-receipt"></i></a>
+                                            <a href="{{ url_for('hdc_tool_rental_payment_receipt', payment_id=p.id) }}" class="btn btn-sm btn-outline-secondary" title="Receipt" aria-label="Receipt"><i class="fas fa-receipt"></i></a>
                                             {% if not p.is_void %}
-                                            <button class="btn btn-sm btn-outline-danger" data-bs-toggle="modal" data-bs-target="#voidPay{{ p.id }}"><i class="fas fa-ban"></i></button>
+                                            <button class="btn btn-sm btn-outline-danger" data-bs-toggle="modal" data-bs-target="#voidPay{{ p.id }}" title="Void" aria-label="Void"><i class="fas fa-ban"></i></button>
                                             {% endif %}
                                         </div>
                                     </td>
@@ -213,7 +213,7 @@
                                     <div class="modal-content hdc-modal">
                                       <form method="POST" action="{{ url_for('hdc_tool_rental_payment_void', payment_id=p.id) }}" data-hdc-dialog>
                                         <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
-                                        <div class="modal-header"><h6 class="modal-title">Void Payment?</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                                        <div class="modal-header"><h6 class="modal-title">Void Payment?</h6><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
                                         <div class="modal-body">Void {{ "{:,.0f}".format(p.amount) }} PKR payment? This will also void in Accounts (Cash/Bank ledger).<br><br><label class="form-label">Reason</label><input type="text" name="void_reason" class="form-control" placeholder="Reason"></div>
                                         <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button type="submit" class="btn btn-danger">Void</button></div>
                                       </form>
@@ -509,13 +509,13 @@
                                 </td>
                                 <td>
                                     {% if not d.is_void %}
-                                    <button class="btn btn-sm btn-outline-danger" data-bs-toggle="modal" data-bs-target="#voidDisc{{ d.id }}" title="Void"><i class="fas fa-ban"></i></button>
+                                    <button class="btn btn-sm btn-outline-danger" data-bs-toggle="modal" data-bs-target="#voidDisc{{ d.id }}" title="Void" aria-label="Void"><i class="fas fa-ban"></i></button>
                                     <div class="modal fade" id="voidDisc{{ d.id }}" tabindex="-1">
                                       <div class="modal-dialog modal-sm">
                                         <div class="modal-content hdc-modal">
                                           <form method="POST" action="{{ url_for('hdc_tool_rental_discount_void', discount_id=d.id) }}" data-hdc-dialog>
                                             <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
-                                            <div class="modal-header"><h6 class="modal-title">Void Discount?</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                                            <div class="modal-header"><h6 class="modal-title">Void Discount?</h6><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
                                             <div class="modal-body">Void {{ "{:,.0f}".format(d.amount) }} PKR discount? The amount becomes owed again and is removed from Accounts.<br><br><label class="form-label">Reason</label><input type="text" name="void_reason" class="form-control" placeholder="Reason"></div>
                                             <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button type="submit" class="btn btn-danger">Void</button></div>
                                           </form>
@@ -706,7 +706,7 @@
                 {% endif %}
             </p>
             <form method="post" action="{{ url_for('hdc_tool_rental_void', rental_id=rental.id) }}"
-                  onsubmit="return confirm('Cancel rental {{ rental.rental_code }}? Its pieces go back to the warehouse.');">
+                  data-hdc-confirm="Cancel rental {{ rental.rental_code }}? Its pieces go back to the warehouse.">
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
                 <div class="row g-2 align-items-end">
                     <div class="col-md-8">

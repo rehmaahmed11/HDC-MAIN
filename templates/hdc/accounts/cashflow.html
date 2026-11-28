@@ -3,6 +3,8 @@
 {% block page_heading %}Daily Report{% endblock %}
 
 {% block content %}
+{% from "shared/_section_nav.html" import section_nav with context %}
+{{ section_nav('accounts', 'cashflow') }}
 <div class="card hdc-card mb-3">
     <div class="card-body py-3">
         <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
@@ -49,7 +51,7 @@
             <div class="col-12 col-md-3 d-flex gap-2">
                 <button type="submit" class="btn btn-sm btn-primary"><i class="fas fa-magnifying-glass me-1"></i>Search</button>
                 <a href="{{ url_for('hdc_cashflow') }}" class="btn btn-sm btn-outline-secondary">Clear</a>
-                <a href="{{ url_for('hdc_cashflow_export', date_from=filter_date_from, date_to=filter_date_to, account_id=filter_account_id, account_mode=filter_account_mode, category=filter_category, direction=filter_direction, project_id=filter_project_id, party_name=filter_party_name) }}" class="btn btn-sm btn-outline-success" title="Download CSV"><i class="fas fa-file-csv" aria-hidden="true"></i></a>
+                <a href="{{ url_for('hdc_cashflow_export', date_from=filter_date_from, date_to=filter_date_to, account_id=filter_account_id, account_mode=filter_account_mode, category=filter_category, direction=filter_direction, project_id=filter_project_id, party_name=filter_party_name) }}" class="btn btn-sm btn-outline-success" title="Download CSV" aria-label="Download CSV"><i class="fas fa-file-csv" aria-hidden="true"></i></a>
             </div>
             <div class="col-12">
                 <details {% if filter_account_mode or filter_category or filter_project_id or filter_party_name %}open{% endif %}>

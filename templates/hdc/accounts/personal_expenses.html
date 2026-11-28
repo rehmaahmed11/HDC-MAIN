@@ -91,7 +91,7 @@
                         </td>
                         <td>
                             {% if not row.is_void %}
-                                <a href="{{ url_for('hdc_personal_expense_void', eid=row.id) }}" class="btn btn-sm btn-outline-danger" title="Void">
+                                <a href="{{ url_for('hdc_personal_expense_void', eid=row.id) }}" class="btn btn-sm btn-outline-danger" title="Void" aria-label="Void">
                                     <i class="fas fa-trash"></i>
                                 </a>
                             {% else %}

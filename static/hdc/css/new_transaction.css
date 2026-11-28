@@ -288,7 +288,7 @@
 
 /* Add-new dialogs */
 .hdc-mini-modal { max-width: min(460px, calc(100vw - 24px)); margin: 8vh auto 12px; }
-.hdc-mini-modal .modal-content { border: 1px solid var(--card-border); border-radius: 14px; }
+.hdc-mini-modal .modal-content { background: var(--modal-bg); color: var(--text); border: 1px solid var(--card-border); border-radius: 14px; }
 .hdc-mini-modal .modal-title { font-size: .98rem; font-weight: 700; }
 .hdc-mini-modal .modal-body { max-height: min(64vh, 520px); overflow-y: auto; }
 .hdc-mini-modal .form-control,

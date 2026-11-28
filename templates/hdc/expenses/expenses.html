@@ -148,7 +148,7 @@
     <input type="text" name="item_remarks" maxlength="200"
            class="form-control form-control-sm exp-item-remarks js-item-remarks"
            placeholder="Remarks (optional)" aria-label="Remarks">
-    <button type="button" class="btn btn-outline-danger btn-sm btn-exp-icon js-item-remove" title="Remove this line">
+    <button type="button" class="btn btn-outline-danger btn-sm btn-exp-icon js-item-remove" title="Remove this line" aria-label="Remove this line">
         <i class="fas fa-xmark"></i>
     </button>
 </div>
@@ -157,12 +157,25 @@
 <div class="row g-3 mt-1">
     <!-- BATCH ENTRY FORM -->
     <div class="col-12">
-        <div class="card hdc-card mb-3">
-            <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
-                <span><i class="fas fa-plus-circle me-2"></i>Record Expenses</span>
-                <span class="badge bg-success-subtle text-success d-none d-md-inline">Fill the site once, add many expense lines</span>
+        <div class="card hdc-card hdc-entry-drawer mb-3" data-hdc-entry-drawer="site-expenses">
+            <div class="card-header hdc-card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+                <div class="d-flex align-items-center gap-2">
+                    <span><i class="fas fa-plus-circle me-2"></i>Record Expenses</span>
+                    <span class="badge bg-success-subtle text-success d-none d-md-inline">Fill the site once, add many expense lines</span>
+                </div>
+                <div class="d-flex align-items-center gap-1">
+                    <a href="#expenseRegisterCard" class="btn btn-sm btn-outline-secondary py-0 px-2" title="Jump to Expense Records">
+                        <i class="fas fa-arrow-down me-1"></i>Register
+                    </a>
+                    <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2" data-hdc-entry-pin title="Keep form open while filtering" aria-label="Keep form open while filtering" aria-pressed="false">
+                        <i class="fas fa-thumbtack"></i>
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2" data-hdc-entry-toggle aria-expanded="true" aria-label="Toggle entry form">
+                        <i class="fas fa-chevron-up me-1"></i><span data-hdc-entry-toggle-label>Hide form</span>
+                    </button>
+                </div>
             </div>
-            <div class="card-body">
+            <div class="card-body" data-hdc-entry-body>
                 <div id="expFormAlert" class="alert alert-danger d-none" role="alert"></div>
                 <form method="POST" id="expenseBatchForm">
                     <div class="row g-3 align-items-end">
@@ -222,7 +235,7 @@
 
     <!-- LIST -->
     <div class="col-12">
-        <div class="card hdc-card">
+        <div class="card hdc-card" id="expenseRegisterCard">
             <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
                 <span><i class="fas fa-list me-2"></i>Expense Records</span>
                 <span class="badge bg-danger fs-6">Total: {{ "{:,.0f}".format(total) }} PKR</span>
@@ -257,11 +270,11 @@
                         <td class="text-muted small">{{ exp.remarks or '-' }}</td>
                         <td class="text-end">
                             <div class="d-inline-flex gap-1">
-                                <a href="{{ url_for('hdc_expense_edit', eid=exp.id) }}" class="btn btn-outline-primary btn-sm" title="Edit">
+                                <a href="{{ url_for('hdc_expense_edit', eid=exp.id) }}" class="btn btn-outline-primary btn-sm" title="Edit" aria-label="Edit">
                                     <i class="fas fa-edit"></i>
                                 </a>
-                                <form method="POST" action="{{ url_for('hdc_expense_delete', eid=exp.id) }}" onsubmit="return confirm('Delete this expense record?');">
-                                    <button type="submit" class="btn btn-outline-danger btn-sm" title="Delete">
+                                <form method="POST" action="{{ url_for('hdc_expense_delete', eid=exp.id) }}" data-hdc-confirm="Delete this expense record?">
+                                    <button type="submit" class="btn btn-outline-danger btn-sm" title="Delete" aria-label="Delete">
                                         <i class="fas fa-trash-alt"></i>
                                     </button>
                                 </form>

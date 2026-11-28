@@ -3,6 +3,8 @@
 {% block page_heading %}Custom Formula Library{% endblock %}
 
 {% block content %}
+{% from "shared/_section_nav.html" import section_nav with context %}
+{{ section_nav('projects', 'formulas') }}
 <div class="row g-3 mt-1">
     <div class="col-md-5">
         <div class="card hdc-card">
@@ -58,7 +60,7 @@
                             <form method="POST" style="display:inline" data-hdc-dialog>
                                 <input type="hidden" name="action" value="delete">
                                 <input type="hidden" name="formula_id" value="{{ f.id }}">
-                                <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Delete this formula?')">
+                                <button type="submit" class="btn btn-sm btn-outline-danger" data-hdc-confirm="Delete this formula?" title="Delete" aria-label="Delete">
                                     <i class="fas fa-trash"></i>
                                 </button>
                             </form>

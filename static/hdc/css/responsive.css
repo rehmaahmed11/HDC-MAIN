@@ -1131,3 +1131,62 @@ pre, code, kbd, samp {
     table.hdc-rt-stack.hdc-no-stack > tbody > tr > td,
     [data-hdc-no-stack] table.hdc-rt-stack > tbody > tr > td { display: table-cell; }
 }
+
+/* ═════════════════════════════════════════════════════════════════════════
+   11. USABILITY UPGRADES — Sub-navigation, Quick Jump, Mobile Filter Drawer
+   ═════════════════════════════════════════════════════════════════════════ */
+main.main-content [id] {
+    scroll-margin-top: calc(var(--topbar-height, 56px) + 14px);
+}
+
+.hdc-mobile-filter-toggle {
+    display: none;
+}
+
+@media screen and (max-width: 991.98px) {
+    .hdc-subnav {
+        padding: 4px;
+        gap: 3px;
+        scrollbar-width: none;
+    }
+    .hdc-subnav::-webkit-scrollbar {
+        display: none;
+    }
+    .hdc-subnav-link {
+        padding: 6px 10px;
+        font-size: 0.78rem;
+    }
+    .hdc-split-workspace {
+        row-gap: 0.75rem;
+    }
+}
+
+@media screen and (max-width: 767.98px) {
+    .topbar-crumb-parent,
+    .topbar-crumb-group,
+    .topbar-crumb-sep {
+        display: none !important;
+    }
+    .quick-jump-label,
+    .quick-jump-kbd {
+        display: none !important;
+    }
+    .btn-quick-jump {
+        padding: 5px 9px;
+        min-width: 38px;
+        justify-content: center;
+    }
+    .hdc-mobile-filter-toggle {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+    }
+    form.hdc-mobile-filter-collapsed {
+        display: none !important;
+    }
+    .hdc-entry-drawer .card-header {
+        padding: 0.55rem 0.75rem;
+    }
+}
+

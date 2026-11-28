@@ -3,6 +3,8 @@
 {% block page_heading %}Office Staff{% endblock %}
 
 {% block content %}
+{% from "shared/_section_nav.html" import section_nav with context %}
+{{ section_nav('office', 'staff') }}
 <div class="row g-3 mt-1">
     <div class="col-md-6">
         <a href="{{ url_for('hdc_office_staff_ledger_list') }}" class="text-decoration-none text-reset d-flex h-100">

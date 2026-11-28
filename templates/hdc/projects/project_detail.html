@@ -62,6 +62,29 @@
         </div>
     </div>
 </div>
+
+<!-- Quick Section Jump Bar -->
+<nav class="hdc-subnav mt-2 mb-1" aria-label="Project sections">
+    <a class="hdc-subnav-link" href="{{ url_for('hdc_projects') }}"><i class="fas fa-arrow-left"></i><span>All Projects</span></a>
+    {% if hdc_page_allowed('stages') %}
+    <a class="hdc-subnav-link" href="#projStages"><i class="fas fa-layer-group"></i><span>Stages ({{ stages|length }})</span></a>
+    {% endif %}
+    {% if hdc_page_allowed('project_financials') or hdc_page_allowed('owner_payments') %}
+    <a class="hdc-subnav-link" href="#projPayments"><i class="fas fa-hand-holding-dollar"></i><span>Financials &amp; Receipts</span></a>
+    {% endif %}
+    {% if hdc_page_allowed('subcontractors') %}
+    <a class="hdc-subnav-link" href="#projSubcontractors"><i class="fas fa-hard-hat"></i><span>Subcontractors</span></a>
+    {% endif %}
+    {% if hdc_page_allowed('timekeeping') or hdc_page_allowed('expenses') %}
+    <a class="hdc-subnav-link" href="#projActivity"><i class="fas fa-calendar-check"></i><span>Time &amp; Expenses</span></a>
+    {% endif %}
+    {% if hdc_page_allowed('purchases') or hdc_page_allowed('purchase_orders') %}
+    <a class="hdc-subnav-link" href="#projSuppliers"><i class="fas fa-truck-loading"></i><span>Site Suppliers</span></a>
+    {% endif %}
+    {% if hdc_page_allowed('estimation') %}
+    <a class="hdc-subnav-link" href="{{ url_for('hdc_project_estimation', pid=p.id) }}"><i class="fas fa-calculator"></i><span>Estimation</span></a>
+    {% endif %}
+</nav>
 {% if hdc_page_allowed('project_financials') %}
 <!-- FINANCIAL SUMMARY CARDS -->
 <div class="row g-3 mt-1">
@@ -204,7 +227,7 @@
                 {% for op in owner_payments_voided[:10] %}
                 <div class="d-flex justify-content-between align-items-center small mb-1">
                     <span>{{ fmt_pkt(op.activity_at or op.created_at) }} | {{ "{:,.0f}".format(op.amount) }} PKR</span>
-                    <form method="POST" action="{{ url_for('hdc_restore_owner_payment', pid=p.id, oid=op.id) }}" class="d-inline" onsubmit="return confirm('Restore this payment?');">
+                    <form method="POST" action="{{ url_for('hdc_restore_owner_payment', pid=p.id, oid=op.id) }}" class="d-inline" data-hdc-confirm="Restore this payment?">
                         <button type="submit" class="btn btn-xs btn-outline-success btn-sm">Restore</button>
                     </form>
                 </div>
@@ -219,7 +242,7 @@
 
 {% if hdc_page_allowed('stages') %}
 <!-- STAGES SECTION -->
-<div class="card hdc-card mt-3">
+<div class="card hdc-card mt-3" id="projStages">
     <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
         <span><i class="fas fa-layer-group me-2"></i>Project Stages
             <span class="badge bg-secondary ms-1">{{ stages|length }}</span>
@@ -311,42 +334,42 @@
                     </span>
                 </td>
                 <td class="text-nowrap">
-                    <a href="{{ url_for('hdc_edit_stage', sid=s.id) }}" class="btn btn-xs btn-outline-primary btn-sm" title="Edit Stage">
+                    <a href="{{ url_for('hdc_edit_stage', sid=s.id) }}" class="btn btn-xs btn-outline-primary btn-sm" title="Edit Stage" aria-label="Edit Stage">
                         <i class="fas fa-edit"></i>
                     </a>
                     <form method="POST" action="{{ url_for('hdc_delete_stage', sid=s.id) }}" class="d-inline"
-                          onsubmit="return confirm('Delete stage {{ s.name }}?')">
-                        <button type="submit" class="btn btn-xs btn-outline-danger btn-sm ms-1" title="Delete">
+                          data-hdc-confirm="Delete stage {{ s.name }}?">
+                        <button type="submit" class="btn btn-xs btn-outline-danger btn-sm ms-1" title="Delete" aria-label="Delete">
                             <i class="fas fa-trash"></i>
                         </button>
                     </form>
                     <form method="POST" action="{{ url_for('hdc_stage_status', sid=s.id) }}" class="d-inline ms-1" data-hdc-dialog>
                         {% if s.status in ['completed','Complete'] %}
                         <input type="hidden" name="status" value="active">
-                        <button type="submit" class="btn btn-xs btn-outline-secondary btn-sm" title="Mark Active">
+                        <button type="submit" class="btn btn-xs btn-outline-secondary btn-sm" title="Mark Active" aria-label="Mark Active">
                             <i class="fas fa-undo"></i>
                         </button>
                         {% else %}
                         <input type="hidden" name="status" value="completed">
-                        <button type="submit" class="btn btn-xs btn-outline-success btn-sm" title="Mark Complete">
+                        <button type="submit" class="btn btn-xs btn-outline-success btn-sm" title="Mark Complete" aria-label="Mark Complete">
                             <i class="fas fa-check"></i>
                         </button>
                         {% endif %}
                     </form>
                     {% if s.status not in ['completed','Complete'] and s.assigned_subcontractor %}
                     <form method="POST" action="{{ url_for('hdc_stage_status', sid=s.id) }}" class="d-inline ms-1"
-                          onsubmit="return confirm('Mark complete and force subcontractor completion to 100%?')">
+                          data-hdc-confirm="Mark complete and force subcontractor completion to 100%?">
                         <input type="hidden" name="status" value="completed">
                         <input type="hidden" name="auto_sub_complete" value="1">
-                        <button type="submit" class="btn btn-xs btn-outline-dark btn-sm" title="Complete + Sub 100%">
+                        <button type="submit" class="btn btn-xs btn-outline-dark btn-sm" title="Complete + Sub 100%" aria-label="Complete + Sub 100%">
                             <i class="fas fa-bolt"></i>
                         </button>
                     </form>
                     {% endif %}
                     {% if s.assigned_subcontractors %}
                     <form method="POST" action="{{ url_for('hdc_stage_shift_to_company', sid=s.id) }}" class="d-inline ms-1"
-                          onsubmit="return confirm('Remove ALL subcontractor assignments and return to company execution? Financial history will be retained.')">
-                        <button type="submit" class="btn btn-xs btn-outline-secondary btn-sm" title="Shift to Company">
+                          data-hdc-confirm="Remove ALL subcontractor assignments and return to company execution? Financial history will be retained.">
+                        <button type="submit" class="btn btn-xs btn-outline-secondary btn-sm" title="Shift to Company" aria-label="Shift to Company">
                             <i class="fas fa-building"></i>
                         </button>
                     </form>
@@ -444,14 +467,14 @@
                         <td class="text-end text-nowrap">
                             {% if not stage_done %}
                             <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="collapse"
-                                    data-bs-target="#member-terms-{{ s.id }}-{{ member.id }}" title="Edit this subcontractor's terms">
+                                    data-bs-target="#member-terms-{{ s.id }}-{{ member.id }}" title="Edit this subcontractor's terms" title="Edit" aria-label="Edit">
                                 <i class="fas fa-pen"></i>
                             </button>
                             {% endif %}
                             <form method="POST" action="{{ url_for('hdc_stage_shift_to_company', sid=s.id) }}" class="d-inline"
                                   onsubmit="return confirm({{ ('Remove ' ~ member.name ~ ' from this stage? Financial history will be retained.')|tojson|forceescape }});">
                                 <input type="hidden" name="subcontractor_id" value="{{ member.id }}">
-                                <button class="btn btn-sm btn-outline-danger" title="Remove from stage"><i class="fas fa-user-minus"></i></button>
+                                <button class="btn btn-sm btn-outline-danger" title="Remove from stage" aria-label="Remove from stage"><i class="fas fa-user-minus"></i></button>
                             </form>
                         </td>
                     </tr>
@@ -525,7 +548,7 @@
                                     <input type="file" name="drawing_file" accept="application/pdf,.pdf" required class="form-control form-control-sm" style="max-width:180px">
                                     <button type="submit" class="btn btn-xs btn-outline-primary btn-sm">Replace</button>
                                 </form>
-                                <form method="POST" action="{{ url_for('hdc_stage_drawing_delete', did=d.id) }}" class="d-inline" onsubmit="return confirm('Delete this drawing?')">
+                                <form method="POST" action="{{ url_for('hdc_stage_drawing_delete', did=d.id) }}" class="d-inline" data-hdc-confirm="Delete this drawing?">
                                     <button type="submit" class="btn btn-xs btn-outline-danger btn-sm ms-1">Delete</button>
                                 </form>
                             </td>
@@ -549,7 +572,7 @@
 {% endif %}
 
 <!-- FINANCIAL BREAKDOWN + PAYMENTS ROW -->
-<div class="row g-3 mt-1">
+<div class="row g-3 mt-1" id="projPayments">
     {% if hdc_page_allowed('project_financials') %}
     <div class="col-md-4">
         <div class="card hdc-card h-100">
@@ -593,7 +616,7 @@
                 <span><i class="fas fa-money-bill-wave me-2"></i>Owner Payments
                     <span class="badge bg-success ms-1">{{ "{:,.0f}".format(p.total_received) }} PKR</span>
                 </span>
-                <button class="btn btn-mint btn-sm" data-bs-toggle="collapse" data-bs-target="#addPaymentForm">
+                <button class="btn btn-mint btn-sm" data-bs-toggle="collapse" data-bs-target="#addPaymentForm" title="Add" aria-label="Add">
                     <i class="fas fa-plus"></i>
                 </button>
             </div>
@@ -633,12 +656,12 @@
                         <td class="small">{{ op.received_to_account.name if op.received_to_account else '-' }}</td>
                         <td class="text-muted small">{{ op.remarks or '—' }}</td>
                         <td>
-                            <a href="{{ url_for('hdc_owner_payment_receipt', pid=p.id, oid=op.id) }}" target="_blank" rel="noopener" class="btn btn-xs btn-outline-primary btn-sm me-1" title="Receipt">
+                            <a href="{{ url_for('hdc_owner_payment_receipt', pid=p.id, oid=op.id) }}" target="_blank" rel="noopener" class="btn btn-xs btn-outline-primary btn-sm me-1" title="Receipt" aria-label="Receipt">
                                 <i class="fas fa-receipt"></i>
                             </a>
                             <form method="POST" action="{{ url_for('hdc_delete_owner_payment', pid=p.id, oid=op.id) }}"
-                                  onsubmit="return confirm('Void this payment?')" class="d-inline">
-                                <button type="submit" class="btn btn-xs btn-outline-danger btn-sm">
+                                  data-hdc-confirm="Void this payment?" class="d-inline">
+                                <button type="submit" class="btn btn-xs btn-outline-danger btn-sm" title="Void" aria-label="Void">
                                     <i class="fas fa-ban"></i>
                                 </button>
                             </form>
@@ -657,10 +680,10 @@
 
 {% if hdc_page_allowed('subcontractors') %}
 <!-- SUBCONTRACTORS -->
-<div class="card hdc-card mt-3">
+<div class="card hdc-card mt-3" id="projSubcontractors">
     <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
         <span><i class="fas fa-hard-hat me-2"></i>Subcontractors</span>
-        <button class="btn btn-mint btn-sm" data-bs-toggle="collapse" data-bs-target="#addSubForm">
+        <button class="btn btn-mint btn-sm" data-bs-toggle="collapse" data-bs-target="#addSubForm" title="Add" aria-label="Add">
             <i class="fas fa-plus"></i>
         </button>
     </div>
@@ -706,15 +729,15 @@
                 <td class="text-muted small">{{ s.retention_percentage }}%</td>
                 <td>
                     <button class="btn btn-xs btn-outline-success btn-sm"
-                        data-bs-toggle="collapse" data-bs-target="#pay-sub-{{ s.id }}">
+                        data-bs-toggle="collapse" data-bs-target="#pay-sub-{{ s.id }}" title="Action" aria-label="Action">
                         <i class="fas fa-money-bill"></i>
                     </button>
                     <button class="btn btn-xs btn-outline-primary btn-sm ms-1"
-                        data-bs-toggle="collapse" data-bs-target="#prog-sub-{{ s.id }}">
+                        data-bs-toggle="collapse" data-bs-target="#prog-sub-{{ s.id }}" title="Action" aria-label="Action">
                         <i class="fas fa-percent"></i>
                     </button>
                     <button class="btn btn-xs btn-outline-warning btn-sm ms-1"
-                        data-bs-toggle="collapse" data-bs-target="#att-sub-{{ s.id }}">
+                        data-bs-toggle="collapse" data-bs-target="#att-sub-{{ s.id }}" title="Action" aria-label="Action">
                         <i class="fas fa-user-check"></i>
                     </button>
                     <div class="collapse mt-2" id="pay-sub-{{ s.id }}">
@@ -760,7 +783,7 @@
 {% endif %}
 
 <!-- ATTENDANCE RECENT + MATERIAL PURCHASES -->
-<div class="row g-3 mt-1">
+<div class="row g-3 mt-1" id="projActivity">
     {% if hdc_page_allowed('timekeeping') or hdc_page_allowed('timekeeping_records') %}
     <div class="col-md-6">
         <div class="card hdc-card">
@@ -825,7 +848,7 @@
 {# Site ⇄ supplier tracking from the Purchase section, read from the site side:
    who is assigned to this site and who has actually delivered to it. #}
 {% if hdc_page_allowed('purchases') or hdc_page_allowed('purchase_orders') %}
-<div class="card hdc-card mt-3">
+<div class="card hdc-card mt-3" id="projSuppliers">
     <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
         <span><i class="fas fa-truck-loading me-2"></i>Site Suppliers (Purchase Tracking)</span>
         <a href="{{ url_for('hdc_purchase_v2_suppliers_by_site', project_id=p.id) }}"

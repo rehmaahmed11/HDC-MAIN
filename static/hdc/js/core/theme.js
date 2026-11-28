@@ -7,9 +7,13 @@
     var themeIcon = document.getElementById('themeIcon');
     function applyTheme(t) {
         document.documentElement.setAttribute('data-theme', t);
+        document.documentElement.setAttribute('data-bs-theme', t);
         localStorage.setItem('hdc_theme', t);
         if (themeIcon) {
             themeIcon.className = t === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
+        }
+        if (themeBtn) {
+            themeBtn.setAttribute('aria-pressed', t === 'dark' ? 'true' : 'false');
         }
     }
     var currentTheme = localStorage.getItem('hdc_theme') || 'light';

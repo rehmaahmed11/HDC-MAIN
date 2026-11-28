@@ -155,7 +155,7 @@
                                 </td>
                                 <td class="text-end acc-actions">
                                     <button class="btn btn-outline-primary" type="button" data-bs-toggle="collapse"
-                                            data-bs-target="#editParty{{ p.id }}" title="Edit">
+                                            data-bs-target="#editParty{{ p.id }}" title="Edit" aria-label="Edit">
                                         <i class="fas fa-pen"></i>
                                     </button>
                                     <form method="post" action="{{ url_for('hdc_shared_parties') }}" class="d-inline" data-hdc-dialog>
@@ -163,17 +163,17 @@
                                         <input type="hidden" name="party_id" value="{{ p.id }}">
                                         <input type="hidden" name="status" value="{{ 'inactive' if p.is_active else 'active' }}">
                                         <button class="btn btn-outline-secondary" type="submit"
-                                                title="{{ 'Deactivate (history stays)' if p.is_active else 'Activate' }}">
+                                                title="{{ 'Deactivate (history stays)' if p.is_active else 'Activate' }}" title="Action" aria-label="Action">
                                             <i class="fas fa-{{ 'pause' if p.is_active else 'play' }}"></i>
                                         </button>
                                     </form>
                                     {% set used = usage.get(p.id, {}) %}
                                     {% if not (used.get('shares') or used.get('as_payer') or used.get('settlements')) %}
                                     <form method="post" action="{{ url_for('hdc_shared_parties') }}" class="d-inline"
-                                          onsubmit="return confirm('Delete party {{ p.name }}? It has never been used.');">
+                                          data-hdc-confirm="Delete party {{ p.name }}? It has never been used.">
                                         <input type="hidden" name="action" value="delete">
                                         <input type="hidden" name="party_id" value="{{ p.id }}">
-                                        <button class="btn btn-outline-danger" type="submit" title="Delete (never used)">
+                                        <button class="btn btn-outline-danger" type="submit" title="Delete (never used)" aria-label="Delete (never used)">
                                             <i class="fas fa-trash"></i>
                                         </button>
                                     </form>

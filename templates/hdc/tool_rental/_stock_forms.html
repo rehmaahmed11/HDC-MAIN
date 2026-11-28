@@ -141,7 +141,7 @@
           <h6 class="modal-title">
             <i class="fas fa-cart-plus me-2"></i>{% if tool %}Add Stock — New Purchase{% else %}Purchase Stock — One or Multiple Tools{% endif %}
           </h6>
-          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         {% if tool %}
         <div class="modal-body row g-2">
@@ -289,7 +289,7 @@
         <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
         <div class="modal-header">
           <h6 class="modal-title text-danger"><i class="fas fa-trash-can me-2"></i>Scrap / Discard Old Tool</h6>
-          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body row g-2">
           {% if tool %}

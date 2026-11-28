@@ -3,6 +3,8 @@
 {% block page_heading %}Payroll{% endblock %}
 
 {% block content %}
+{% from "shared/_section_nav.html" import section_nav with context %}
+{{ section_nav('workforce', 'payroll') }}
 <div class="row justify-content-center mt-2">
     <div class="col-12 col-lg-8 col-xl-7 col-xxl-6">
         <div class="text-center mb-3">

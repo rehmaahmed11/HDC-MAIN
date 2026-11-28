@@ -3,6 +3,8 @@
 {% block page_heading %}Supplier ⇄ Site Tracking{% endblock %}
 
 {% block content %}
+{% from "shared/_section_nav.html" import section_nav with context %}
+{{ section_nav('purchase', 'supplier_sites') }}
 {# Both directions of the same question:
      site → which suppliers supplied it (and which are only assigned), and
      supplier → which sites it supplied.

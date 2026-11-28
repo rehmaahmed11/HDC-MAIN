@@ -4,6 +4,8 @@
 {% block page_heading %}Trades{% endblock %}
 
 {% block content %}
+{% from "shared/_section_nav.html" import section_nav with context %}
+{{ section_nav('workforce', 'trades') }}
 {# Trades is a list of names, the same object as Expense Categories, so it uses
    the same page shape — shared page head, one full-width table card, the same
    add modal and the shared row-rename script.  It previously had its own
@@ -69,7 +71,7 @@
                             <i class="fas fa-pen" aria-hidden="true"></i>
                         </button>
                         <form method="POST" class="d-inline"
-                              onsubmit="return confirm('Delete this trade from active list?');">
+                              data-hdc-confirm="Delete this trade from active list?">
                             <input type="hidden" name="action" value="delete_trade">
                             <input type="hidden" name="trade_id" value="{{ tr.id }}">
                             <button type="submit" class="btn btn-outline-danger btn-sm hdc-rename-icon-btn ms-1"
@@ -124,5 +126,5 @@
 
 {% block extra_js %}
 {# Row rename is shared with Expense Categories — static/hdc/js/core/row_rename.js #}
-<script src="/hdc_static/js/core/row_rename.js"></script>
+<script src="/hdc_static/js/core/row_rename.js?v={{ hdc_asset_stamp }}"></script>
 {% endblock %}

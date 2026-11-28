@@ -3,6 +3,8 @@
 {% block page_heading %}Office Expenses{% endblock %}
 
 {% block content %}
+{% from "shared/_section_nav.html" import section_nav with context %}
+{{ section_nav('office', 'expenses') }}
 <div class="row g-3 mt-1">
     <div class="col-md-4">
         <div class="card hdc-card">
@@ -110,9 +112,9 @@
                                 {% if r.office_staff_ledger_id %}
                                 <span class="badge bg-secondary">From Staff Ledger</span>
                                 {% else %}
-                                <a href="{{ url_for('hdc_office_expense_edit', eid=r.id) }}" class="btn btn-outline-primary btn-sm"><i class="fas fa-edit"></i></a>
-                                <form method="POST" action="{{ url_for('hdc_office_expense_delete', eid=r.id) }}" class="d-inline" onsubmit="return confirm('Delete this office expense?');">
-                                    <button type="submit" class="btn btn-outline-danger btn-sm"><i class="fas fa-trash-alt"></i></button>
+                                <a href="{{ url_for('hdc_office_expense_edit', eid=r.id) }}" class="btn btn-outline-primary btn-sm" title="Edit" aria-label="Edit"><i class="fas fa-edit"></i></a>
+                                <form method="POST" action="{{ url_for('hdc_office_expense_delete', eid=r.id) }}" class="d-inline" data-hdc-confirm="Delete this office expense?">
+                                    <button type="submit" class="btn btn-outline-danger btn-sm" title="Delete" aria-label="Delete"><i class="fas fa-trash-alt"></i></button>
                                 </form>
                                 {% endif %}
                             </td>

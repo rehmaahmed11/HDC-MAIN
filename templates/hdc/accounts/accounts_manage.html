@@ -3,6 +3,8 @@
 {% block page_heading %}Manage Accounts{% endblock %}
 
 {% block content %}
+{% from "shared/_section_nav.html" import section_nav with context %}
+{{ section_nav('accounts', 'balances') }}
 {#
   Manage Accounts — every account in one list.
 
@@ -326,12 +328,12 @@
                         <td>
                             <div class="acc-actions">
                                 <a href="{{ url_for('hdc_account_ledger', account_id=a.id) }}"
-                                   class="btn btn-outline-dark" title="View ledger">
+                                   class="btn btn-outline-dark" title="View ledger" aria-label="View ledger">
                                     <i class="fas fa-book-open"></i>
                                 </a>
                                 {% if a.status != 'archived' %}
                                 <a href="{{ url_for('hdc_account_edit', account_id=a.id, return_to=url_for('hdc_accounts_manage', show=show_mode)) }}"
-                                   class="btn btn-outline-primary" title="Edit account">
+                                   class="btn btn-outline-primary" title="Edit account" aria-label="Edit account">
                                     <i class="fas fa-pen-to-square"></i>
                                 </a>
                                 <form method="POST" class="d-inline"
@@ -341,7 +343,7 @@
                                     <button type="submit"
                                             class="btn {% if a.status == 'active' %}btn-outline-warning{% else %}btn-outline-success{% endif %}"
                                             title="{{ 'Suspend' if a.status == 'active' else 'Reactivate' }}"
-                                            onclick="return confirm('{{ 'Suspend' if a.status == 'active' else 'Reactivate' }} “{{ a.name }}”?{% if a.status == 'active' %} Suspended accounts cannot be used for new transactions.{% endif %}');">
+                                            onclick="return confirm('{{ 'Suspend' if a.status == 'active' else 'Reactivate' }} “{{ a.name }}”?{% if a.status == 'active' %} Suspended accounts cannot be used for new transactions.{% endif %}');" title="Restore" aria-label="Restore">
                                         <i class="fas {% if a.status == 'active' %}fa-power-off{% else %}fa-rotate-left{% endif %}"></i>
                                     </button>
                                 </form>
@@ -350,7 +352,7 @@
                                     <input type="hidden" name="action" value="delete_account">
                                     <input type="hidden" name="account_id" value="{{ a.id }}">
                                     <button type="submit" class="btn btn-outline-danger" title="Delete / archive"
-                                            onclick="return confirm('Delete “{{ a.name }}”?\n\n{% if a.txn_count %}This account has {{ a.txn_count }} posted transaction(s), so it will be ARCHIVED instead of deleted to preserve accounting history.{% else %}This account has no posted transactions and will be permanently deleted.{% endif %}');">
+                                            data-hdc-confirm="Delete “{{ a.name }}”?  {% if a.txn_count %}This account has {{ a.txn_count }} posted transaction(s), so it will be ARCHIVED instead of deleted to preserve accounting history.{% else %}This account has no posted transactions and will be permanently deleted.{% endif %}" aria-label="Delete / archive">
                                         <i class="fas fa-trash"></i>
                                     </button>
                                 </form>
@@ -358,7 +360,7 @@
                                 {# Archived: read-only, but restorable. Restoring beats recreating —
                                    a new account would start a second ledger and split the history. #}
                                 <a href="{{ url_for('hdc_account_ledger', account_id=a.id) }}"
-                                   class="btn btn-outline-dark" title="View preserved ledger ({{ a.txn_count }} transactions)">
+                                   class="btn btn-outline-dark" title="View preserved ledger ({{ a.txn_count }} transactions)" aria-label="View preserved ledger ({{ a.txn_count }} transactions)">
                                     <i class="fas fa-lock"></i>
                                 </a>
                                 <form method="POST" class="d-inline"
@@ -366,7 +368,7 @@
                                     <input type="hidden" name="action" value="restore_account">
                                     <input type="hidden" name="account_id" value="{{ a.id }}">
                                     <button type="submit" class="btn btn-outline-success" title="Restore this archived account"
-                                            onclick="return confirm('Restore “{{ a.name }}”?\n\nIt becomes active again and its {{ a.txn_count }} preserved transaction(s) stay intact.');">
+                                            data-hdc-confirm="Restore “{{ a.name }}”?  It becomes active again and its {{ a.txn_count }} preserved transaction(s) stay intact." aria-label="Restore this archived account">
                                         <i class="fas fa-box-open"></i>
                                     </button>
                                 </form>

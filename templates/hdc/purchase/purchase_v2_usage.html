@@ -3,6 +3,8 @@
 {% block page_heading %}Material Usage{% endblock %}
 
 {% block content %}
+{% from "shared/_section_nav.html" import section_nav with context %}
+{{ section_nav('purchase', 'usage') }}
 <div class="d-flex flex-wrap gap-2 align-items-center mt-1 mb-3">
     <a href="{{ url_for('hdc_purchase_v2_page') }}" class="btn btn-sm btn-outline-secondary">
         <i class="fas fa-arrow-left me-1"></i>Back
@@ -12,12 +14,25 @@
     <span class="badge bg-secondary">Cost: Rs {{ "{:,.0f}".format(total_cost or 0) }}</span>
 </div>
 
-<div class="row g-4">
+<div class="row g-4 hdc-split-workspace">
     <!-- Record Usage Form (left column) -->
     <div class="col-lg-4">
-        <div class="card hdc-card mb-4">
-            <div class="card-header hdc-card-header"><i class="fas fa-tools me-2"></i>Record Usage</div>
-            <div class="card-body">
+        <div class="card hdc-card hdc-entry-drawer mb-4" data-hdc-entry-drawer="purchase-usage">
+            <div class="card-header hdc-card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+                <span><i class="fas fa-tools me-2"></i>Record Usage</span>
+                <div class="d-flex align-items-center gap-1">
+                    <a href="#usageFilterForm" class="btn btn-sm btn-outline-secondary py-0 px-2 d-lg-none" title="Jump to Usage Log">
+                        <i class="fas fa-arrow-down me-1"></i>Log
+                    </a>
+                    <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2" data-hdc-entry-pin title="Keep form open while filtering" aria-label="Keep form open while filtering" aria-pressed="false">
+                        <i class="fas fa-thumbtack"></i>
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2" data-hdc-entry-toggle aria-expanded="true" aria-label="Toggle entry form">
+                        <i class="fas fa-chevron-up me-1"></i><span data-hdc-entry-toggle-label>Hide form</span>
+                    </button>
+                </div>
+            </div>
+            <div class="card-body" data-hdc-entry-body>
                 <form method="POST" id="usageV2Form" data-hdc-dialog>
                     <div class="mb-3">
                         <label class="form-label fw-semibold">Material <span class="text-danger">*</span></label>
@@ -240,11 +255,11 @@
                                         '{{ r.quantity }}',
                                         '{{ r.project_id }}',
                                         '{{ r.stage_id or '' }}',
-                                        '{{ (r.notes or '')|replace("'","") }}')">
+                                        '{{ (r.notes or '')|replace("'","") }}')" aria-label="Edit">
                                     <i class="fas fa-edit"></i>
                                 </button>
                                 <button class="btn btn-sm btn-outline-danger" title="Void"
-                                    onclick="openUsageVoidModal({{ r.id }})">
+                                    onclick="openUsageVoidModal({{ r.id }})" aria-label="Void">
                                     <i class="fas fa-ban"></i>
                                 </button>
                             </td>
@@ -267,7 +282,7 @@
         <div class="modal-content">
             <div class="modal-header hdc-card-header">
                 <h5 class="modal-title"><i class="fas fa-edit me-2"></i>Edit Usage Record</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <form method="POST" id="usageEditForm" data-hdc-dialog>
                 <div class="modal-body">
@@ -316,7 +331,7 @@
         <div class="modal-content">
             <div class="modal-header bg-danger text-white">
                 <h5 class="modal-title"><i class="fas fa-ban me-2"></i>Void Usage Record</h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <form method="POST" id="usageVoidForm" data-hdc-dialog>
                 <div class="modal-body">
@@ -491,7 +506,7 @@
 // The All Sites / All Stages buttons are the same control the Delivery
 // register has, so both pages bind the one shared implementation.
 </script>
-<script src="/hdc_static/js/pages/purchase_delivery.js"></script>
+<script src="/hdc_static/js/pages/purchase_delivery.js?v={{ hdc_asset_stamp }}"></script>
 <script>
 (function () {
     if (!window.hdcPurchaseDelivery) return;

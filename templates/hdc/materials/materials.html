@@ -82,7 +82,7 @@
                                 <input type="hidden" name="action" value="toggle">
                                 <input type="hidden" name="mid" value="{{ m.id }}">
                                 <button type="submit" class="btn btn-xs btn-outline-secondary btn-sm"
-                                    title="{{ 'Deactivate' if m.is_active else 'Activate' }}">
+                                    title="{{ 'Deactivate' if m.is_active else 'Activate' }}" title="Action" aria-label="Action">
                                     <i class="fas fa-toggle-{% if m.is_active %}on text-success{% else %}off{% endif %}"></i>
                                 </button>
                             </form>

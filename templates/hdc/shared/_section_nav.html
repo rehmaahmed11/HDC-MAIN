@@ -1,0 +1,88 @@
+{# Universal horizontal section navigation rail (`shared/_section_nav.html`).
+
+   Reuses the proven `.tools-subnav` / `.tools-subnav-link` responsive pill rail
+   so every multi-screen domain (Purchases, Accounts, Projects, Workforce,
+   Office Management) gets 1-click sibling navigation on laptop/desktop and a
+   clean horizontal touch strip on phones.
+
+   Every tab checks `hdc_page_allowed(tab.permission or hdc_page_id_for_path(tab.href), 'read')`
+   and optional `admin_only`, so restricted operators never see links they
+   cannot open.
+#}
+{% macro section_nav(section_key, active='') -%}
+{% set role_key = (current_user.role or '')|trim|lower %}
+{% set is_admin = (role_key == 'admin') %}
+{% if section_key == 'purchase' %}
+    {% set tabs = [
+        {'id': 'overview', 'label': 'Overview', 'icon': 'fa-gauge-high', 'href': url_for('hdc_purchase_v2_page')},
+        {'id': 'purchases', 'label': 'Purchase Orders', 'icon': 'fa-cart-shopping', 'href': url_for('hdc_purchase_v2_purchases')},
+        {'id': 'delivered', 'label': 'Deliveries', 'icon': 'fa-dolly', 'href': url_for('hdc_purchase_v2_delivered')},
+        {'id': 'usage', 'label': 'Site Usage', 'icon': 'fa-layer-group', 'href': url_for('hdc_purchase_v2_usage_page')},
+        {'id': 'stock', 'label': 'Stock', 'icon': 'fa-warehouse', 'href': url_for('hdc_purchase_v2_stock')},
+        {'id': 'materials', 'label': 'Materials', 'icon': 'fa-boxes-stacked', 'href': url_for('hdc_purchase_v2_materials')},
+        {'id': 'categories', 'label': 'Categories', 'icon': 'fa-tags', 'href': url_for('hdc_purchase_v2_categories')},
+        {'id': 'items', 'label': 'Item Register', 'icon': 'fa-list-check', 'href': url_for('hdc_purchase_v2_items')},
+        {'id': 'suppliers', 'label': 'Suppliers', 'icon': 'fa-truck-loading', 'href': url_for('hdc_purchase_v2_suppliers')},
+        {'id': 'supplier_sites', 'label': 'Supplier ⇄ Site', 'icon': 'fa-diagram-project', 'href': url_for('hdc_purchase_v2_suppliers_by_site')},
+    ] %}
+{% elif section_key == 'accounts' %}
+    {% set tabs = [
+        {'id': 'hub', 'label': 'Hub', 'icon': 'fa-wallet', 'href': url_for('hdc_accounts_hub')},
+        {'id': 'record', 'label': 'Record Money', 'icon': 'fa-sack-dollar', 'href': url_for('hdc_money_center')},
+        {'id': 'history', 'label': 'History', 'icon': 'fa-receipt', 'href': url_for('hdc_cashflow_register'), 'admin_only': true},
+        {'id': 'balances', 'label': 'Balances', 'icon': 'fa-building-columns', 'href': url_for('hdc_accounts_manage')},
+        {'id': 'cashflow', 'label': 'Daily Report', 'icon': 'fa-chart-line', 'href': url_for('hdc_cashflow')},
+        {'id': 'day_close', 'label': 'Day Close', 'icon': 'fa-clipboard-check', 'href': url_for('hdc_cashflow_reconciliation'), 'admin_only': true},
+        {'id': 'entries', 'label': 'Detailed Ledger', 'icon': 'fa-book', 'href': url_for('hdc_accounts_entries'), 'admin_only': true},
+    ] %}
+{% elif section_key == 'projects' %}
+    {% set tabs = [
+        {'id': 'projects', 'label': 'Projects', 'icon': 'fa-project-diagram', 'href': url_for('hdc_projects')},
+        {'id': 'stages', 'label': 'Stages', 'icon': 'fa-layer-group', 'href': url_for('hdc_stage_overview')},
+        {'id': 'library', 'label': 'Stage Library', 'icon': 'fa-swatchbook', 'href': url_for('hdc_stage_library')},
+        {'id': 'estimation', 'label': 'Estimation', 'icon': 'fa-calculator', 'href': url_for('hdc_estimation')},
+        {'id': 'project_estimation', 'label': 'Project Estimation', 'icon': 'fa-list-check', 'href': url_for('hdc_project_estimation')},
+        {'id': 'formulas', 'label': 'Formulas', 'icon': 'fa-square-root-variable', 'href': url_for('hdc_formulas')},
+    ] %}
+{% elif section_key == 'workforce' %}
+    {% set tabs = [
+        {'id': 'workers', 'label': 'Workers', 'icon': 'fa-users-cog', 'href': url_for('hdc_workers'), 'permission': 'workers'},
+        {'id': 'labour_card', 'label': 'Labour Card', 'icon': 'fa-id-card', 'href': url_for('hdc_labour_card'), 'permission': 'labour_card'},
+        {'id': 'timekeeping', 'label': 'Timekeeping', 'icon': 'fa-calendar-check', 'href': url_for('hdc_attendance')},
+        {'id': 'timekeeping_status', 'label': 'Attendance Status', 'icon': 'fa-clipboard-user', 'href': url_for('hdc_timekeeping_status')},
+        {'id': 'subcontractors', 'label': 'Subcontractors', 'icon': 'fa-hard-hat', 'href': url_for('hdc_subcontractors')},
+        {'id': 'payroll', 'label': 'Payroll', 'icon': 'fa-money-check-dollar', 'href': url_for('hdc_payroll')},
+        {'id': 'trades', 'label': 'Trades', 'icon': 'fa-people-carry-box', 'href': url_for('hdc_trades')},
+    ] %}
+{% elif section_key == 'office' %}
+    {% set tabs = [
+        {'id': 'overview', 'label': 'Overview', 'icon': 'fa-building-user', 'href': url_for('hdc_office_management')},
+        {'id': 'staff', 'label': 'Staff', 'icon': 'fa-users', 'href': url_for('hdc_office_staff_home')},
+        {'id': 'attendance', 'label': 'Attendance', 'icon': 'fa-calendar-check', 'href': url_for('hdc_office_staff_attendance')},
+        {'id': 'ledgers', 'label': 'Staff Ledgers', 'icon': 'fa-book-open', 'href': url_for('hdc_office_staff_ledger_list')},
+        {'id': 'expenses', 'label': 'Office Expenses', 'icon': 'fa-receipt', 'href': url_for('hdc_office_expenses')},
+        {'id': 'categories', 'label': 'Allowance Categories', 'icon': 'fa-tags', 'href': url_for('hdc_allowance_categories')},
+    ] %}
+{% else %}
+    {% set tabs = [] %}
+{% endif %}
+{% set visible_tabs = [] %}
+{% for tab in tabs %}
+    {% set perm_id = tab.permission|default(hdc_page_id_for_path(tab.href)) %}
+    {% if (not tab.admin_only|default(false) or is_admin) and hdc_page_allowed(perm_id, 'read') %}
+        {% set _ = visible_tabs.append(tab) %}
+    {% endif %}
+{% endfor %}
+{% if visible_tabs|length > 1 %}
+<nav class="tools-subnav hdc-subnav mb-3" aria-label="Section navigation">
+    {% for tab in visible_tabs %}
+    {% set is_current = (tab.id == active) or (not active and request.path == tab.href) %}
+    <a href="{{ tab.href }}"
+       class="tools-subnav-link{% if is_current %} active{% endif %}"
+       {% if is_current %}aria-current="page"{% endif %}>
+        <i class="fas {{ tab.icon }} me-1" aria-hidden="true"></i>{{ tab.label }}
+    </a>
+    {% endfor %}
+</nav>
+{% endif %}
+{%- endmacro %}

@@ -119,7 +119,7 @@
                 </button>
                 {% if s.discrepancies %}
                 <button type="submit" class="btn btn-sm btn-outline-danger" name="save_and_adjust" value="1"
-                        onclick="return confirm('Save this count and post the adjustments now?\\nLosses will be written off and removed from the rental lines holding them.');">
+                        data-hdc-confirm="Save this count and post the adjustments now?\ Losses will be written off and removed from the rental lines holding them.">
                     <i class="fas fa-scale-balanced me-1" aria-hidden="true"></i>Save &amp; adjust now
                 </button>
                 {% endif %}
@@ -495,7 +495,7 @@
     </small>
     <form method="POST" action="{{ url_for('hdc_tool_rental_audit_void', audit_id=audit.id) }}"
           class="d-flex gap-2 align-items-center flex-wrap"
-          onsubmit="return confirm('Cancel this count sheet?{% if posted_adjustments %} Tick the reverse box if the stock it posted should come back too.{% endif %}');">
+          data-hdc-confirm="Cancel this count sheet?{% if posted_adjustments %} Tick the reverse box if the stock it posted should come back too.{% endif %}">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
         <input type="text" name="void_reason" class="form-control form-control-sm" placeholder="why cancelled">
         {% if posted_adjustments %}
@@ -528,5 +528,5 @@
 {% endblock %}
 
 {% block extra_js %}
-<script src="/hdc_static/js/pages/tool_audit.js"></script>
+<script src="/hdc_static/js/pages/tool_audit.js?v={{ hdc_asset_stamp }}"></script>
 {% endblock %}

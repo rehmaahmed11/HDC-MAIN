@@ -3,6 +3,8 @@
 {% block page_heading %}Item Categories &amp; Item Types{% endblock %}
 
 {% block content %}
+{% from "shared/_section_nav.html" import section_nav with context %}
+{{ section_nav('purchase', 'categories') }}
 {# The vocabulary behind every register: Electric Materials, Plumbing
    Materials, Cement, Steel …  One page owns it, and every other Purchase page
    (purchases, delivery, usage, stock, items, suppliers) filters by it. #}
@@ -162,23 +164,23 @@
                     <td>
                         <div class="d-flex gap-1 flex-wrap">
                             <a href="{{ url_for('hdc_purchase_v2_purchases', category_id=c.id) }}"
-                               class="btn btn-sm btn-outline-success" title="Purchases in this category">
+                               class="btn btn-sm btn-outline-success" title="Purchases in this category" aria-label="Purchases in this category">
                                 <i class="fas fa-cart-shopping"></i>
                             </a>
                             <a href="{{ url_for('hdc_purchase_v2_delivered', category_id=c.id) }}"
-                               class="btn btn-sm btn-outline-primary" title="Deliveries in this category">
+                               class="btn btn-sm btn-outline-primary" title="Deliveries in this category" aria-label="Deliveries in this category">
                                 <i class="fas fa-dolly"></i>
                             </a>
                             <a href="{{ url_for('hdc_purchase_v2_usage_page', category_id=c.id) }}"
-                               class="btn btn-sm btn-outline-warning" title="Usage in this category">
+                               class="btn btn-sm btn-outline-warning" title="Usage in this category" aria-label="Usage in this category">
                                 <i class="fas fa-tools"></i>
                             </a>
                             <a href="{{ url_for('hdc_purchase_v2_items', category_id=c.id) }}"
-                               class="btn btn-sm btn-outline-info" title="Item-wise view of this category">
+                               class="btn btn-sm btn-outline-info" title="Item-wise view of this category" aria-label="Item-wise view of this category">
                                 <i class="fas fa-list-check"></i>
                             </a>
                             <a href="{{ url_for('hdc_purchase_v2_suppliers', category_id=c.id) }}"
-                               class="btn btn-sm btn-outline-dark" title="Suppliers for this category">
+                               class="btn btn-sm btn-outline-dark" title="Suppliers for this category" aria-label="Suppliers for this category">
                                 <i class="fas fa-truck-loading"></i>
                             </a>
                             {% if c.id != uncategorized_id %}
@@ -186,13 +188,13 @@
                                     data-id="{{ c.id }}"
                                     data-name="{{ (c.name or '')|replace('"', '&quot;') }}"
                                     data-status="{{ c.status or 'active' }}"
-                                    onclick="openCategoryEditModal(this)">
+                                    onclick="openCategoryEditModal(this)" aria-label="Edit category">
                                 <i class="fas fa-edit"></i>
                             </button>
                             <form method="POST" class="d-inline"
                                   action="{{ url_for('hdc_purchase_v2_category_delete', category_id=c.id) }}"
-                                  onsubmit="return confirm('Delete {{ c.name }}? If records use it, it will be set inactive instead.');">
-                                <button class="btn btn-sm btn-outline-danger" type="submit" title="Delete">
+                                  data-hdc-confirm="Delete {{ c.name }}? If records use it, it will be set inactive instead.">
+                                <button class="btn btn-sm btn-outline-danger" type="submit" title="Delete" aria-label="Delete">
                                     <i class="fas fa-trash"></i>
                                 </button>
                             </form>
@@ -216,7 +218,7 @@
         <div class="modal-content">
             <div class="modal-header hdc-card-header">
                 <h5 class="modal-title"><i class="fas fa-tag me-2"></i>Edit Category</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <form method="POST" id="categoryEditForm" data-hdc-dialog>
                 <div class="modal-body">

@@ -3,6 +3,8 @@
 {% block page_heading %}Stage Library - {{ project.name }}{% endblock %}
 
 {% block content %}
+{% from "shared/_section_nav.html" import section_nav with context %}
+{{ section_nav('projects', 'library') }}
 <div class="row g-3 mt-1">
     <div class="col-md-4">
         <div class="card hdc-card">
@@ -65,11 +67,11 @@
                                 <input type="hidden" name="def_id" value="{{ d.id }}">
                                 <button type="submit" class="btn btn-xs btn-outline-secondary btn-sm">{{ 'Suspend' if d.active_status else 'Reactivate' }}</button>
                             </form>
-                            <form method="POST" class="d-inline" onsubmit="return confirm('Delete {{ d.name }}? If used, it will be suspended only.')">
+                            <form method="POST" class="d-inline" data-hdc-confirm="Delete {{ d.name }}? If used, it will be suspended only.">
                                 <input type="hidden" name="project_id" value="{{ project.id }}">
                                 <input type="hidden" name="action" value="delete">
                                 <input type="hidden" name="def_id" value="{{ d.id }}">
-                                <button type="submit" class="btn btn-xs btn-outline-danger btn-sm"><i class="fas fa-trash"></i></button>
+                                <button type="submit" class="btn btn-xs btn-outline-danger btn-sm" title="Delete" aria-label="Delete"><i class="fas fa-trash"></i></button>
                             </form>
                         </td>
                     </tr>

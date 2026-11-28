@@ -7,7 +7,7 @@
     vertical-align: middle;
 }
 .entries-compact .badge {
-    font-size: .62rem;
+    font-size: .72rem;
 }
 .text-truncate-cell {
     max-width: 120px;
@@ -16,21 +16,16 @@
     text-overflow: ellipsis;
 }
 .entries-compact .small {
-    font-size: .68rem !important;
-    line-height: 1.2;
+    font-size: .74rem !important;
+    line-height: 1.25;
 }
 .action-cell {
     white-space: nowrap;
     min-width: 126px;
 }
-.btn-mini {
-    padding: .08rem .3rem;
-    font-size: .67rem;
-    line-height: 1.2;
-}
 .badge-mini {
-    padding: .18em .35em;
-    font-size: .58rem;
+    padding: .18em .4em;
+    font-size: .72rem;
 }
 @media (max-width: 1400px) {
     .text-truncate-cell { max-width: 95px; }

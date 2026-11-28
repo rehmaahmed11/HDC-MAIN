@@ -297,7 +297,7 @@
                 {% if not expense.is_linked %}
                 <hr>
                 <form method="post" action="{{ url_for('hdc_shared_expense_delete', expense_id=expense.id) }}"
-                      onsubmit="return confirm('Delete this shared expense? It has no Accounts link, so nothing else is affected.');">
+                      data-hdc-confirm="Delete this shared expense? It has no Accounts link, so nothing else is affected.">
                     <button class="btn btn-outline-secondary w-100" type="submit">
                         <i class="fas fa-trash me-1"></i>Delete (never used in Accounts)
                     </button>

@@ -110,7 +110,7 @@
                 <td class="text-end text-success">{{ "{:,.0f}".format(p.amount or 0) }}</td>
                 <td>
                     {% if not p.is_void %}
-                    <a href="{{ url_for('hdc_subcontractor_payment_receipt', sid=sub.id, pid=p.id) }}" class="btn btn-outline-secondary btn-sm px-2 py-0" target="_blank"><i class="fas fa-receipt"></i></a>
+                    <a href="{{ url_for('hdc_subcontractor_payment_receipt', sid=sub.id, pid=p.id) }}" class="btn btn-outline-secondary btn-sm px-2 py-0" target="_blank" title="Action" aria-label="Action"><i class="fas fa-receipt"></i></a>
                     {% endif %}
                 </td>
             </tr>

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="en" data-theme="light" data-bs-theme="light">
 <head>
     <meta charset="UTF-8">
     {# width=device-width  → the layout is built for the device, not a 980px
@@ -15,8 +15,11 @@
     <link href="/hdc_static/vendor/bootstrap/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="/hdc_static/vendor/fontawesome/css/all.min.css">
     <link rel="stylesheet" href="/hdc_static/css/hdc.css?v={{ hdc_asset_stamp }}">
-    <!-- Accounts section (hub / manage / edit) — ported from the AMS accounts UI. -->
+    {% if request.path.startswith('/hdc/accounts') %}
+    <!-- Accounts & Shared Expenses styles — scoped to /hdc/accounts/** -->
     <link rel="stylesheet" href="/hdc_static/css/accounts.css?v={{ hdc_asset_stamp }}">
+    {% endif %}
+    {% block extra_css %}{% endblock %}
     <!-- ADAPTIVE LAYER — must stay LAST.  It retunes every section, page, form
          and table for the screen it is on (320px phone → laptop → wide
          desktop) without touching the 110+ templates.  Desktop rules in the
@@ -27,6 +30,7 @@
         (function(){
             var t = localStorage.getItem('hdc_theme') || 'light';
             document.documentElement.setAttribute('data-theme', t);
+            document.documentElement.setAttribute('data-bs-theme', t);
         })();
     </script>
     <!-- No JavaScript: the drawer cannot be toggled, so fall back to the
@@ -73,8 +77,12 @@ body[data-hdc-custom-access="true"][data-hdc-page-write="false"] form[method="PO
     <!-- SIDEBAR (off-canvas: hidden by default, opened with the hamburger) -->
     <nav id="sidebar" class="collapsed" aria-label="Main navigation">
         <div class="sidebar-brand">
-            <i class="fas fa-hard-hat"></i>
+            <i class="fas fa-hard-hat" aria-hidden="true"></i>
             <span class="brand-text">HDC ERP</span>
+            <button type="button" id="sidebarPin" class="sidebar-pin" title="Unpin sidebar (auto-hide)"
+                    aria-label="Unpin sidebar" aria-pressed="true">
+                <i class="fas fa-thumbtack" aria-hidden="true"></i>
+            </button>
             <button type="button" id="sidebarClose" class="sidebar-close" title="Close menu" aria-label="Close menu">
                 <i class="fas fa-xmark" aria-hidden="true"></i>
             </button>
@@ -196,13 +204,15 @@ body[data-hdc-custom-access="true"][data-hdc-page-write="false"] form[method="PO
             {% endif %}
         {% endfor %}
         {# Which row is the current page?  Longest matching URL prefix wins. #}
-        {% set sidebar_active = namespace(href='', group='', length=-1) %}
+        {% set sidebar_active = namespace(href='', group='', group_label='', link_label='', length=-1) %}
         {% for section in sidebar_visible %}
             {% for link in section.links %}
                 {% for prefix in link.match %}
                     {% if request.path.startswith(prefix) and prefix|length > sidebar_active.length %}
                         {% set sidebar_active.href = link.href %}
                         {% set sidebar_active.group = section.id %}
+                        {% set sidebar_active.group_label = section.label %}
+                        {% set sidebar_active.link_label = link.label %}
                         {% set sidebar_active.length = prefix|length %}
                     {% endif %}
                 {% endfor %}
@@ -275,11 +285,29 @@ body[data-hdc-custom-access="true"][data-hdc-page-write="false"] form[method="PO
                     aria-label="Toggle navigation menu" aria-controls="sidebar" aria-expanded="false">
                 <i class="fas fa-bars" id="sidebarToggleIcon" aria-hidden="true"></i>
             </button>
-            <div class="topbar-title" title="{{ self.page_heading()|striptags|trim }}">{% block page_heading %}{% endblock %}</div>
+            {% set heading_plain = self.page_heading()|striptags|trim %}
+            <div class="topbar-title" title="{{ self.page_heading()|striptags|trim }}">
+                <span class="topbar-breadcrumb">
+                    {% if sidebar_active.group_label and sidebar_active.group != 'overview' %}
+                    <span class="topbar-crumb-parent topbar-crumb-group">{{ sidebar_active.group_label }}</span>
+                    <i class="fas fa-chevron-right topbar-crumb-sep topbar-crumb-group" aria-hidden="true"></i>
+                    {% endif %}
+                    {% if sidebar_active.href and sidebar_active.link_label and request.path != sidebar_active.href and sidebar_active.link_label|lower != heading_plain|lower %}
+                    <a href="{{ sidebar_active.href }}" class="topbar-crumb-parent">{{ sidebar_active.link_label }}</a>
+                    <i class="fas fa-chevron-right topbar-crumb-sep" aria-hidden="true"></i>
+                    {% endif %}
+                    <span class="topbar-crumb-current">{% block page_heading %}{% endblock %}</span>
+                </span>
+            </div>
             <div class="topbar-right">
+                <button id="quickJumpBtn" type="button" class="btn-quick-jump" title="Quick jump to any page (Ctrl+K or /)" aria-label="Quick jump to page">
+                    <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+                    <span class="quick-jump-label">Jump</span>
+                    <kbd class="quick-jump-kbd">Ctrl+K</kbd>
+                </button>
                 {% if hdc_page_allowed('alerts', 'read') %}
-                <a href="{{ url_for('hdc_alerts') }}" class="btn-theme position-relative" title="Alerts">
-                    <i class="fas fa-bell"></i>
+                <a href="{{ url_for('hdc_alerts') }}" class="btn-theme position-relative" title="Alerts" aria-label="Alerts">
+                    <i class="fas fa-bell" aria-hidden="true"></i>
                     {% if alert_count and alert_count > 0 %}
                     <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger">
                         {{ alert_count }}
@@ -287,11 +315,11 @@ body[data-hdc-custom-access="true"][data-hdc-page-write="false"] form[method="PO
                     {% endif %}
                 </a>
                 {% endif %}
-                <button id="themeToggle" class="btn-theme" title="Toggle Dark/Light Mode">
-                    <i class="fas fa-moon" id="themeIcon"></i>
+                <button id="themeToggle" type="button" class="btn-theme" title="Toggle Dark/Light Mode" aria-label="Toggle Dark/Light Mode">
+                    <i class="fas fa-moon" id="themeIcon" aria-hidden="true"></i>
                 </button>
                 <div class="topbar-user">
-                    <i class="fas fa-user-circle me-1"></i>
+                    <i class="fas fa-user-circle me-1" aria-hidden="true"></i>
                     <span>{{ current_user.username }}</span>
                 </div>
             </div>
@@ -310,7 +338,7 @@ body[data-hdc-custom-access="true"][data-hdc-page-write="false"] form[method="PO
           {% for cat, msg in hdc_flashes %}
             <div class="alert alert-{{ cat }} alert-dismissible fade show py-2" role="alert">
               {{ msg }}
-              <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+              <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
             </div>
           {% endfor %}
         </div>
@@ -344,6 +372,7 @@ body[data-hdc-custom-access="true"][data-hdc-page-write="false"] form[method="PO
      too; it also re-scans when that column arrives from its async fetch. -->
 <script src="/hdc_static/js/core/responsive_tables.js?v={{ hdc_asset_stamp }}"></script>
 <script src="/hdc_static/js/core/collapse_groups.js"></script>
+<script src="/hdc_static/js/core/quick_jump.js?v={{ hdc_asset_stamp }}"></script>
 <script>
 (function () {
     var tokenMeta = document.querySelector('meta[name=\"csrf-token\"]');

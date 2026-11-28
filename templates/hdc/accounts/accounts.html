@@ -3,6 +3,8 @@
 {% block page_heading %}Accounts{% endblock %}
 
 {% block content %}
+{% from "shared/_section_nav.html" import section_nav with context %}
+{{ section_nav('accounts', 'workspace') }}
 {% if edit_txn %}
 <div class="d-flex justify-content-between align-items-center mt-1 mb-3">
     <h5 class="mb-0"><i class="fas fa-pen-to-square me-2"></i>Edit Transaction <span class="text-muted small">— same form as Create, all fields prefilled</span></h5>
@@ -414,12 +416,12 @@
                                 <form method="POST" class="d-inline" data-hdc-dialog>
                                     <input type="hidden" name="action" value="suspend_account">
                                     <input type="hidden" name="account_id" value="{{ a.id }}">
-                                    <button type="submit" class="btn btn-outline-warning btn-mini" onclick="return confirm('Suspend this account?')">Suspend</button>
+                                    <button type="submit" class="btn btn-outline-warning btn-mini" data-hdc-confirm="Suspend this account?">Suspend</button>
                                 </form>
                                 <form method="POST" class="d-inline" data-hdc-dialog>
                                     <input type="hidden" name="action" value="delete_account">
                                     <input type="hidden" name="account_id" value="{{ a.id }}">
-                                    <button type="submit" class="btn btn-outline-danger btn-mini" onclick="return confirm('Delete/archive this account?')">Delete</button>
+                                    <button type="submit" class="btn btn-outline-danger btn-mini" data-hdc-confirm="Delete/archive this account?">Delete</button>
                                 </form>
                             </td>
                         </tr>
@@ -509,7 +511,7 @@
     {% endif %}
 </div>
 
-<link rel="stylesheet" href="/hdc_static/css/accounts_workspace.css">
+<link rel="stylesheet" href="/hdc_static/css/accounts_workspace.css?v={{ hdc_asset_stamp }}">
 
 <div class="modal fade" id="accountCreateModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog">
@@ -517,7 +519,7 @@
             <form method="POST" data-hdc-dialog>
                 <div class="modal-header">
                     <h5 class="modal-title"><i class="fas fa-building-columns me-2"></i>Create Account</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
                     <input type="hidden" name="action" value="create_account">
@@ -578,7 +580,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title"><i class="fas fa-money-check-dollar me-2"></i>Create Transaction</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body" id="txnCreateModalBody"></div>
         </div>
@@ -594,7 +596,7 @@
                 <input type="hidden" name="related_entity_type" id="edit_related_type">
                 <div class="modal-header">
                     <h5 class="modal-title">Edit Transaction Entry</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
                     <div class="row g-2">
@@ -690,7 +692,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title"><i class="fas fa-receipt me-2"></i>Entry Saved</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
                 <div class="fw-semibold">Transaction recorded successfully.</div>
@@ -732,6 +734,6 @@
   "editTxn": {% if edit_txn %}{"type": "{{ edit_txn.type }}", "fromAccountId": {{ edit_txn.from_account_id }}, "toAccountId": "{{ edit_txn.to_account_id or '' }}", "projectId": "{{ edit_txn.project_id or '' }}", "stageId": "{{ edit_txn.stage_id or '' }}", "relatedType": "{{ edit_txn.related_entity_type or '' }}", "relatedId": "{{ edit_txn.related_entity_id or '' }}"}{% else %}null{% endif %}
 }
 </script>
-<script src="/hdc_static/js/pages/accounts_workspace.js"></script>
+<script src="/hdc_static/js/pages/accounts_workspace.js?v={{ hdc_asset_stamp }}"></script>
 {# edit-panel data is passed to accounts_workspace.js via the config block above; the script itself lives in the static file (audit 7.3) #}
 {% endblock %}
