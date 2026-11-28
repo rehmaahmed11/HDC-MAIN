@@ -191,7 +191,7 @@
                                     <form method="post" action="{{ url_for('hdc_shared_settlements') }}" class="d-inline" data-hdc-dialog>
                                         <input type="hidden" name="action" value="restore">
                                         <input type="hidden" name="settlement_id" value="{{ s.id }}">
-                                        <button class="btn btn-outline-success" type="submit" title="Restore">
+                                        <button class="btn btn-outline-success" type="submit" title="Restore" aria-label="Restore">
                                             <i class="fas fa-rotate-left"></i>
                                         </button>
                                     </form>
@@ -203,7 +203,7 @@
                                         {% if s.cf_entry_id %}
                                         <input type="hidden" name="void_linked_entry" value="1">
                                         {% endif %}
-                                        <button class="btn btn-outline-danger" type="submit" title="Void">
+                                        <button class="btn btn-outline-danger" type="submit" title="Void" aria-label="Void">
                                             <i class="fas fa-ban"></i>
                                         </button>
                                     </form>

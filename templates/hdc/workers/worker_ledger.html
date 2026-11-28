@@ -185,7 +185,7 @@
                             <div><small class="text-danger">Void: {{ entry.void_reason or 'No reason' }}</small></div>
                             {% if entry.entry_type in ['advance', 'payment'] %}
                             <div class="mt-1">
-                                <form method="POST" action="{{ url_for('hdc_worker_ledger_restore', wid=w.id, lid=entry.id) }}" class="d-inline" onsubmit="return confirm('Restore this ledger entry?');">
+                                <form method="POST" action="{{ url_for('hdc_worker_ledger_restore', wid=w.id, lid=entry.id) }}" class="d-inline" data-hdc-confirm="Restore this ledger entry?">
                                     <button type="submit" class="btn btn-xs btn-outline-success btn-sm">Restore</button>
                                 </form>
                             </div>
@@ -194,7 +194,7 @@
                             {% if not entry.is_void and entry.entry_type != 'work' %}
                             <div class="mt-1 d-flex gap-1">
                                 <a href="{{ url_for('hdc_worker_ledger_edit', wid=w.id, lid=entry.id) }}" class="btn btn-xs btn-outline-primary btn-sm">Edit</a>
-                                <form method="POST" action="{{ url_for('hdc_worker_ledger_void', wid=w.id, lid=entry.id) }}" class="d-inline" onsubmit="return confirm('Void this ledger entry?');">
+                                <form method="POST" action="{{ url_for('hdc_worker_ledger_void', wid=w.id, lid=entry.id) }}" class="d-inline" data-hdc-confirm="Void this ledger entry?">
                                     <input type="hidden" name="void_reason" value="Voided from worker ledger">
                                     <button type="submit" class="btn btn-xs btn-outline-danger btn-sm">Void</button>
                                 </form>

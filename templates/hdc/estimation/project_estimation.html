@@ -3,6 +3,8 @@
 {% block page_heading %}Project Estimation{% endblock %}
 
 {% block content %}
+{% from "shared/_section_nav.html" import section_nav with context %}
+{{ section_nav('projects', 'project_estimation') }}
 <div id="peAlert"></div>
 
 <div class="card hdc-card mb-3">
@@ -129,7 +131,7 @@
 {% endblock %}
 
 {% block extra_js %}
-<script src="/hdc_static/js/pages/project_estimation.js"></script>
+<script src="/hdc_static/js/pages/project_estimation.js?v={{ hdc_asset_stamp }}"></script>
 <script>
 window.HDC_PROJECT_ESTIMATION_BOOT = {
     stageOptionsId: 'peStageOptions',

@@ -102,7 +102,7 @@
                                     <i class="fas {% if u.is_active %}fa-user-slash{% else %}fa-user-check{% endif %} me-1"></i>{{ 'Suspend' if u.is_active else 'Activate' }}
                                 </button>
                             </form>
-                            <form method="POST" class="d-inline ms-1" onsubmit="return confirm('Delete this user permanently?')">
+                            <form method="POST" class="d-inline ms-1" data-hdc-confirm="Delete this user permanently?">
                                 <input type="hidden" name="action" value="delete"><input type="hidden" name="user_id" value="{{ u.id }}">
                                 <button type="submit" class="btn btn-sm btn-outline-danger" aria-label="Delete {{ u.username }}" title="Delete user"><i class="fas fa-trash"></i></button>
                             </form>

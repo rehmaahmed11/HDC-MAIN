@@ -3,6 +3,8 @@
 {% block page_heading %}Stage Overview{% endblock %}
 
 {% block content %}
+{% from "shared/_section_nav.html" import section_nav with context %}
+{{ section_nav('projects', 'stages') }}
 <div class="card hdc-card mt-2 mb-3">
     <div class="card-body py-2">
         <form method="GET" class="d-flex gap-2 align-items-center flex-wrap">

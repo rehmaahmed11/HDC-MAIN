@@ -3,6 +3,8 @@
 {% block page_heading %}Suppliers{% endblock %}
 
 {% block content %}
+{% from "shared/_section_nav.html" import section_nav with context %}
+{{ section_nav('purchase', 'suppliers') }}
 <div class="d-flex flex-wrap gap-2 align-items-center mt-1 mb-3">
     <a href="{{ url_for('hdc_purchase_v2_page') }}" class="btn btn-sm btn-outline-secondary">
         <i class="fas fa-arrow-left me-1"></i>Back
@@ -205,7 +207,7 @@
                     <td>
                         <div class="d-flex gap-1 justify-content-end flex-wrap">
                             <a href="{{ url_for('hdc_purchase_v2_supplier_detail', supplier_id=s.id) }}"
-                               class="btn btn-sm btn-outline-primary" title="View Detail">
+                               class="btn btn-sm btn-outline-primary" title="View Detail" aria-label="View Detail">
                                 <i class="fas fa-eye"></i>
                             </a>
                             <button type="button"
@@ -215,7 +217,7 @@
                                     data-name="{{ (s.name or '')|replace('"', '&quot;') }}"
                                     data-phone="{{ (s.phone or '')|replace('"', '&quot;') }}"
                                     data-status="{{ (s.status or 'active') }}"
-                                    onclick="openSupplierEditModal(this)">
+                                    onclick="openSupplierEditModal(this)" aria-label="Edit Supplier">
                                 <i class="fas fa-edit"></i>
                             </button>
                             <form method="POST" action="{{ url_for('hdc_purchase_v2_supplier_suspend', supplier_id=s.id) }}"
@@ -247,7 +249,7 @@
         <div class="modal-content">
             <div class="modal-header hdc-card-header">
                 <h5 class="modal-title"><i class="fas fa-user-edit me-2"></i>Edit Supplier</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <form method="POST" id="supplierEditForm" data-hdc-dialog>
                 <div class="modal-body">

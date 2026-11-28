@@ -174,7 +174,7 @@
                     <td class="text-end text-success">{{ "{:,.0f}".format(p.total_received or 0) }}</td>
                     <td class="text-end text-warning">{{ "{:,.0f}".format(p.remaining_receivable or 0) }}</td>
                     <td class="text-end {% if (p.net_profit or 0) >=0 %}text-success{% else %}text-danger{% endif %}">{{ "{:,.0f}".format(p.net_profit or 0) }}</td>
-                    <td class="text-end"><a href="{{ url_for('hdc_project_detail', pid=p.id) }}" class="btn btn-sm btn-outline-primary"><i class="fas fa-eye"></i></a></td>
+                    <td class="text-end"><a href="{{ url_for('hdc_project_detail', pid=p.id) }}" class="btn btn-sm btn-outline-primary" title="View details" aria-label="View details"><i class="fas fa-eye"></i></a></td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -232,7 +232,7 @@
                         {{ "{:,.0f}".format((r.total_amount or 0) - (r.total_paid or 0) - (r.total_discount or 0)) }}
                     </td>
                     <td><span class="badge {% if r.is_void %}bg-secondary{% elif (r.total_amount or 0) - (r.total_paid or 0) - (r.total_discount or 0) <= 0 %}bg-success{% else %}bg-warning text-dark{% endif %}">{% if r.is_void %}Void{% elif (r.total_amount or 0) - (r.total_paid or 0) - (r.total_discount or 0) <= 0 %}Paid{% else %}Due{% endif %}</span></td>
-                    <td class="text-end"><a href="{{ url_for('hdc_tool_rental_detail', rental_id=r.id) }}" class="btn btn-sm btn-outline-primary"><i class="fas fa-eye"></i></a></td>
+                    <td class="text-end"><a href="{{ url_for('hdc_tool_rental_detail', rental_id=r.id) }}" class="btn btn-sm btn-outline-primary" title="View details" aria-label="View details"><i class="fas fa-eye"></i></a></td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -326,7 +326,7 @@
                     <td class="text-end">{% if row.money_out %}{{ "{:,.2f}".format(row.money_out) }}{% else %}–{% endif %}</td>
                     <td class="text-end fw-semibold {% if row.running_balance < 0 %}text-danger{% endif %}">{{ "{:,.2f}".format(row.running_balance) }}</td>
                     <td>
-                        <a href="{{ url_for('hdc_accounts_entries', party_name=party.name) }}#txn-{{ row.id }}" class="btn btn-sm btn-outline-secondary" title="Open this party in All Entries">
+                        <a href="{{ url_for('hdc_accounts_entries', party_name=party.name) }}#txn-{{ row.id }}" class="btn btn-sm btn-outline-secondary" title="Open this party in All Entries" aria-label="Open this party in All Entries">
                             <i class="fas fa-arrow-up-right-from-square" aria-hidden="true"></i>
                         </a>
                     </td>

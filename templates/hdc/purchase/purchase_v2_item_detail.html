@@ -3,6 +3,8 @@
 {% block page_heading %}Item Ledger: {{ material.name }}{% endblock %}
 
 {% block content %}
+{% from "shared/_section_nav.html" import section_nav with context %}
+{{ section_nav('purchase', 'items') }}
 <div class="d-flex flex-wrap gap-2 align-items-center mt-1 mb-3">
     <a href="{{ url_for('hdc_purchase_v2_items') }}" class="btn btn-sm btn-outline-secondary">
         <i class="fas fa-arrow-left me-1"></i>All Items

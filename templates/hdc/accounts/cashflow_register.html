@@ -3,8 +3,10 @@
 {% block page_heading %}Transaction History{% endblock %}
 
 {% block content %}
-<link rel="stylesheet" href="/hdc_static/css/cashflow_register.css">
-<link rel="stylesheet" href="/hdc_static/css/new_transaction.css">
+{% from "shared/_section_nav.html" import section_nav with context %}
+{{ section_nav('accounts', 'history') }}
+<link rel="stylesheet" href="/hdc_static/css/cashflow_register.css?v={{ hdc_asset_stamp }}">
+<link rel="stylesheet" href="/hdc_static/css/new_transaction.css?v={{ hdc_asset_stamp }}">
 
 <div class="cf-history-header">
     <div>
@@ -315,5 +317,5 @@
 {% endblock %}
 
 {% block extra_js %}
-<script src="/hdc_static/js/pages/new_transaction.js"></script>
+<script src="/hdc_static/js/pages/new_transaction.js?v={{ hdc_asset_stamp }}"></script>
 {% endblock %}

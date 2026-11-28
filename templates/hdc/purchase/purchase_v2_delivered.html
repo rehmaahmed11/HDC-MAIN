@@ -3,6 +3,8 @@
 {% block page_heading %}Material Deliveries{% endblock %}
 
 {% block content %}
+{% from "shared/_section_nav.html" import section_nav with context %}
+{{ section_nav('purchase', 'delivered') }}
 <div class="d-flex flex-wrap gap-2 align-items-center mt-1 mb-3">
     <a href="{{ url_for('hdc_purchase_v2_page') }}" class="btn btn-sm btn-outline-secondary">
         <i class="fas fa-arrow-left me-1"></i>Back
@@ -20,11 +22,22 @@
 </div>
 
 <!-- Record Delivery Card -->
-<div class="card hdc-card mb-4">
-    <div class="card-header hdc-card-header">
-        <i class="fas fa-truck-fast me-2"></i>Record Delivery
+<div class="card hdc-card hdc-entry-drawer mb-4" data-hdc-entry-drawer="purchase-delivery">
+    <div class="card-header hdc-card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <span><i class="fas fa-truck-fast me-2"></i>Record Delivery</span>
+        <div class="d-flex align-items-center gap-1">
+            <a href="#deliveryFilterForm" class="btn btn-sm btn-outline-secondary py-0 px-2" title="Jump to Delivery Register">
+                <i class="fas fa-arrow-down me-1"></i>Register
+            </a>
+            <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2" data-hdc-entry-pin title="Keep form open while filtering" aria-label="Keep form open while filtering" aria-pressed="false">
+                <i class="fas fa-thumbtack"></i>
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2" data-hdc-entry-toggle aria-expanded="true" aria-label="Toggle entry form">
+                <i class="fas fa-chevron-up me-1"></i><span data-hdc-entry-toggle-label>Hide form</span>
+            </button>
+        </div>
     </div>
-    <div class="card-body">
+    <div class="card-body" data-hdc-entry-body>
         {# data-hdc-dialog: the save is validated and then confirmed by
            core/dialog.js (see the rules at the bottom of this block). #}
         <form method="POST" id="deliveryForm" data-hdc-dialog>
@@ -148,11 +161,19 @@
 </div>
 
 <!-- Stock Shift Card -->
-<div class="card hdc-card mb-4">
-    <div class="card-header hdc-card-header">
-        <i class="fas fa-right-left me-2"></i>Shift Stock Between Projects / Stages
+<div class="card hdc-card hdc-entry-drawer mb-4" data-hdc-entry-drawer="purchase-stock-shift">
+    <div class="card-header hdc-card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <span><i class="fas fa-right-left me-2"></i>Shift Stock Between Projects / Stages</span>
+        <div class="d-flex align-items-center gap-1">
+            <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2" data-hdc-entry-pin title="Keep form open while filtering" aria-label="Keep form open while filtering" aria-pressed="false">
+                <i class="fas fa-thumbtack"></i>
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2" data-hdc-entry-toggle aria-expanded="true" aria-label="Toggle shift stock form">
+                <i class="fas fa-chevron-up me-1"></i><span data-hdc-entry-toggle-label>Hide form</span>
+            </button>
+        </div>
     </div>
-    <div class="card-body">
+    <div class="card-body" data-hdc-entry-body>
         <form method="POST" action="{{ url_for('hdc_purchase_v2_delivery_transfer') }}" id="stockShiftForm" data-hdc-dialog class="row g-3">
             <div class="col-md-3">
                 <label class="form-label fw-semibold">Material <span class="text-danger">*</span></label>
@@ -376,12 +397,12 @@
                                 '{{ r.date.strftime('%Y-%m-%d') if r.date else (r.created_at.strftime('%Y-%m-%d') if r.created_at else '') }}',
                                 '{{ r.quantity }}',
                                 '{{ (r.delivery_person or '')|replace("'","") }}',
-                                '{{ (r.notes or '')|replace("'","") }}')">
+                                '{{ (r.notes or '')|replace("'","") }}')" aria-label="Edit">
                             <i class="fas fa-edit"></i>
                         </button>
                         {% endif %}
                         <button class="btn btn-sm btn-outline-danger" title="Void"
-                            onclick="openDelVoidModal({{ r.id }})">
+                            onclick="openDelVoidModal({{ r.id }})" aria-label="Void">
                             <i class="fas fa-ban"></i>
                         </button>
                     </td>
@@ -564,7 +585,7 @@
         <div class="modal-content">
             <div class="modal-header hdc-card-header">
                 <h5 class="modal-title"><i class="fas fa-edit me-2"></i>Edit Delivery</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <form method="POST" id="delEditForm" data-hdc-dialog>
                 <div class="modal-body">
@@ -600,7 +621,7 @@
         <div class="modal-content">
             <div class="modal-header bg-danger text-white">
                 <h5 class="modal-title"><i class="fas fa-ban me-2"></i>Void Delivery</h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <form method="POST" id="delVoidForm" data-hdc-dialog>
                 <div class="modal-body">
@@ -954,7 +975,7 @@ function openDelVoidModal(id) {
 // same way — and so tests/purchase_delivery_harness.js can run the filter
 // logic under Node instead of only checking the markup.
 </script>
-<script src="/hdc_static/js/pages/purchase_delivery.js"></script>
+<script src="/hdc_static/js/pages/purchase_delivery.js?v={{ hdc_asset_stamp }}"></script>
 <script>
 (function () {
     if (!window.hdcPurchaseDelivery) return;

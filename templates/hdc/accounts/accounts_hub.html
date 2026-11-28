@@ -3,6 +3,8 @@
 {% block page_heading %}Accounts{% endblock %}
 
 {% block content %}
+{% from "shared/_section_nav.html" import section_nav with context %}
+{{ section_nav('accounts', 'hub') }}
 {% set is_admin = (current_user.role or '')|trim|lower == 'admin' %}
 
 <style>

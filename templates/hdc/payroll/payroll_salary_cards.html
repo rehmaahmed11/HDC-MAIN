@@ -17,7 +17,7 @@
                         <td>{{ "{:,.0f}".format(r.total_amount or 0) }}</td>
                         <td class="text-end text-nowrap">
                             <a href="{{ url_for('hdc_payroll_salary_cards_page', run_id=r.id) }}" class="btn btn-sm btn-outline-secondary">Open</a>
-                            <form method="POST" action="{{ url_for('hdc_payroll_delete', run_id=r.id) }}" class="d-inline" onsubmit="return confirm('Delete payroll run #{{ r.id }}? This will also remove linked payroll payment entries.');">
+                            <form method="POST" action="{{ url_for('hdc_payroll_delete', run_id=r.id) }}" class="d-inline" data-hdc-confirm="Delete payroll run #{{ r.id }}? This will also remove linked payroll payment entries.">
                                 <button type="submit" class="btn btn-sm btn-outline-danger ms-1">Delete</button>
                             </form>
                         </td>

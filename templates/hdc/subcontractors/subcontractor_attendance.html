@@ -174,8 +174,8 @@
                 <td class="small">{{ r.stage.name if r.stage else ('Stage#' ~ r.stage_id if r.stage_id else '-') }}</td>
                 <td class="small text-muted">{{ r.notes or '-' }}</td>
                 <td class="text-nowrap">
-                    <form method="POST" action="{{ url_for('hdc_subcontractor_team_attendance_delete', sid=sub.id, rid=r.id) }}" class="d-inline" onsubmit="return confirm('Delete this crew attendance entry?');">
-                        <button type="submit" class="btn btn-xs btn-outline-danger btn-sm" title="Delete entry"><i class="fas fa-trash"></i></button>
+                    <form method="POST" action="{{ url_for('hdc_subcontractor_team_attendance_delete', sid=sub.id, rid=r.id) }}" class="d-inline" data-hdc-confirm="Delete this crew attendance entry?">
+                        <button type="submit" class="btn btn-xs btn-outline-danger btn-sm" title="Delete entry" aria-label="Delete entry"><i class="fas fa-trash"></i></button>
                     </form>
                 </td>
             </tr>
@@ -256,9 +256,9 @@
                 <td class="text-end text-success">{{ "{:,.0f}".format(row.paid or 0) }}</td>
                 <td class="text-end {% if (row.payable or 0) > 0 %}text-warning fw-bold{% else %}text-muted{% endif %}">{{ "{:,.0f}".format(row.payable or 0) }}</td>
                 <td class="text-nowrap">
-                    <a href="{{ url_for('hdc_subcontractor_worker_ledger', sid=sub.id, wid=w.id) }}" class="btn btn-xs btn-outline-dark btn-sm" title="Worker Ledger"><i class="fas fa-book"></i></a>
+                    <a href="{{ url_for('hdc_subcontractor_worker_ledger', sid=sub.id, wid=w.id) }}" class="btn btn-xs btn-outline-dark btn-sm" title="Worker Ledger" aria-label="Worker Ledger"><i class="fas fa-book"></i></a>
                     <form method="POST" action="{{ url_for('hdc_subcontractor_worker_toggle', sid=sub.id, wid=w.id) }}" class="d-inline" data-hdc-dialog>
-                        <button type="submit" class="btn btn-xs btn-outline-secondary btn-sm" title="{% if w.active_status %}Suspend{% else %}Activate{% endif %}">
+                        <button type="submit" class="btn btn-xs btn-outline-secondary btn-sm" title="{% if w.active_status %}Suspend{% else %}Activate{% endif %}" aria-label="{% if w.active_status %}Suspend{% else %}Activate{% endif %}">
                             <i class="fas {% if w.active_status %}fa-pause{% else %}fa-play{% endif %}"></i>
                         </button>
                     </form>
@@ -550,8 +550,8 @@
                 <td class="text-end">{{ "{:.2f}".format(r.overtime_hours or 0) }}</td>
                 <td class="small">
                     <span class="text-muted">{{ r.notes or '-' }}</span>
-                    <form method="POST" action="{{ url_for('hdc_subcontractor_labour_attendance_delete', sid=sub.id, rid=r.id) }}" class="d-inline" onsubmit="return confirm('Delete this labour attendance row?');">
-                        <button type="submit" class="btn btn-xs btn-outline-danger btn-sm ms-2" title="Delete row"><i class="fas fa-trash"></i></button>
+                    <form method="POST" action="{{ url_for('hdc_subcontractor_labour_attendance_delete', sid=sub.id, rid=r.id) }}" class="d-inline" data-hdc-confirm="Delete this labour attendance row?">
+                        <button type="submit" class="btn btn-xs btn-outline-danger btn-sm ms-2" title="Delete row" aria-label="Delete row"><i class="fas fa-trash"></i></button>
                     </form>
                 </td>
             </tr>

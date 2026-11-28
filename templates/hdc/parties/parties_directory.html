@@ -153,7 +153,7 @@
                             </form>
                             {% if cat.in_use %}
                             <button type="button" class="btn btn-sm btn-outline-danger" disabled
-                                    title="Move the {{ cat.count }} party(ies) filed here first, or retire the category">
+                                    title="Move the {{ cat.count }} party(ies) filed here first, or retire the category" aria-label="Move the {{ cat.count }} party(ies) filed here first, or retire the category">
                                 <i class="fas fa-trash" aria-hidden="true"></i>
                             </button>
                             {% else %}

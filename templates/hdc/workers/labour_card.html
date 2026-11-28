@@ -6,6 +6,8 @@
 {% endblock %}
 
 {% block content %}
+{% from "shared/_section_nav.html" import section_nav with context %}
+{{ section_nav('workforce', 'labour_card') }}
 {% from "shared/_combo_field.html" import combo_select %}
 {% macro num(v) %}{{ '%g'|format((v or 0)|round(2)) }}{% endmacro %}
 {% macro money(v) %}{{ "{:,.0f}".format(v or 0) }}{% endmacro %}

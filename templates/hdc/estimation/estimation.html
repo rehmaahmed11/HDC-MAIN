@@ -3,6 +3,8 @@
 {% block page_heading %}Estimation Engine{% endblock %}
 
 {% block content %}
+{% from "shared/_section_nav.html" import section_nav with context %}
+{{ section_nav('projects', 'estimation') }}
 <ul class="nav nav-tabs mt-2 mb-3" id="estTab">
     <li class="nav-item"><a class="nav-link {% if tab=='concrete' %}active{% endif %}" href="?tab=concrete">
         <i class="fas fa-cube me-1"></i>Concrete</a></li>

@@ -495,12 +495,164 @@
     whenReady(function () {
         playServerResult();
         installGuards();
+        installConfirmations();
     });
+
+    // ── contextual confirmation modal (`data-hdc-confirm`) ───────────────────
+    var CONFIRM_ATTR = 'data-hdc-confirm';
+    var confirmNode = null;
+    var confirmModal = null;
+    var pendingConfirmAction = null;
+
+    function buildConfirmModal() {
+        if (confirmNode && document.body.contains(confirmNode)) return confirmNode;
+        confirmNode = make('div', 'modal fade hdc-result-dialog hdc-result-bad');
+        confirmNode.id = 'hdcConfirmDialog';
+        confirmNode.setAttribute('tabindex', '-1');
+        confirmNode.setAttribute('role', 'alertdialog');
+        confirmNode.setAttribute('aria-modal', 'true');
+        confirmNode.setAttribute('aria-labelledby', 'hdcConfirmDialogTitle');
+
+        var dialog = make('div', 'modal-dialog modal-dialog-centered');
+        var content = make('div', 'modal-content hdc-modal');
+        var body = make('div', 'modal-body text-center');
+        var iconDisc = make('div', 'hdc-result-icon hdc-result-bad');
+        var icon = make('i', 'fas fa-triangle-exclamation');
+        icon.setAttribute('aria-hidden', 'true');
+        iconDisc.appendChild(icon);
+        var title = make('h5', 'hdc-result-title', 'Confirm Action');
+        title.id = 'hdcConfirmDialogTitle';
+        var lines = make('div', 'hdc-result-lines');
+        body.appendChild(iconDisc);
+        body.appendChild(title);
+        body.appendChild(lines);
+
+        var footer = make('div', 'modal-footer justify-content-center border-0 pb-3 gap-2');
+        var cancelBtn = make('button', 'btn btn-outline-secondary px-3', 'Cancel');
+        cancelBtn.type = 'button';
+        cancelBtn.id = 'hdcConfirmDialogCancel';
+        cancelBtn.setAttribute('data-bs-dismiss', 'modal');
+        var okBtn = make('button', 'btn btn-danger px-4', 'Confirm');
+        okBtn.type = 'button';
+        okBtn.id = 'hdcConfirmDialogOk';
+        footer.appendChild(cancelBtn);
+        footer.appendChild(okBtn);
+
+        content.appendChild(body);
+        content.appendChild(footer);
+        dialog.appendChild(content);
+        confirmNode.appendChild(dialog);
+        document.body.appendChild(confirmNode);
+
+        confirmNode._parts = { title: title, lines: lines, cancel: cancelBtn, ok: okBtn };
+
+        okBtn.addEventListener('click', function () {
+            var fn = pendingConfirmAction;
+            pendingConfirmAction = null;
+            if (confirmModal) {
+                try { confirmModal.hide(); } catch (err) { confirmNode.classList.remove('show'); }
+            }
+            if (typeof fn === 'function') fn();
+        });
+
+        confirmNode.addEventListener('shown.bs.modal', function () {
+            // Focus Cancel by default so an accidental Enter never deletes data.
+            try { cancelBtn.focus(); } catch (err) { /* detached */ }
+        });
+
+        return confirmNode;
+    }
+
+    function confirmAction(opts, onConfirm) {
+        opts = typeof opts === 'string' ? { message: opts } : (opts || {});
+        var msg = String(opts.message || 'Are you sure you want to continue?').trim();
+        if (!document.body || typeof window.bootstrap === 'undefined' || !window.bootstrap.Modal) {
+            if (typeof window.confirm === 'function' ? window.confirm(msg) : true) {
+                if (typeof onConfirm === 'function') onConfirm();
+            }
+            return;
+        }
+        buildConfirmModal();
+        var parts = confirmNode._parts;
+        parts.title.textContent = opts.title || 'Please Confirm';
+        while (parts.lines.firstChild) parts.lines.removeChild(parts.lines.firstChild);
+        parts.lines.appendChild(make('div', 'hdc-result-line', msg));
+        if (opts.detail) {
+            parts.lines.appendChild(make('div', 'hdc-result-note', opts.detail));
+        }
+        parts.ok.textContent = opts.cta || 'Confirm';
+        parts.ok.className = (opts.tone === 'warning' ? 'btn btn-warning px-4' : 'btn btn-danger px-4');
+        pendingConfirmAction = onConfirm || null;
+        if (!confirmModal) {
+            confirmModal = new window.bootstrap.Modal(confirmNode, { backdrop: 'static', keyboard: true });
+        }
+        confirmModal.show();
+    }
+
+    function installConfirmations() {
+        document.addEventListener('click', function (e) {
+            var target = e.target;
+            if (!target || !target.closest) return;
+            var btn = target.closest('button[' + CONFIRM_ATTR + '], a[' + CONFIRM_ATTR + ']');
+            if (!btn) return;
+            if (btn.dataset && btn.dataset.hdcConfirmApproved === '1') {
+                btn.dataset.hdcConfirmApproved = '0';
+                return;
+            }
+            e.preventDefault();
+            e.stopPropagation();
+            var msg = btn.getAttribute(CONFIRM_ATTR);
+            var title = btn.getAttribute('data-hdc-confirm-title') || 'Confirm Action';
+            var cta = btn.getAttribute('data-hdc-confirm-cta') || (
+                /delete|remove|wipe/i.test(msg) ? 'Delete' : (/void/i.test(msg) ? 'Void' : 'Confirm')
+            );
+            confirmAction({ message: msg, title: title, cta: cta }, function () {
+                if (btn.tagName === 'A' && btn.href) {
+                    window.location.assign(btn.href);
+                    return;
+                }
+                var ownerForm = btn.closest ? btn.closest('form') : null;
+                if (ownerForm) {
+                    ownerForm.dataset.hdcConfirmApproved = '1';
+                    releaseDoubleSubmitLock(ownerForm);
+                    if (typeof ownerForm.requestSubmit === 'function') {
+                        try { ownerForm.requestSubmit(btn); return; } catch (err) { /* fallback */ }
+                    }
+                    ownerForm.submit();
+                }
+            });
+        }, true);
+
+        document.addEventListener('submit', function (e) {
+            var form = e.target;
+            if (!form || !form.hasAttribute || !form.hasAttribute(CONFIRM_ATTR)) return;
+            if (form.dataset && form.dataset.hdcConfirmApproved === '1') {
+                form.dataset.hdcConfirmApproved = '0';
+                return;
+            }
+            e.preventDefault();
+            e.stopPropagation();
+            releaseDoubleSubmitLock(form);
+            var msg = form.getAttribute(CONFIRM_ATTR);
+            var title = form.getAttribute('data-hdc-confirm-title') || 'Confirm Action';
+            var cta = form.getAttribute('data-hdc-confirm-cta') || (
+                /delete|remove|wipe/i.test(msg) ? 'Delete' : (/void/i.test(msg) ? 'Void' : 'Confirm')
+            );
+            confirmAction({ message: msg, title: title, cta: cta }, function () {
+                form.dataset.hdcConfirmApproved = '1';
+                if (typeof form.requestSubmit === 'function') {
+                    try { form.requestSubmit(); return; } catch (err) { /* fallback */ }
+                }
+                form.submit();
+            });
+        }, true);
+    }
 
     window.hdcDialog = {
         /** Open a dialog. `{kind, title, message|lines, note, cta}` */
         show: show,
         hide: hide,
+        confirm: confirmAction,
         success: function (message, opts) {
             return show(Object.assign({ kind: 'success', message: message }, opts || {}));
         },

@@ -3,6 +3,8 @@
 {% block page_heading %}Purchase · Delivery · Usage — On Item Basis{% endblock %}
 
 {% block content %}
+{% from "shared/_section_nav.html" import section_nav with context %}
+{{ section_nav('purchase', 'items') }}
 {# The field's request in one screen: every item with what was bought for it,
    what was sent to sites and what was used — with the item type (category)
    beside it, filterable as "All Categories" or one category at a time. #}
@@ -173,12 +175,12 @@
                     <td>
                         <a href="{{ url_for('hdc_purchase_v2_item_detail', material_id=r.id, project_id=selected_project_id or '',
                                             stage_id=selected_stage_id or '', date_from=filter_date_from, date_to=filter_date_to) }}"
-                           class="btn btn-sm btn-outline-primary" title="Open this item's ledger">
+                           class="btn btn-sm btn-outline-primary" title="Open this item's ledger" title="Open ledger" aria-label="Open ledger">
                             <i class="fas fa-book-open"></i>
                         </a>
                         <a href="{{ url_for('hdc_purchase_v2_stock', material_id=r.id, project_id=selected_project_id or '',
                                             stage_id=selected_stage_id or '') }}"
-                           class="btn btn-sm btn-outline-dark" title="Stock for this item">
+                           class="btn btn-sm btn-outline-dark" title="Stock for this item" aria-label="Stock for this item">
                             <i class="fas fa-warehouse"></i>
                         </a>
                     </td>

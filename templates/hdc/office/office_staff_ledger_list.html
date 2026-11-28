@@ -3,6 +3,8 @@
 {% block page_heading %}Office Staff Ledger{% endblock %}
 
 {% block content %}
+{% from "shared/_section_nav.html" import section_nav with context %}
+{{ section_nav('office', 'ledgers') }}
 <div class="d-flex justify-content-between align-items-center mt-2 mb-3">
     <h5 class="mb-0"><i class="fas fa-user-tie me-2 text-mint"></i>Office Staff ({{ staff_rows|length }})</h5>
     <button class="btn btn-mint btn-sm" data-bs-toggle="modal" data-bs-target="#addOfficeStaffModal">
@@ -15,7 +17,7 @@
         <div class="modal-content hdc-modal">
             <div class="modal-header">
                 <h5 class="modal-title"><i class="fas fa-user-plus me-2"></i>Add Office Staff</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <form method="POST" action="{{ url_for('hdc_office_staff_home') }}" data-hdc-dialog>
                 <div class="modal-body row g-3">
@@ -57,7 +59,7 @@
         <div class="modal-content hdc-modal">
             <div class="modal-header">
                 <h5 class="modal-title"><i class="fas fa-user-edit me-2"></i>Edit Office Staff</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <form method="POST" id="editOfficeStaffForm" data-hdc-dialog>
                 <div class="modal-body row g-3">
@@ -123,12 +125,12 @@
                     <td class="fw-bold {% if (snap.balance or 0) > 0 %}text-warning{% elif (snap.balance or 0) < 0 %}text-success{% else %}text-muted{% endif %}">{{ "{:,.0f}".format(snap.balance or 0) }}</td>
                     <td><span class="badge {% if s.active_status %}bg-success{% else %}bg-warning text-dark{% endif %}">{{ 'Active' if s.active_status else 'Suspended' }}</span></td>
                     <td class="text-end text-nowrap">
-                        <a href="{{ url_for('hdc_office_staff_allowances', sid=s.id) }}" class="btn btn-outline-purple btn-sm" title="Manage Allowances">
+                        <a href="{{ url_for('hdc_office_staff_allowances', sid=s.id) }}" class="btn btn-outline-purple btn-sm" title="Manage Allowances" aria-label="Manage Allowances">
                             <i class="fas fa-hand-holding-dollar"></i>
                         </a>
-                        <a href="{{ url_for('hdc_office_staff_ledger', sid=s.id) }}" class="btn btn-outline-dark btn-sm ms-1" title="Open Ledger"><i class="fas fa-book"></i></a>
-                        <a href="{{ url_for('hdc_office_staff_payment', sid=s.id) }}" class="btn btn-outline-success btn-sm ms-1" title="Pay Salary"><i class="fas fa-money-bill-wave"></i></a>
-                        <button type="button" class="btn btn-outline-info btn-sm js-edit-office ms-1" title="Edit"><i class="fas fa-pen"></i></button>
+                        <a href="{{ url_for('hdc_office_staff_ledger', sid=s.id) }}" class="btn btn-outline-dark btn-sm ms-1" title="Open Ledger" aria-label="Open Ledger"><i class="fas fa-book"></i></a>
+                        <a href="{{ url_for('hdc_office_staff_payment', sid=s.id) }}" class="btn btn-outline-success btn-sm ms-1" title="Pay Salary" aria-label="Pay Salary"><i class="fas fa-money-bill-wave"></i></a>
+                        <button type="button" class="btn btn-outline-info btn-sm js-edit-office ms-1" title="Edit" aria-label="Edit"><i class="fas fa-pen"></i></button>
                         <form method="POST" action="{{ url_for('hdc_office_staff_toggle', sid=s.id) }}" class="d-inline" data-hdc-dialog>
                             <button type="submit" class="btn btn-sm {% if s.active_status %}btn-outline-warning{% else %}btn-outline-success{% endif %} ms-1" title="{{ 'Suspend' if s.active_status else 'Activate' }}">
                                 {{ 'Suspend' if s.active_status else 'Activate' }}

@@ -190,7 +190,7 @@
                         <td class="text-center">
                             <a class="btn btn-sm btn-outline-success"
                                href="{{ party_links.get(row.party_id) or url_for('hdc_shared_expenses', **base_qs) }}"
-                               title="Open this party's running ledger">
+                               title="Open this party's running ledger" title="Action" aria-label="Action">
                                 <i class="fas fa-book"></i>
                             </a>
                         </td>

@@ -3,7 +3,19 @@
 {% block page_heading %}Purchases &amp; Inventory{% endblock %}
 
 {% block content %}
-<div class="row g-3 mt-1 mb-4">
+{% from "shared/_section_nav.html" import section_nav with context %}
+{{ section_nav('purchase', 'overview') }}
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mt-1 mb-2">
+    <div class="small fw-bold text-uppercase text-muted" style="letter-spacing:0.06em;">
+        <i class="fas fa-arrow-right-arrow-left me-1 text-mint"></i>Operational Workflow: Buy &rarr; Deliver &rarr; Use
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+        <a href="{{ url_for('hdc_purchase_v2_purchases') }}" class="btn btn-sm btn-mint"><i class="fas fa-plus me-1"></i>New Purchase</a>
+        <a href="{{ url_for('hdc_purchase_v2_delivered') }}" class="btn btn-sm btn-outline-secondary"><i class="fas fa-truck-fast me-1"></i>Record Delivery</a>
+        <a href="{{ url_for('hdc_purchase_v2_usage_page') }}" class="btn btn-sm btn-outline-secondary"><i class="fas fa-tools me-1"></i>Record Usage</a>
+    </div>
+</div>
+<div class="row g-3 mb-4">
     <div class="col-6 col-md-4 col-lg">
         <a href="{{ url_for('hdc_purchase_v2_suppliers') }}" class="text-decoration-none">
             <div class="kpi-card kpi-blue h-100">
@@ -57,6 +69,9 @@
 </div>
 
 <!-- Item types: the vocabulary every register below is filtered by. -->
+<div class="small fw-bold text-uppercase text-muted mb-2" style="letter-spacing:0.06em;">
+    <i class="fas fa-sitemap me-1 text-mint"></i>Catalog, Categories &amp; Site Mapping
+</div>
 <div class="row g-3 mb-4">
     <div class="col-6 col-md-3">
         <a href="{{ url_for('hdc_purchase_v2_categories') }}" class="text-decoration-none">

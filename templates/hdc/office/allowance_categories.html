@@ -4,6 +4,8 @@
 {% block page_heading %}Allowance Categories{% endblock %}
 
 {% block content %}
+{% from "shared/_section_nav.html" import section_nav with context %}
+{{ section_nav('office', 'categories') }}
 {# The shared page head, so this list lines up with the other category lists
    (Expense Categories, Personal Expense Categories) and with every other list
    screen.  The classes here used to be btn-purple / text-purple, which no
@@ -68,12 +70,12 @@
                     </td>
                     <td class="text-muted">{{ category.created_at.strftime('%Y-%m-%d') if category.created_at else '-' }}</td>
                     <td class="text-end text-nowrap">
-                        <a href="{{ url_for('hdc_allowance_category_edit', cid=category.id) }}" class="btn btn-outline-info btn-sm" title="Edit">
+                        <a href="{{ url_for('hdc_allowance_category_edit', cid=category.id) }}" class="btn btn-outline-info btn-sm" title="Edit" aria-label="Edit">
                             <i class="fas fa-pen"></i>
                         </a>
                         <form method="POST" action="{{ url_for('hdc_allowance_category_toggle', cid=category.id) }}" class="d-inline" data-hdc-dialog>
                             <button type="submit" class="btn btn-sm {% if category.is_active %}btn-outline-warning{% else %}btn-outline-success{% endif %} ms-1"
-                                    title="{{ 'Deactivate' if category.is_active else 'Activate' }}">
+                                    title="{{ 'Deactivate' if category.is_active else 'Activate' }}" title="Action" aria-label="Action">
                                 <i class="fas fa-{% if category.is_active %}ban{% else %}check{% endif %}"></i>
                             </button>
                         </form>

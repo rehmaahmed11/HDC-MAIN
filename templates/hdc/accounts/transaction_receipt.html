@@ -15,7 +15,7 @@
             <i class="fas fa-pen me-1"></i>Edit
         </a>
         <form method="POST" action="{{ url_for('hdc_accounts') }}" class="d-inline"
-              onsubmit="return confirm('Void this transaction (and any linked source row)? This is reversible via Restore.');">
+              data-hdc-confirm="Void this transaction (and any linked source row)? This is reversible via Restore.">
             <input type="hidden" name="action" value="void_transaction">
             <input type="hidden" name="transaction_id" value="{{ txn_id }}">
             <button type="submit" class="btn btn-outline-danger btn-sm">
@@ -24,7 +24,7 @@
         </form>
         {% else %}
         <form method="POST" action="{{ url_for('hdc_accounts') }}" class="d-inline"
-              onsubmit="return confirm('Restore this voided transaction and re-activate the linked source row?');">
+              data-hdc-confirm="Restore this voided transaction and re-activate the linked source row?">
             <input type="hidden" name="action" value="restore_transaction">
             <input type="hidden" name="transaction_id" value="{{ txn_id }}">
             <button type="submit" class="btn btn-outline-success btn-sm">

@@ -3,6 +3,8 @@
 {% block page_heading %}Materials Catalog{% endblock %}
 
 {% block content %}
+{% from "shared/_section_nav.html" import section_nav with context %}
+{{ section_nav('purchase', 'materials') }}
 <div class="d-flex flex-wrap gap-2 align-items-center mt-1 mb-3">
     <a href="{{ url_for('hdc_purchase_v2_page') }}" class="btn btn-sm btn-outline-secondary">
         <i class="fas fa-arrow-left me-1"></i>Back
@@ -129,12 +131,12 @@
                     </td>
                     <td>
                         <button class="btn btn-sm btn-outline-primary me-1" title="Edit"
-                            onclick="openMatEditModal({{ m.id }}, '{{ m.name|replace("'","\\'") }}', '{{ m.unit }}', '{{ m.status or 'active' }}', '{{ m.category_id or '' }}')">
+                            onclick="openMatEditModal({{ m.id }}, '{{ m.name|replace("'","\\'") }}', '{{ m.unit }}', '{{ m.status or 'active' }}', '{{ m.category_id or '' }}')" aria-label="Edit">
                             <i class="fas fa-edit"></i>
                         </button>
                         <form method="POST" action="{{ url_for('hdc_purchase_v2_material_delete', material_id=m.id) }}"
-                              class="d-inline" onsubmit="return confirm('Delete {{ m.name }}? If it has transactions it will be set inactive.');">
-                            <button class="btn btn-sm btn-outline-danger" type="submit" title="Delete"><i class="fas fa-trash"></i></button>
+                              class="d-inline" data-hdc-confirm="Delete {{ m.name }}? If it has transactions it will be set inactive.">
+                            <button class="btn btn-sm btn-outline-danger" type="submit" title="Delete" aria-label="Delete"><i class="fas fa-trash"></i></button>
                         </form>
                     </td>
                 </tr>
@@ -154,7 +156,7 @@
         <div class="modal-content">
             <div class="modal-header hdc-card-header">
                 <h5 class="modal-title"><i class="fas fa-edit me-2"></i>Edit Material</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <form method="POST" id="matEditForm" data-hdc-dialog>
                 <div class="modal-body">

@@ -3,12 +3,14 @@
 {% block page_heading %}Record Money{% endblock %}
 
 {% block content %}
+{% from "shared/_section_nav.html" import section_nav with context %}
+{{ section_nav('accounts', 'record') }}
 {% set t = pending.totals %}
 {% set to_pay = (t.workers_pending or 0) + (t.suppliers_pending or 0) + (t.subcontractors_pending or 0) + (t.office_staff_pending or 0) %}
 {% set to_receive = (t.projects_receivable or 0) + (t.tool_rentals_receivable or 0) %}
 
-<link rel="stylesheet" href="/hdc_static/css/money_center.css">
-<link rel="stylesheet" href="/hdc_static/css/new_transaction.css">
+<link rel="stylesheet" href="/hdc_static/css/money_center.css?v={{ hdc_asset_stamp }}">
+<link rel="stylesheet" href="/hdc_static/css/new_transaction.css?v={{ hdc_asset_stamp }}">
 
 <div class="rm-header">
     <div>
@@ -185,5 +187,5 @@
 {% endblock %}
 
 {% block extra_js %}
-<script src="/hdc_static/js/pages/new_transaction.js"></script>
+<script src="/hdc_static/js/pages/new_transaction.js?v={{ hdc_asset_stamp }}"></script>
 {% endblock %}

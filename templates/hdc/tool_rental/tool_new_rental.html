@@ -2111,7 +2111,7 @@ function updateSelectedSerialsDisplay(){
     let html = '';
     serials.forEach(s => {
         html += `<span class="badge bg-success border me-1 serial-chip" data-serial-id="${s.serial_id}">`;
-        html += `${s.serial_number} <button type="button" class="btn btn-sm btn-close" onclick="removeSerialSelection(${s.serial_id})"></button></span>`;
+        html += `${s.serial_number} <button type="button" class="btn btn-sm btn-close" onclick="removeSerialSelection(${s.serial_id})" aria-label="Close"></button></span>`;
     });
     container.innerHTML = html + `<span class="text-muted small ms-2">(${serials.length} selected)</span>`;
     input.value = Array.from(selectedSerials).join(',');
@@ -2322,7 +2322,7 @@ if(toolStatusModalEl){
     <div class="modal-content hdc-modal">
       <div class="modal-header">
         <h6 class="modal-title" id="toolStatusModalTitle">Tool Status</h6>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
       <div class="modal-body" id="toolStatusModalBody">
         <div class="text-center py-4">

@@ -3,6 +3,8 @@
 {% block page_heading %}Staff Allowances - {{ staff.name }}{% endblock %}
 
 {% block content %}
+{% from "shared/_section_nav.html" import section_nav with context %}
+{{ section_nav('office', 'staff') }}
 <div class="d-flex justify-content-between align-items-center mt-2 mb-3">
     <div>
         <h5 class="mb-0"><i class="fas fa-tags me-2 text-purple"></i>Allowances for {{ staff.name }}</h5>
@@ -24,7 +26,7 @@
         <div class="modal-content hdc-modal">
             <div class="modal-header">
                 <h5 class="modal-title"><i class="fas fa-plus me-2"></i>Add Allowance to {{ staff.name }}</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <form method="POST" data-hdc-dialog>
                 <div class="modal-body row g-3">
@@ -103,10 +105,10 @@
                     <td>{{ allowance.effective_date.strftime('%Y-%m-%d') if allowance.effective_date else '-' }}</td>
                     <td class="text-muted">{{ allowance.created_at.strftime('%Y-%m-%d') if allowance.created_at else '-' }}</td>
                     <td class="text-end text-nowrap">
-                        <a href="{{ url_for('hdc_office_staff_allowance_edit', sid=staff.id, aid=allowance.id) }}" class="btn btn-outline-info btn-sm" title="Edit">
+                        <a href="{{ url_for('hdc_office_staff_allowance_edit', sid=staff.id, aid=allowance.id) }}" class="btn btn-outline-info btn-sm" title="Edit" aria-label="Edit">
                             <i class="fas fa-pen"></i>
                         </a>
-                        <button type="button" class="btn btn-outline-danger btn-sm ms-1" data-bs-toggle="modal" data-bs-target="#removeAllowanceModal{{ allowance.id }}" title="Remove">
+                        <button type="button" class="btn btn-outline-danger btn-sm ms-1" data-bs-toggle="modal" data-bs-target="#removeAllowanceModal{{ allowance.id }}" title="Remove" aria-label="Remove">
                             <i class="fas fa-trash"></i>
                         </button>
                     </td>
@@ -118,7 +120,7 @@
                         <div class="modal-content hdc-modal">
                             <div class="modal-header">
                                 <h5 class="modal-title"><i class="fas fa-trash me-2"></i>Remove Allowance</h5>
-                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                             </div>
                             <div class="modal-body">
                                 <p>Are you sure you want to remove the <strong>{{ category.name }}</strong> allowance of <strong>{{ "{:,.0f}".format(allowance.amount) }} PKR</strong> from {{ staff.name }}?</p>

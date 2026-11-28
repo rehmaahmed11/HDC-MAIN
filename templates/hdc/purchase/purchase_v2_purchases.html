@@ -3,6 +3,8 @@
 {% block page_heading %}Purchase Orders{% endblock %}
 
 {% block content %}
+{% from "shared/_section_nav.html" import section_nav with context %}
+{{ section_nav('purchase', 'purchases') }}
 <!-- Top bar -->
 <div class="d-flex flex-wrap gap-2 align-items-center mt-1 mb-3">
     <a href="{{ url_for('hdc_purchase_v2_page') }}" class="btn btn-sm btn-outline-secondary">
@@ -73,12 +75,25 @@
 {% endif %}
 
 <!-- Add Purchase Form -->
-<div class="card hdc-card mb-4">
-    <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
-        <span><i class="fas fa-plus me-2"></i>New Purchase</span>
-        <span class="small text-muted">Add one or several materials in a single purchase</span>
+<div class="card hdc-card hdc-entry-drawer mb-4" data-hdc-entry-drawer="purchase-orders">
+    <div class="card-header hdc-card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <div class="d-flex align-items-center gap-2">
+            <span><i class="fas fa-plus me-2"></i>New Purchase</span>
+            <span class="small text-muted d-none d-md-inline">Add one or several materials in a single purchase</span>
+        </div>
+        <div class="d-flex align-items-center gap-1">
+            <a href="#purchaseOrdersRegister" class="btn btn-sm btn-outline-secondary py-0 px-2" title="Jump to Purchase Orders table">
+                <i class="fas fa-arrow-down me-1"></i>Register
+            </a>
+            <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2" data-hdc-entry-pin title="Keep form open while filtering" aria-label="Keep form open while filtering" aria-pressed="false">
+                <i class="fas fa-thumbtack"></i>
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2" data-hdc-entry-toggle aria-expanded="true" aria-label="Toggle entry form">
+                <i class="fas fa-chevron-up me-1"></i><span data-hdc-entry-toggle-label>Hide form</span>
+            </button>
+        </div>
     </div>
-    <div class="card-body">
+    <div class="card-body" data-hdc-entry-body>
         {# data-hdc-dialog: core/dialog.js validates this form before it posts and
            reports the outcome afterwards. The item-row fields carry
            data-hdc-dialog-skip because a row left blank on purpose is not an
@@ -135,7 +150,7 @@
                     <div class="col-5 col-md-1"><label class="form-label small fw-semibold">Qty *</label><input type="number" step="0.01" min="0.01" name="quantity[]" class="form-control item-qty" required data-hdc-dialog-skip="true"></div>
                     <div class="col-5 col-md-2"><label class="form-label small fw-semibold">Rate / Unit *</label><input type="number" step="0.01" min="0.01" name="unit_price[]" class="form-control item-rate" required data-hdc-dialog-skip="true"></div>
                     <div class="col-6 col-md-1"><label class="form-label small fw-semibold">Line total</label><input type="text" class="form-control item-total bg-white" readonly tabindex="-1"></div>
-                    <div class="col-6 col-md-1"><button type="button" class="btn btn-outline-danger remove-purchase-item w-100" title="Remove this item"><i class="fas fa-trash"></i></button></div>
+                    <div class="col-6 col-md-1"><button type="button" class="btn btn-outline-danger remove-purchase-item w-100" title="Remove this item" aria-label="Remove this item"><i class="fas fa-trash"></i></button></div>
                     <div class="col-12"><input type="text" name="notes[]" class="form-control form-control-sm" placeholder="Item notes (optional)"></div>
                 </div>
             </div>
@@ -148,7 +163,7 @@
 </div>
 
 <!-- Purchases Table -->
-<div class="card hdc-card">
+<div class="card hdc-card" id="purchaseOrdersRegister">
     <div class="card-header hdc-card-header d-flex justify-content-between align-items-center">
         <span><i class="fas fa-list me-2"></i>All Purchase Orders</span>
     </div>
@@ -217,12 +232,12 @@
                             onclick="openEditPurchaseModal({{ r.id }}, '{{ r.supplier_id }}', '{{ r.material_id }}',
                                 '{{ r.quantity }}', '{{ r.unit_price }}', '{{ r.payment_status or 'unpaid' }}',
                                 '{{ r.date or '' }}', '{{ (r.challan_no or '')|replace("'","") }}', '{{ (r.notes or '')|replace("'","") }}',
-                                '{{ r.category_id or '' }}')">
+                                '{{ r.category_id or '' }}')" aria-label="Edit">
                             <i class="fas fa-edit"></i>
                         </button>
                         <form method="POST" action="{{ url_for('hdc_purchase_v2_purchase_delete', purchase_id=r.id) }}"
-                              class="d-inline" onsubmit="return confirm('Delete purchase #{{ r.id }}? This cannot be undone.');">
-                            <button class="btn btn-sm btn-outline-danger" type="submit" title="Delete"><i class="fas fa-trash"></i></button>
+                              class="d-inline" data-hdc-confirm="Delete purchase #{{ r.id }}? This cannot be undone.">
+                            <button class="btn btn-sm btn-outline-danger" type="submit" title="Delete" aria-label="Delete"><i class="fas fa-trash"></i></button>
                         </form>
                     </td>
                 </tr>
@@ -243,7 +258,7 @@
         <div class="modal-content">
             <div class="modal-header hdc-card-header">
                 <h5 class="modal-title"><i class="fas fa-edit me-2"></i>Edit Purchase Order</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <form method="POST" id="editPurchaseForm" data-hdc-dialog>
                 <div class="modal-body">
